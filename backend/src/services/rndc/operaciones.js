@@ -369,31 +369,73 @@ export async function traerTercero(empresaId, clave, usuarioId, { tipoId, numId,
   return { ok: true, guardados };
 }
 
+// Datos del vehículo según la respuesta del RNDC (último registro de su historia).
+function datosVehiculoRndc(d) {
+  return {
+    configuracion: txt(d.codconfiguracionunidadcarga), marca: txt(d.codmarcavehiculocarga), linea: txt(d.codlineavehiculocarga),
+    ejes: numero(d.numejes), modelo: numero(d.anofabricacionvehiculocarga), color: txt(d.codcolorvehiculocarga),
+    pesoVacio: numero(d.pesovehiculovacio), capacidad: numero(d.capacidadunidadcarga), unidadMedida: txt(d.unidadmedidacapacidad),
+    carroceria: txt(d.codtipocarroceria), combustible: txt(d.codtipocombustible),
+    propietario: { tipoId: txt(d.codtipoidpropietario), numId: txt(d.numidpropietario) },
+    tenedor: { tipoId: txt(d.codtipoidtenedor), numId: txt(d.numidtenedor) },
+    soat: { numero: txt(d.numsegurosoat), vence: fechaRndc(d.fechavencimientosoat), aseguradoraNit: txt(d.numnitaseguradorasoat) },
+  };
+}
+
+// Aplica solo los campos que el RNDC devolvió con valor (nunca borra datos con vacíos).
+// Devuelve los campos que realmente cambiaron.
+const comparable = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : v === null || v === undefined ? '' : String(v));
+function aplicarDatos(doc, datos) {
+  const cambiados = [];
+  const poner = (ruta, v) => {
+    if (v === '' || v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v))) return;
+    if (comparable(doc.get(ruta)) === comparable(v)) return;
+    doc.set(ruta, v); cambiados.push(ruta);
+  };
+  for (const [k, v] of Object.entries(datos)) {
+    if (v && typeof v === 'object' && !(v instanceof Date)) for (const [k2, v2] of Object.entries(v)) poner(`${k}.${k2}`, v2);
+    else poner(k, v);
+  }
+  return cambiados;
+}
+
+function marcarSincronizado(empresa, doc) {
+  doc.rndc = { estado: 'enviado', fecha: new Date(), hash: huella(variablesVehiculo(empresa, doc.toObject())), radicado: '', mensaje: 'Datos traídos del RNDC' };
+}
+
 export async function traerVehiculo(empresaId, clave, usuarioId, { placa }) {
   const r = await consultar(empresaId, clave, usuarioId, { que: 'vehiculo', filtros: { NUMPLACA: placa } });
   if (!r.ok) return { ok: false, mensaje: r.mensaje };
   const d = r.documentos.at(-1);
   if (!d) return { ok: false, mensaje: 'El RNDC no tiene registrado ese vehículo para su empresa' };
   const empresa = await empresaConRndc(empresaId);
-  const datos = {
-    configuracion: txt(d.codconfiguracionunidadcarga), marca: txt(d.codmarcavehiculocarga), linea: txt(d.codlineavehiculocarga),
-    ejes: numero(d.numejes), modelo: numero(d.anofabricacionvehiculocarga), color: txt(d.codcolorvehiculocarga),
-    pesoVacio: numero(d.pesovehiculovacio), capacidad: numero(d.capacidadunidadcarga), unidadMedida: txt(d.unidadmedidacapacidad) || '1',
-    carroceria: txt(d.codtipocarroceria), combustible: txt(d.codtipocombustible),
-    propietario: { tipoId: txt(d.codtipoidpropietario), numId: txt(d.numidpropietario) },
-    tenedor: { tipoId: txt(d.codtipoidtenedor), numId: txt(d.numidtenedor) },
-    soat: { numero: txt(d.numsegurosoat), vence: fechaRndc(d.fechavencimientosoat), aseguradoraNit: txt(d.numnitaseguradorasoat) },
-  };
   const existente = await Vehiculo.findOne({ empresa: empresaId, placa });
   const doc = existente || new Vehiculo({ empresa: empresaId, placa });
-  // Solo se reemplazan los campos que el RNDC devolvió con valor
-  for (const [k, v] of Object.entries(datos)) {
-    if (v && typeof v === 'object' && !(v instanceof Date)) { for (const [k2, v2] of Object.entries(v)) if (v2 !== '' && v2 !== null) doc.set(`${k}.${k2}`, v2); }
-    else if (v !== '' && v !== null) doc.set(k, v);
-  }
-  doc.rndc = { estado: 'enviado', fecha: new Date(), hash: huella(variablesVehiculo(empresa, doc.toObject())), radicado: '', mensaje: 'Datos traídos del RNDC' };
+  if (!existente && !txt(d.unidadmedidacapacidad)) doc.unidadMedida = '1';
+  aplicarDatos(doc, datosVehiculoRndc(d));
+  marcarSincronizado(empresa, doc);
   await doc.save();
   return { ok: true, nuevo: !existente, id: doc._id, placa };
+}
+
+// Actualiza un vehículo YA registrado en la empresa con lo que tenga el RNDC.
+// resultado.estado: actualizado | sin_cambios | no_encontrado (en el RNDC) | no_registrado (en la empresa) | error
+export async function actualizarVehiculo(empresaId, clave, usuarioId, placa) {
+  const doc = await Vehiculo.findOne({ empresa: empresaId, placa });
+  if (!doc) return { placa, estado: 'no_registrado', mensaje: 'La placa no está registrada en su empresa' };
+  const r = await consultar(empresaId, clave, usuarioId, { que: 'vehiculo', filtros: { NUMPLACA: placa } });
+  if (!r.ok) {
+    const sinDatos = /no (se )?encontr|no existe|no hay|sin registros|no tiene/i.test(r.mensaje || '');
+    return { placa, estado: sinDatos ? 'no_encontrado' : 'error', mensaje: r.mensaje || 'El RNDC no respondió', conexion: /No hubo conexión/.test(r.mensaje || '') };
+  }
+  const d = r.documentos.at(-1);
+  if (!d) return { placa, estado: 'no_encontrado', mensaje: 'El RNDC no tiene registrado ese vehículo para su empresa' };
+  const empresa = await empresaConRndc(empresaId);
+  const campos = aplicarDatos(doc, datosVehiculoRndc(d));
+  marcarSincronizado(empresa, doc);
+  await doc.save();
+  return { placa, id: doc._id, estado: campos.length ? 'actualizado' : 'sin_cambios', campos,
+    mensaje: campos.length ? `Actualizado: ${campos.join(', ')}` : 'Ya coincidía con el RNDC' };
 }
 
 // ── Verificar antes de crear un vehículo o tercero ───────────────────────────

@@ -6,6 +6,7 @@ import { env } from '../../config/env.js';
 import { TransaccionRndc } from '../../models/index.js';
 import { ENDPOINTS, SOAP_ACTION } from './catalogos.js';
 import { sobreSoap, ocultarClave } from './xml.js';
+import { enCola } from './limitador.js';
 
 export class ErrorRndc extends Error {
   constructor(mensaje, status = 400) { super(mensaje); this.status = status; }
@@ -51,8 +52,14 @@ async function post(url, cuerpo) {
 
 // Envía un XML interno y devuelve { texto, url, duracionMs }.
 // meta: { empresa, usuario, ambiente, tipo, proceso, referencia, viaje }
+// En los ambientes oficiales la petición espera su turno en el limitador.
 export async function enviar(xmlInterno, meta) {
   const urls = urlsAmbiente(meta.ambiente);
+  if (meta.ambiente === 'PRUEBAS' || meta.ambiente === 'PRODUCCION') return enCola(() => enviarA(urls, xmlInterno));
+  return enviarA(urls, xmlInterno);
+}
+
+async function enviarA(urls, xmlInterno) {
   const inicio = Date.now();
   let resp = { texto: '', status: 0, conectado: false };
   let urlUsada = urls[0];

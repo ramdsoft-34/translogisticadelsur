@@ -323,6 +323,55 @@ test('Titular automático según la placa y manifiesto sin pasar por Viajes', as
   for (const x of [v.body._id, v2.body._id]) await s.manif.del(`/api/viajes/${x}`);
 });
 
+test('Actualizar vehículos desde el RNDC: individual y por lotes de 30', async () => {
+  const esperar = async (estados) => {
+    for (let i = 0; i < 150; i += 1) {
+      const p = (await s.manif.get('/api/rndc/vehiculos/actualizacion')).body.proceso;
+      if (p && estados.includes(p.estado)) return p;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    throw new Error('el proceso no llegó a ' + estados.join('/'));
+  };
+  // El vehículo está en el RNDC; aquí se le cambia un dato y se recupera
+  const env = await s.manif.post(`/api/rndc/vehiculos/${s.vehiculo}/enviar`, { clave: CLAVE_RNDC, forzar: true });
+  assert.equal(env.body.ok, true, JSON.stringify(env.body));
+  await M.Vehiculo.updateOne({ empresa: s.empresaA, _id: s.vehiculo }, { $set: { pesoVacio: 1111 } });
+  const uno = await s.manif.post('/api/rndc/vehiculos/actualizar', { clave: CLAVE_RNDC, placa: 'abc-123' });
+  assert.equal(uno.body.estado, 'actualizado', JSON.stringify(uno.body));
+  assert.ok(uno.body.campos.includes('pesoVacio'), JSON.stringify(uno.body.campos));
+  assert.equal((await M.Vehiculo.findOne({ empresa: s.empresaA, _id: s.vehiculo }).lean()).pesoVacio, 4000);
+  assert.equal((await s.manif.post('/api/rndc/vehiculos/actualizar', { clave: CLAVE_RNDC, placa: 'ABC123' })).body.estado, 'sin_cambios');
+  assert.equal((await s.manif.post('/api/rndc/vehiculos/actualizar', { clave: CLAVE_RNDC, placa: 'ZZZ999' })).body.estado, 'no_registrado');
+  assert.equal((await s.reportero.post('/api/rndc/vehiculos/actualizar', { clave: CLAVE_RNDC, placa: 'ABC123' })).status, 403);
+
+  // 31 vehículos más (no están en el RNDC) para tener dos lotes
+  await M.Vehiculo.insertMany(Array.from({ length: 31 }, (_, i) => ({ empresa: s.empresaA, placa: `LOT${String(i).padStart(3, '0')}` })));
+  const total = await M.Vehiculo.countDocuments({ empresa: s.empresaA });
+  const ini = await s.manif.post('/api/rndc/vehiculos/actualizacion', { clave: CLAVE_RNDC, modo: 'lotes' });
+  assert.equal(ini.status, 202, JSON.stringify(ini.body));
+  assert.equal(ini.body.clave, undefined, 'la contraseña no se devuelve');
+  assert.equal((await s.manif.post('/api/rndc/vehiculos/actualizacion', { clave: CLAVE_RNDC, modo: 'todos' })).status, 409, 'un solo proceso por empresa');
+  const p1 = await esperar(['esperando']);
+  assert.equal(p1.lotes.length, 1);
+  assert.equal(p1.lotes[0].resultados.length, 30);
+  assert.equal(p1.procesados, 30);
+  const p2 = await (async () => { await s.manif.post('/api/rndc/vehiculos/actualizacion/continuar', {}); return esperar(['esperando', 'terminado']); })();
+  assert.equal(p2.loteActual, 2);
+  let fin = p2;
+  while (fin.estado === 'esperando') { await s.manif.post('/api/rndc/vehiculos/actualizacion/continuar', {}); fin = await esperar(['esperando', 'terminado']); }
+  assert.equal(fin.procesados, total);
+  assert.equal(fin.actualizados + fin.sinCambios + fin.noEncontrados + fin.errores, total);
+  assert.ok(fin.noEncontrados >= 31, 'las placas que el RNDC no tiene quedan como no encontradas');
+  assert.equal(await M.Vehiculo.countDocuments({ empresa: s.empresaA }), total, 'no se crean vehículos');
+
+  // Contraseña rechazada: el proceso se detiene de inmediato
+  await s.manif.post('/api/rndc/vehiculos/actualizacion', { clave: 'clave-incorrecta', modo: 'todos' });
+  const det = await esperar(['detenido']);
+  assert.equal(det.procesados, 1);
+  assert.match(det.mensaje, /contraseña/);
+  await M.Vehiculo.deleteMany({ empresa: s.empresaA, placa: /^LOT/ });
+});
+
 test('Vehículos y terceros: verificar antes de crear (base local, RNDC o nuevo)', async () => {
   // Ya existe en la empresa: no se duplica
   const local = await s.manif.post('/api/rndc/verificar/vehiculo', { placa: 'abc-123' });

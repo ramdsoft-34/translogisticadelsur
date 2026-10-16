@@ -1,6 +1,7 @@
 // Configuración leída de variables de entorno, validada al arrancar.
 import 'dotenv/config';
 
+const entero = (v, def) => (v === undefined || v === '' || !Number.isFinite(Number(v)) ? def : Math.max(0, Number(v)));
 const bool = (v, def = false) => (v === undefined || v === '' ? def : String(v).toLowerCase() === 'true');
 
 export const env = {
@@ -17,6 +18,11 @@ export const env = {
     permitirProduccion: bool(process.env.RNDC_PERMITIR_PRODUCCION, false),
     permitirPruebas: bool(process.env.RNDC_PERMITIR_PRUEBAS, true),
     timeoutMs: Number(process.env.RNDC_TIMEOUT_MS) || 90000,
+    // Protección del web service: peticiones simultáneas y pausa mínima entre peticiones (ms)
+    maxConcurrentes: Math.max(1, Number(process.env.RNDC_MAX_CONCURRENTES) || 1),
+    pausaMs: entero(process.env.RNDC_PAUSA_MS, 1000),
+    // Pausa adicional entre placas en la actualización masiva de vehículos (ms)
+    pausaMasivaMs: entero(process.env.RNDC_PAUSA_MASIVA_MS, 1500),
   },
 };
 

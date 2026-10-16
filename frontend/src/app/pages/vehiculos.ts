@@ -10,6 +10,7 @@ import { Icono } from '../shared/icono';
 import { FORMATOS, isoDia } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
 import { TraerRndc } from '../shared/traer-rndc';
+import { ActualizarVehiculos } from '../shared/actualizar-vehiculos';
 import { CargarMas } from '../shared/cargar-mas';
 import { mensajeError } from '../core/api.service';
 import { BuscarTercero } from '../shared/buscar-tercero';
@@ -23,7 +24,7 @@ const vacio = () => ({
 
 @Component({
   selector: 'app-vehiculos',
-  imports: [FormsModule, Modal, Icono, ImportarExcel, TraerRndc, CargarMas, BuscarTercero, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, BuscarTercero, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Vehículos</h1><p class="sutil">Vehículos y remolques con sus documentos. Los códigos (configuración, marca, línea…) son los de las tablas del RNDC.</p></div>
@@ -31,12 +32,14 @@ const vacio = () => ({
         @if (puedeEditar) {
           <button (click)="importar.set(true)"><app-icono nombre="descargar" />Importar Excel</button>
           @if (puedeRndc) { <button (click)="traer.set(true)"><app-icono nombre="buscar" />Traer del RNDC</button> }
+          @if (puedeConsultar) { <button (click)="actualizar.set(true)"><app-icono nombre="reloj" />Actualizar desde el RNDC</button> }
           <button class="primario" (click)="nuevo()"><app-icono nombre="mas" />Nuevo vehículo</button>
         }
       </div>
     </div>
     <app-importar-excel tipo="vehiculos" titulo="vehículos" [abierto]="importar()" (cerrar)="importar.set(false)" (importado)="cargar()" />
     <app-traer-rndc tipo="vehiculos" [abierto]="traer()" (cerrar)="traer.set(false)" (traidos)="cargar()" />
+    <app-actualizar-vehiculos [abierto]="actualizar()" (cerrar)="actualizar.set(false); cargar()" (actualizados)="cargar()" />
     <div class="barra"><div class="campo crece"><label for="v-q">Buscar placa</label>
       <input id="v-q" type="search" placeholder="ABC123" [(ngModel)]="q" (input)="buscarDiferido()" style="text-transform:uppercase" /></div></div>
     <div class="tabla-caja">
@@ -154,6 +157,7 @@ export class Vehiculos {
   readonly abierto = signal(false);
   readonly importar = signal(false);
   readonly traer = signal(false);
+  readonly actualizar = signal(false);
   readonly form = signal<any>(vacio());
   readonly editando = computed(() => !!this.form()._id);
   q = '';

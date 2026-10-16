@@ -11,6 +11,8 @@ import * as cat from '../services/rndc/catalogos.js';
 import { env } from '../config/env.js';
 import { parseFecha } from '../utils/texto.js';
 import { titularDePlaca } from './viajes.js';
+import * as masiva from '../services/rndc/actualizacionVehiculos.js';
+import { estadoLimitador } from '../services/rndc/limitador.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -219,6 +221,34 @@ r.post('/vehiculos/:id/enviar', operar, async (req, res) => {
   const resultado = await op.registrarMaestro(req.empresaId, c, req.usuario._id, Vehiculo, doc, forzar);
   await auditar(req, 'rndc_vehiculo', { entidad: 'Vehiculo', entidadId: doc._id, detalle: { ok: resultado.ok, sinCambios: resultado.sinCambios } });
   res.json(resultado);
+});
+
+// ── Actualizar vehículos registrados con la información del RNDC ───────────
+// Individual (una placa), todos o por lotes de 30. Las consultas van de una en una.
+const actualizarVeh = [permitir(P.MAESTROS_EDITAR), permitir(P.RNDC_CONSULTAR, P.RNDC_OPERAR)];
+const placaSchema = z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^[A-Z0-9]{5,6}$/, 'placa inválida'));
+
+r.post('/vehiculos/actualizar', ...actualizarVeh, async (req, res) => {
+  const d = z.object({ clave, placa: placaSchema }).parse(req.body);
+  const r1 = await op.actualizarVehiculo(req.empresaId, d.clave, req.usuario._id, d.placa);
+  const { conexion, ...resultado } = r1;
+  await auditar(req, 'actualizar_vehiculo_rndc', { entidad: 'Vehiculo', entidadId: r1.id || '', detalle: { placa: d.placa, estado: r1.estado, campos: r1.campos } });
+  res.json(resultado);
+});
+
+r.get('/vehiculos/actualizacion', ...actualizarVeh, (req, res) => {
+  res.json({ proceso: masiva.estadoProceso(req.empresaId), tamLote: masiva.TAM_LOTE, limitador: estadoLimitador() });
+});
+r.post('/vehiculos/actualizacion', ...actualizarVeh, async (req, res) => {
+  const d = z.object({ clave, modo: z.enum(['todos', 'lotes']) }).parse(req.body);
+  res.status(202).json(await masiva.iniciar({ empresaId: req.empresaId, usuario: req.usuario, clave: d.clave, modo: d.modo }));
+});
+r.post('/vehiculos/actualizacion/continuar', ...actualizarVeh, (req, res) => {
+  const d = z.object({ clave: z.string().max(100).optional() }).parse(req.body);
+  res.json(masiva.continuar(req.empresaId, d.clave));
+});
+r.post('/vehiculos/actualizacion/detener', ...actualizarVeh, (req, res) => {
+  res.json(masiva.detener(req.empresaId));
 });
 
 // ── Verificar antes de crear (evita duplicados y trae los datos del RNDC) ───
