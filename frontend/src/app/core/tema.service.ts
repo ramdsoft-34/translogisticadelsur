@@ -26,7 +26,8 @@ export class TemaService {
     return matchMedia('(prefers-color-scheme: dark)').matches ? 'oscuro' : 'claro';
   }
 
-  private aplicar(t: Tema) {
+  // Aplica un tema sin guardarlo (el login sigue la preferencia del sistema).
+  aplicar(t: Tema) {
     document.documentElement.dataset['tema'] = t;
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t === 'oscuro' ? '#0a0908' : '#0f0e0c');
   }

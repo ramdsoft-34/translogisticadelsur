@@ -2,6 +2,8 @@
 (function () {
   var t = null;
   try { t = localStorage.getItem('tls_tema'); } catch (e) { /* sin almacenamiento */ }
-  if (t !== 'claro' && t !== 'oscuro') t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'oscuro' : 'claro';
+  // El inicio de sesión sigue siempre la apariencia del sistema.
+  var login = location.pathname === '/' || location.pathname.indexOf('/ingresar') === 0;
+  if (login || (t !== 'claro' && t !== 'oscuro')) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'oscuro' : 'claro';
   document.documentElement.setAttribute('data-tema', t);
 })();
