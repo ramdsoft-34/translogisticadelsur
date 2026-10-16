@@ -6,6 +6,8 @@ const bool = (v, def = false) => (v === undefined || v === '' ? def : String(v).
 export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 4000,
+  // En producción se escucha solo en 127.0.0.1: el acceso público entra por nginx (HTTPS).
+  host: process.env.HOST || '0.0.0.0',
   mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/translogisticadelsur',
   jwtSecret: process.env.JWT_SECRET || '',
   jwtExpires: process.env.JWT_EXPIRES || '8h',

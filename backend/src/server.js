@@ -5,7 +5,7 @@ import { crearApp } from './app.js';
 validarEnv();
 await conectar();
 const app = crearApp();
-app.listen(env.port, () => {
-  console.log(`API Translogística del Sur en http://localhost:${env.port}/api`);
+app.listen(env.port, env.host, () => {
+  console.log(`API Translogística del Sur en http://${env.host}:${env.port}/api`);
   console.log(`RNDC: producción ${env.rndc.permitirProduccion ? 'HABILITADA' : 'deshabilitada'}, pruebas ${env.rndc.permitirPruebas ? 'habilitadas' : 'deshabilitadas'}`);
 });
