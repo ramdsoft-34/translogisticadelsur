@@ -1,0 +1,395 @@
+import { Component, computed, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { Api } from '../core/api.service';
+import { Auth } from '../core/auth.service';
+import { Avisos } from '../core/avisos.service';
+import { ESTADOS_VIAJE, P, Viaje } from '../core/modelos';
+import { Modal } from '../shared/modal';
+import { Icono } from '../shared/icono';
+import { FORMATOS, hoyIso, inicioMesIso, isoDia } from '../shared/formato';
+import { SelectorMunicipio } from '../shared/municipio';
+import { Moneda } from '../shared/moneda';
+import { CargarMas } from '../shared/cargar-mas';
+import { BuscarTercero } from '../shared/buscar-tercero';
+
+interface Formulario {
+  _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
+  placa: string; remolque: string; conductor: string; titular: string;
+  pesoKg: number | null; cantidad: number | null; conAuxiliar: boolean;
+  tarifa: number | null; flete: number | null; anticipo: number | null; observaciones: string; estado?: string; historico?: boolean;
+}
+
+const vacio = (): Formulario => ({
+  fecha: hoyIso(), cliente: '', tarifaRef: '', destino: '', codDestino: '', placa: '', remolque: '', conductor: '', titular: '',
+  pesoKg: null, cantidad: 1, conAuxiliar: false, tarifa: null, flete: null, anticipo: null, observaciones: '',
+});
+
+type Periodo = 'hoy' | 'ayer' | 'semana' | 'mes' | 'rango';
+const POR_PAGINA = 50;
+const diasAtras = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return isoLocal(d); };
+const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+@Component({
+  selector: 'app-viajes',
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, ...FORMATOS],
+  template: `
+    <div class="pagina-cab">
+      <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
+      <div class="acciones">
+        <button (click)="abrirWhatsapp()"><app-icono nombre="enviar" [tam]="16" />WhatsApp</button>
+        <button (click)="descargar('xlsx')" title="Descargar en Excel"><app-icono nombre="descargar" [tam]="16" />Excel</button>
+        <button (click)="descargar('pdf')" title="Descargar en PDF"><app-icono nombre="descargar" [tam]="16" />PDF</button>
+        @if (puedeRegistrar) { <button class="primario" (click)="nuevo()"><app-icono nombre="mas" [tam]="16" />Registrar viaje</button> }
+      </div>
+    </div>
+
+    <section class="barra" aria-label="Filtros">
+      <div class="campo"><span class="etiqueta">Periodo</span>
+        <div class="segmentos" role="group" aria-label="Periodo">
+          @for (p of periodos; track p[0]) {
+            <button type="button" [class.activo]="periodo() === p[0]" (click)="elegirPeriodo(p[0])">{{ p[1] }}</button>
+          }
+        </div></div>
+      @if (periodo() === 'rango') {
+        <div class="campo"><label for="f-desde">Desde</label><input id="f-desde" type="date" [(ngModel)]="filtro.desde" (change)="cargar()" /></div>
+        <div class="campo"><label for="f-hasta">Hasta</label><input id="f-hasta" type="date" [(ngModel)]="filtro.hasta" (change)="cargar()" /></div>
+      }
+      <div class="campo"><label for="f-cli">Cliente</label>
+        <select id="f-cli" [(ngModel)]="filtro.cliente" (change)="cargar()"><option value="">Todos</option>
+          @for (c of clientes(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }</select></div>
+      <div class="campo"><label for="f-est">Estado</label>
+        <select id="f-est" [(ngModel)]="filtro.estado" (change)="cargar()"><option value="">Todos</option>
+          @for (e of estados; track e[0]) { <option [value]="e[0]">{{ e[1] }}</option> }</select></div>
+      <div class="campo crece"><label for="f-q">Buscar</label>
+        <input id="f-q" type="search" placeholder="Placa, destino o manifiesto" [(ngModel)]="filtro.q" (keyup.enter)="cargar()" (search)="cargar()" /></div>
+    </section>
+
+    <div class="resumen">
+      <div><span>Viajes</span><strong>{{ total() }}</strong></div>
+      <div><span>Fletes</span><strong>{{ sumas().flete | pesos }}</strong></div>
+      <div><span>Anticipos</span><strong>{{ sumas().anticipo | pesos }}</strong></div>
+      <div><span>Saldo por pagar</span><strong>{{ sumas().saldo | pesos }}</strong></div>
+    </div>
+
+    <div class="tabla-caja">
+      <table>
+        <thead><tr><th>N°</th><th>Fecha</th><th>Cliente / destino</th><th>Placa</th><th>Conductor</th>
+          <th class="num">Flete</th><th class="num">Anticipo</th><th class="num">Saldo</th><th>Estado</th></tr></thead>
+        <tbody>
+          @for (v of viajes(); track v._id) {
+            <tr class="seleccionable" (click)="editar(v)" tabindex="0" (keydown.enter)="editar(v)">
+              <td class="sutil">{{ v.numero }}</td><td>{{ v.fecha | dia }}</td>
+              <td><span class="celda-doble"><span>{{ v.cliente?.nombre }}</span><small>{{ v.destino }}</small></span></td>
+              <td><span class="placa">{{ v.placa }}</span></td><td>{{ v.conductorNombre }}</td>
+              <td class="num">{{ v.flete | pesos }}</td><td class="num">{{ v.anticipo | pesos }}</td><td class="num"><strong>{{ v.saldo | pesos }}</strong></td>
+              <td><span class="estados">
+                <span class="chip" [class]="claseEstado(v.estado)">{{ estadoTexto(v.estado) }}</span>
+                @if (v.manifiesto.estado === 'aceptado') { <small class="sutil">{{ v.manifiesto.numero }}</small> }
+                @if (v.historico) { <span class="chip sin-punto" title="Importado del Excel: sus documentos RNDC se gestionaron fuera de la plataforma">Histórico</span> }
+                @if (v.reporteWhatsapp?.fecha) { <span class="chip ok sin-punto" title="Reportado por WhatsApp">WA</span> }
+              </span></td>
+            </tr>
+          } @empty {
+            @if (cargando()) {
+              @for (i of [1, 2, 3, 4]; track i) { <tr><td colspan="9"><span class="esqueleto"></span></td></tr> }
+            } @else {
+              <tr><td colspan="9" class="vacio"><strong>{{ periodo() === 'hoy' ? 'Aún no hay viajes hoy' : 'No hay viajes con estos filtros' }}</strong>
+                {{ periodo() === 'hoy' ? 'Registre el primer despacho del día o revise otro periodo.' : 'Cambie el periodo o los filtros.' }}
+                @if (puedeRegistrar && periodo() === 'hoy') { <div style="margin-top:12px"><button class="primario" (click)="nuevo()"><app-icono nombre="mas" [tam]="16" />Registrar viaje</button></div> }
+              </td></tr>
+            }
+          }
+        </tbody>
+      </table>
+      @if (viajes().length) { <app-cargar-mas [mostrados]="viajes().length" [total]="total()" [cargando]="cargandoMas()" unidad="viajes" (mas)="cargarMas()" /> }
+    </div>
+
+    <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : 'Registrar viaje'" [abierto]="abierto()" (cerrar)="abierto.set(false)" [ancho]="true">
+      @let f = form();
+      @if (bloqueado()) {
+        <div class="mensaje info" style="margin-bottom:14px">Este viaje ya tiene documentos en el RNDC: solo puede cambiar observaciones, cantidad, auxiliar y tarifa.</div>
+      }
+      <form id="form-viaje" (ngSubmit)="guardar()" class="secciones">
+        <fieldset><legend>Cliente y ruta</legend><div class="formulario">
+          <div class="campo"><label for="v-fecha">Fecha</label><input id="v-fecha" type="date" name="fecha" [(ngModel)]="f.fecha" [disabled]="bloqueado()" required /></div>
+          <div class="campo"><label for="v-cli">Cliente</label>
+            <select id="v-cli" name="cliente" [(ngModel)]="f.cliente" (ngModelChange)="cambiarCliente($event)" [disabled]="bloqueado()" required>
+              <option value="">Seleccione…</option>
+              @for (c of clientesActivos(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }
+            </select></div>
+          <div class="campo"><label for="v-dest">Destino</label>
+            <select id="v-dest" name="tarifaRef" [(ngModel)]="f.tarifaRef" (ngModelChange)="cambiarDestino($event)" [disabled]="bloqueado() || !f.cliente">
+              <option value="">Otro destino (escribir)</option>
+              @for (t of tarifasCliente(); track t._id) { <option [value]="t._id">{{ t.destino }}</option> }
+            </select><small>Al escoger un destino se llenan tarifa, flete y anticipo.</small></div>
+          @if (!f.tarifaRef) {
+            <div class="campo"><label for="v-dest2">Nombre del destino</label><input id="v-dest2" name="destino" [(ngModel)]="f.destino" [disabled]="bloqueado()" required /></div>
+            <app-municipio etiqueta="Municipio de destino" [(codigo)]="f.codDestino" />
+          }
+        </div></fieldset>
+
+        <fieldset><legend>Vehículo y conductor</legend><div class="formulario">
+          <div class="campo"><label for="v-placa">Placa</label>
+            <input id="v-placa" name="placa" list="lista-placas" [(ngModel)]="f.placa" (input)="buscarPlacas(f.placa)" (change)="sugerirPorPlaca()"
+              [disabled]="bloqueado()" required autocomplete="off" style="text-transform:uppercase" placeholder="ABC123" />
+            <datalist id="lista-placas">@for (x of placas(); track x._id) { <option [value]="x.placa"></option> }</datalist>
+            <small>Sugiere el conductor habitual de la placa.</small></div>
+          <app-buscar-tercero etiqueta="Conductor" rol="conductor" [(valor)]="f.conductor" [deshabilitado]="bloqueado()" />
+          <app-buscar-tercero etiqueta="Titular del manifiesto (vacío = el conductor)" [(valor)]="f.titular" [deshabilitado]="bloqueado()" />
+          <div class="campo"><label for="v-rem">Remolque (opcional)</label><input id="v-rem" name="remolque" [(ngModel)]="f.remolque" [disabled]="bloqueado()" style="text-transform:uppercase" /></div>
+          <div class="campo"><label for="v-peso">Peso (kg)</label><input id="v-peso" type="number" min="0" name="pesoKg" [(ngModel)]="f.pesoKg" [disabled]="bloqueado()" /></div>
+          <div class="campo"><label for="v-cant">Cantidad (viajes o unidades)</label><input id="v-cant" type="number" min="0" name="cantidad" [(ngModel)]="f.cantidad" /></div>
+        </div></fieldset>
+
+        <fieldset><legend>Valores en pesos colombianos (COP)</legend><div class="formulario">
+          <div class="campo"><label for="v-tar">Tarifa al cliente</label><div class="moneda"><input id="v-tar" moneda name="tarifa" [(ngModel)]="f.tarifa" /></div></div>
+          <div class="campo"><label for="v-flete">Flete al conductor</label><div class="moneda"><input id="v-flete" moneda name="flete" [(ngModel)]="f.flete" [disabled]="bloqueado()" /></div></div>
+          <div class="campo"><label for="v-ant">Anticipo</label><div class="moneda"><input id="v-ant" moneda name="anticipo" [(ngModel)]="f.anticipo" [disabled]="bloqueado()" /></div></div>
+          <div class="campo saldo"><span class="etiqueta">Saldo al conductor</span><strong>{{ ((f.flete || 0) - (f.anticipo || 0)) | pesos }} <small>COP</small></strong></div>
+          <label class="casilla ancho"><input type="checkbox" name="aux" [(ngModel)]="f.conAuxiliar" /> El viaje lleva auxiliar</label>
+        </div></fieldset>
+
+        <div class="campo"><label for="v-obs">Observaciones (van en el manifiesto)</label><textarea id="v-obs" name="obs" maxlength="200" [(ngModel)]="f.observaciones"></textarea></div>
+        @if (f.historico) {
+          <div class="mensaje info">Viaje histórico importado del Excel: no aparece en «Manifiestos RNDC».
+            @if (puedeEditarTodos) { <label class="casilla" style="margin-top:6px"><input type="checkbox" name="habilitar" [(ngModel)]="habilitarRndc" />Habilitarlo para expedir sus documentos en el RNDC</label> }</div>
+        }
+      </form>
+      <ng-container pie>
+        @if (form()._id && !bloqueado() && puedeRegistrar) { <button class="peligro" type="button" (click)="eliminar()" style="margin-right:auto">Eliminar</button> }
+        <button type="button" (click)="abierto.set(false)">Cancelar</button>
+        @if (puedeRegistrar) { <button class="primario" type="submit" form="form-viaje" [disabled]="guardando()">{{ guardando() ? 'Guardando…' : 'Guardar viaje' }}</button> }
+      </ng-container>
+    </app-modal>
+
+    <app-modal titulo="Reporte de vehículos por WhatsApp" [abierto]="waAbierto()" (cerrar)="waAbierto.set(false)" [ancho]="true">
+      <div class="filtros">
+        <div class="campo"><label for="wa-fecha">Fecha</label><input id="wa-fecha" type="date" [(ngModel)]="waFecha" (change)="cargarWhatsapp()" /></div>
+        <label class="casilla"><input type="checkbox" [(ngModel)]="waIncluir" (change)="cargarWhatsapp()" />Incluir los ya reportados</label>
+      </div>
+      <p class="sutil">Un mensaje por cliente con los viajes de la fecha, igual que en la plantilla. «Abrir WhatsApp» abre el chat con el texto escrito:
+        elija el contacto o grupo (si el cliente no tiene número) y presione Enviar. Después marque el mensaje como reportado.</p>
+      @for (m of waMensajes(); track m.cliente) {
+        <div class="tarjeta" style="margin-top:12px">
+          <div class="pagina-cab" style="margin-bottom:8px"><div><h3 style="margin:0">{{ m.cliente }}</h3>
+            <span class="sutil">{{ m.cantidad }} vehículo(s) · Flete {{ m.totalFlete | pesos }} COP · Anticipo {{ m.totalAnticipo | pesos }} COP</span></div>
+            <div class="acciones">
+              <button class="pequeno" (click)="copiar(m.texto)">Copiar</button>
+              <a class="boton pequeno wa" [href]="m.enlace" target="_blank" rel="noopener noreferrer"><app-icono nombre="enviar" [tam]="15" />Abrir WhatsApp</a>
+              @if (puedeRegistrar) { <button class="pequeno primario" (click)="marcarReportado(m)">Marcar reportado</button> }
+            </div></div>
+          <pre class="wa-texto">{{ m.texto }}</pre>
+        </div>
+      } @empty { <p class="vacio">No hay vehículos por reportar en esa fecha.</p> }
+      <ng-container pie><button type="button" (click)="waAbierto.set(false)">Cerrar</button></ng-container>
+    </app-modal>`,
+  styles: [`
+    .resumen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--gris-2); border: 1px solid var(--gris-2);
+      border-radius: var(--radio-l); overflow: hidden; margin-bottom: 14px; }
+    .resumen > div { background: #fff; padding: 12px 16px; display: flex; flex-direction: column; gap: 2px; }
+    .resumen span { font-size: 12.5px; color: var(--gris-5); }
+    .resumen strong { font-size: 20px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+    .estados { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .secciones { display: flex; flex-direction: column; gap: 14px; }
+    .saldo { justify-content: flex-end; }
+    .saldo strong { font-size: 20px; font-weight: 650; padding: 6px 0; }
+    .saldo small { font-size: 11px; color: var(--gris-5); font-weight: 600; }
+    .wa-texto { white-space: pre-wrap; font-family: inherit; background: var(--gris-1); border-radius: 10px; padding: 12px; margin: 0; font-size: 13.5px; }
+    .boton.wa { background: #1c8a4a; border-color: #1c8a4a; color: #fff; }
+    @media (max-width: 760px) { .resumen { grid-template-columns: repeat(2, 1fr); } }
+  `],
+})
+export class Viajes {
+  private api = inject(Api);
+  private auth = inject(Auth);
+  private avisos = inject(Avisos);
+  readonly puedeRegistrar = this.auth.tiene(P.VIAJES_REGISTRAR);
+  readonly puedeEditarTodos = this.auth.tiene(P.VIAJES_EDITAR_TODOS);
+  readonly periodos: [Periodo, string][] = [['hoy', 'Hoy'], ['ayer', 'Ayer'], ['semana', '7 días'], ['mes', 'Este mes'], ['rango', 'Rango']];
+  readonly periodo = signal<Periodo>('hoy');
+  readonly waAbierto = signal(false);
+  readonly waMensajes = signal<any[]>([]);
+  waFecha = hoyIso();
+  waIncluir = false;
+  habilitarRndc = false;
+  readonly estados = Object.entries(ESTADOS_VIAJE);
+  readonly viajes = signal<Viaje[]>([]);
+  readonly total = signal(0);
+  readonly sumas = signal({ flete: 0, anticipo: 0, saldo: 0 });
+  readonly cargando = signal(false);
+  readonly cargandoMas = signal(false);
+  private pagina = 1;
+  readonly clientes = signal<any[]>([]);
+  readonly clientesActivos = computed(() => this.clientes().filter(c => c.activo !== false));
+  readonly tarifas = signal<any[]>([]);
+  readonly placas = signal<any[]>([]);
+  readonly form = signal<Formulario>(vacio());
+  readonly tarifasCliente = computed(() => this.tarifas().filter(t => (t.cliente?._id || t.cliente) === this.form().cliente && t.activo !== false));
+  readonly abierto = signal(false);
+  readonly guardando = signal(false);
+  readonly bloqueado = signal(false);
+  readonly numeroEditado = signal(0);
+  // Por defecto solo los viajes de HOY (no todo el histórico)
+  filtro = { desde: hoyIso(), hasta: hoyIso(), cliente: '', estado: '', q: '' };
+  private temporizadorPlacas: ReturnType<typeof setTimeout> | undefined;
+
+  constructor() {
+    this.cargar();
+    this.cargarMaestros();
+  }
+
+  descripcionPeriodo() {
+    const p = this.periodo();
+    if (p === 'hoy') return `Despachos de hoy, ${new Date().toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+    if (p === 'ayer') return 'Despachos de ayer';
+    if (p === 'semana') return 'Despachos de los últimos 7 días';
+    if (p === 'mes') return 'Despachos del mes en curso';
+    return 'Despachos del rango seleccionado';
+  }
+
+  elegirPeriodo(p: Periodo) {
+    this.periodo.set(p);
+    const hoy = hoyIso();
+    if (p === 'hoy') this.filtro = { ...this.filtro, desde: hoy, hasta: hoy };
+    if (p === 'ayer') { const a = diasAtras(1); this.filtro = { ...this.filtro, desde: a, hasta: a }; }
+    if (p === 'semana') this.filtro = { ...this.filtro, desde: diasAtras(6), hasta: hoy };
+    if (p === 'mes') this.filtro = { ...this.filtro, desde: inicioMesIso(), hasta: hoy };
+    if (p !== 'rango') this.cargar();
+  }
+
+  async cargarMaestros() {
+    try {
+      const [c, t] = await Promise.all([this.api.get<any[]>('/maestros/clientes'), this.api.get<any[]>('/maestros/tarifas')]);
+      this.clientes.set(c); this.tarifas.set(t);
+    } catch (e) { this.avisos.error(e); }
+  }
+
+  // Primera página (reinicia la lista)
+  async cargar() {
+    this.cargando.set(true);
+    this.pagina = 1;
+    try {
+      const r = await this.api.get<any>('/viajes', { ...this.filtro, pagina: 1, limite: POR_PAGINA });
+      this.viajes.set(r.viajes); this.total.set(r.total);
+      if (r.sumas) this.sumas.set(r.sumas);
+    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
+  }
+
+  // Páginas siguientes (carga progresiva)
+  async cargarMas() {
+    if (this.cargandoMas() || this.viajes().length >= this.total()) return;
+    this.cargandoMas.set(true);
+    try {
+      const r = await this.api.get<any>('/viajes', { ...this.filtro, pagina: this.pagina + 1, limite: POR_PAGINA });
+      this.pagina += 1;
+      this.viajes.update(l => [...l, ...r.viajes]);
+    } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }
+  }
+
+  estadoTexto(e: string) { return ESTADOS_VIAJE[e] || e; }
+  claseEstado(e: string) { return ({ manifestado: 'marca', cumplido: 'ok', anulado: 'error', remesa: 'alerta' } as Record<string, string>)[e] || ''; }
+
+  nuevo() { this.form.set(vacio()); this.bloqueado.set(false); this.abierto.set(true); }
+
+  editar(v: Viaje) {
+    this.numeroEditado.set(v.numero);
+    this.form.set({
+      _id: v._id, fecha: isoDia(v.fecha), cliente: v.cliente?._id || '', tarifaRef: v.tarifaRef?._id || v.tarifaRef || '',
+      destino: v.destino, codDestino: v.codDestino, placa: v.placa, remolque: v.remolque, conductor: v.conductor?._id || '',
+      titular: v.titular?._id || '', pesoKg: v.pesoKg, cantidad: v.cantidad, conAuxiliar: v.conAuxiliar, tarifa: v.tarifa,
+      flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones, estado: v.estado, historico: !!v.historico,
+    });
+    this.habilitarRndc = false;
+    this.bloqueado.set(v.estado !== 'registrado' || !!v.liquidacion);
+    this.abierto.set(true);
+  }
+
+  cambiarCliente(_: string) { this.form.update(f => ({ ...f, tarifaRef: '' })); }
+
+  // Al escoger un destino con tarifa se sugieren sus valores.
+  cambiarDestino(id: string) {
+    const t = this.tarifas().find(x => x._id === id);
+    if (!t) return;
+    this.form.update(f => ({ ...f, destino: t.destino, codDestino: t.codMunicipio, tarifa: t.tarifaCliente, flete: t.fleteConductor,
+      anticipo: t.anticipoHabitual, pesoKg: t.pesoKg || f.pesoKg }));
+  }
+
+  buscarPlacas(q: string) {
+    clearTimeout(this.temporizadorPlacas);
+    if (!q || q.length < 2) return;
+    this.temporizadorPlacas = setTimeout(async () => {
+      this.placas.set(await this.api.get<any[]>('/maestros/vehiculos', { q, activos: 1, limite: 15 }).catch(() => []));
+    }, 200);
+  }
+
+  async sugerirPorPlaca() {
+    const placa = this.form().placa.trim().toUpperCase();
+    if (placa.length < 5 || this.form().conductor) return;
+    try {
+      const s = await this.api.get<any>(`/viajes/sugerencias/placa/${encodeURIComponent(placa)}`);
+      this.form.update(f => ({ ...f, conductor: s.conductor || f.conductor, remolque: f.remolque || s.remolque || '',
+        titular: f.titular || s.titular || s.vehiculo?.titularHabitual || '' }));
+    } catch { /* sin sugerencia */ }
+  }
+
+  async guardar() {
+    const f = this.form();
+    if (!f.conductor && !this.bloqueado()) { this.avisos.mostrar('Seleccione el conductor', 'error'); return; }
+    const cuerpo: any = { ...f, placa: f.placa.toUpperCase(), remolque: (f.remolque || '').toUpperCase(), tarifaRef: f.tarifaRef || null, titular: f.titular || null };
+    delete cuerpo._id; delete cuerpo.estado;
+    for (const k of ['pesoKg', 'cantidad', 'tarifa', 'flete', 'anticipo']) if (cuerpo[k] === null || cuerpo[k] === '') delete cuerpo[k];
+    delete cuerpo.historico;
+    if (this.bloqueado()) {
+      for (const k of Object.keys(cuerpo)) if (!['observaciones', 'cantidad', 'conAuxiliar', 'tarifa'].includes(k)) delete cuerpo[k];
+    }
+    if (f.historico && this.habilitarRndc) cuerpo.historico = false;
+    this.guardando.set(true);
+    try {
+      if (f._id) await this.api.put(`/viajes/${f._id}`, cuerpo);
+      else {
+        const v = await this.api.post<Viaje>('/viajes', cuerpo);
+        this.avisos.ok(`Viaje N° ${v.numero} registrado`);
+      }
+      this.abierto.set(false);
+      this.cargar();
+    } catch (e) { this.avisos.error(e); } finally { this.guardando.set(false); }
+  }
+
+  async eliminar() {
+    if (!confirm('¿Eliminar este viaje? Esta acción no se puede deshacer.')) return;
+    try {
+      await this.api.delete(`/viajes/${this.form()._id}`);
+      this.avisos.ok('Viaje eliminado');
+      this.abierto.set(false);
+      this.cargar();
+    } catch (e) { this.avisos.error(e); }
+  }
+
+  // ── Reporte WhatsApp ──
+  abrirWhatsapp() { this.waFecha = this.filtro.hasta || hoyIso(); this.waAbierto.set(true); this.cargarWhatsapp(); }
+
+  async cargarWhatsapp() {
+    try {
+      const r = await this.api.get<{ mensajes: any[] }>('/viajes/reporte-whatsapp', { fecha: this.waFecha, incluirReportados: this.waIncluir ? 1 : 0 });
+      this.waMensajes.set(r.mensajes);
+    } catch (e) { this.avisos.error(e); }
+  }
+
+  async copiar(texto: string) {
+    try { await navigator.clipboard.writeText(texto); this.avisos.ok('Mensaje copiado'); } catch { this.avisos.mostrar('No se pudo copiar; seleccione el texto manualmente', 'error'); }
+  }
+
+  async marcarReportado(m: any) {
+    try {
+      await this.api.post('/viajes/reporte-whatsapp/marcar', { viajes: m.viajes });
+      this.avisos.ok(`${m.cliente}: ${m.cantidad} vehículo(s) marcados como reportados`);
+      this.cargarWhatsapp(); this.cargar();
+    } catch (e) { this.avisos.error(e); }
+  }
+
+  async descargar(tipo: 'xlsx' | 'pdf') {
+    try {
+      await this.api.descargar(`/reportes/bitacora.${tipo}`, { desde: this.filtro.desde, hasta: this.filtro.hasta, cliente: this.filtro.cliente }, `bitacora.${tipo}`);
+    } catch (e) { this.avisos.error(e); }
+  }
+}

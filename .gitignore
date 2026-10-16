@@ -1,0 +1,15 @@
+# Dependencias y compilados
+node_modules/
+dist/
+.angular/
+coverage/
+
+# Variables de entorno (contienen secretos)
+.env
+.env.*
+!.env.example
+
+# Registros y sistema
+*.log
+.DS_Store
+Thumbs.db
