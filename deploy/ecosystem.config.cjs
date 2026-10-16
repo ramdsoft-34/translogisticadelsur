@@ -14,7 +14,10 @@ module.exports = {
       // Simulador RNDC local (solo 127.0.0.1) para el ambiente SIMULADO de cada empresa.
       name: 'tls-simulador',
       cwd: __dirname + '/../backend',
-      script: 'tools/rndcSimulador.js',
+      // Se lanza con node directamente: el script solo escucha cuando es el programa principal.
+      script: 'node',
+      args: 'tools/rndcSimulador.js',
+      interpreter: 'none',
       max_memory_restart: '150M',
       time: true,
     },
