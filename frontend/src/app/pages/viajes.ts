@@ -186,7 +186,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
   styles: [`
     .resumen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--gris-2); border: 1px solid var(--gris-2);
       border-radius: var(--radio-l); overflow: hidden; margin-bottom: 14px; }
-    .resumen > div { background: #fff; padding: 12px 16px; display: flex; flex-direction: column; gap: 2px; }
+    .resumen > div { background: var(--gris-0); padding: 12px 16px; display: flex; flex-direction: column; gap: 2px; }
     .resumen span { font-size: 12.5px; color: var(--gris-5); }
     .resumen strong { font-size: 20px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
     .estados { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -195,7 +195,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .saldo strong { font-size: 20px; font-weight: 650; padding: 6px 0; }
     .saldo small { font-size: 11px; color: var(--gris-5); font-weight: 600; }
     .wa-texto { white-space: pre-wrap; font-family: inherit; background: var(--gris-1); border-radius: 10px; padding: 12px; margin: 0; font-size: 13.5px; }
-    .boton.wa { background: #1c8a4a; border-color: #1c8a4a; color: #fff; }
+    .boton.wa { background: var(--whatsapp); border-color: var(--whatsapp); color: #fff; }
     @media (max-width: 760px) { .resumen { grid-template-columns: repeat(2, 1fr); } }
   `],
 })

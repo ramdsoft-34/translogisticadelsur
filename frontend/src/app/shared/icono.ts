@@ -27,6 +27,8 @@ const ICONOS: Record<string, string> = {
   chevron: 'M6 9l6 6 6-6',
   fijar: 'M12 17v5M9 10.8V5h6v5.8l2 2.2v2H7v-2zM8 2h8',
   desfijar: 'M12 17v5M9 10.8V5h6v5.8l2 2.2v2H7v-2zM8 2h8M3 3l18 18',
+  sol: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41',
+  luna: 'M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z',
 };
 
 @Component({

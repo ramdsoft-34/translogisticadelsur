@@ -33,8 +33,8 @@ import { Modal } from './modal';
     </app-modal>`,
   styles: [`
     .avisos { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; max-width: min(420px, calc(100vw - 32px)); }
-    .aviso { padding: 12px 16px; border-radius: 10px; color: #fff; background: var(--negro); box-shadow: 0 8px 24px rgba(0,0,0,.18); cursor: pointer; font-size: 14px; }
-    .aviso.ok { background: var(--negro); } .aviso.ok::before { content: "✓ "; color: #86efac; } .aviso.error { background: #7f1d1d; }
+    .aviso { padding: 12px 16px; border-radius: 10px; color: #fff; background: var(--negro); box-shadow: var(--sombra-2); border: 1px solid #2b2823; border-left: 4px solid var(--primario); cursor: pointer; font-size: 14px; }
+    .aviso.ok { background: var(--negro); } .aviso.ok::before { content: "✓ "; color: #86efac; } .aviso.error { background: #7f1d1d; border-color: #7f1d1d; border-left-color: #f87171; }
   `],
 })
 export class Globales {

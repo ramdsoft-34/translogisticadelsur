@@ -25,7 +25,7 @@ import { nombreTercero } from '../core/modelos';
   styles: [`
     .combo { position: relative; }
     .limpiar { position: absolute; right: 6px; bottom: 6px; font-size: 18px; line-height: 1; color: var(--gris-5); }
-    .lista { position: absolute; top: 100%; left: 0; right: 0; z-index: 30; margin: 4px 0 0; padding: 4px; list-style: none; background: #fff;
+    .lista { position: absolute; top: 100%; left: 0; right: 0; z-index: 30; margin: 4px 0 0; padding: 4px; list-style: none; background: var(--gris-0);
       border: 1px solid var(--gris-2); border-radius: 10px; box-shadow: var(--sombra-2); max-height: 260px; overflow: auto; }
     li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 7px; cursor: pointer; }
     li small { color: var(--gris-5); white-space: nowrap; }

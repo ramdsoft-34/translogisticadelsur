@@ -65,7 +65,7 @@ import { FORMATOS } from '../shared/formato';
     .sub::first-letter { text-transform: uppercase; }
 
     .indicadores { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-bottom: 16px; }
-    .indicador { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 18px; border-radius: var(--radio-l); background: #fff;
+    .indicador { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 18px; border-radius: var(--radio-l); background: var(--gris-0);
       border: 1px solid var(--gris-2); box-shadow: var(--sombra); text-decoration: none; color: inherit;
       transition: transform var(--transicion), box-shadow var(--transicion), border-color var(--transicion); }
     a.indicador:hover { border-color: var(--gris-4); }

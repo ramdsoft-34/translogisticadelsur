@@ -7,6 +7,7 @@ import { Auth } from '../core/auth.service';
 import { RndcClave } from '../core/rndc-clave.service';
 import { P } from '../core/modelos';
 import { Icono } from '../shared/icono';
+import { TemaService } from '../core/tema.service';
 
 interface Opcion { ruta: string; texto: string; icono: string; permisos: string[]; grupo?: string }
 
@@ -68,6 +69,12 @@ function leerFijo() {
             }
           </div>
 
+          <button type="button" class="tema" (click)="tema.alternar()" [attr.aria-pressed]="tema.tema() === 'oscuro'"
+            [attr.aria-label]="tema.tema() === 'oscuro' ? 'Activar modo claro' : 'Activar modo oscuro'"
+            [title]="tema.tema() === 'oscuro' ? 'Modo claro' : 'Modo oscuro'">
+            <app-icono [nombre]="tema.tema() === 'oscuro' ? 'sol' : 'luna'" [tam]="18" />
+          </button>
+
           <!-- Menú de usuario -->
           <div class="usuario">
             <button type="button" class="disparador" aria-label="Menú de usuario" (click)="menuUsuario.set(!menuUsuario())" [attr.aria-expanded]="menuUsuario()" aria-haspopup="menu">
@@ -83,6 +90,7 @@ function leerFijo() {
                 </div>
                 <a role="menuitem" routerLink="/mi-cuenta" (click)="menuUsuario.set(false)"><app-icono nombre="usuario" [tam]="17" />Mi perfil</a>
                 <a role="menuitem" routerLink="/privacidad" (click)="menuUsuario.set(false)"><app-icono nombre="escudo" [tam]="17" />Política y privacidad</a>
+                <button type="button" role="menuitem" (click)="tema.alternar()"><app-icono [nombre]="tema.tema() === 'oscuro' ? 'sol' : 'luna'" [tam]="17" />{{ tema.tema() === 'oscuro' ? 'Modo claro' : 'Modo oscuro' }}</button>
                 <hr />
                 <button type="button" role="menuitem" class="cerrar" (click)="salir()"><app-icono nombre="salir" [tam]="17" />Cerrar sesión</button>
               </div>
@@ -100,13 +108,13 @@ function leerFijo() {
     .app.fijo { grid-template-columns: var(--ancho-max) 1fr; }
 
     /* Barra lateral: ocupa el ancho mínimo y se superpone al desplegarse con el mouse */
-    aside { position: sticky; top: 0; height: 100dvh; z-index: var(--z-menu); width: var(--ancho-min); background: #fff;
-      border-right: 1px solid var(--gris-2); display: flex; flex-direction: column; overflow: hidden;
+    aside { position: sticky; top: 0; height: 100dvh; z-index: var(--z-menu); width: var(--ancho-min); background: var(--lateral);
+      border-right: 1px solid var(--lateral-borde); color: var(--lateral-texto); display: flex; flex-direction: column; overflow: hidden;
       transition: width .2s ease, box-shadow .2s ease; }
     /* Se despliega solo mientras el cursor está encima, con foco de teclado (Tab) o si el usuario lo fijó.
        No se usa :focus-within: el clic deja el foco en el enlace y el menú quedaba abierto al navegar. */
     aside:hover, aside:has(:focus-visible), aside.desplegado { width: var(--ancho-max); }
-    .app:not(.fijo) aside:hover, .app:not(.fijo) aside:has(:focus-visible) { box-shadow: 12px 0 32px -16px rgba(20,18,15,.22); }
+    .app:not(.fijo) aside:hover, .app:not(.fijo) aside:has(:focus-visible) { box-shadow: 14px 0 36px -14px rgba(0,0,0,.45); }
     .etq { opacity: 0; white-space: nowrap; transition: opacity .12s ease; pointer-events: none; }
     aside:hover .etq, aside:has(:focus-visible) .etq, aside.desplegado .etq { opacity: 1; pointer-events: auto; transition-delay: .06s; }
 
@@ -115,35 +123,40 @@ function leerFijo() {
     .logo { flex: none; width: 40px; height: auto; display: block; transition: opacity .12s ease; }
     .nombre { position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 168px; height: auto; display: block; }
     aside:hover .logo, aside:has(:focus-visible) .logo, aside.desplegado .logo { opacity: 0; }
-    .fijar { min-height: 0; width: 28px; height: 28px; padding: 0; border-radius: 7px; border-color: transparent; color: var(--gris-5); flex: none; }
-    .fijar:hover:not(:disabled) { background: var(--gris-1); color: var(--gris-8); border-color: transparent; }
-    .fijo .fijar { color: var(--gris-8); }
+    .marca { border-bottom: 1px solid var(--lateral-linea); margin-bottom: 6px; }
+    .fijar { min-height: 0; width: 28px; height: 28px; padding: 0; border-radius: 7px; border-color: transparent; background: transparent; color: var(--lateral-tenue); flex: none; }
+    .fijar:hover:not(:disabled) { background: var(--lateral-hover); color: #fff; border-color: transparent; }
+    .fijo .fijar { color: var(--primario); }
 
     nav { display: flex; flex-direction: column; padding: 4px 12px 16px; gap: 2px; }
-    .grupo { height: 26px; margin-top: 10px; padding: 0 9px; display: flex; align-items: center; font-size: 11.5px; font-weight: 500; color: var(--gris-4);
-      border-top: 1px solid var(--gris-15); }
+    .grupo { height: 26px; margin-top: 10px; padding: 0 9px; display: flex; align-items: center; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+      color: var(--lateral-tenue); border-top: 1px solid var(--lateral-linea); }
     aside:hover .grupo, aside.desplegado .grupo { border-top-color: transparent; }
-    nav a { position: relative; display: flex; gap: 12px; align-items: center; height: 38px; padding: 0 10px; border-radius: 9px; color: var(--gris-5);
+    nav a { position: relative; display: flex; gap: 12px; align-items: center; height: 38px; padding: 0 10px; border-radius: 9px; color: var(--lateral-texto);
       text-decoration: none; font-weight: 500; transition: background var(--transicion), color var(--transicion); }
     nav a app-icono { flex: none; }
-    nav a:hover { background: var(--gris-1); color: var(--gris-8); }
-    nav a.activa { background: var(--gris-1); color: var(--gris-8); font-weight: 600; }
+    nav a:hover { background: var(--lateral-hover); color: #fff; }
+    nav a.activa { background: var(--primario); color: var(--sobre-primario); font-weight: 650; }
     nav a.activa::before { content: ""; position: absolute; left: -12px; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: var(--primario); }
+    nav a:focus-visible { box-shadow: 0 0 0 2px var(--primario); }
 
     .principal { min-width: 0; display: flex; flex-direction: column; }
-    header { display: flex; align-items: center; gap: 12px; padding: 10px 28px; background: rgba(255,255,255,.92); backdrop-filter: blur(8px);
-      border-bottom: 1px solid var(--gris-2); position: sticky; top: 0; z-index: var(--z-cabecera); }
+    header { display: flex; align-items: center; gap: 12px; padding: 10px 28px; background: var(--cabecera); backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--gris-2); box-shadow: inset 0 -3px 0 var(--primario); position: sticky; top: 0; z-index: var(--z-cabecera); }
     .contexto { flex: 1; display: flex; gap: 10px; align-items: center; min-width: 0; }
-    .contexto strong { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .contexto strong { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .ambiente { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gris-5); white-space: nowrap; }
     .ambiente i { width: 7px; height: 7px; border-radius: 50%; background: var(--ambar); }
     .ambiente.prod i { background: var(--verde); }
 
+    .tema { min-height: 0; width: 38px; height: 38px; padding: 0; border-radius: 50%; border: 1px solid var(--gris-2); background: var(--gris-0); color: var(--gris-8); }
+    .tema:hover:not(:disabled) { background: var(--negro); border-color: var(--negro); color: var(--primario); }
+
     /* Menú de usuario */
     .usuario { position: relative; }
-    .disparador { display: flex; gap: 10px; align-items: center; min-height: 0; padding: 5px 10px 5px 5px; border-radius: 999px; border: 1px solid var(--gris-2); background: #fff; }
+    .disparador { display: flex; gap: 10px; align-items: center; min-height: 0; padding: 5px 10px 5px 5px; border-radius: 999px; border: 1px solid var(--gris-2); background: var(--gris-0); }
     .disparador:hover:not(:disabled) { background: var(--gris-1); border-color: var(--gris-3); }
-    .avatar { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--negro); color: var(--primario);
+    .avatar { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--primario); color: var(--sobre-primario);
       font-weight: 650; font-size: 12px; }
     .avatar.grande { width: 42px; height: 42px; font-size: 14px; }
     .txt { display: flex; flex-direction: column; line-height: 1.2; text-align: left; min-width: 0; }
@@ -151,8 +164,8 @@ function leerFijo() {
     .txt small { color: var(--gris-5); font-size: 11.5px; font-weight: 400; }
     .flecha { color: var(--gris-5); transition: transform var(--transicion); }
     .flecha.girada { transform: rotate(180deg); }
-    .desplegable { position: absolute; right: 0; top: calc(100% + 8px); width: 248px; background: #fff; border: 1px solid var(--gris-2); border-radius: 14px;
-      box-shadow: 0 18px 40px -16px rgba(20,18,15,.28); padding: 6px; animation: abrir .14s ease-out; z-index: var(--z-menu); }
+    .desplegable { position: absolute; right: 0; top: calc(100% + 8px); width: 248px; background: var(--gris-0); border: 1px solid var(--gris-2); border-radius: 14px;
+      box-shadow: var(--sombra-menu); padding: 6px; animation: abrir .14s ease-out; z-index: var(--z-menu); }
     @keyframes abrir { from { transform: translateY(-4px); } to { transform: none; } }
     .cabeza { display: flex; gap: 11px; align-items: center; padding: 10px 10px 12px; border-bottom: 1px solid var(--gris-15); margin-bottom: 4px; }
     .cabeza .txt strong { font-size: 14px; }
@@ -175,7 +188,7 @@ function leerFijo() {
       aside .etq { opacity: 1; pointer-events: auto; }
       .fijar { display: none; }
       .menu-abierto aside { transform: none; box-shadow: var(--sombra-2); }
-      .menu-abierto .velo { display: block; position: fixed; inset: 0; background: rgba(20,18,15,.35); z-index: calc(var(--z-menu) - 1); }
+      .menu-abierto .velo { display: block; position: fixed; inset: 0; background: var(--velo); z-index: calc(var(--z-menu) - 1); }
       .menu { display: inline-flex; }
       .disparador .txt { display: none; }
       header { padding: 10px 14px; }
@@ -187,6 +200,7 @@ export class Layout {
   private auth = inject(Auth);
   private clave = inject(RndcClave);
   readonly u = this.auth.usuario;
+  readonly tema = inject(TemaService);
   readonly menuAbierto = signal(false);
   readonly menuUsuario = signal(false);
   // Preferencia de este navegador: menú lateral fijo o solo íconos

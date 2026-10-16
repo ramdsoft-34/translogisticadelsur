@@ -126,7 +126,7 @@ const ACCIONES: Record<string, string> = {
   styles: [`
     .cabecera { display: flex; gap: 16px; align-items: center; margin-bottom: 22px; }
     .cabecera p { margin: 4px 0 0; }
-    .avatar { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 14px; background: var(--negro); color: var(--primario);
+    .avatar { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 14px; background: var(--primario); color: var(--sobre-primario);
       font-weight: 650; font-size: 18px; }
     .columnas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
     .col { display: flex; flex-direction: column; gap: 16px; }

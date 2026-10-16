@@ -172,7 +172,7 @@ type Pestana = 'rndc' | 'usuarios' | 'importar' | 'auditoria';
         <button class="primario" type="submit" form="form-usuario">Guardar</button></ng-container>
     </app-modal>`,
   styles: [`.barra-guardar { position: sticky; top: 64px; z-index: 4; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
-      background: #fff; border: 1px solid var(--gris-2); border-radius: var(--radio); padding: 10px 14px; margin-bottom: 16px; box-shadow: var(--sombra); }
+      background: var(--gris-0); border: 1px solid var(--gris-2); border-radius: var(--radio); padding: 10px 14px; margin-bottom: 16px; box-shadow: var(--sombra); }
     .barra-guardar.pendiente { background: var(--primario-claro); border-color: var(--primario-borde); }`],
 })
 export class Configuracion {

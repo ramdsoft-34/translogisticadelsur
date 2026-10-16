@@ -53,7 +53,7 @@ import { Api } from '../core/api.service';
       <p class="nota">Este es un texto base de la plataforma. Cada empresa debe revisarlo y ajustarlo con su asesor legal antes de adoptarlo como su política oficial.</p>
     </article>`,
   styles: [`
-    .documento { max-width: 760px; background: #fff; border: 1px solid var(--gris-2); border-radius: var(--radio-l); padding: 28px 32px; }
+    .documento { max-width: 760px; background: var(--gris-0); border: 1px solid var(--gris-2); border-radius: var(--radio-l); padding: 28px 32px; }
     h1 { margin-bottom: 6px; }
     h2 { margin: 26px 0 8px; font-size: 16px; }
     p, li { color: var(--gris-7); line-height: 1.65; }

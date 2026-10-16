@@ -15,12 +15,12 @@ import { Icono } from './icono';
       <footer><ng-content select="[pie]" /></footer>
     </dialog>`,
   styles: [`
-    dialog { border: none; border-radius: 18px; padding: 0; width: min(580px, calc(100vw - 24px)); color: var(--gris-8);
-      box-shadow: 0 30px 70px -20px rgba(20, 18, 12, .45); overflow: hidden; }
+    dialog { border: 1px solid var(--gris-2); border-radius: 18px; padding: 0; width: min(580px, calc(100vw - 24px)); color: var(--gris-8); background: var(--gris-0);
+      box-shadow: var(--sombra-menu); overflow: hidden; }
     dialog[open] { animation: aparecer .2s cubic-bezier(.2, .7, .2, 1); }
     @keyframes aparecer { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
     dialog.ancho { width: min(1000px, calc(100vw - 24px)); }
-    dialog::backdrop { background: rgba(20, 18, 15, .55); backdrop-filter: blur(2px); }
+    dialog::backdrop { background: var(--velo); backdrop-filter: blur(2px); }
     header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 22px 14px;
       border-bottom: 1px solid var(--gris-15); }
     header h2 { margin: 0; font-size: 18px; }
