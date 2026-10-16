@@ -3,7 +3,6 @@ import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
 import { Avisos } from '../core/avisos.service';
-import { RndcClave } from '../core/rndc-clave.service';
 import { ESTADOS_VIAJE, P, Viaje } from '../core/modelos';
 import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
@@ -12,17 +11,19 @@ import { SelectorMunicipio } from '../shared/municipio';
 import { Moneda } from '../shared/moneda';
 import { CargarMas } from '../shared/cargar-mas';
 import { BuscarTercero } from '../shared/buscar-tercero';
+import { PlantillasWhatsapp } from '../shared/plantillas-whatsapp';
 
 interface Formulario {
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
   placa: string; remolque: string; conductor: string; titular: string;
   pesoKg: number | null; cantidad: number | null; conAuxiliar: boolean;
   tarifa: number | null; flete: number | null; anticipo: number | null; observaciones: string; estado?: string; historico?: boolean;
+  requiereManifiesto: boolean;
 }
 
 const vacio = (): Formulario => ({
   fecha: hoyIso(), cliente: '', tarifaRef: '', destino: '', codDestino: '', placa: '', remolque: '', conductor: '', titular: '',
-  pesoKg: null, cantidad: 1, conAuxiliar: false, tarifa: null, flete: null, anticipo: null, observaciones: '',
+  pesoKg: null, cantidad: 1, conAuxiliar: false, tarifa: null, flete: null, anticipo: null, observaciones: '', requiereManifiesto: true,
 });
 
 type Periodo = 'hoy' | 'ayer' | 'semana' | 'mes' | 'rango';
@@ -32,7 +33,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
@@ -87,6 +88,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
                 <span class="chip" [class]="claseEstado(v.estado)">{{ estadoTexto(v.estado) }}</span>
                 @if (v.manifiesto.estado === 'aceptado') { <small class="sutil">{{ v.manifiesto.numero }}</small> }
                 @if (v.historico) { <span class="chip sin-punto" title="Importado del Excel: sus documentos RNDC se gestionaron fuera de la plataforma">Histórico</span> }
+                @if (v.requiereManifiesto === false) { <span class="chip sin-punto" title="No genera remesa ni manifiesto en el RNDC">Sin manifiesto</span> }
                 @if (v.reporteWhatsapp?.fecha) { <span class="chip ok sin-punto" title="Reportado por WhatsApp">WA</span> }
               </span></td>
             </tr>
@@ -151,6 +153,10 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         </div></fieldset>
 
         <div class="campo"><label for="v-obs">Observaciones (van en el manifiesto)</label><textarea id="v-obs" name="obs" maxlength="200" [(ngModel)]="f.observaciones"></textarea></div>
+        <label class="casilla requiere">
+          <input type="checkbox" name="requiere" [(ngModel)]="f.requiereManifiesto" [disabled]="bloqueado() || !!f.historico" />
+          <span><strong>Requiere manifiesto de carga</strong><small>Desmárquelo si este viaje no debe expedir remesa ni manifiesto en el RNDC; no aparecerá en «Manifiestos RNDC».</small></span>
+        </label>
         @if (f.historico) {
           <div class="mensaje info">Viaje histórico importado del Excel: no aparece en «Manifiestos RNDC».
             @if (puedeEditarTodos) { <label class="casilla" style="margin-top:6px"><input type="checkbox" name="habilitar" [(ngModel)]="habilitarRndc" />Habilitarlo para expedir sus documentos en el RNDC</label> }</div>
@@ -166,11 +172,15 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     <app-modal titulo="Reporte de vehículos por WhatsApp" [abierto]="waAbierto()" (cerrar)="waAbierto.set(false)" [ancho]="true">
       <div class="filtros">
         <div class="campo"><label for="wa-fecha">Fecha</label><input id="wa-fecha" type="date" [(ngModel)]="waFecha" (change)="cargarWhatsapp()" /></div>
+        <div class="campo"><label for="wa-pl">Plantilla</label>
+          <select id="wa-pl" [(ngModel)]="waPlantilla" (change)="cargarWhatsapp()">
+            @for (p of waPlantillas(); track p._id) { <option [value]="p._id">{{ p.nombre }}{{ p.predeterminada ? ' (predeterminada)' : '' }}</option> }</select></div>
         <label class="casilla"><input type="checkbox" [(ngModel)]="waIncluir" (change)="cargarWhatsapp()" />Incluir los ya reportados</label>
+        <button type="button" (click)="plantillasAbierto.set(true)" style="margin-left:auto"><app-icono nombre="editar" [tam]="16" />Plantillas</button>
       </div>
-      <p class="sutil">Un mensaje por cliente con los viajes de la fecha, igual que en la plantilla. «Abrir WhatsApp» abre el chat con el texto escrito:
+      <p class="sutil">Un mensaje por cliente con los viajes de la fecha, con el formato de la plantilla elegida. «Abrir WhatsApp» abre el chat con el texto escrito:
         elija el contacto o grupo (si el cliente no tiene número) y presione Enviar. Después marque el mensaje como reportado.
-        @if (puedeOperarRndc) { «Crear remesas y manifiestos» los expide en el RNDC para los viajes del mensaje que aún no los tienen, estén reportados o no. }</p>
+        Las remesas y los manifiestos se expiden en «Manifiestos RNDC».</p>
       @for (m of waMensajes(); track m.cliente) {
         <div class="tarjeta" style="margin-top:12px">
           <div class="pagina-cab" style="margin-bottom:8px"><div><h3 style="margin:0">{{ m.cliente }}</h3>
@@ -178,18 +188,14 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             <div class="acciones">
               <button class="pequeno" (click)="copiar(m.texto)">Copiar</button>
               <a class="boton pequeno wa" [href]="m.enlace" target="_blank" rel="noopener noreferrer"><app-icono nombre="enviar" [tam]="15" />Abrir WhatsApp</a>
-              @if (puedeOperarRndc && m.pendientesRndc?.length) {
-                <button class="pequeno oscuro" (click)="crearDocumentos(m)" [disabled]="expidiendo()"
-                  [title]="'Expide remesa y manifiesto de ' + m.pendientesRndc.length + ' viaje(s) en el RNDC'">
-                  <app-icono nombre="documento" [tam]="15" />{{ expidiendo() ? 'Enviando al RNDC…' : 'Crear remesas y manifiestos (' + m.pendientesRndc.length + ')' }}</button>
-              }
               @if (puedeRegistrar) { <button class="pequeno primario" (click)="marcarReportado(m)">Marcar reportado</button> }
             </div></div>
           <pre class="wa-texto">{{ m.texto }}</pre>
         </div>
       } @empty { <p class="vacio">No hay vehículos por reportar en esa fecha.</p> }
       <ng-container pie><button type="button" (click)="waAbierto.set(false)">Cerrar</button></ng-container>
-    </app-modal>`,
+    </app-modal>
+    <app-plantillas-whatsapp [abierto]="plantillasAbierto()" [fecha]="waFecha" (cerrar)="plantillasAbierto.set(false)" (cambiadas)="cargarPlantillas()" />`,
   styles: [`
     .resumen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--gris-2); border: 1px solid var(--gris-2);
       border-radius: var(--radio-l); overflow: hidden; margin-bottom: 14px; }
@@ -203,6 +209,9 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .saldo small { font-size: 11px; color: var(--gris-5); font-weight: 600; }
     .wa-texto { white-space: pre-wrap; font-family: inherit; background: var(--gris-1); border-radius: 10px; padding: 12px; margin: 0; font-size: 13.5px; }
     .boton.wa { background: var(--whatsapp); border-color: var(--whatsapp); color: #fff; }
+    .requiere { align-items: flex-start; padding: 12px 14px; border: 1px solid var(--gris-2); border-radius: var(--radio); }
+    .requiere span { display: flex; flex-direction: column; gap: 2px; }
+    .requiere small { color: var(--gris-5); font-size: 12.5px; }
     @media (max-width: 760px) { .resumen { grid-template-columns: repeat(2, 1fr); } }
   `],
 })
@@ -212,9 +221,9 @@ export class Viajes {
   private avisos = inject(Avisos);
   readonly puedeRegistrar = this.auth.tiene(P.VIAJES_REGISTRAR);
   readonly puedeEditarTodos = this.auth.tiene(P.VIAJES_EDITAR_TODOS);
-  readonly puedeOperarRndc = this.auth.tiene(P.RNDC_OPERAR);
-  private claveRndc = inject(RndcClave);
-  readonly expidiendo = signal(false);
+  readonly plantillasAbierto = signal(false);
+  readonly waPlantillas = signal<any[]>([]);
+  waPlantilla = '';
   readonly periodos: [Periodo, string][] = [['hoy', 'Hoy'], ['ayer', 'Ayer'], ['semana', '7 días'], ['mes', 'Este mes'], ['rango', 'Rango']];
   readonly periodo = signal<Periodo>('hoy');
   readonly waAbierto = signal(false);
@@ -308,6 +317,7 @@ export class Viajes {
       destino: v.destino, codDestino: v.codDestino, placa: v.placa, remolque: v.remolque, conductor: v.conductor?._id || '',
       titular: v.titular?._id || '', pesoKg: v.pesoKg, cantidad: v.cantidad, conAuxiliar: v.conAuxiliar, tarifa: v.tarifa,
       flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones, estado: v.estado, historico: !!v.historico,
+      requiereManifiesto: v.requiereManifiesto !== false,
     });
     this.habilitarRndc = false;
     this.bloqueado.set(v.estado !== 'registrado' || !!v.liquidacion);
@@ -376,41 +386,26 @@ export class Viajes {
   }
 
   // ── Reporte WhatsApp ──
-  abrirWhatsapp() { this.waFecha = this.filtro.hasta || hoyIso(); this.waAbierto.set(true); this.cargarWhatsapp(); }
+  async abrirWhatsapp() { this.waFecha = this.filtro.hasta || hoyIso(); this.waAbierto.set(true); await this.cargarPlantillas(); this.cargarWhatsapp(); }
+
+  async cargarPlantillas() {
+    try {
+      const r = await this.api.get<any>('/viajes/plantillas-whatsapp');
+      this.waPlantillas.set(r.plantillas);
+      if (!r.plantillas.some((p: any) => p._id === this.waPlantilla)) this.waPlantilla = (r.plantillas.find((p: any) => p.predeterminada) || r.plantillas[0])._id;
+      if (this.waAbierto()) this.cargarWhatsapp();
+    } catch (e) { this.avisos.error(e); }
+  }
 
   async cargarWhatsapp() {
     try {
-      const r = await this.api.get<{ mensajes: any[] }>('/viajes/reporte-whatsapp', { fecha: this.waFecha, incluirReportados: this.waIncluir ? 1 : 0 });
+      const r = await this.api.get<{ mensajes: any[] }>('/viajes/reporte-whatsapp', { fecha: this.waFecha, incluirReportados: this.waIncluir ? 1 : 0, plantilla: this.waPlantilla });
       this.waMensajes.set(r.mensajes);
     } catch (e) { this.avisos.error(e); }
   }
 
   async copiar(texto: string) {
     try { await navigator.clipboard.writeText(texto); this.avisos.ok('Mensaje copiado'); } catch { this.avisos.mostrar('No se pudo copiar; seleccione el texto manualmente', 'error'); }
-  }
-
-  // Expide remesa y manifiesto en el RNDC para los viajes del mensaje que aún no los tienen.
-  async crearDocumentos(m: any) {
-    const ids: string[] = m.pendientesRndc || [];
-    if (!ids.length) return;
-    if (!confirm(`¿Crear remesa y manifiesto en el RNDC para ${ids.length} viaje(s) de ${m.cliente}?`)) return;
-    const clave = await this.claveRndc.obtener();
-    if (!clave) return;
-    this.expidiendo.set(true);
-    try {
-      const r = await this.api.post<any[]>('/rndc/despachar-lote', { clave, viajes: ids });
-      const ok = r.filter(x => x.manifiesto?.estado === 'aceptado');
-      const fallos = r.filter(x => x.manifiesto?.estado !== 'aceptado').map(x => x.error || x.manifiesto?.mensaje || x.remesa?.mensaje || 'rechazado por el RNDC');
-      if (fallos.some(f => /usuario|contrase|clave|password/i.test(f))) this.claveRndc.olvidar();
-      if (!fallos.length) this.avisos.ok(`${m.cliente}: ${ok.length} manifiesto(s) aceptados (${ok.map(x => x.manifiesto.numero).join(', ')})`);
-      else this.avisos.mostrar(`${m.cliente}: ${ok.length} de ${ids.length} manifestados. ${fallos[0]}`, 'error');
-    } catch (e) {
-      this.avisos.error(e);
-    } finally {
-      this.expidiendo.set(false);
-      this.cargarWhatsapp();
-      this.cargar();
-    }
   }
 
   async marcarReportado(m: any) {

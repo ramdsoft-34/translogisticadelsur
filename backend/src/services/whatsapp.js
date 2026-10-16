@@ -1,17 +1,22 @@
 // Reporte de vehículos por WhatsApp (macro GenerarReporteWhatsApp de la plantilla).
-// Estructura del Excel, un mensaje por cliente con los viajes de la fecha aún no reportados:
+// Un mensaje por cliente con los viajes de la fecha. El texto sale de una
+// plantilla editable por la empresa; la predeterminada reproduce el Excel:
 //
-//   {Saludo},
+//   {saludo},
 //
-//   Reporte de vehiculos - dd/mm/aaaa
+//   Reporte de vehículos - {fecha}
 //
-//   {Cliente}
+//   {cliente}
 //
-//   {Conductor}. {Destino}. Flete {valor}. Anticipo {valor}
+//   {conductor}. {destino}. Flete {flete}. Anticipo {anticipo}
 //   Placa {placa}
-//   {Observaciones, si hay}
+//   {observaciones}
 //
-// Los valores se expresan en pesos colombianos: "$ 1.500.000 COP".
+// Reglas de formato:
+// - Los valores se expresan en pesos colombianos: "$ 1.500.000 COP".
+// - Una línea de la plantilla cuyos datos quedan todos vacíos no se escribe
+//   (p. ej. «{observaciones}» o «Remolque {remolque}» sin remolque).
+// - Si el destino escrito es el nombre del conductor, no se repite.
 //
 // Envío: se usa el enlace oficial "clic para chatear" de WhatsApp
 // (https://wa.me/<número>?text=<mensaje>). No requiere credenciales ni API; el
@@ -20,7 +25,7 @@
 // tokens; no se implementa sin esas credenciales.)
 import { enColombia, fmtFecha, normalizar, soloDigitos, txt } from '../utils/texto.js';
 
-const cop = (n) => `$ ${Math.round(Number(n) || 0).toLocaleString('es-CO')} COP`;
+export const cop = (n) => `$ ${Math.round(Number(n) || 0).toLocaleString('es-CO')} COP`;
 
 export function saludo(fecha = new Date()) {
   const h = enColombia(fecha).getUTCHours();
@@ -36,19 +41,60 @@ export function destinoRepiteConductor(destino, conductor) {
   return d.length > 0 && d.every(p => c.has(p));
 }
 
-// Estados en los que el viaje aún puede expedir remesa y manifiesto en el RNDC.
-const PENDIENTE_RNDC = new Set(['registrado', 'remesa']);
+// Datos disponibles en las plantillas (nombre → descripción). El orden es el de la ayuda en pantalla.
+export const MARCADORES = {
+  mensaje: {
+    saludo: 'Buenos días / tardes / noches', fecha: 'Fecha del reporte', cliente: 'Nombre del cliente',
+    cantidad: 'Número de vehículos', total_flete: 'Suma de fletes', total_anticipo: 'Suma de anticipos', total_saldo: 'Suma de saldos',
+  },
+  viaje: {
+    numero: 'N° del viaje', conductor: 'Nombre del conductor', cedula: 'Cédula del conductor', celular: 'Celular del conductor',
+    destino: 'Destino', placa: 'Placa', remolque: 'Remolque', peso: 'Peso (kg)', flete: 'Flete', anticipo: 'Anticipo', saldo: 'Saldo',
+    remesa: 'N° de remesa', manifiesto: 'N° de manifiesto', observaciones: 'Observaciones',
+  },
+};
 
-export function lineaViaje(v) {
-  const partes = [txt(v.conductorNombre)];
-  if (txt(v.destino) && !destinoRepiteConductor(v.destino, v.conductorNombre)) partes.push(txt(v.destino));
-  let l = `${partes.filter(Boolean).join('. ')}. Flete ${cop(v.flete)}. Anticipo ${cop(v.anticipo)}\nPlaca ${txt(v.placa)}`;
-  if (txt(v.observaciones)) l += `\n${txt(v.observaciones)}`;
-  return l;
+// Plantilla de la plataforma (igual a la macro del Excel).
+export const PLANTILLA_BASE = Object.freeze({
+  nombre: 'Formato de la plantilla de Excel',
+  encabezado: '{saludo},\n\nReporte de vehículos - {fecha}\n\n{cliente}',
+  linea: '{conductor}. {destino}. Flete {flete}. Anticipo {anticipo}\nPlaca {placa}\n{observaciones}',
+  separador: 'blanco',
+  pie: '',
+});
+const SEPARADORES = { blanco: '\n\n', linea: '\n', guiones: '\n----------\n' };
+
+const kg = (n) => (Number(n) ? `${Math.round(Number(n)).toLocaleString('es-CO')} kg` : '');
+
+function datosViaje(v) {
+  const flete = Number(v.flete) || 0; const anticipo = Number(v.anticipo) || 0;
+  return {
+    numero: txt(v.numero), conductor: txt(v.conductorNombre), cedula: txt(v.conductor?.numId), celular: txt(v.conductor?.celular),
+    destino: destinoRepiteConductor(v.destino, v.conductorNombre) ? '' : txt(v.destino),
+    placa: txt(v.placa), remolque: txt(v.remolque), peso: kg(v.pesoKg),
+    flete: cop(flete), anticipo: cop(anticipo), saldo: cop(flete - anticipo),
+    remesa: txt(v.remesa?.numero), manifiesto: txt(v.manifiesto?.numero), observaciones: txt(v.observaciones),
+  };
 }
 
-// viajes: con cliente poblado y conductorNombre resuelto. Agrupa por cliente en el orden de aparición.
-export function mensajesPorCliente(viajes, fecha, ahora = new Date()) {
+// Reemplaza los marcadores línea por línea; descarta las líneas cuyos datos están todos vacíos.
+export function aplicarPlantilla(texto, datos) {
+  const salida = [];
+  for (const linea of String(texto ?? '').split('\n')) {
+    const marcas = [...linea.matchAll(/\{([a-z_]+)\}/g)].map(m => m[1]).filter(k => k in datos);
+    if (marcas.length && marcas.every(k => txt(datos[k]) === '')) continue;
+    const l = linea.replace(/\{([a-z_]+)\}/g, (m, k) => (k in datos ? txt(datos[k]) : m))
+      .replace(/\.\s+\./g, '.')            // «Juan. . Flete» cuando falta un dato intermedio
+      .replace(/^\s*[.,;:]\s*/, '')        // separador sobrante al inicio
+      .replace(/[ \t]+$/, '');
+    salida.push(l);
+  }
+  return salida.join('\n');
+}
+
+// viajes: con cliente y conductor poblados. Agrupa por cliente en el orden de aparición.
+export function mensajesPorCliente(viajes, fecha, ahora = new Date(), plantilla = PLANTILLA_BASE) {
+  const p = { ...PLANTILLA_BASE, ...(plantilla || {}) };
   const grupos = new Map();
   for (const v of viajes) {
     const id = String(v.cliente?._id || v.cliente || 'sin-cliente');
@@ -56,14 +102,18 @@ export function mensajesPorCliente(viajes, fecha, ahora = new Date()) {
     grupos.get(id).viajes.push(v);
   }
   return [...grupos.values()].map(g => {
-    const texto = `${saludo(ahora)},\n\nReporte de vehículos - ${fmtFecha(fecha)}\n\n${g.cliente}\n\n${g.viajes.map(lineaViaje).join('\n\n')}\n`;
+    const totalFlete = g.viajes.reduce((a, v) => a + (Number(v.flete) || 0), 0);
+    const totalAnticipo = g.viajes.reduce((a, v) => a + (Number(v.anticipo) || 0), 0);
+    const general = {
+      saludo: saludo(ahora), fecha: fmtFecha(fecha), cliente: g.cliente, cantidad: String(g.viajes.length),
+      total_flete: cop(totalFlete), total_anticipo: cop(totalAnticipo), total_saldo: cop(totalFlete - totalAnticipo),
+    };
+    const lineas = g.viajes.map(v => aplicarPlantilla(p.linea, { ...general, ...datosViaje(v) })).filter(Boolean);
+    const partes = [aplicarPlantilla(p.encabezado, general), lineas.join(SEPARADORES[p.separador] || SEPARADORES.blanco), aplicarPlantilla(p.pie, general)];
+    const texto = `${partes.filter(x => x.trim()).join('\n\n')}\n`;
     const numero = g.whatsapp ? (g.whatsapp.length === 10 ? `57${g.whatsapp}` : g.whatsapp) : '';
     return {
-      cliente: g.cliente, texto, viajes: g.viajes.map(v => v._id), cantidad: g.viajes.length,
-      // Viajes del mensaje que todavía no tienen manifiesto (no depende de si ya se reportaron)
-      pendientesRndc: g.viajes.filter(v => PENDIENTE_RNDC.has(v.estado) && !v.historico).map(v => v._id),
-      totalFlete: g.viajes.reduce((a, v) => a + (Number(v.flete) || 0), 0),
-      totalAnticipo: g.viajes.reduce((a, v) => a + (Number(v.anticipo) || 0), 0),
+      cliente: g.cliente, texto, viajes: g.viajes.map(v => v._id), cantidad: g.viajes.length, totalFlete, totalAnticipo,
       enlace: `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`,
     };
   });

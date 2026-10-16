@@ -11,6 +11,7 @@ import { FORMATOS, isoDia } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
 import { TraerRndc } from '../shared/traer-rndc';
 import { CargarMas } from '../shared/cargar-mas';
+import { mensajeError } from '../core/api.service';
 import { BuscarTercero } from '../shared/buscar-tercero';
 
 const vacio = () => ({
@@ -63,46 +64,69 @@ const vacio = () => ({
       @if (lista().length) { <app-cargar-mas [mostrados]="lista().length" [total]="total()" [cargando]="cargandoMas()" unidad="vehículos" (mas)="cargarMas()" /> }
     </div>
 
-    <app-modal [titulo]="editando() ? 'Vehículo ' + form().placa : 'Nuevo vehículo'" [abierto]="abierto()" (cerrar)="abierto.set(false)" [ancho]="true">
+    <!-- Paso 1: verificar la placa en la empresa y en el RNDC -->
+    <app-modal titulo="Nuevo vehículo" [abierto]="verificando()" (cerrar)="verificando.set(false)">
+      <form id="form-verificar" (ngSubmit)="verificar()">
+        <p class="sutil" style="margin-top:0">Primero se busca la placa en su empresa{{ puedeConsultar ? ' y en el RNDC' : '' }}, para no duplicarla y traer los datos que ya existan.</p>
+        <div class="campo"><label for="vv-placa">Placa</label><input id="vv-placa" name="placa" [(ngModel)]="placaBuscar" required maxlength="7" style="text-transform:uppercase" placeholder="ABC123" autofocus /></div>
+        @if (puedeConsultar) { <label class="casilla" style="margin-top:12px"><input type="checkbox" name="rndc" [(ngModel)]="consultarRndc" />Consultar en el RNDC (pide la contraseña del web service)</label> }
+      </form>
+      <ng-container pie>
+        <button type="button" (click)="verificando.set(false)">Cancelar</button>
+        <button class="primario" type="submit" form="form-verificar" [disabled]="trabajando() || placaBuscar.trim().length < 5">{{ trabajando() ? 'Buscando…' : 'Continuar' }}</button>
+      </ng-container>
+    </app-modal>
+
+    <app-modal [titulo]="editando() ? 'Vehículo ' + form().placa : 'Nuevo vehículo ' + (form().placa || '')" [abierto]="abierto()" (cerrar)="abierto.set(false)" [ancho]="true">
       @let f = form();
+      @if (origen(); as o) { <div class="mensaje" [class.ok]="o.tipo === 'ok'" [class.info]="o.tipo === 'info'" [class.alerta]="o.tipo === 'alerta'" style="margin-bottom:12px">{{ o.texto }}</div> }
+      @if (faltantes().length) {
+        <div class="mensaje alerta" style="margin-bottom:12px">
+          <strong>Para registrarlo en el RNDC falta:</strong> {{ etiquetasFaltantes() }}.
+          <label class="casilla" style="margin-top:6px"><input type="checkbox" [checked]="soloFaltantes()" (change)="soloFaltantes.set(!soloFaltantes())" />Mostrar solo lo que falta</label>
+        </div>
+      }
       <form id="form-veh" (ngSubmit)="guardar()">
         <div class="formulario">
-          <div class="campo"><label for="vp">Placa</label><input id="vp" name="placa" [(ngModel)]="f.placa" [disabled]="editando()" required style="text-transform:uppercase" /></div>
-          <div class="campo"><label for="vc">Clase</label><select id="vc" name="clase" [(ngModel)]="f.clase"><option value="vehiculo">Vehículo (camión / tractocamión)</option><option value="remolque">Remolque / semirremolque</option></select></div>
-          <div class="campo"><label for="vcn">Configuración (para el QR)</label><input id="vcn" name="confN" maxlength="4" placeholder="2, 3, 2S2, 3S3…" [(ngModel)]="f.configuracionNombre" /></div>
-          <div class="campo"><label for="vcc">Código configuración RNDC</label><input id="vcc" name="conf" maxlength="2" [(ngModel)]="f.configuracion" /></div>
-          <div class="campo"><label for="vm">Código marca RNDC</label><input id="vm" name="marca" [(ngModel)]="f.marca" /></div>
-          <div class="campo"><label for="vmn">Marca (nombre)</label><input id="vmn" name="marcaN" [(ngModel)]="f.marcaNombre" /></div>
-          <div class="campo"><label for="vl">Código línea RNDC</label><input id="vl" name="linea" [(ngModel)]="f.linea" /></div>
-          <div class="campo"><label for="vmo">Modelo (año)</label><input id="vmo" type="number" name="modelo" [(ngModel)]="f.modelo" /></div>
-          <div class="campo"><label for="vco">Código color RNDC</label><input id="vco" name="color" [(ngModel)]="f.color" /></div>
-          <div class="campo"><label for="vca">Código carrocería RNDC</label><input id="vca" name="carroceria" [(ngModel)]="f.carroceria" /></div>
-          <div class="campo"><label for="vcb">Código combustible RNDC</label><input id="vcb" name="comb" [(ngModel)]="f.combustible" /></div>
-          <div class="campo"><label for="vej">Ejes</label><input id="vej" type="number" name="ejes" [(ngModel)]="f.ejes" /></div>
-          <div class="campo"><label for="vpv">Peso vacío (kg)</label><input id="vpv" type="number" name="pv" [(ngModel)]="f.pesoVacio" /></div>
-          <div class="campo"><label for="vpb">Peso bruto vehicular (kg)</label><input id="vpb" type="number" name="pbv" [(ngModel)]="f.pbv" /></div>
-          <div class="campo"><label for="vcp">Capacidad (kg)</label><input id="vcp" type="number" name="cap" [(ngModel)]="f.capacidad" /></div>
-          <app-buscar-tercero etiqueta="Conductor habitual" rol="conductor" [(valor)]="f.conductorHabitual" />
-          <app-buscar-tercero etiqueta="Titular habitual del manifiesto" [(valor)]="f.titularHabitual" placeholder="Vacío = el conductor" />
+          <div class="campo" [hidden]="soloFaltantes()"><label for="vp">Placa</label><input id="vp" name="placa" [(ngModel)]="f.placa" [disabled]="editando() || !!origen()" required style="text-transform:uppercase" /></div>
+          <div class="campo" [hidden]="soloFaltantes()"><label for="vc">Clase</label><select id="vc" name="clase" [(ngModel)]="f.clase"><option value="vehiculo">Vehículo (camión / tractocamión)</option><option value="remolque">Remolque / semirremolque</option></select></div>
+          <div class="campo" [hidden]="soloFaltantes()"><label for="vcn">Configuración (para el QR)</label><input id="vcn" name="confN" maxlength="4" placeholder="2, 3, 2S2, 3S3…" [(ngModel)]="f.configuracionNombre" /></div>
+          <div class="campo" [hidden]="!ver('configuracion')" [class.falta]="falta('configuracion')"><label for="vcc">Código configuración RNDC</label><input id="vcc" name="conf" maxlength="2" [(ngModel)]="f.configuracion" /></div>
+          <div class="campo" [hidden]="!ver('marca')" [class.falta]="falta('marca')"><label for="vm">Código marca RNDC</label><input id="vm" name="marca" [(ngModel)]="f.marca" /></div>
+          <div class="campo" [hidden]="soloFaltantes()"><label for="vmn">Marca (nombre)</label><input id="vmn" name="marcaN" [(ngModel)]="f.marcaNombre" /></div>
+          <div class="campo" [hidden]="!ver('linea')" [class.falta]="falta('linea')"><label for="vl">Código línea RNDC</label><input id="vl" name="linea" [(ngModel)]="f.linea" /></div>
+          <div class="campo" [hidden]="!ver('modelo')" [class.falta]="falta('modelo')"><label for="vmo">Modelo (año)</label><input id="vmo" type="number" name="modelo" [(ngModel)]="f.modelo" /></div>
+          <div class="campo" [hidden]="!ver('color')" [class.falta]="falta('color')"><label for="vco">Código color RNDC</label><input id="vco" name="color" [(ngModel)]="f.color" /></div>
+          <div class="campo" [hidden]="!ver('carroceria')" [class.falta]="falta('carroceria')"><label for="vca">Código carrocería RNDC</label><input id="vca" name="carroceria" [(ngModel)]="f.carroceria" /></div>
+          <div class="campo" [hidden]="!ver('combustible')" [class.falta]="falta('combustible')"><label for="vcb">Código combustible RNDC</label><input id="vcb" name="comb" [(ngModel)]="f.combustible" /></div>
+          <div class="campo" [hidden]="!ver('ejes')" [class.falta]="falta('ejes')"><label for="vej">Ejes</label><input id="vej" type="number" name="ejes" [(ngModel)]="f.ejes" /></div>
+          <div class="campo" [hidden]="!ver('pesoVacio')" [class.falta]="falta('pesoVacio')"><label for="vpv">Peso vacío (kg)</label><input id="vpv" type="number" name="pv" [(ngModel)]="f.pesoVacio" /></div>
+          <div class="campo" [hidden]="soloFaltantes()"><label for="vpb">Peso bruto vehicular (kg)</label><input id="vpb" type="number" name="pbv" [(ngModel)]="f.pbv" /></div>
+          <div class="campo" [hidden]="!ver('capacidad')" [class.falta]="falta('capacidad')"><label for="vcp">Capacidad (kg)</label><input id="vcp" type="number" name="cap" [(ngModel)]="f.capacidad" /></div>
+          @if (!soloFaltantes()) {
+            <app-buscar-tercero etiqueta="Conductor habitual" rol="conductor" [(valor)]="f.conductorHabitual" />
+            <app-buscar-tercero etiqueta="Titular habitual del manifiesto" [(valor)]="f.titularHabitual" placeholder="Vacío = el conductor" />
+          }
         </div>
-        <fieldset style="margin-top:14px"><legend>Documentos</legend><div class="formulario">
-          <div class="campo"><label for="sn">N° póliza SOAT</label><input id="sn" name="soatN" [(ngModel)]="f.soat.numero" /></div>
-          <div class="campo"><label for="sv">SOAT vence</label><input id="sv" type="date" name="soatV" [(ngModel)]="f.soat.vence" /></div>
-          <div class="campo"><label for="sa">NIT aseguradora SOAT</label><input id="sa" name="soatA" [(ngModel)]="f.soat.aseguradoraNit" /></div>
-          <div class="campo"><label for="san">Aseguradora (nombre)</label><input id="san" name="soatAN" [(ngModel)]="f.aseguradoraSoat" /></div>
-          <div class="campo"><label for="tv">Tecnomecánica vence</label><input id="tv" type="date" name="tecno" [(ngModel)]="f.venceTecnomecanica" /></div>
+        <fieldset style="margin-top:14px" [hidden]="!verAlguno(['soat.numero', 'soat.vence', 'soat.aseguradoraNit'])"><legend>Documentos</legend><div class="formulario">
+          <div class="campo" [hidden]="!ver('soat.numero')" [class.falta]="falta('soat.numero')"><label for="sn">N° póliza SOAT</label><input id="sn" name="soatN" [(ngModel)]="f.soat.numero" /></div>
+          <div class="campo" [hidden]="!ver('soat.vence')" [class.falta]="falta('soat.vence')"><label for="sv">SOAT vence</label><input id="sv" type="date" name="soatV" [(ngModel)]="f.soat.vence" /></div>
+          <div class="campo" [hidden]="!ver('soat.aseguradoraNit')" [class.falta]="falta('soat.aseguradoraNit')"><label for="sa">NIT aseguradora SOAT</label><input id="sa" name="soatA" [(ngModel)]="f.soat.aseguradoraNit" /></div>
+          <div class="campo" [hidden]="soloFaltantes()"><label for="san">Aseguradora (nombre)</label><input id="san" name="soatAN" [(ngModel)]="f.aseguradoraSoat" /></div>
+          <div class="campo" [hidden]="soloFaltantes()"><label for="tv">Tecnomecánica vence</label><input id="tv" type="date" name="tecno" [(ngModel)]="f.venceTecnomecanica" /></div>
         </div></fieldset>
-        <fieldset style="margin-top:14px"><legend>Propietario y tenedor (deben existir como terceros en el RNDC)</legend><div class="formulario">
-          <div class="campo"><label for="pt">Tipo doc. propietario</label><select id="pt" name="pt" [(ngModel)]="f.propietario.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
-          <div class="campo"><label for="pn">Documento propietario</label><input id="pn" name="pn" [(ngModel)]="f.propietario.numId" /></div>
-          <div class="campo"><label for="tt">Tipo doc. tenedor</label><select id="tt" name="tt" [(ngModel)]="f.tenedor.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
-          <div class="campo"><label for="tn">Documento tenedor</label><input id="tn" name="tn" [(ngModel)]="f.tenedor.numId" /></div>
+        <fieldset style="margin-top:14px" [hidden]="!verAlguno(['propietario.tipoId', 'propietario.numId', 'tenedor.tipoId', 'tenedor.numId'])"><legend>Propietario y tenedor (deben existir como terceros en el RNDC)</legend><div class="formulario">
+          <div class="campo" [hidden]="!verAlguno(['propietario.tipoId', 'propietario.numId'])"><label for="pt">Tipo doc. propietario</label><select id="pt" name="pt" [(ngModel)]="f.propietario.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
+          <div class="campo" [hidden]="!verAlguno(['propietario.tipoId', 'propietario.numId'])" [class.falta]="falta('propietario.numId')"><label for="pn">Documento propietario</label><input id="pn" name="pn" [(ngModel)]="f.propietario.numId" /></div>
+          <div class="campo" [hidden]="!verAlguno(['tenedor.tipoId', 'tenedor.numId'])"><label for="tt">Tipo doc. tenedor</label><select id="tt" name="tt" [(ngModel)]="f.tenedor.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
+          <div class="campo" [hidden]="!verAlguno(['tenedor.tipoId', 'tenedor.numId'])" [class.falta]="falta('tenedor.numId')"><label for="tn">Documento tenedor</label><input id="tn" name="tn" [(ngModel)]="f.tenedor.numId" /></div>
         </div></fieldset>
-        @if (editando()) { <label class="casilla" style="margin-top:14px"><input type="checkbox" name="activo" [(ngModel)]="f.activo" />Activo</label> }
+        @if (editando() && !soloFaltantes()) { <label class="casilla" style="margin-top:14px"><input type="checkbox" name="activo" [(ngModel)]="f.activo" />Activo</label> }
+        @if (puedeRndc && puedeEditar) { <label class="casilla" style="margin-top:14px"><input type="checkbox" name="sinc" [(ngModel)]="sincronizar" />Registrar o actualizar en el RNDC al guardar</label> }
       </form>
       <ng-container pie>
         <button type="button" (click)="abierto.set(false)">Cancelar</button>
-        @if (puedeEditar) { <button class="primario" type="submit" form="form-veh" [disabled]="trabajando()">Guardar</button> }
+        @if (puedeEditar) { <button class="primario" type="submit" form="form-veh" [disabled]="trabajando()">{{ sincronizar && puedeRndc ? 'Guardar y registrar en el RNDC' : 'Guardar' }}</button> }
       </ng-container>
     </app-modal>`,
 })
@@ -113,7 +137,17 @@ export class Vehiculos {
   private clave = inject(RndcClave);
   readonly puedeEditar = this.auth.tiene(P.MAESTROS_EDITAR);
   readonly puedeRndc = this.auth.tiene(P.RNDC_OPERAR);
+  readonly puedeConsultar = this.auth.tiene(P.RNDC_OPERAR) || this.auth.tiene(P.RNDC_CONSULTAR);
   readonly tipos = Object.entries(TIPOS_ID);
+  // Verificación previa y datos que faltan para el RNDC
+  readonly verificando = signal(false);
+  readonly origen = signal<{ tipo: 'ok' | 'info' | 'alerta'; texto: string } | null>(null);
+  readonly faltantes = signal<{ campo: string; etiqueta: string }[]>([]);
+  readonly soloFaltantes = signal(false);
+  readonly etiquetasFaltantes = computed(() => this.faltantes().map(f => f.etiqueta).join(', '));
+  placaBuscar = '';
+  consultarRndc = true;
+  sincronizar = false;
   readonly lista = signal<any[]>([]);
   readonly cargando = signal(false);
   readonly trabajando = signal(false);
@@ -160,8 +194,48 @@ export class Vehiculos {
   chip(e: string) { return ({ enviado: 'ok', error: 'error' } as Record<string, string>)[e] || 'alerta'; }
   estadoRndc(e: string) { return ({ enviado: 'Sincronizado', error: 'Con error' } as Record<string, string>)[e] || 'Pendiente'; }
 
-  nuevo() { this.form.set(vacio()); this.abierto.set(true); }
-  editar(v: any) {
+  falta(campo: string) { return this.faltantes().some(f => f.campo === campo); }
+  ver(campo: string) { return !this.soloFaltantes() || this.falta(campo); }
+  verAlguno(campos: string[]) { return campos.some(c => this.ver(c)); }
+
+  nuevo() { this.placaBuscar = ''; this.consultarRndc = this.puedeConsultar; this.verificando.set(true); }
+
+  // Busca la placa en la empresa y (si se pide) en el RNDC antes de crear el registro.
+  async verificar() {
+    const placa = this.placaBuscar.trim().toUpperCase().replace(/[\s-]/g, '');
+    let clave: string | null = null;
+    if (this.consultarRndc && this.puedeConsultar) clave = await this.clave.obtener();
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.post<any>('/rndc/verificar/vehiculo', { placa, ...(clave ? { clave } : {}) });
+      this.verificando.set(false);
+      if (r.origen === 'local') {
+        this.editar(r.registro, r.faltantes);
+        this.origen.set({ tipo: 'info', texto: `La placa ${placa} ya está registrada en su empresa: revise o complete sus datos.` });
+      } else if (r.origen === 'rndc') {
+        this.editar(r.registro, r.faltantes);
+        this.origen.set({ tipo: 'ok', texto: `Datos recuperados del RNDC y guardados en su empresa.${r.faltantes.length ? ' Complete solo lo que falta.' : ' Está completo.'}` });
+        this.cargar();
+      } else {
+        this.form.set({ ...vacio(), placa });
+        this.faltantes.set([]); this.soloFaltantes.set(false); this.sincronizar = this.puedeRndc;
+        this.origen.set(r.consultado
+          ? { tipo: 'alerta', texto: `No está en el RNDC (respuesta: ${r.mensaje}). Es un vehículo nuevo: complete sus datos.` }
+          : { tipo: 'info', texto: 'Vehículo nuevo en su empresa. No se consultó el RNDC.' });
+        this.abierto.set(true);
+      }
+      if (clave && r.mensaje && /usuario|contrase|clave/i.test(r.mensaje)) this.clave.olvidar();
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+
+  editar(v: any, faltantes?: any[]) {
+    this.origen.set(null);
+    this.faltantes.set(faltantes || []);
+    this.soloFaltantes.set(!!faltantes?.length);
+    this.sincronizar = false;
+    if (!faltantes && this.puedeRndc && v._id) {
+      this.api.get<any>(`/rndc/faltantes/vehiculo/${v._id}`).then(r => this.faltantes.set(r.faltantes)).catch(() => {});
+    }
     const b = vacio();
     this.form.set({ ...b, ...v, soat: { ...b.soat, ...v.soat, vence: isoDia(v.soat?.vence) }, venceTecnomecanica: isoDia(v.venceTecnomecanica),
       propietario: { ...b.propietario, ...v.propietario }, tenedor: { ...b.tenedor, ...v.tenedor }, conductorHabitual: v.conductorHabitual?._id || '', titularHabitual: v.titularHabitual?._id || v.titularHabitual || '' });
@@ -180,10 +254,11 @@ export class Vehiculos {
     cuerpo.titularHabitual = f.titularHabitual || null;
     this.trabajando.set(true);
     try {
-      if (f._id) await this.api.put(`/maestros/vehiculos/${f._id}`, cuerpo); else await this.api.post('/maestros/vehiculos', cuerpo);
+      const guardado = f._id ? await this.api.put<any>(`/maestros/vehiculos/${f._id}`, cuerpo) : await this.api.post<any>('/maestros/vehiculos', cuerpo);
       this.avisos.ok('Vehículo guardado');
       this.abierto.set(false); this.cargar();
-    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+      if (this.sincronizar && this.puedeRndc) await this.enviar(guardado);
+    } catch (e) { this.avisos.mostrar(await mensajeError(e), 'error'); } finally { this.trabajando.set(false); }
   }
 
   async enviar(v: any) {

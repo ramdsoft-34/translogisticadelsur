@@ -200,6 +200,8 @@ const viajeSchema = new Schema({
   cumplidoManifiesto: { type: documentoRndc, default: nuevoDoc },
   liquidacion: { type: Schema.Types.ObjectId, ref: 'Liquidacion', default: null },
   manifiestoReemplazado: str(),
+  // No todos los viajes generan remesa y manifiesto (p. ej. carga propia o urbana).
+  requiereManifiesto: { type: Boolean, default: true },
   // Importado de la plantilla de Excel: sus documentos RNDC se gestionaron fuera de la
   // plataforma, por eso no aparece en «Por enviar» hasta que un usuario lo habilite.
   historico: { type: Boolean, default: false },
@@ -213,6 +215,20 @@ viajeSchema.index({ empresa: 1, numero: 1 }, { unique: true });
 viajeSchema.index({ empresa: 1, fecha: -1 });
 viajeSchema.index({ empresa: 1, estado: 1 });
 viajeSchema.index({ empresa: 1, 'manifiesto.numero': 1 });
+
+// ── Plantillas del reporte de WhatsApp ──────────────────────────────────────
+// Texto con marcadores {conductor}, {placa}, {flete}… (ver services/whatsapp.js).
+const plantillaWhatsappSchema = new Schema({
+  nombre: str({ required: true, maxlength: 60 }),
+  encabezado: str({ maxlength: 1000 }),       // una vez por mensaje (saludo, fecha, cliente)
+  linea: str({ required: true, maxlength: 1000 }),  // una vez por viaje
+  separador: { type: String, enum: ['blanco', 'linea', 'guiones'], default: 'blanco' },
+  pie: str({ maxlength: 1000 }),              // al final del mensaje (totales, firma)
+  predeterminada: { type: Boolean, default: false },
+  creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+plantillaWhatsappSchema.plugin(tenantPlugin);
+plantillaWhatsappSchema.index({ empresa: 1, nombre: 1 }, { unique: true, collation: { locale: 'es', strength: 1 } });
 
 // ── Liquidación de fletes (relación para facturar y pagar) ──────────────────
 const liquidacionSchema = new Schema({
@@ -287,6 +303,7 @@ export const Liquidacion = modelo('Liquidacion', liquidacionSchema);
 export const TransaccionRndc = modelo('TransaccionRndc', transaccionSchema);
 export const Contador = modelo('Contador', contadorSchema);
 export const Auditoria = modelo('Auditoria', auditoriaSchema);
+export const PlantillaWhatsapp = modelo('PlantillaWhatsapp', plantillaWhatsappSchema);
 
 // Siguiente valor de un contador de la empresa (atómico). `minimo` permite
 // continuar una numeración existente (ej. último manifiesto expedido).

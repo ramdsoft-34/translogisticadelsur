@@ -1,10 +1,11 @@
 // Integración con el RNDC (Registro Nacional de Despachos de Carga).
 import { Router } from 'express';
 import { z } from 'zod';
-import { Empresa, Tercero, Vehiculo, TransaccionRndc, proximo, Contador } from '../models/index.js';
+import mongoose from 'mongoose';
+import { Empresa, Tercero, Vehiculo, Viaje, TransaccionRndc, proximo, Contador } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
-import { P } from '../config/permisos.js';
-import { auditar } from '../services/auditoria.js';
+import { P, tienePermiso } from '../config/permisos.js';
+import { auditar, cambios } from '../services/auditoria.js';
 import * as op from '../services/rndc/operaciones.js';
 import * as cat from '../services/rndc/catalogos.js';
 import { env } from '../config/env.js';
@@ -84,6 +85,52 @@ r.put('/config', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
 // ── Viajes ──────────────────────────────────────────────────────────────────
 r.get('/viajes/:id/vista-previa', operar, async (req, res) => {
   res.json(await op.vistaPrevia(req.empresaId, req.params.id));
+});
+
+// Corrección de los datos del viaje antes de enviarlo (o después de un rechazo).
+// Solo los campos que van en la remesa y el manifiesto; los de la remesa se bloquean
+// cuando ya fue aceptada, y los valores (flete/anticipo) exigen permiso para editarlos.
+const oid = z.string().refine(v => mongoose.isValidObjectId(v), 'identificador inválido');
+const datosExpedicion = z.object({
+  fecha: z.string().optional().transform(v => (v ? parseFecha(v) : undefined)),
+  codOrigen: divipola.optional(), codDestino: divipola.optional(),
+  placa: z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^[A-Z0-9]{5,6}$/, 'placa inválida')).optional(),
+  remolque: z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^([A-Z0-9]{5,6})?$/, 'remolque inválido')).optional(),
+  conductor: oid.optional(), titular: oid.nullable().optional(),
+  pesoKg: z.coerce.number().min(0).optional(),
+  destinatario: z.object({ tipoId: t(1), numId: t(15), sede: t(6) }).optional(),
+  flete: z.coerce.number().min(0).optional(), anticipo: z.coerce.number().min(0).optional(),
+  observaciones: t(500).optional(),
+  requiereManifiesto: z.boolean().optional(),
+});
+const CAMPOS_REMESA = ['fecha', 'pesoKg', 'destinatario'];
+
+r.put('/viajes/:id/datos', operar, async (req, res) => {
+  const d = Object.fromEntries(Object.entries(datosExpedicion.parse(req.body)).filter(([, v]) => v !== undefined));
+  const v = await Viaje.findOne(deEmpresa(req, { _id: req.params.id }));
+  if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
+  if (!['registrado', 'remesa'].includes(v.estado)) throw new ErrorHttp(409, `El viaje ya está ${v.estado}: corrija con una anulación o un reemplazo`);
+  if (v.estado === 'remesa') {
+    const bloqueados = CAMPOS_REMESA.filter(k => k in d && JSON.stringify(d[k]) !== JSON.stringify(v[k]?.toObject?.() ?? v[k]));
+    if (bloqueados.length) throw new ErrorHttp(409, `La remesa ${v.remesa.numero} ya fue aceptada; no se puede cambiar: ${bloqueados.join(', ')}. Anule la remesa si debe corregirlos.`);
+    if (d.requiereManifiesto === false) throw new ErrorHttp(409, 'El viaje ya tiene remesa aceptada en el RNDC');
+  }
+  if (('flete' in d || 'anticipo' in d) && !tienePermiso(req.usuario.rol, P.VIAJES_EDITAR_TODOS)) {
+    throw new ErrorHttp(403, 'Su rol no puede cambiar el flete ni el anticipo');
+  }
+  if (('flete' in d || 'anticipo' in d) && v.liquidacion) throw new ErrorHttp(409, 'El viaje ya está en una liquidación de fletes: no se cambian sus valores');
+  for (const k of ['conductor', 'titular']) {
+    if (d[k] && !(await Tercero.exists(deEmpresa(req, { _id: d[k] })))) throw new ErrorHttp(400, `El ${k} indicado no pertenece a su empresa`);
+  }
+  const antes = v.toObject();
+  if (d.conductor) {
+    const c = await Tercero.findOne(deEmpresa(req, { _id: d.conductor })).select('nombres apellido1 apellido2').lean();
+    d.conductorNombre = [c.nombres, c.apellido1, c.apellido2].filter(Boolean).join(' ');
+  }
+  v.set({ ...d, actualizadoPor: req.usuario._id });
+  await v.save();
+  await auditar(req, 'editar_viaje_rndc', { entidad: 'Viaje', entidadId: v._id, detalle: { numero: v.numero, cambios: cambios(antes, v.toObject(), Object.keys(d)) } });
+  res.json(await op.vistaPrevia(req.empresaId, v._id));
 });
 
 r.post('/viajes/:id/despachar', operar, async (req, res) => {
@@ -169,6 +216,41 @@ r.post('/vehiculos/:id/enviar', operar, async (req, res) => {
   const resultado = await op.registrarMaestro(req.empresaId, c, req.usuario._id, Vehiculo, doc, forzar);
   await auditar(req, 'rndc_vehiculo', { entidad: 'Vehiculo', entidadId: doc._id, detalle: { ok: resultado.ok, sinCambios: resultado.sinCambios } });
   res.json(resultado);
+});
+
+// ── Verificar antes de crear (evita duplicados y trae los datos del RNDC) ───
+// Sin contraseña solo revisa la base de la empresa; con contraseña consulta el RNDC.
+function exigirConsulta(req, c) {
+  if (c && !tienePermiso(req.usuario.rol, P.RNDC_CONSULTAR) && !tienePermiso(req.usuario.rol, P.RNDC_OPERAR)) {
+    throw new ErrorHttp(403, 'Su rol no puede consultar el RNDC');
+  }
+}
+r.post('/verificar/vehiculo', permitir(P.MAESTROS_EDITAR), async (req, res) => {
+  const d = z.object({ placa: z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^[A-Z0-9]{5,6}$/, 'placa inválida')),
+    clave: z.string().max(100).optional() }).parse(req.body);
+  exigirConsulta(req, d.clave);
+  const r1 = await op.verificarVehiculo(req.empresaId, req.usuario._id, d);
+  if (r1.origen === 'rndc') await auditar(req, 'importar_rndc', { entidad: 'Vehiculo', entidadId: r1.registro._id, detalle: { placa: d.placa } });
+  res.json(r1);
+});
+r.post('/verificar/tercero', permitir(P.MAESTROS_EDITAR), async (req, res) => {
+  const d = z.object({ tipoId: z.enum(Object.keys(cat.TIPOS_ID)), numId: z.string().trim().regex(/^\d{5,15}$/, 'documento inválido'),
+    clave: z.string().max(100).optional(),
+    roles: z.array(z.enum(['conductor', 'propietario', 'tenedor', 'titular', 'remitente', 'destinatario'])).optional().default([]) }).parse(req.body);
+  exigirConsulta(req, d.clave);
+  const r1 = await op.verificarTercero(req.empresaId, req.usuario._id, d);
+  if (r1.origen === 'rndc') await auditar(req, 'importar_rndc', { entidad: 'Tercero', entidadId: r1.registro._id, detalle: { numId: d.numId } });
+  res.json(r1);
+});
+
+// Campos que le faltan a un vehículo o tercero para registrarse en el RNDC.
+r.get('/faltantes/:tipo/:id', permitir(P.MAESTROS_VER), async (req, res) => {
+  const tipo = req.params.tipo === 'vehiculo' ? 'vehiculo' : 'tercero';
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ErrorHttp(400, 'Identificador inválido');
+  const doc = await (tipo === 'vehiculo' ? Vehiculo : Tercero).findOne(deEmpresa(req, { _id: req.params.id })).lean();
+  if (!doc) throw new ErrorHttp(404, 'No encontrado');
+  const empresa = await Empresa.findById(req.empresaId).lean();
+  res.json({ faltantes: op.faltantesMaestro(empresa, tipo, doc), rndc: doc.rndc || {} });
 });
 
 // ── Consultas ───────────────────────────────────────────────────────────────

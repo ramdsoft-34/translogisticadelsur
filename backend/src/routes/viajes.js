@@ -3,11 +3,11 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { Viaje, Cliente, Tarifa, Tercero, Vehiculo, siguiente, pob } from '../models/index.js';
+import { Viaje, Cliente, Tarifa, Tercero, Vehiculo, PlantillaWhatsapp, siguiente, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P, tienePermiso } from '../config/permisos.js';
 import { auditar, cambios } from '../services/auditoria.js';
-import { mensajesPorCliente } from '../services/whatsapp.js';
+import { mensajesPorCliente, PLANTILLA_BASE, MARCADORES } from '../services/whatsapp.js';
 import { parseFecha, hoyColombia, escaparRegex } from '../utils/texto.js';
 import { saldoViaje, utilidadViaje, valoresDesdeTarifa } from '../services/calculos.js';
 
@@ -33,6 +33,7 @@ const viajeSchema = z.object({
   tarifa: dinero.optional(), flete: dinero.optional(), anticipo: dinero.optional(),
   observaciones: z.string().trim().max(500).optional(),
   historico: z.boolean().optional(),
+  requiereManifiesto: z.boolean().optional(),
 });
 // Después de expedir documentos en el RNDC solo se pueden cambiar datos internos.
 const CAMPOS_INTERNOS = ['observaciones', 'cantidad', 'conAuxiliar', 'tarifa', 'historico'];
@@ -70,6 +71,8 @@ function filtroLista(req) {
   if (req.query.sinLiquidar === '1') f.liquidacion = null;
   if (req.query.historico === '0') f.historico = { $ne: true };
   if (req.query.historico === '1') f.historico = true;
+  // Solo los viajes que deben expedir remesa y manifiesto (módulo Manifiestos RNDC)
+  if (req.query.rndc === '1') f.requiereManifiesto = { $ne: false };
   if (req.query.q) {
     const re = new RegExp(escaparRegex(req.query.q), 'i');
     f.$or = [{ destino: re }, { placa: re }, { 'manifiesto.numero': re }, { 'remesa.numero': re }, { observaciones: re }];
@@ -103,7 +106,7 @@ r.get('/resumen', permitir(P.VIAJES_VER), async (req, res) => {
   const [hoyN, porEstado, mes] = await Promise.all([
     Viaje.countDocuments(deEmpresa(req, { fecha: hoy })),
     // Los históricos importados del Excel no cuentan como pendientes de RNDC
-    Viaje.aggregate([{ $match: { ...base, historico: { $ne: true } } }, { $group: { _id: '$estado', n: { $sum: 1 } } }]),
+    Viaje.aggregate([{ $match: { ...base, historico: { $ne: true }, requiereManifiesto: { $ne: false } } }, { $group: { _id: '$estado', n: { $sum: 1 } } }]),
     Viaje.aggregate([{ $match: { ...base, fecha: { $gte: inicioMes }, estado: { $ne: 'anulado' } } },
       { $group: { _id: null, viajes: { $sum: 1 }, tarifa: { $sum: '$tarifa' }, flete: { $sum: '$flete' }, anticipo: { $sum: '$anticipo' } } }]),
   ]);
@@ -111,14 +114,73 @@ r.get('/resumen', permitir(P.VIAJES_VER), async (req, res) => {
   res.json({ hoy: hoyN, estados, mes: mes[0] || { viajes: 0, tarifa: 0, flete: 0, anticipo: 0 } });
 });
 
-// ── Reporte de vehículos por WhatsApp (estructura de la plantilla de Excel) ──
+// ── Reporte de vehículos por WhatsApp (plantillas editables) ──────────────
+const plantillaSchema = z.object({
+  nombre: z.string().trim().min(2).max(60),
+  encabezado: z.string().max(1000).optional().default(''),
+  linea: z.string().min(1, 'Escriba el texto de cada viaje').max(1000),
+  separador: z.enum(['blanco', 'linea', 'guiones']).optional().default('blanco'),
+  pie: z.string().max(1000).optional().default(''),
+  predeterminada: z.boolean().optional().default(false),
+});
+
+async function viajesDelReporte(req, fecha, incluirReportados) {
+  const filtro = deEmpresa(req, { fecha, estado: { $ne: 'anulado' } });
+  if (!incluirReportados) filtro['reporteWhatsapp.fecha'] = null;
+  return (await Viaje.find(filtro).sort({ numero: 1 }).populate(POBLAR(req))
+    .populate(pob(req.empresaId, 'cliente', 'nombre whatsapp')).lean()).map(presentar);
+}
+
+// Plantilla pedida, la predeterminada de la empresa o la de la plataforma.
+async function plantillaDe(req, id) {
+  if (id && id !== 'base' && mongoose.isValidObjectId(id)) {
+    const p = await PlantillaWhatsapp.findOne(deEmpresa(req, { _id: id })).lean();
+    if (p) return p;
+  }
+  if (id === 'base') return { _id: 'base', ...PLANTILLA_BASE };
+  return (await PlantillaWhatsapp.findOne(deEmpresa(req, { predeterminada: true })).lean()) || { _id: 'base', ...PLANTILLA_BASE };
+}
+
 r.get('/reporte-whatsapp', permitir(P.VIAJES_VER), async (req, res) => {
   const fecha = parseFecha(req.query.fecha) || hoyColombia();
-  const filtro = deEmpresa(req, { fecha, estado: { $ne: 'anulado' } });
-  if (req.query.incluirReportados !== '1') filtro['reporteWhatsapp.fecha'] = null;
-  const viajes = (await Viaje.find(filtro).sort({ numero: 1 }).populate(POBLAR(req))
-    .populate(pob(req.empresaId, 'cliente', 'nombre whatsapp')).lean()).map(presentar);
-  res.json({ fecha, mensajes: mensajesPorCliente(viajes, fecha) });
+  const plantilla = await plantillaDe(req, req.query.plantilla);
+  const viajes = await viajesDelReporte(req, fecha, req.query.incluirReportados === '1');
+  res.json({ fecha, plantilla: plantilla._id, mensajes: mensajesPorCliente(viajes, fecha, new Date(), plantilla) });
+});
+
+// Vista previa de una plantilla en edición con los viajes de la fecha (no guarda nada).
+r.post('/reporte-whatsapp/vista-previa', permitir(P.VIAJES_VER), async (req, res) => {
+  const d = z.object({ fecha: z.string().optional(), plantilla: plantillaSchema.partial({ nombre: true }) }).parse(req.body);
+  const fecha = parseFecha(d.fecha) || hoyColombia();
+  const viajes = await viajesDelReporte(req, fecha, true);
+  res.json({ fecha, mensajes: mensajesPorCliente(viajes, fecha, new Date(), d.plantilla) });
+});
+
+r.get('/plantillas-whatsapp', permitir(P.VIAJES_VER), async (req, res) => {
+  const propias = await PlantillaWhatsapp.find(deEmpresa(req)).sort({ nombre: 1 }).lean();
+  res.json({ marcadores: MARCADORES, plantillas: [{ _id: 'base', ...PLANTILLA_BASE, predeterminada: !propias.some(p => p.predeterminada), base: true }, ...propias] });
+});
+
+async function guardarPlantilla(req, res, existente) {
+  const d = plantillaSchema.parse(req.body);
+  if (d.predeterminada) await PlantillaWhatsapp.updateMany(deEmpresa(req, { predeterminada: true }), { $set: { predeterminada: false } });
+  let p;
+  if (existente) { existente.set(d); p = await existente.save(); }
+  else p = await PlantillaWhatsapp.create({ ...d, empresa: req.empresaId, creadoPor: req.usuario._id });
+  await auditar(req, existente ? 'editar_plantilla_whatsapp' : 'crear_plantilla_whatsapp', { entidad: 'PlantillaWhatsapp', entidadId: p._id, detalle: { nombre: p.nombre } });
+  res.status(existente ? 200 : 201).json(p);
+}
+r.post('/plantillas-whatsapp', permitir(P.VIAJES_REGISTRAR), (req, res) => guardarPlantilla(req, res, null));
+r.put('/plantillas-whatsapp/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
+  const p = mongoose.isValidObjectId(req.params.id) && await PlantillaWhatsapp.findOne(deEmpresa(req, { _id: req.params.id }));
+  if (!p) throw new ErrorHttp(404, 'Plantilla no encontrada (la de la plataforma no se modifica: cree una copia)');
+  await guardarPlantilla(req, res, p);
+});
+r.delete('/plantillas-whatsapp/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
+  const p = mongoose.isValidObjectId(req.params.id) && await PlantillaWhatsapp.findOneAndDelete(deEmpresa(req, { _id: req.params.id }));
+  if (!p) throw new ErrorHttp(404, 'Plantilla no encontrada');
+  await auditar(req, 'eliminar_plantilla_whatsapp', { entidad: 'PlantillaWhatsapp', entidadId: p._id, detalle: { nombre: p.nombre } });
+  res.json({ ok: true });
 });
 
 // Marca los viajes como reportados (columna «Reportado» de la bitácora).

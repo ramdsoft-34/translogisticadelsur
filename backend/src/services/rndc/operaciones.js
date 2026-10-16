@@ -2,7 +2,7 @@
 // cumplir, anular, registrar maestros y consultar. Cada envío queda en
 // TransaccionRndc. La clave del usuario web service se recibe en cada
 // operación y nunca se guarda.
-import { Empresa, Viaje, Vehiculo, Tercero, Municipio, siguiente, pob } from '../../models/index.js';
+import { Empresa, Viaje, Vehiculo, Tercero, Municipio, TransaccionRndc, siguiente, pob } from '../../models/index.js';
 import { buscadorMunicipios } from '../importacion/excel.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { enviar, registrarTransaccion } from './cliente.js';
@@ -74,7 +74,62 @@ function avisosViaje(v, vehiculo) {
   return avisos;
 }
 
-// Vista previa de lo que se enviaría (sin clave y sin consumir consecutivos).
+// ── Datos de maestros que exige el RNDC ─────────────────────────────────────
+// Variable del RNDC → [campo del formulario, etiqueta para el usuario].
+const CAMPOS_TERCERO = {
+  NOMIDTERCERO: ['nombres', 'Nombres o razón social'], PRIMERAPELLIDOIDTERCERO: ['apellido1', 'Primer apellido'],
+  CODSEDETERCERO: ['sede.codigo', 'Código de sede'], NOMSEDETERCERO: ['sede.nombre', 'Nombre de sede'],
+  NUMTELEFONOCONTACTO: ['telefono', 'Teléfono fijo'], NUMCELULARPERSONA: ['celular', 'Celular'],
+  NOMENCLATURADIRECCION: ['direccion', 'Dirección'], CODMUNICIPIORNDC: ['codMunicipio', 'Municipio'],
+  CODCATEGORIALICENCIACONDUCCION: ['licencia.categoria', 'Categoría de la licencia'], NUMLICENCIACONDUCCION: ['licencia.numero', 'Número de licencia'],
+  FECHAVENCIMIENTOLICENCIA: ['licencia.vence', 'Vencimiento de la licencia'],
+};
+const CAMPOS_VEHICULO = {
+  CODCONFIGURACIONUNIDADCARGA: ['configuracion', 'Código de configuración'], CODMARCAVEHICULOCARGA: ['marca', 'Código de marca'],
+  CODLINEAVEHICULOCARGA: ['linea', 'Código de línea'], NUMEJES: ['ejes', 'Ejes'], ANOFABRICACIONVEHICULOCARGA: ['modelo', 'Modelo (año)'],
+  CODCOLORVEHICULOCARGA: ['color', 'Código de color'], PESOVEHICULOVACIO: ['pesoVacio', 'Peso vacío'], CAPACIDADUNIDADCARGA: ['capacidad', 'Capacidad'],
+  CODTIPOCARROCERIA: ['carroceria', 'Código de carrocería'], CODTIPOCOMBUSTIBLE: ['combustible', 'Código de combustible'],
+  NUMSEGUROSOAT: ['soat.numero', 'N° póliza SOAT'], FECHAVENCIMIENTOSOAT: ['soat.vence', 'Vencimiento del SOAT'],
+  NUMNITASEGURADORASOAT: ['soat.aseguradoraNit', 'NIT aseguradora SOAT'],
+  CODTIPOIDPROPIETARIO: ['propietario.tipoId', 'Tipo de documento del propietario'], NUMIDPROPIETARIO: ['propietario.numId', 'Documento del propietario'],
+  CODTIPOIDTENEDOR: ['tenedor.tipoId', 'Tipo de documento del tenedor'], NUMIDTENEDOR: ['tenedor.numId', 'Documento del tenedor'],
+};
+
+// Problemas según el diccionario oficial, más dos condiciones del manual:
+// los conductores llevan número y categoría de licencia, y las personas naturales, apellido.
+export function problemasMaestro(proceso, variables, doc) {
+  const problemas = validarVariables(proceso, variables);
+  if (proceso === 11) {
+    if ((doc.roles || []).includes('conductor')) {
+      if (!txt(doc.licencia?.numero)) problemas.push('NUMLICENCIACONDUCCION: es obligatorio para conductores');
+      if (!txt(doc.licencia?.categoria)) problemas.push('CODCATEGORIALICENCIACONDUCCION: es obligatorio para conductores');
+    }
+    if (doc.tipoId !== 'N' && !txt(doc.apellido1)) problemas.push('PRIMERAPELLIDOIDTERCERO: es obligatorio');
+  }
+  return [...new Set(problemas)];
+}
+
+// Campos que faltan para registrar el tercero/vehículo en el RNDC, con su etiqueta.
+export function faltantesMaestro(empresa, tipo, doc) {
+  const esTercero = tipo === 'tercero';
+  const vars = esTercero ? variablesTercero(empresa, doc) : variablesVehiculo(empresa, doc);
+  const mapa = esTercero ? CAMPOS_TERCERO : CAMPOS_VEHICULO;
+  return problemasMaestro(esTercero ? 11 : 12, vars, doc).map(p => {
+    const variable = p.split(':')[0];
+    const [campo, etiqueta] = mapa[variable] || ['', variable];
+    return { variable, campo, etiqueta, problema: p.slice(variable.length + 1).trim() };
+  });
+}
+
+const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
+function estadoMaestro(empresa, tipo, rol, doc) {
+  if (!doc) return null;
+  return { tipo, rol, id: doc._id, referencia: tipo === 'vehiculo' ? doc.placa : `${nombreDe(doc)} (${doc.tipoId} ${doc.numId})`,
+    estado: doc.rndc?.estado || 'sin_enviar', mensaje: doc.rndc?.mensaje || '', faltantes: faltantesMaestro(empresa, tipo, doc) };
+}
+
+// Vista previa de lo que se enviaría (sin clave y sin consumir consecutivos), con el
+// estado de los documentos, la última respuesta real del RNDC y los maestros del viaje.
 export async function vistaPrevia(empresaId, viajeId) {
   const empresa = await empresaConRndc(empresaId);
   const { v, vehiculo } = await cargarViaje(empresaId, viajeId);
@@ -83,10 +138,25 @@ export async function vistaPrevia(empresaId, viajeId) {
   const numM = v.manifiesto?.numero || `${empresa.rndc?.prefijoManifiesto || ''}(siguiente)`;
   const remesa = variablesRemesa(empresa, v, ctx, numR);
   const manifiesto = variablesManifiesto(empresa, v, ctx, numM);
+  const remolque = v.remolque ? await Vehiculo.findOne({ empresa: empresaId, placa: v.remolque }).lean() : null;
+  const ultimo = await TransaccionRndc.findOne({ empresa: empresaId, viaje: v._id, tipo: 1, ok: false }).sort({ createdAt: -1 }).lean();
+  const remesaAceptada = v.remesa?.estado === 'aceptado';
   return {
     ambiente: empresa.rndc?.ambiente,
+    estado: v.estado, requiereManifiesto: v.requiereManifiesto !== false,
+    documentos: { remesa: v.remesa || {}, manifiesto: v.manifiesto || {} },
+    remesaAceptada,
+    // Respuesta textual del RNDC en el último rechazo (para corregir y reenviar)
+    ultimoError: ultimo && !(v.manifiesto?.estado === 'aceptado')
+      ? { proceso: ultimo.proceso, mensaje: ultimo.mensaje, fecha: ultimo.createdAt, referencia: ultimo.referencia } : null,
     avisos: avisosViaje(v, vehiculo),
-    remesa: { variables: remesa, problemas: validarVariables(3, remesa.map(([n, x]) => [n, n === 'CONSECUTIVOREMESA' ? 'X' : x])) },
+    maestros: [
+      vehiculo ? estadoMaestro(empresa, 'vehiculo', 'Vehículo', vehiculo) : { tipo: 'vehiculo', rol: 'Vehículo', referencia: v.placa, estado: 'no_existe', faltantes: [] },
+      v.remolque ? (remolque ? estadoMaestro(empresa, 'vehiculo', 'Remolque', remolque) : { tipo: 'vehiculo', rol: 'Remolque', referencia: v.remolque, estado: 'no_existe', faltantes: [] }) : null,
+      estadoMaestro(empresa, 'tercero', 'Conductor', v.conductor),
+      v.titular && String(v.titular._id) !== String(v.conductor?._id) ? estadoMaestro(empresa, 'tercero', 'Titular', v.titular) : null,
+    ].filter(Boolean),
+    remesa: { variables: remesa, problemas: remesaAceptada ? [] : validarVariables(3, remesa.map(([n, x]) => [n, n === 'CONSECUTIVOREMESA' ? 'X' : x])) },
     manifiesto: { variables: manifiesto, problemas: validarVariables(4, manifiesto.map(([n, x]) => [n, n === 'NUMMANIFIESTOCARGA' ? 'X' : x])) },
   };
 }
@@ -106,6 +176,7 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
     const { v, vehiculo } = await cargarViaje(empresaId, viajeId);
     if (v.estado === 'anulado' || v.estado === 'cumplido') throw new ErrorHttp(409, `El viaje está ${v.estado}`);
     if (v.historico) throw new ErrorHttp(409, 'Viaje histórico importado del Excel: sus documentos se gestionaron fuera de la plataforma. Habilítelo en Viajes si debe enviarse.');
+    if (v.requiereManifiesto === false) throw new ErrorHttp(409, 'Este viaje está marcado como «no requiere manifiesto». Cámbielo si debe expedirse.');
     if (v.manifiesto?.estado === 'aceptado') throw new ErrorHttp(409, 'El viaje ya tiene manifiesto aceptado');
     const ctx = contextoViaje(empresa, v, vehiculo);
     const meta = { usuario: usuarioId, viaje: v._id, referencia: `Viaje ${v.numero}` };
@@ -230,7 +301,7 @@ export async function registrarMaestro(empresaId, clave, usuarioId, modelo, doc,
   if (!forzar && doc.rndc?.estado === 'enviado' && doc.rndc?.hash === h) {
     return { ok: true, sinCambios: true, mensaje: 'Sin cambios desde el último envío; no se reenvía (el RNDC lo rechazaría como DUPLICADO)' };
   }
-  const problemas = validarVariables(proceso, vars);
+  const problemas = problemasMaestro(proceso, vars, doc);
   if (problemas.length) throw new ErrorHttp(422, `Faltan datos del ${esTercero ? 'tercero' : 'vehículo'}`, problemas);
   const referencia = esTercero ? `Tercero ${doc.tipoId} ${doc.numId}` : `Placa ${doc.placa}`;
   const res = await registrar(empresa, cred, proceso, vars, { usuario: usuarioId, referencia });
@@ -323,6 +394,33 @@ export async function traerVehiculo(empresaId, clave, usuarioId, { placa }) {
   doc.rndc = { estado: 'enviado', fecha: new Date(), hash: huella(variablesVehiculo(empresa, doc.toObject())), radicado: '', mensaje: 'Datos traídos del RNDC' };
   await doc.save();
   return { ok: true, nuevo: !existente, id: doc._id, placa };
+}
+
+// ── Verificar antes de crear un vehículo o tercero ───────────────────────────
+// 1) Si ya existe en la empresa, se devuelve (no se duplica).
+// 2) Si no, y hay contraseña, se consulta el RNDC: si lo tiene, se crea con esos datos
+//    (queda sincronizado) y se indican solo los campos que faltan.
+// 3) Si tampoco está en el RNDC, es nuevo: el usuario completa el registro.
+export async function verificarVehiculo(empresaId, usuarioId, { placa, clave }) {
+  const empresa = await empresaConRndc(empresaId);
+  const local = await Vehiculo.findOne({ empresa: empresaId, placa }).lean();
+  if (local) return { origen: 'local', registro: local, faltantes: faltantesMaestro(empresa, 'vehiculo', local) };
+  if (!clave) return { origen: 'nuevo', consultado: false };
+  const r = await traerVehiculo(empresaId, clave, usuarioId, { placa });
+  if (!r.ok) return { origen: 'nuevo', consultado: true, mensaje: r.mensaje };
+  const registro = await Vehiculo.findOne({ empresa: empresaId, _id: r.id }).lean();
+  return { origen: 'rndc', registro, faltantes: faltantesMaestro(empresa, 'vehiculo', registro) };
+}
+
+export async function verificarTercero(empresaId, usuarioId, { tipoId, numId, clave, roles = [] }) {
+  const empresa = await empresaConRndc(empresaId);
+  const local = await Tercero.findOne({ empresa: empresaId, tipoId, numId }).lean();
+  if (local) return { origen: 'local', registro: local, faltantes: faltantesMaestro(empresa, 'tercero', local) };
+  if (!clave) return { origen: 'nuevo', consultado: false };
+  const r = await traerTercero(empresaId, clave, usuarioId, { tipoId, numId, roles });
+  if (!r.ok || !r.guardados?.length) return { origen: 'nuevo', consultado: true, mensaje: r.mensaje || 'El RNDC no devolvió datos de ese tercero' };
+  const registro = await Tercero.findOne({ empresa: empresaId, _id: r.guardados[0].id }).lean();
+  return { origen: 'rndc', registro, faltantes: faltantesMaestro(empresa, 'tercero', registro), sedes: r.guardados.length };
 }
 
 export async function consultar(empresaId, clave, usuarioId, { que, filtros = {}, desde, hasta }) {

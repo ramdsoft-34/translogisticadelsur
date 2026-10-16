@@ -9,6 +9,7 @@ import { CargarMas } from '../shared/cargar-mas';
 import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
 import { FORMATOS, hoyIso, isoDia } from '../shared/formato';
+import { ExpedirRndc } from '../shared/expedir-rndc';
 
 type Pestana = 'pendientes' | 'manifestados' | 'cumplidos' | 'historial';
 const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
@@ -17,10 +18,11 @@ const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
 
 @Component({
   selector: 'app-manifiestos',
-  imports: [FormsModule, Modal, Icono, Moneda, CargarMas, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, Moneda, CargarMas, ExpedirRndc, ...FORMATOS],
   template: `
     <div class="pagina-cab">
-      <div><h1>Manifiestos RNDC</h1><p class="sutil">Expida remesa y manifiesto, registre cumplidos y anulaciones ante el Ministerio de Transporte.</p></div>
+      <div><h1>Manifiestos RNDC</h1><p class="sutil">Aquí se expiden las remesas y los manifiestos: revise los datos, envíelos al RNDC y, si hay un rechazo, corríjalos y reenvíe.
+        Los viajes marcados como «no requiere manifiesto» no aparecen.</p></div>
       @if (pestana() === 'pendientes' && seleccion().size) {
         <button class="primario" (click)="enviarLote()" [disabled]="trabajando()"><app-icono nombre="enviar" />Enviar {{ seleccion().size }} seleccionado(s)</button>
       }
@@ -61,8 +63,8 @@ const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
                   <div class="acciones" style="justify-content:flex-end">
                     @switch (pestana()) {
                       @case ('pendientes') {
-                        <button class="pequeno" (click)="revisar(v)">Revisar</button>
-                        <button class="pequeno primario" (click)="despachar(v)" [disabled]="trabajando()"><app-icono nombre="enviar" [tam]="15" />Enviar</button>
+                        <button class="pequeno primario" (click)="expedir.set(v._id)" [disabled]="trabajando()">
+                          <app-icono nombre="enviar" [tam]="15" />{{ mensajeError(v) ? 'Corregir y reenviar' : 'Expedir' }}</button>
                         @if (v.estado === 'remesa') { <button class="pequeno peligro" (click)="abrirAnular(v)" title="Anular la remesa aceptada">Anular remesa</button> }
                       }
                       @case ('manifestados') {
@@ -79,7 +81,7 @@ const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
                 </td>
               </tr>
               @if (mensajeError(v); as m) {
-                <tr><td [attr.colspan]="pestana() === 'pendientes' ? 10 : 9" style="padding-top:0"><div class="mensaje error">{{ m }}</div></td></tr>
+                <tr><td [attr.colspan]="pestana() === 'pendientes' ? 10 : 9" style="padding-top:0"><div class="mensaje error">Respuesta del RNDC · {{ m }}</div></td></tr>
               }
             } @empty {
               @if (cargando()) { @for (i of [1, 2, 3]; track i) { <tr><td colspan="10"><span class="esqueleto"></span></td></tr> } }
@@ -105,24 +107,8 @@ const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
       </div>
     }
 
-    <!-- Revisión previa -->
-    <app-modal titulo="Revisión antes de enviar" [abierto]="!!previa()" (cerrar)="previa.set(null)" [ancho]="true">
-      @if (previa(); as p) {
-        @if (p.avisos.length) { <div class="mensaje alerta" style="margin-bottom:12px"><strong>Revise:</strong><ul>@for (a of p.avisos; track a) { <li>{{ a }}</li> }</ul></div> }
-        @for (doc of [['Remesa', p.remesa], ['Manifiesto', p.manifiesto]]; track doc[0]) {
-          <h3>{{ doc[0] }}</h3>
-          @if (doc[1].problemas.length) { <div class="mensaje error" style="margin-bottom:8px"><strong>Faltan datos:</strong><ul>@for (x of doc[1].problemas; track x) { <li>{{ x }}</li> }</ul></div> }
-          @else { <div class="mensaje ok" style="margin-bottom:8px">Completa según el diccionario de datos del RNDC.</div> }
-          <details style="margin-bottom:14px"><summary>Ver variables que se enviarán</summary>
-            <table><tbody>@for (x of doc[1].variables; track x[0]) { <tr><td class="sutil">{{ x[0] }}</td><td>{{ x[1] }}</td></tr> }</tbody></table>
-          </details>
-        }
-      }
-      <ng-container pie>
-        <button type="button" (click)="previa.set(null)">Cerrar</button>
-        @if (previaViaje(); as v) { <button class="primario" (click)="previa.set(null); despachar(v)">Enviar al RNDC</button> }
-      </ng-container>
-    </app-modal>
+    <!-- Expedición: revisar, corregir y enviar -->
+    <app-expedir-rndc [viajeId]="expedir()" (cerrar)="expedir.set(null)" (actualizado)="cargar()" />
 
     <!-- Cumplido -->
     <app-modal [titulo]="'Cumplir viaje N° ' + (cumplirViaje()?.numero || '')" [abierto]="!!cumplirViaje()" (cerrar)="cumplirViaje.set(null)" [ancho]="true">
@@ -198,8 +184,7 @@ export class Manifiestos {
   readonly catalogos = signal<any>(null);
   readonly procesos = computed(() => this.catalogos()?.procesos || {});
   readonly ambiente = signal('');
-  readonly previa = signal<any>(null);
-  readonly previaViaje = signal<Viaje | null>(null);
+  readonly expedir = signal<string | null>(null);
   readonly cumplirViaje = signal<Viaje | null>(null);
   readonly cumplido = signal<any>(null);
   readonly anularViaje = signal<Viaje | null>(null);
@@ -220,7 +205,7 @@ export class Manifiestos {
       if (this.pestana() === 'historial') this.transacciones.set(await this.api.get<any[]>('/rndc/transacciones', { limite: 200 }));
       else {
         this.pagina = 1;
-        const r = await this.api.get<any>('/viajes', { estado: ESTADOS[this.pestana() as Exclude<Pestana, 'historial'>], pagina: 1, limite: 50, historico: 0 });
+        const r = await this.api.get<any>('/viajes', { estado: ESTADOS[this.pestana() as Exclude<Pestana, 'historial'>], pagina: 1, limite: 50, historico: 0, rndc: 1 });
         this.viajes.set(r.viajes); this.total.set(r.total);
       }
     } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
@@ -234,7 +219,7 @@ export class Manifiestos {
     if (this.pestana() === 'historial' || this.cargandoMas() || this.viajes().length >= this.total()) return;
     this.cargandoMas.set(true);
     try {
-      const r = await this.api.get<any>('/viajes', { estado: ESTADOS[this.pestana() as Exclude<Pestana, 'historial'>], pagina: this.pagina + 1, limite: 50, historico: 0 });
+      const r = await this.api.get<any>('/viajes', { estado: ESTADOS[this.pestana() as Exclude<Pestana, 'historial'>], pagina: this.pagina + 1, limite: 50, historico: 0, rndc: 1 });
       this.pagina += 1;
       this.viajes.update(l => [...l, ...r.viajes]);
     } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }
@@ -249,10 +234,6 @@ export class Manifiestos {
   }
   alternar(id: string) { this.seleccion.update(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
   alternarTodos() { this.seleccion.set(this.todos() ? new Set() : new Set(this.viajes().map(v => v._id))); }
-
-  async revisar(v: Viaje) {
-    try { this.previaViaje.set(v); this.previa.set(await this.api.get(`/rndc/viajes/${v._id}/vista-previa`)); } catch (e) { this.avisos.error(e); }
-  }
 
   // Ejecuta una operación que requiere la contraseña del RNDC.
   private async conClave<T>(fn: (clave: string) => Promise<T>): Promise<T | null> {
@@ -271,18 +252,6 @@ export class Manifiestos {
 
   private revisarClave(mensajes: string[]) {
     if (mensajes.some(m => /usuario|contrase|clave|password/i.test(m || ''))) this.clave.olvidar();
-  }
-
-  async despachar(v: Viaje) {
-    const r = await this.conClave(c => this.api.post<any>(`/rndc/viajes/${v._id}/despachar`, { clave: c }));
-    if (!r) return;
-    if (r.manifiesto?.estado === 'aceptado') this.avisos.ok(`Viaje ${v.numero}: manifiesto ${r.manifiesto.numero} aceptado (radicado ${r.manifiesto.radicado})`);
-    else {
-      const m = r.manifiesto?.mensaje || r.remesa?.mensaje || 'El RNDC rechazó el envío';
-      this.revisarClave([m]);
-      this.avisos.mostrar(`Viaje ${v.numero}: ${m}`, 'error');
-    }
-    this.cargar();
   }
 
   async enviarLote() {

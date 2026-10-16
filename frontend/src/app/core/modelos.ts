@@ -34,7 +34,7 @@ export interface Viaje {
   estado: 'registrado' | 'remesa' | 'manifestado' | 'cumplido' | 'anulado';
   remesa: DocRndc; manifiesto: DocRndc; cumplidoRemesa: DocRndc; cumplidoManifiesto: DocRndc;
   liquidacion: string | null; manifiestoReemplazado?: string; creadoPor: string;
-  historico?: boolean; reporteWhatsapp?: { fecha: string | null };
+  historico?: boolean; reporteWhatsapp?: { fecha: string | null }; requiereManifiesto?: boolean;
 }
 
 export const ESTADOS_VIAJE: Record<string, string> = {

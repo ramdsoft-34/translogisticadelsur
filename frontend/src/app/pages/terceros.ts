@@ -12,6 +12,7 @@ import { FORMATOS, isoDia } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
 import { TraerRndc } from '../shared/traer-rndc';
 import { CargarMas } from '../shared/cargar-mas';
+import { mensajeError } from '../core/api.service';
 
 const ROLES: [string, string][] = [['conductor', 'Conductor'], ['titular', 'Titular de manifiesto'], ['propietario', 'Propietario'],
   ['tenedor', 'Tenedor'], ['remitente', 'Remitente'], ['destinatario', 'Destinatario']];
@@ -67,48 +68,74 @@ const vacio = () => ({
       @if (lista().length) { <app-cargar-mas [mostrados]="lista().length" [total]="total()" [cargando]="cargandoMas()" unidad="terceros" (mas)="cargarMas()" /> }
     </div>
 
+    <!-- Paso 1: verificar el documento en la empresa y en el RNDC -->
+    <app-modal titulo="Nuevo conductor o tercero" [abierto]="verificando()" (cerrar)="verificando.set(false)">
+      <form id="form-verificar-t" class="formulario" (ngSubmit)="verificar()">
+        <p class="sutil ancho" style="margin:0">Primero se busca el documento en su empresa{{ puedeConsultar ? ' y en el RNDC' : '' }}, para no duplicarlo y traer los datos que ya existan.</p>
+        <div class="campo"><label for="vt-tipo">Tipo de documento</label><select id="vt-tipo" name="tipo" [(ngModel)]="buscar.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
+        <div class="campo"><label for="vt-num">Número</label><input id="vt-num" name="num" [(ngModel)]="buscar.numId" required inputmode="numeric" autofocus />
+          @if (buscar.tipoId === 'N') { <small>NIT con dígito de verificación, sin guion.</small> }</div>
+        <div class="campo"><label for="vt-rol">Rol</label><select id="vt-rol" name="rol" [(ngModel)]="buscar.rol">@for (r of roles; track r[0]) { <option [value]="r[0]">{{ r[1] }}</option> }</select></div>
+        @if (puedeConsultar) { <label class="casilla ancho"><input type="checkbox" name="rndc" [(ngModel)]="consultarRndc" />Consultar en el RNDC (pide la contraseña del web service)</label> }
+      </form>
+      <ng-container pie>
+        <button type="button" (click)="verificando.set(false)">Cancelar</button>
+        <button class="primario" type="submit" form="form-verificar-t" [disabled]="trabajando() || digitos(buscar.numId).length < 5">{{ trabajando() ? 'Buscando…' : 'Continuar' }}</button>
+      </ng-container>
+    </app-modal>
+
     <app-modal [titulo]="editando() ? 'Editar tercero' : 'Nuevo tercero'" [abierto]="abierto()" (cerrar)="abierto.set(false)" [ancho]="true">
       @let f = form();
+      @if (origen(); as o) { <div class="mensaje" [class.ok]="o.tipo === 'ok'" [class.info]="o.tipo === 'info'" [class.alerta]="o.tipo === 'alerta'" style="margin-bottom:12px">{{ o.texto }}</div> }
+      @if (faltantes().length) {
+        <div class="mensaje alerta" style="margin-bottom:12px">
+          <strong>Para registrarlo en el RNDC falta:</strong> {{ etiquetasFaltantes() }}.
+          <label class="casilla" style="margin-top:6px"><input type="checkbox" [checked]="soloFaltantes()" (change)="soloFaltantes.set(!soloFaltantes())" />Mostrar solo lo que falta</label>
+        </div>
+      }
       <form id="form-tercero" (ngSubmit)="guardar()">
         <div class="formulario">
-          <div class="campo"><label for="tt">Tipo de documento</label><select id="tt" name="tipoId" [(ngModel)]="f.tipoId" [disabled]="editando()">
+          <div class="campo" [hidden]="soloFaltantes()"><label for="tt">Tipo de documento</label><select id="tt" name="tipoId" [(ngModel)]="f.tipoId" [disabled]="editando() || !!origen()">
             @for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
-          <div class="campo"><label for="tn">Número</label><input id="tn" name="numId" [(ngModel)]="f.numId" [disabled]="editando()" required />
+          <div class="campo" [hidden]="soloFaltantes()"><label for="tn">Número</label><input id="tn" name="numId" [(ngModel)]="f.numId" [disabled]="editando() || !!origen()" required />
             @if (f.tipoId === 'N') { <small>NIT con dígito de verificación, sin guion.</small> }</div>
-          <div class="campo"><label for="tno">{{ f.tipoId === 'N' ? 'Razón social' : 'Nombres' }}</label><input id="tno" name="nombres" [(ngModel)]="f.nombres" required /></div>
+          <div class="campo" [hidden]="!ver('nombres')" [class.falta]="falta('nombres')"><label for="tno">{{ f.tipoId === 'N' ? 'Razón social' : 'Nombres' }}</label><input id="tno" name="nombres" [(ngModel)]="f.nombres" required /></div>
           @if (f.tipoId !== 'N') {
-            <div class="campo"><label for="ta1">Primer apellido</label><input id="ta1" name="ap1" [(ngModel)]="f.apellido1" required /></div>
-            <div class="campo"><label for="ta2">Segundo apellido</label><input id="ta2" name="ap2" [(ngModel)]="f.apellido2" /></div>
+            <div class="campo" [hidden]="!ver('apellido1')" [class.falta]="falta('apellido1')"><label for="ta1">Primer apellido</label><input id="ta1" name="ap1" [(ngModel)]="f.apellido1" required /></div>
+            <div class="campo" [hidden]="soloFaltantes()"><label for="ta2">Segundo apellido</label><input id="ta2" name="ap2" [(ngModel)]="f.apellido2" /></div>
           } @else {
-            <div class="campo"><label for="ts">Código de sede</label><input id="ts" name="sede" maxlength="6" [(ngModel)]="f.sede.codigo" /></div>
-            <div class="campo"><label for="tsn">Nombre de sede</label><input id="tsn" name="sedeN" maxlength="20" [(ngModel)]="f.sede.nombre" /></div>
+            <div class="campo" [hidden]="!ver('sede.codigo')" [class.falta]="falta('sede.codigo')"><label for="ts">Código de sede</label><input id="ts" name="sede" maxlength="6" [(ngModel)]="f.sede.codigo" /></div>
+            <div class="campo" [hidden]="!ver('sede.nombre')" [class.falta]="falta('sede.nombre')"><label for="tsn">Nombre de sede</label><input id="tsn" name="sedeN" maxlength="20" [(ngModel)]="f.sede.nombre" /></div>
           }
-          <div class="campo"><label for="tcel">Celular</label><input id="tcel" name="cel" maxlength="10" [(ngModel)]="f.celular" /></div>
-          <div class="campo"><label for="ttel">Teléfono fijo</label><input id="ttel" name="tel" maxlength="7" [(ngModel)]="f.telefono" /></div>
-          <div class="campo"><label for="tdir">Dirección</label><input id="tdir" name="dir" maxlength="60" [(ngModel)]="f.direccion" /></div>
-          <app-municipio etiqueta="Municipio" [(codigo)]="f.codMunicipio" />
-          <div class="campo ancho"><span class="etiqueta">Roles</span><div class="acciones">
+          <div class="campo" [hidden]="!ver('celular')" [class.falta]="falta('celular')"><label for="tcel">Celular</label><input id="tcel" name="cel" maxlength="10" [(ngModel)]="f.celular" /></div>
+          <div class="campo" [hidden]="!ver('telefono')" [class.falta]="falta('telefono')"><label for="ttel">Teléfono fijo</label><input id="ttel" name="tel" maxlength="7" [(ngModel)]="f.telefono" /></div>
+          <div class="campo" [hidden]="!ver('direccion')" [class.falta]="falta('direccion')"><label for="tdir">Dirección</label><input id="tdir" name="dir" maxlength="60" [(ngModel)]="f.direccion" /></div>
+          @if (ver('codMunicipio')) { <app-municipio etiqueta="Municipio" [(codigo)]="f.codMunicipio" [class.falta]="falta('codMunicipio')" /> }
+          <div class="campo ancho" [hidden]="soloFaltantes()"><span class="etiqueta">Roles</span><div class="acciones">
             @for (r of roles; track r[0]) { <label class="casilla"><input type="checkbox" [checked]="f.roles.includes(r[0])" (change)="alternarRol(r[0])" />{{ r[1] }}</label> }
           </div></div>
         </div>
-        @if (f.roles.includes('conductor')) {
-          <fieldset style="margin-top:14px"><legend>Licencia de conducción</legend><div class="formulario">
-            <div class="campo"><label for="lc">Categoría</label><input id="lc" name="lcat" maxlength="3" [(ngModel)]="f.licencia.categoria" /></div>
-            <div class="campo"><label for="ln">Número</label><input id="ln" name="lnum" [(ngModel)]="f.licencia.numero" /></div>
-            <div class="campo"><label for="lv">Vence</label><input id="lv" type="date" name="lven" [(ngModel)]="f.licencia.vence" /></div>
-            <div class="campo"><label for="fn">Fecha de nacimiento</label><input id="fn" type="date" name="fnac" [(ngModel)]="f.fechaNacimiento" /></div>
+        @if (f.roles.includes('conductor') || falta('licencia.vence')) {
+          <fieldset style="margin-top:14px" [hidden]="!verAlguno(['licencia.categoria', 'licencia.numero', 'licencia.vence'])"><legend>Licencia de conducción</legend><div class="formulario">
+            <div class="campo" [hidden]="!ver('licencia.categoria')" [class.falta]="falta('licencia.categoria')"><label for="lc">Categoría</label><input id="lc" name="lcat" maxlength="3" [(ngModel)]="f.licencia.categoria" /></div>
+            <div class="campo" [hidden]="!ver('licencia.numero')" [class.falta]="falta('licencia.numero')"><label for="ln">Número</label><input id="ln" name="lnum" [(ngModel)]="f.licencia.numero" /></div>
+            <div class="campo" [hidden]="!ver('licencia.vence')" [class.falta]="falta('licencia.vence')"><label for="lv">Vence</label><input id="lv" type="date" name="lven" [(ngModel)]="f.licencia.vence" /></div>
+            <div class="campo" [hidden]="soloFaltantes()"><label for="fn">Fecha de nacimiento</label><input id="fn" type="date" name="fnac" [(ngModel)]="f.fechaNacimiento" /></div>
           </div></fieldset>
-          <fieldset style="margin-top:14px"><legend>Cuenta para pagos</legend><div class="formulario">
-            <div class="campo"><label for="be">Banco</label><input id="be" name="banco" [(ngModel)]="f.banco.entidad" /></div>
-            <div class="campo"><label for="bt">Tipo</label><select id="bt" name="btipo" [(ngModel)]="f.banco.tipoCuenta"><option value=""></option><option>Ahorros</option><option>Corriente</option></select></div>
-            <div class="campo"><label for="bc">Número de cuenta</label><input id="bc" name="bcta" [(ngModel)]="f.banco.cuenta" /></div>
-          </div></fieldset>
+          @if (!soloFaltantes()) {
+            <fieldset style="margin-top:14px"><legend>Cuenta para pagos</legend><div class="formulario">
+              <div class="campo"><label for="be">Banco</label><input id="be" name="banco" [(ngModel)]="f.banco.entidad" /></div>
+              <div class="campo"><label for="bt">Tipo</label><select id="bt" name="btipo" [(ngModel)]="f.banco.tipoCuenta"><option value=""></option><option>Ahorros</option><option>Corriente</option></select></div>
+              <div class="campo"><label for="bc">Número de cuenta</label><input id="bc" name="bcta" [(ngModel)]="f.banco.cuenta" /></div>
+            </div></fieldset>
+          }
         }
-        @if (editando()) { <label class="casilla" style="margin-top:14px"><input type="checkbox" name="activo" [(ngModel)]="f.activo" />Activo</label> }
+        @if (editando() && !soloFaltantes()) { <label class="casilla" style="margin-top:14px"><input type="checkbox" name="activo" [(ngModel)]="f.activo" />Activo</label> }
+        @if (puedeRndc && puedeEditar) { <label class="casilla" style="margin-top:14px"><input type="checkbox" name="sinc" [(ngModel)]="sincronizar" />Registrar o actualizar en el RNDC al guardar</label> }
       </form>
       <ng-container pie>
         <button type="button" (click)="abierto.set(false)">Cancelar</button>
-        @if (puedeEditar) { <button class="primario" type="submit" form="form-tercero" [disabled]="trabajando()">Guardar</button> }
+        @if (puedeEditar) { <button class="primario" type="submit" form="form-tercero" [disabled]="trabajando()">{{ sincronizar && puedeRndc ? 'Guardar y registrar en el RNDC' : 'Guardar' }}</button> }
       </ng-container>
     </app-modal>`,
 })
@@ -119,7 +146,17 @@ export class Terceros {
   private clave = inject(RndcClave);
   readonly puedeEditar = this.auth.tiene(P.MAESTROS_EDITAR);
   readonly puedeRndc = this.auth.tiene(P.RNDC_OPERAR);
+  readonly puedeConsultar = this.auth.tiene(P.RNDC_OPERAR) || this.auth.tiene(P.RNDC_CONSULTAR);
   readonly roles = ROLES;
+  // Verificación previa y datos que faltan para el RNDC
+  readonly verificando = signal(false);
+  readonly origen = signal<{ tipo: 'ok' | 'info' | 'alerta'; texto: string } | null>(null);
+  readonly faltantes = signal<{ campo: string; etiqueta: string }[]>([]);
+  readonly soloFaltantes = signal(false);
+  readonly etiquetasFaltantes = computed(() => this.faltantes().map(f => f.etiqueta).join(', '));
+  buscar = { tipoId: 'C', numId: '', rol: 'conductor' };
+  consultarRndc = true;
+  sincronizar = false;
   readonly tipos = Object.entries(TIPOS_ID);
   readonly lista = signal<any[]>([]);
   readonly cargando = signal(false);
@@ -165,8 +202,50 @@ export class Terceros {
   chip(e: string) { return ({ enviado: 'ok', error: 'error' } as Record<string, string>)[e] || 'alerta'; }
   estadoRndc(e: string) { return ({ enviado: 'Sincronizado', error: 'Con error' } as Record<string, string>)[e] || 'Pendiente'; }
 
-  nuevo() { this.form.set(vacio()); this.abierto.set(true); }
-  editar(t: any) {
+  digitos(v: string) { return String(v || '').replace(/\D/g, ''); }
+  falta(campo: string) { return this.faltantes().some(f => f.campo === campo); }
+  ver(campo: string) { return !this.soloFaltantes() || this.falta(campo); }
+  verAlguno(campos: string[]) { return campos.some(c => this.ver(c)); }
+
+  nuevo() { this.buscar = { tipoId: 'C', numId: '', rol: this.rol || 'conductor' }; this.consultarRndc = this.puedeConsultar; this.verificando.set(true); }
+
+  // Busca el documento en la empresa y (si se pide) en el RNDC antes de crear el registro.
+  async verificar() {
+    const numId = this.digitos(this.buscar.numId);
+    const { tipoId, rol } = this.buscar;
+    let clave: string | null = null;
+    if (this.consultarRndc && this.puedeConsultar) clave = await this.clave.obtener();
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.post<any>('/rndc/verificar/tercero', { tipoId, numId, roles: [rol], ...(clave ? { clave } : {}) });
+      this.verificando.set(false);
+      if (r.origen === 'local') {
+        this.editar(r.registro, r.faltantes);
+        this.origen.set({ tipo: 'info', texto: `El documento ${tipoId} ${numId} ya está registrado en su empresa: revise o complete sus datos.` });
+      } else if (r.origen === 'rndc') {
+        this.editar(r.registro, r.faltantes);
+        this.origen.set({ tipo: 'ok', texto: `Datos recuperados del RNDC y guardados en su empresa${r.sedes > 1 ? ` (${r.sedes} sedes)` : ''}.${r.faltantes.length ? ' Complete solo lo que falta.' : ' Está completo.'}` });
+        this.cargar();
+      } else {
+        this.form.set({ ...vacio(), tipoId, numId, roles: [rol] });
+        this.faltantes.set([]); this.soloFaltantes.set(false); this.sincronizar = this.puedeRndc;
+        this.origen.set(r.consultado
+          ? { tipo: 'alerta', texto: `No está en el RNDC (respuesta: ${r.mensaje}). Es un registro nuevo: complete sus datos.` }
+          : { tipo: 'info', texto: 'Registro nuevo en su empresa. No se consultó el RNDC.' });
+        this.abierto.set(true);
+      }
+      if (clave && r.mensaje && /usuario|contrase|clave/i.test(r.mensaje)) this.clave.olvidar();
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+
+  editar(t: any, faltantes?: any[]) {
+    this.origen.set(null);
+    this.faltantes.set(faltantes || []);
+    this.soloFaltantes.set(!!faltantes?.length);
+    this.sincronizar = false;
+    if (!faltantes && this.puedeRndc && t._id) {
+      this.api.get<any>(`/rndc/faltantes/tercero/${t._id}`).then(r => this.faltantes.set(r.faltantes)).catch(() => {});
+    }
     const b = vacio();
     this.form.set({ ...b, ...t, sede: { ...b.sede, ...t.sede }, banco: { ...b.banco, ...t.banco },
       licencia: { ...b.licencia, ...t.licencia, vence: isoDia(t.licencia?.vence) }, fechaNacimiento: isoDia(t.fechaNacimiento) });
@@ -184,10 +263,11 @@ export class Terceros {
       roles: f.roles, activo: f.activo };
     this.trabajando.set(true);
     try {
-      if (f._id) await this.api.put(`/maestros/terceros/${f._id}`, cuerpo); else await this.api.post('/maestros/terceros', cuerpo);
+      const guardado = f._id ? await this.api.put<any>(`/maestros/terceros/${f._id}`, cuerpo) : await this.api.post<any>('/maestros/terceros', cuerpo);
       this.avisos.ok('Tercero guardado');
       this.abierto.set(false); this.cargar();
-    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+      if (this.sincronizar && this.puedeRndc) await this.enviar(guardado);
+    } catch (e) { this.avisos.mostrar(await mensajeError(e), 'error'); } finally { this.trabajando.set(false); }
   }
 
   async enviar(t: any) {

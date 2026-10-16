@@ -267,6 +267,94 @@ test('RNDC: contraseña incorrecta queda como rechazo del RNDC', async () => {
   assert.equal(r2.body.manifiesto.estado, 'aceptado');
 });
 
+test('Manifiestos RNDC: revisar, corregir tras un rechazo y reenviar', async () => {
+  const v = await s.reportero.post('/api/viajes', { fecha: '2026-11-02', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  s.viaje3 = v.body._id;
+  // Solo quien opera el RNDC corrige los datos de envío
+  assert.equal((await s.reportero.put(`/api/rndc/viajes/${s.viaje3}/datos`, { pesoKg: 1 })).status, 403);
+  const malo = await s.manif.post(`/api/rndc/viajes/${s.viaje3}/despachar`, { clave: 'clave-incorrecta' });
+  assert.equal(malo.body.remesa.estado, 'rechazado');
+  const prev = (await s.manif.get(`/api/rndc/viajes/${s.viaje3}/vista-previa`)).body;
+  assert.match(prev.ultimoError.mensaje, /no válidos/, 'se muestra la respuesta real del RNDC');
+  assert.equal(prev.documentos.remesa.estado, 'rechazado');
+  assert.deepEqual(prev.maestros.map(m => m.rol), ['Vehículo', 'Conductor']);
+  // Corrección antes de reenviar (devuelve la nueva vista previa)
+  const c = await s.manif.put(`/api/rndc/viajes/${s.viaje3}/datos`, { pesoKg: 4200, observaciones: 'Corregido', flete: 1400000 });
+  assert.equal(c.status, 200, JSON.stringify(c.body));
+  assert.ok(c.body.manifiesto.variables.some(([n, x]) => n === 'VALORFLETEPACTADOVIAJE' && x === '1400000'));
+  const ok = await s.manif.post(`/api/rndc/viajes/${s.viaje3}/despachar`, { clave: CLAVE_RNDC });
+  assert.equal(ok.body.manifiesto.estado, 'aceptado', JSON.stringify(ok.body));
+  assert.equal((await s.manif.get(`/api/rndc/viajes/${s.viaje3}/vista-previa`)).body.ultimoError, null);
+  // Con manifiesto aceptado ya no se editan sus datos aquí
+  assert.equal((await s.manif.put(`/api/rndc/viajes/${s.viaje3}/datos`, { pesoKg: 1 })).status, 409);
+});
+
+test('Viajes que no requieren manifiesto no aparecen en Manifiestos RNDC', async () => {
+  const v = await s.reportero.post('/api/viajes', { fecha: '2026-11-02', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123',
+    conductor: s.conductor, requiereManifiesto: false });
+  assert.equal(v.status, 201, JSON.stringify(v.body));
+  assert.equal(v.body.requiereManifiesto, false);
+  const pendientes = (await s.manif.get('/api/viajes?estado=registrado,remesa&rndc=1')).body.viajes.map(x => x._id);
+  assert.ok(!pendientes.includes(v.body._id));
+  const r = await s.manif.post(`/api/rndc/viajes/${v.body._id}/despachar`, { clave: CLAVE_RNDC });
+  assert.equal(r.status, 409);
+  // Se puede cambiar de opinión mientras no tenga documentos
+  assert.equal((await s.reportero.put(`/api/viajes/${v.body._id}`, { requiereManifiesto: true })).status, 200);
+  assert.ok((await s.manif.get('/api/viajes?estado=registrado,remesa&rndc=1')).body.viajes.some(x => x._id === v.body._id));
+  assert.equal((await s.reportero.del(`/api/viajes/${v.body._id}`)).status, 200);
+});
+
+test('Vehículos y terceros: verificar antes de crear (base local, RNDC o nuevo)', async () => {
+  // Ya existe en la empresa: no se duplica
+  const local = await s.manif.post('/api/rndc/verificar/vehiculo', { placa: 'abc-123' });
+  assert.equal(local.body.origen, 'local');
+  assert.equal(local.body.registro._id, s.vehiculo);
+  // Sin contraseña no se consulta el RNDC
+  assert.deepEqual((await s.manif.post('/api/rndc/verificar/vehiculo', { placa: 'NUE321' })).body, { origen: 'nuevo', consultado: false });
+  // Consulta al RNDC: no lo tiene → nuevo con el mensaje real
+  const nuevo = await s.manif.post('/api/rndc/verificar/vehiculo', { placa: 'NUE321', clave: CLAVE_RNDC });
+  assert.equal(nuevo.body.origen, 'nuevo');
+  assert.equal(nuevo.body.consultado, true);
+  assert.ok(nuevo.body.mensaje);
+  // Un conductor registrado en el RNDC desde otra plataforma (aquí se envía y se borra de la empresa)
+  const prop = await s.manif.post('/api/maestros/terceros', { tipoId: 'C', numId: '1098765432', nombres: 'Ana', apellido1: 'Rosero', celular: '3005556666',
+    direccion: 'Carrera 5 # 10-20', codMunicipio: '52001000', roles: ['conductor'], licencia: { categoria: 'C3', numero: '1098765432', vence: '2031-05-01' } });
+  assert.equal(prop.status, 201, JSON.stringify(prop.body));
+  const env = await s.manif.post(`/api/rndc/terceros/${prop.body._id}/enviar`, { clave: CLAVE_RNDC });
+  assert.equal(env.body.ok, true, JSON.stringify(env.body));
+  // Si existe en el RNDC pero no en la empresa, se crea con esos datos y queda sincronizado
+  await M.Tercero.deleteOne({ empresa: s.empresaA, _id: prop.body._id });
+  const rndc = await s.manif.post('/api/rndc/verificar/tercero', { tipoId: 'C', numId: '1098765432', clave: CLAVE_RNDC, roles: ['conductor'] });
+  assert.equal(rndc.body.origen, 'rndc', JSON.stringify(rndc.body));
+  assert.equal(rndc.body.registro.nombres, 'Ana');
+  assert.equal(rndc.body.registro.licencia.numero, '1098765432');
+  assert.equal(rndc.body.registro.rndc.estado, 'enviado');
+  assert.deepEqual(rndc.body.faltantes, []);
+  // Los faltantes se informan con su etiqueta
+  const f = await s.manif.get(`/api/rndc/faltantes/vehiculo/${s.vehiculo}`);
+  assert.equal(f.status, 200);
+  assert.ok(f.body.faltantes.every(x => x.etiqueta && x.variable));
+  // El reportero no verifica (no edita maestros)
+  assert.equal((await s.reportero.post('/api/rndc/verificar/vehiculo', { placa: 'NUE321' })).status, 403);
+});
+
+test('Plantillas de WhatsApp: crear, predeterminar, vista previa y eliminar', async () => {
+  const base = (await s.reportero.get('/api/viajes/plantillas-whatsapp')).body;
+  assert.equal(base.plantillas[0]._id, 'base');
+  assert.ok(base.marcadores.viaje.placa);
+  const p = await s.reportero.post('/api/viajes/plantillas-whatsapp', { nombre: 'Corta', encabezado: '{cliente} {fecha}', linea: '{placa} · {conductor} · {flete}',
+    separador: 'linea', pie: 'Total {total_flete}', predeterminada: true });
+  assert.equal(p.status, 201, JSON.stringify(p.body));
+  const rep = (await s.reportero.get('/api/viajes/reporte-whatsapp?fecha=2026-11-02&incluirReportados=1')).body;
+  assert.equal(rep.plantilla, p.body._id);
+  assert.match(rep.mensajes[0].texto, /^Distribuidora Sur 02\/11\/2026\n\nABC123 · Pedro Pérez Gómez · \$ 1\.400\.000 COP\n\nTotal \$ 1\.400\.000 COP\n$/);
+  const prev = await s.reportero.post('/api/viajes/reporte-whatsapp/vista-previa', { fecha: '2026-11-02', plantilla: { linea: 'Placa {placa}' } });
+  assert.match(prev.body.mensajes[0].texto, /Placa ABC123/);
+  assert.equal((await s.adminB.put(`/api/viajes/plantillas-whatsapp/${p.body._id}`, { nombre: 'X', linea: 'x' })).status, 404, 'otra empresa no la ve');
+  assert.equal((await s.reportero.del(`/api/viajes/plantillas-whatsapp/${p.body._id}`)).status, 200);
+  assert.equal((await s.reportero.get('/api/viajes/reporte-whatsapp?fecha=2026-11-02&incluirReportados=1')).body.plantilla, 'base');
+});
+
 test('RNDC: anulación de manifiesto por cambio de conductor y reemplazo', async () => {
   const r = await s.manif.post(`/api/rndc/viajes/${s.viaje2}/anular`, { clave: CLAVE_RNDC, documento: 'manifiesto', motivo: 'C', observaciones: 'Cambio de conductor' });
   assert.equal(r.body.ok, true, JSON.stringify(r.body));
