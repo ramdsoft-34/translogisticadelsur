@@ -10,6 +10,10 @@ import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
 import { FORMATOS, hoyIso, isoDia } from '../shared/formato';
 import { ExpedirRndc } from '../shared/expedir-rndc';
+import { SelectorMunicipio } from '../shared/municipio';
+import { BuscarTercero } from '../shared/buscar-tercero';
+import { Auth } from '../core/auth.service';
+import { P } from '../core/modelos';
 
 type Pestana = 'pendientes' | 'manifestados' | 'cumplidos' | 'historial';
 const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
@@ -18,14 +22,17 @@ const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
 
 @Component({
   selector: 'app-manifiestos',
-  imports: [FormsModule, Modal, Icono, Moneda, CargarMas, ExpedirRndc, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, Moneda, CargarMas, ExpedirRndc, SelectorMunicipio, BuscarTercero, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Manifiestos RNDC</h1><p class="sutil">Aquí se expiden las remesas y los manifiestos: revise los datos, envíelos al RNDC y, si hay un rechazo, corríjalos y reenvíe.
         Los viajes marcados como «no requiere manifiesto» no aparecen.</p></div>
-      @if (pestana() === 'pendientes' && seleccion().size) {
-        <button class="primario" (click)="enviarLote()" [disabled]="trabajando()"><app-icono nombre="enviar" />Enviar {{ seleccion().size }} seleccionado(s)</button>
-      }
+      <div class="acciones">
+        @if (pestana() === 'pendientes' && seleccion().size) {
+          <button (click)="enviarLote()" [disabled]="trabajando()"><app-icono nombre="enviar" />Enviar {{ seleccion().size }} seleccionado(s)</button>
+        }
+        @if (puedeCrear) { <button class="primario" (click)="nuevoManifiesto()"><app-icono nombre="mas" />Nuevo manifiesto</button> }
+      </div>
     </div>
 
     @if (ambiente() && ambiente() !== 'PRODUCCION') {
@@ -107,6 +114,42 @@ const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
       </div>
     }
 
+    <!-- Manifiesto y remesa sin registrar antes el viaje -->
+    <app-modal titulo="Nuevo manifiesto y remesa" [abierto]="directoAbierto()" (cerrar)="directoAbierto.set(false)" [ancho]="true">
+      @let d = directo();
+      <p class="sutil" style="margin-top:0">Para cualquier vehículo y conductor, sin registrar antes el viaje. Al continuar podrá revisar todo y enviarlo al RNDC.</p>
+      <form id="form-directo" class="secciones" (ngSubmit)="crearDirecto()">
+        <fieldset><legend>Cliente y ruta</legend><div class="rejilla">
+          <div class="campo"><label for="md-fecha">Fecha</label><input id="md-fecha" type="date" name="fecha" [(ngModel)]="d.fecha" required /></div>
+          <div class="campo"><label for="md-cli">Cliente (remitente)</label>
+            <select id="md-cli" name="cliente" [(ngModel)]="d.cliente" (ngModelChange)="d.tarifaRef = ''" required><option value="">Seleccione…</option>
+              @for (c of clientes(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }</select></div>
+          <div class="campo"><label for="md-dest">Destino</label>
+            <select id="md-dest" name="tarifa" [(ngModel)]="d.tarifaRef" (ngModelChange)="elegirTarifa($event)" [disabled]="!d.cliente"><option value="">Otro destino (escribir)</option>
+              @for (t of tarifasDe(d.cliente); track t._id) { <option [value]="t._id">{{ t.destino }}</option> }</select></div>
+          @if (!d.tarifaRef) {
+            <div class="campo"><label for="md-dn">Nombre del destino</label><input id="md-dn" name="destino" [(ngModel)]="d.destino" required /></div>
+            <app-municipio etiqueta="Municipio de destino" [(codigo)]="d.codDestino" />
+          }
+        </div></fieldset>
+        <fieldset><legend>Vehículo y conductor</legend><div class="rejilla">
+          <div class="campo"><label for="md-placa">Placa</label><input id="md-placa" name="placa" [(ngModel)]="d.placa" required maxlength="7" placeholder="ABC123" style="text-transform:uppercase" /></div>
+          <app-buscar-tercero etiqueta="Conductor" rol="conductor" [(valor)]="d.conductor" />
+          <div class="campo"><label for="md-rem">Remolque</label><input id="md-rem" name="remolque" [(ngModel)]="d.remolque" maxlength="7" placeholder="Opcional" style="text-transform:uppercase" /></div>
+        </div></fieldset>
+        <fieldset><legend>Carga y valores (COP)</legend><div class="rejilla">
+          <div class="campo"><label for="md-peso">Cantidad cargada (kg)</label><input id="md-peso" type="number" min="0" name="peso" [(ngModel)]="d.pesoKg" /></div>
+          <div class="campo"><label for="md-fl">Flete pactado</label><div class="moneda"><input id="md-fl" moneda name="flete" [(ngModel)]="d.flete" /></div></div>
+          <div class="campo"><label for="md-an">Anticipo</label><div class="moneda"><input id="md-an" moneda name="anticipo" [(ngModel)]="d.anticipo" /></div></div>
+        </div>
+        <div class="campo" style="margin-top:14px"><label for="md-obs">Observaciones (van en el manifiesto)</label><input id="md-obs" name="obs" maxlength="200" [(ngModel)]="d.observaciones" /></div></fieldset>
+      </form>
+      <ng-container pie>
+        <button type="button" (click)="directoAbierto.set(false)">Cancelar</button>
+        <button class="primario" type="submit" form="form-directo" [disabled]="trabajando() || !d.cliente || !d.placa || !d.conductor">Continuar a revisión</button>
+      </ng-container>
+    </app-modal>
+
     <!-- Expedición: revisar, corregir y enviar -->
     <app-expedir-rndc [viajeId]="expedir()" (cerrar)="expedir.set(null)" (actualizado)="cargar()" />
 
@@ -169,6 +212,12 @@ const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
         <button class="peligro" type="submit" form="form-anular" [disabled]="trabajando() || !a.motivo || !a.observaciones">Anular</button>
       </ng-container>
     </app-modal>`,
+  styles: [`
+    .secciones { display: flex; flex-direction: column; gap: 14px; }
+    .rejilla { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
+    .rejilla .campo > label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    @media (max-width: 760px) { .rejilla { grid-template-columns: 1fr; } }
+  `],
 })
 export class Manifiestos {
   private api = inject(Api);
@@ -185,6 +234,13 @@ export class Manifiestos {
   readonly procesos = computed(() => this.catalogos()?.procesos || {});
   readonly ambiente = signal('');
   readonly expedir = signal<string | null>(null);
+  // Manifiesto directo (sin registrar antes el viaje)
+  private auth = inject(Auth);
+  readonly puedeCrear = this.auth.tiene(P.VIAJES_REGISTRAR);
+  readonly directoAbierto = signal(false);
+  readonly directo = signal<any>({});
+  readonly clientes = signal<any[]>([]);
+  readonly tarifas = signal<any[]>([]);
   readonly cumplirViaje = signal<Viaje | null>(null);
   readonly cumplido = signal<any>(null);
   readonly anularViaje = signal<Viaje | null>(null);
@@ -223,6 +279,40 @@ export class Manifiestos {
       this.pagina += 1;
       this.viajes.update(l => [...l, ...r.viajes]);
     } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }
+  }
+
+  async nuevoManifiesto() {
+    this.directo.set({ fecha: hoyIso(), cliente: '', tarifaRef: '', destino: '', codDestino: '', placa: '', conductor: '', remolque: '',
+      pesoKg: null, flete: null, anticipo: null, observaciones: '' });
+    this.directoAbierto.set(true);
+    if (!this.clientes().length) {
+      try {
+        const [c, t] = await Promise.all([this.api.get<any[]>('/maestros/clientes'), this.api.get<any[]>('/maestros/tarifas')]);
+        this.clientes.set(c.filter(x => x.activo !== false)); this.tarifas.set(t.filter(x => x.activo !== false));
+      } catch (e) { this.avisos.error(e); }
+    }
+  }
+  tarifasDe(cliente: string) { return this.tarifas().filter(t => (t.cliente?._id || t.cliente) === cliente); }
+  elegirTarifa(id: string) {
+    const t = this.tarifas().find(x => x._id === id);
+    if (t) this.directo.update(d => ({ ...d, destino: t.destino, codDestino: t.codMunicipio, flete: t.fleteConductor, anticipo: t.anticipoHabitual, pesoKg: t.pesoKg || d.pesoKg }));
+  }
+
+  // Crea el registro del despacho (origen «manifiesto») y abre la revisión para enviarlo al RNDC.
+  async crearDirecto() {
+    const d = this.directo();
+    const cuerpo: any = { fecha: d.fecha, cliente: d.cliente, tarifaRef: d.tarifaRef || null, destino: d.destino, codDestino: d.codDestino || '',
+      placa: String(d.placa).toUpperCase().replace(/[\s-]/g, ''), remolque: String(d.remolque || '').toUpperCase(), conductor: d.conductor,
+      observaciones: d.observaciones || '', origen: 'manifiesto', requiereManifiesto: true };
+    for (const k of ['pesoKg', 'flete', 'anticipo']) if (d[k] !== null && d[k] !== '') cuerpo[k] = Number(d[k]);
+    this.trabajando.set(true);
+    try {
+      const v = await this.api.post<any>('/viajes', cuerpo);
+      this.directoAbierto.set(false);
+      this.avisos.ok(`Despacho N° ${v.numero} creado: revise y envíe al RNDC`);
+      this.ir('pendientes');
+      this.expedir.set(v._id);
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 
   entradas(o: Record<string, string> | undefined) { return Object.entries(o || {}); }

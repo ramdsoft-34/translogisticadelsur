@@ -74,8 +74,8 @@ import { FORMATOS, isoDia } from './formato';
               <div class="campo"><span class="etiqueta">Remolque</span><button type="button" class="pequeno" (click)="mostrarRemolque.set(true)">Agregar remolque</button></div>
             }
             <app-buscar-tercero etiqueta="Conductor" rol="conductor" [(valor)]="f.conductor" />
-            <app-buscar-tercero etiqueta="Titular del manifiesto" [(valor)]="f.titular" placeholder="Vacío = el conductor" />
-          </div></fieldset>
+          </div>
+          <p class="sutil" style="margin:10px 0 0;font-size:12.5px">El titular del manifiesto se toma del vehículo (titular habitual); si no tiene, es el conductor.</p></fieldset>
 
           @if (!p.remesaAceptada) {
             <fieldset><legend>Carga (remesa)</legend><div class="formulario">
@@ -193,7 +193,7 @@ export class ExpedirRndc {
   private cuerpo() {
     const f = this.form(); const p = this.previa();
     const c: any = { codOrigen: f.codOrigen || '', codDestino: f.codDestino || '', placa: String(f.placa || '').toUpperCase(),
-      remolque: String(f.remolque || '').toUpperCase(), titular: f.titular || null, observaciones: f.observaciones || '' };
+      remolque: String(f.remolque || '').toUpperCase(), observaciones: f.observaciones || '' };
     if (f.conductor) c.conductor = f.conductor;
     if (!p.remesaAceptada) { c.fecha = f.fecha; c.pesoKg = Number(f.pesoKg) || 0; c.destinatario = f.destinatario.tipoId ? f.destinatario : { tipoId: '', numId: '', sede: '' }; }
     if (this.puedeValores) { c.flete = Number(f.flete) || 0; c.anticipo = Number(f.anticipo) || 0; }

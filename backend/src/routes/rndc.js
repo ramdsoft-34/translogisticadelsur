@@ -10,6 +10,7 @@ import * as op from '../services/rndc/operaciones.js';
 import * as cat from '../services/rndc/catalogos.js';
 import { env } from '../config/env.js';
 import { parseFecha } from '../utils/texto.js';
+import { titularDePlaca } from './viajes.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -127,6 +128,8 @@ r.put('/viajes/:id/datos', operar, async (req, res) => {
     const c = await Tercero.findOne(deEmpresa(req, { _id: d.conductor })).select('nombres apellido1 apellido2').lean();
     d.conductorNombre = [c.nombres, c.apellido1, c.apellido2].filter(Boolean).join(' ');
   }
+  // Al cambiar la placa, el titular vuelve a tomarse del vehículo (o el conductor)
+  if (d.placa && d.placa !== v.placa && d.titular === undefined) d.titular = await titularDePlaca(req.empresaId, d.placa);
   v.set({ ...d, actualizadoPor: req.usuario._id });
   await v.save();
   await auditar(req, 'editar_viaje_rndc', { entidad: 'Viaje', entidadId: v._id, detalle: { numero: v.numero, cambios: cambios(antes, v.toObject(), Object.keys(d)) } });

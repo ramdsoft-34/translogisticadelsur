@@ -88,6 +88,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
                 <span class="chip" [class]="claseEstado(v.estado)">{{ estadoTexto(v.estado) }}</span>
                 @if (v.manifiesto.estado === 'aceptado') { <small class="sutil">{{ v.manifiesto.numero }}</small> }
                 @if (v.historico) { <span class="chip sin-punto" title="Importado del Excel: sus documentos RNDC se gestionaron fuera de la plataforma">Histórico</span> }
+                @if (v.origen === 'manifiesto') { <span class="chip sin-punto" title="Creado directamente en Manifiestos RNDC">Desde Manifiestos</span> }
                 @if (v.requiereManifiesto === false) { <span class="chip sin-punto" title="No genera remesa ni manifiesto en el RNDC">Sin manifiesto</span> }
                 @if (v.reporteWhatsapp?.fecha) { <span class="chip ok sin-punto" title="Reportado por WhatsApp">WA</span> }
               </span></td>
@@ -113,46 +114,6 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         <div class="mensaje info" style="margin-bottom:14px">Este viaje ya tiene documentos en el RNDC: solo puede cambiar observaciones, cantidad, auxiliar y tarifa.</div>
       }
       <form id="form-viaje" (ngSubmit)="guardar()" class="secciones">
-        <fieldset><legend>Cliente y ruta</legend><div class="formulario">
-          <div class="campo"><label for="v-fecha">Fecha</label><input id="v-fecha" type="date" name="fecha" [(ngModel)]="f.fecha" [disabled]="bloqueado()" required /></div>
-          <div class="campo"><label for="v-cli">Cliente</label>
-            <select id="v-cli" name="cliente" [(ngModel)]="f.cliente" (ngModelChange)="cambiarCliente($event)" [disabled]="bloqueado()" required>
-              <option value="">Seleccione…</option>
-              @for (c of clientesActivos(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }
-            </select></div>
-          <div class="campo"><label for="v-dest">Destino</label>
-            <select id="v-dest" name="tarifaRef" [(ngModel)]="f.tarifaRef" (ngModelChange)="cambiarDestino($event)" [disabled]="bloqueado() || !f.cliente">
-              <option value="">Otro destino (escribir)</option>
-              @for (t of tarifasCliente(); track t._id) { <option [value]="t._id">{{ t.destino }}</option> }
-            </select><small>Al escoger un destino se llenan tarifa, flete y anticipo.</small></div>
-          @if (!f.tarifaRef) {
-            <div class="campo"><label for="v-dest2">Nombre del destino</label><input id="v-dest2" name="destino" [(ngModel)]="f.destino" [disabled]="bloqueado()" required /></div>
-            <app-municipio etiqueta="Municipio de destino" [(codigo)]="f.codDestino" />
-          }
-        </div></fieldset>
-
-        <fieldset><legend>Vehículo y conductor</legend><div class="formulario">
-          <div class="campo"><label for="v-placa">Placa</label>
-            <input id="v-placa" name="placa" list="lista-placas" [(ngModel)]="f.placa" (input)="buscarPlacas(f.placa)" (change)="sugerirPorPlaca()"
-              [disabled]="bloqueado()" required autocomplete="off" style="text-transform:uppercase" placeholder="ABC123" />
-            <datalist id="lista-placas">@for (x of placas(); track x._id) { <option [value]="x.placa"></option> }</datalist>
-            <small>Sugiere el conductor habitual de la placa.</small></div>
-          <app-buscar-tercero etiqueta="Conductor" rol="conductor" [(valor)]="f.conductor" [deshabilitado]="bloqueado()" />
-          <app-buscar-tercero etiqueta="Titular del manifiesto (vacío = el conductor)" [(valor)]="f.titular" [deshabilitado]="bloqueado()" />
-          <div class="campo"><label for="v-rem">Remolque (opcional)</label><input id="v-rem" name="remolque" [(ngModel)]="f.remolque" [disabled]="bloqueado()" style="text-transform:uppercase" /></div>
-          <div class="campo"><label for="v-peso">Peso (kg)</label><input id="v-peso" type="number" min="0" name="pesoKg" [(ngModel)]="f.pesoKg" [disabled]="bloqueado()" /></div>
-          <div class="campo"><label for="v-cant">Cantidad (viajes o unidades)</label><input id="v-cant" type="number" min="0" name="cantidad" [(ngModel)]="f.cantidad" /></div>
-        </div></fieldset>
-
-        <fieldset><legend>Valores en pesos colombianos (COP)</legend><div class="formulario">
-          <div class="campo"><label for="v-tar">Tarifa al cliente</label><div class="moneda"><input id="v-tar" moneda name="tarifa" [(ngModel)]="f.tarifa" /></div></div>
-          <div class="campo"><label for="v-flete">Flete al conductor</label><div class="moneda"><input id="v-flete" moneda name="flete" [(ngModel)]="f.flete" [disabled]="bloqueado()" /></div></div>
-          <div class="campo"><label for="v-ant">Anticipo</label><div class="moneda"><input id="v-ant" moneda name="anticipo" [(ngModel)]="f.anticipo" [disabled]="bloqueado()" /></div></div>
-          <div class="campo saldo"><span class="etiqueta">Saldo al conductor</span><strong>{{ ((f.flete || 0) - (f.anticipo || 0)) | pesos }} <small>COP</small></strong></div>
-          <label class="casilla ancho"><input type="checkbox" name="aux" [(ngModel)]="f.conAuxiliar" /> El viaje lleva auxiliar</label>
-        </div></fieldset>
-
-        <div class="campo"><label for="v-obs">Observaciones (van en el manifiesto)</label><textarea id="v-obs" name="obs" maxlength="200" [(ngModel)]="f.observaciones"></textarea></div>
         <label class="casilla requiere">
           <input type="checkbox" name="requiere" [(ngModel)]="f.requiereManifiesto" [disabled]="bloqueado() || !!f.historico" />
           <span><strong>Requiere manifiesto de carga</strong><small>Desmárquelo si este viaje no debe expedir remesa ni manifiesto en el RNDC; no aparecerá en «Manifiestos RNDC».</small></span>
@@ -161,6 +122,53 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
           <div class="mensaje info">Viaje histórico importado del Excel: no aparece en «Manifiestos RNDC».
             @if (puedeEditarTodos) { <label class="casilla" style="margin-top:6px"><input type="checkbox" name="habilitar" [(ngModel)]="habilitarRndc" />Habilitarlo para expedir sus documentos en el RNDC</label> }</div>
         }
+
+        <fieldset><legend>Cliente y ruta</legend>
+          <div class="rejilla">
+            <div class="campo"><label for="v-fecha">Fecha</label><input id="v-fecha" type="date" name="fecha" [(ngModel)]="f.fecha" [disabled]="bloqueado()" required /></div>
+            <div class="campo"><label for="v-cli">Cliente</label>
+              <select id="v-cli" name="cliente" [(ngModel)]="f.cliente" (ngModelChange)="cambiarCliente($event)" [disabled]="bloqueado()" required>
+                <option value="">Seleccione…</option>
+                @for (c of clientesActivos(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }
+              </select></div>
+            <div class="campo"><label for="v-dest">Destino</label>
+              <select id="v-dest" name="tarifaRef" [(ngModel)]="f.tarifaRef" (ngModelChange)="cambiarDestino($event)" [disabled]="bloqueado() || !f.cliente">
+                <option value="">Otro destino (escribir)</option>
+                @for (t of tarifasCliente(); track t._id) { <option [value]="t._id">{{ t.destino }}</option> }
+              </select></div>
+            @if (!f.tarifaRef) {
+              <div class="campo"><label for="v-dest2">Nombre del destino</label><input id="v-dest2" name="destino" [(ngModel)]="f.destino" [disabled]="bloqueado()" required /></div>
+              <app-municipio etiqueta="Municipio de destino" [(codigo)]="f.codDestino" />
+            }
+          </div>
+          <p class="nota">Al escoger un destino del cliente se llenan la tarifa, el flete y el anticipo.</p>
+        </fieldset>
+
+        <fieldset><legend>Vehículo y conductor</legend>
+          <div class="rejilla">
+            <div class="campo"><label for="v-placa">Placa</label>
+              <input id="v-placa" name="placa" list="lista-placas" [(ngModel)]="f.placa" (input)="buscarPlacas(f.placa)" (change)="sugerirPorPlaca()"
+                [disabled]="bloqueado()" required autocomplete="off" style="text-transform:uppercase" placeholder="ABC123" />
+              <datalist id="lista-placas">@for (x of placas(); track x._id) { <option [value]="x.placa"></option> }</datalist></div>
+            <app-buscar-tercero etiqueta="Conductor" rol="conductor" [(valor)]="f.conductor" [deshabilitado]="bloqueado()" />
+            <div class="campo"><label for="v-rem">Remolque</label><input id="v-rem" name="remolque" [(ngModel)]="f.remolque" [disabled]="bloqueado()" style="text-transform:uppercase" placeholder="Opcional" /></div>
+            <div class="campo"><label for="v-peso">Peso (kg)</label><input id="v-peso" type="number" min="0" name="pesoKg" [(ngModel)]="f.pesoKg" [disabled]="bloqueado()" /></div>
+            <div class="campo"><label for="v-cant">Cantidad</label><input id="v-cant" type="number" min="0" name="cantidad" [(ngModel)]="f.cantidad" title="Viajes o unidades (tarifa por unidad)" /></div>
+          </div>
+          <p class="nota">Al escribir la placa se sugiere su conductor habitual. El titular del manifiesto se toma del vehículo; si no tiene, es el conductor.</p>
+        </fieldset>
+
+        <fieldset><legend>Valores en pesos colombianos (COP)</legend>
+          <div class="rejilla">
+            <div class="campo"><label for="v-tar">Tarifa al cliente</label><div class="moneda"><input id="v-tar" moneda name="tarifa" [(ngModel)]="f.tarifa" /></div></div>
+            <div class="campo"><label for="v-flete">Flete al conductor</label><div class="moneda"><input id="v-flete" moneda name="flete" [(ngModel)]="f.flete" [disabled]="bloqueado()" /></div></div>
+            <div class="campo"><label for="v-ant">Anticipo</label><div class="moneda"><input id="v-ant" moneda name="anticipo" [(ngModel)]="f.anticipo" [disabled]="bloqueado()" /></div></div>
+            <div class="campo"><span class="etiqueta">Saldo al conductor</span><div class="lectura">{{ ((f.flete || 0) - (f.anticipo || 0)) | pesos }} <small>COP</small></div></div>
+            <div class="campo"><span class="etiqueta">Auxiliar</span><label class="casilla caja"><input type="checkbox" name="aux" [(ngModel)]="f.conAuxiliar" />El viaje lleva auxiliar</label></div>
+          </div>
+        </fieldset>
+
+        <div class="campo"><label for="v-obs">Observaciones (van en el manifiesto)</label><textarea id="v-obs" name="obs" maxlength="200" rows="3" [(ngModel)]="f.observaciones"></textarea></div>
       </form>
       <ng-container pie>
         @if (form()._id && !bloqueado() && puedeRegistrar) { <button class="peligro" type="button" (click)="eliminar()" style="margin-right:auto">Eliminar</button> }
@@ -204,9 +212,15 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .resumen strong { font-size: 20px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
     .estados { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .secciones { display: flex; flex-direction: column; gap: 14px; }
-    .saldo { justify-content: flex-end; }
-    .saldo strong { font-size: 20px; font-weight: 650; padding: 6px 0; }
-    .saldo small { font-size: 11px; color: var(--gris-5); font-weight: 600; }
+    /* Formulario del viaje: rejilla fija de 3 columnas, etiquetas en una línea e inputs de igual alto */
+    .rejilla { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
+    .rejilla .campo > label, .rejilla .campo > .etiqueta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lectura { height: 42px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 0 12px; border-radius: 10px;
+      border: 1px dashed var(--gris-3); background: var(--gris-1); font-weight: 700; font-variant-numeric: tabular-nums; }
+    .lectura small { font-size: 11px; color: var(--gris-5); font-weight: 600; }
+    .caja { height: 42px; padding: 0 12px; border: 1px solid var(--gris-3); border-radius: 10px; background: var(--campo); }
+    .nota { margin: 12px 0 0; font-size: 12.5px; color: var(--gris-5); }
+    @media (max-width: 760px) { .rejilla { grid-template-columns: 1fr; } }
     .wa-texto { white-space: pre-wrap; font-family: inherit; background: var(--gris-1); border-radius: 10px; padding: 12px; margin: 0; font-size: 13.5px; }
     .boton.wa { background: var(--whatsapp); border-color: var(--whatsapp); color: #fff; }
     .requiere { align-items: flex-start; padding: 12px 14px; border: 1px solid var(--gris-2); border-radius: var(--radio); }
@@ -347,16 +361,15 @@ export class Viajes {
     if (placa.length < 5 || this.form().conductor) return;
     try {
       const s = await this.api.get<any>(`/viajes/sugerencias/placa/${encodeURIComponent(placa)}`);
-      this.form.update(f => ({ ...f, conductor: s.conductor || f.conductor, remolque: f.remolque || s.remolque || '',
-        titular: f.titular || s.titular || s.vehiculo?.titularHabitual || '' }));
+      this.form.update(f => ({ ...f, conductor: s.conductor || f.conductor, remolque: f.remolque || s.remolque || '' }));
     } catch { /* sin sugerencia */ }
   }
 
   async guardar() {
     const f = this.form();
     if (!f.conductor && !this.bloqueado()) { this.avisos.mostrar('Seleccione el conductor', 'error'); return; }
-    const cuerpo: any = { ...f, placa: f.placa.toUpperCase(), remolque: (f.remolque || '').toUpperCase(), tarifaRef: f.tarifaRef || null, titular: f.titular || null };
-    delete cuerpo._id; delete cuerpo.estado;
+    const cuerpo: any = { ...f, placa: f.placa.toUpperCase(), remolque: (f.remolque || '').toUpperCase(), tarifaRef: f.tarifaRef || null };
+    delete cuerpo._id; delete cuerpo.estado; delete cuerpo.titular;
     for (const k of ['pesoKg', 'cantidad', 'tarifa', 'flete', 'anticipo']) if (cuerpo[k] === null || cuerpo[k] === '') delete cuerpo[k];
     delete cuerpo.historico;
     if (this.bloqueado()) {

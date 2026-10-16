@@ -34,7 +34,14 @@ const viajeSchema = z.object({
   observaciones: z.string().trim().max(500).optional(),
   historico: z.boolean().optional(),
   requiereManifiesto: z.boolean().optional(),
+  origen: z.enum(['viajes', 'manifiesto']).optional(),
 });
+
+// El titular del manifiesto sale del vehículo (titular habitual); si no tiene, es el conductor (null).
+export async function titularDePlaca(empresaId, placa) {
+  const v = await Vehiculo.findOne({ empresa: empresaId, placa }).select('titularHabitual').lean();
+  return v?.titularHabitual || null;
+}
 // Después de expedir documentos en el RNDC solo se pueden cambiar datos internos.
 const CAMPOS_INTERNOS = ['observaciones', 'cantidad', 'conAuxiliar', 'tarifa', 'historico'];
 
@@ -209,6 +216,8 @@ r.post('/', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
     if (!d.destinatario?.numId && sug.destinatario?.numId) d.destinatario = sug.destinatario;
   }
   // Remolque habitual / conductor del vehículo no se imponen: solo se sugieren en la interfaz.
+  if (!d.titular) d.titular = await titularDePlaca(req.empresaId, d.placa);
+  if (d.origen === 'manifiesto') d.requiereManifiesto = true;
   const numero = await siguiente(req.empresaId, 'viaje');
   const cond = await Tercero.findOne(deEmpresa(req, { _id: d.conductor })).select('nombres apellido1 apellido2').lean();
   const v = await Viaje.create({ ...d, numero, conductorNombre: nombreTercero(cond), empresa: req.empresaId,
@@ -242,6 +251,9 @@ r.put('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
     const cond = await Tercero.findOne(deEmpresa(req, { _id: d.conductor })).select('nombres apellido1 apellido2').lean();
     d.conductorNombre = nombreTercero(cond);
   }
+  delete d.origen;
+  // Si cambia la placa, el titular vuelve a tomarse del vehículo
+  if (d.placa && d.placa !== v.placa && d.titular === undefined) d.titular = await titularDePlaca(req.empresaId, d.placa);
   v.set({ ...d, actualizadoPor: req.usuario._id });
   await v.save();
   await auditar(req, 'editar_viaje', { entidad: 'Viaje', entidadId: v._id,
@@ -265,7 +277,7 @@ r.get('/sugerencias/placa/:placa', permitir(P.VIAJES_VER), async (req, res) => {
   const placa = String(req.params.placa).toUpperCase().replace(/[\s-]/g, '');
   const v = await Vehiculo.findOne(deEmpresa(req, { placa })).populate(pob(req.empresaId, 'conductorHabitual', 'nombres apellido1 apellido2 numId')).lean();
   const ultimo = await Viaje.findOne(deEmpresa(req, { placa })).sort({ fecha: -1, numero: -1 }).select('conductor remolque titular').lean();
-  res.json({ vehiculo: v, conductor: v?.conductorHabitual?._id || ultimo?.conductor || null, remolque: ultimo?.remolque || '', titular: ultimo?.titular || null });
+  res.json({ vehiculo: v, conductor: v?.conductorHabitual?._id || ultimo?.conductor || null, remolque: ultimo?.remolque || '', titular: v?.titularHabitual || null });
 });
 
 export default r;

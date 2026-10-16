@@ -183,10 +183,10 @@ button.pequeno, .boton.pequeno { min-height: 32px; padding: 5px 10px; font-size:
 .campo label, .etiqueta { font-size: 13px; font-weight: 500; color: var(--gris-7); }
 .campo small { color: var(--gris-5); font-size: 12px; }
 input, select, textarea {
-  font: inherit; min-height: 40px; padding: 8px 12px; border: 1px solid var(--gris-3); border-radius: 10px; background: var(--campo);
+  font: inherit; min-height: 42px; padding: 8px 12px; border: 1px solid var(--gris-3); border-radius: 10px; background: var(--campo);
   color: var(--gris-8); width: 100%; transition: border-color var(--transicion), box-shadow var(--transicion);
 }
-input::placeholder, textarea::placeholder { color: var(--gris-4); }
+input::placeholder, textarea::placeholder { color: var(--gris-4); text-transform: none; }
 input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) { border-color: var(--gris-4); }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--gris-8); box-shadow: var(--anillo); }
 button:focus-visible, a:focus-visible { outline: none; box-shadow: var(--anillo); }

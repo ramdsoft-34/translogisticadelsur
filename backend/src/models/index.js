@@ -202,6 +202,8 @@ const viajeSchema = new Schema({
   manifiestoReemplazado: str(),
   // No todos los viajes generan remesa y manifiesto (p. ej. carga propia o urbana).
   requiereManifiesto: { type: Boolean, default: true },
+  // Dónde se creó: en Viajes (bitácora) o directamente en Manifiestos RNDC
+  origen: { type: String, enum: ['viajes', 'manifiesto'], default: 'viajes' },
   // Importado de la plantilla de Excel: sus documentos RNDC se gestionaron fuera de la
   // plataforma, por eso no aparece en «Por enviar» hasta que un usuario lo habilite.
   historico: { type: Boolean, default: false },

@@ -304,6 +304,25 @@ test('Viajes que no requieren manifiesto no aparecen en Manifiestos RNDC', async
   assert.equal((await s.reportero.del(`/api/viajes/${v.body._id}`)).status, 200);
 });
 
+test('Titular automático según la placa y manifiesto sin pasar por Viajes', async () => {
+  const tit = await s.manif.post('/api/maestros/terceros', { tipoId: 'C', numId: '7654321', nombres: 'Rosa', apellido1: 'Titular', celular: '3001112233',
+    direccion: 'Calle 9', codMunicipio: '52001000', roles: ['titular'] });
+  assert.equal(tit.status, 201, JSON.stringify(tit.body));
+  await s.manif.put(`/api/maestros/vehiculos/${s.vehiculo}`, { titularHabitual: tit.body._id });
+  // Creado desde Manifiestos RNDC: no se pide titular; sale del vehículo
+  const v = await s.manif.post('/api/viajes', { fecha: '2026-11-03', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123',
+    conductor: s.conductor, origen: 'manifiesto', requiereManifiesto: false });
+  assert.equal(v.status, 201, JSON.stringify(v.body));
+  assert.equal(v.body.titular._id, tit.body._id);
+  assert.equal(v.body.origen, 'manifiesto');
+  assert.equal(v.body.requiereManifiesto, true, 'lo creado en Manifiestos siempre requiere manifiesto');
+  // Sin titular habitual, el titular es el conductor (vacío)
+  await s.manif.put(`/api/maestros/vehiculos/${s.vehiculo}`, { titularHabitual: null });
+  const v2 = await s.reportero.post('/api/viajes', { fecha: '2026-11-03', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  assert.equal(v2.body.titular, null);
+  for (const x of [v.body._id, v2.body._id]) await s.manif.del(`/api/viajes/${x}`);
+});
+
 test('Vehículos y terceros: verificar antes de crear (base local, RNDC o nuevo)', async () => {
   // Ya existe en la empresa: no se duplica
   const local = await s.manif.post('/api/rndc/verificar/vehiculo', { placa: 'abc-123' });
