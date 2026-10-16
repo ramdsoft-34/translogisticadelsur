@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
 import { Avisos } from '../core/avisos.service';
+import { RndcClave } from '../core/rndc-clave.service';
 import { ESTADOS_VIAJE, P, Viaje } from '../core/modelos';
 import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
@@ -168,7 +169,8 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         <label class="casilla"><input type="checkbox" [(ngModel)]="waIncluir" (change)="cargarWhatsapp()" />Incluir los ya reportados</label>
       </div>
       <p class="sutil">Un mensaje por cliente con los viajes de la fecha, igual que en la plantilla. «Abrir WhatsApp» abre el chat con el texto escrito:
-        elija el contacto o grupo (si el cliente no tiene número) y presione Enviar. Después marque el mensaje como reportado.</p>
+        elija el contacto o grupo (si el cliente no tiene número) y presione Enviar. Después marque el mensaje como reportado.
+        @if (puedeOperarRndc) { «Crear remesas y manifiestos» los expide en el RNDC para los viajes del mensaje que aún no los tienen, estén reportados o no. }</p>
       @for (m of waMensajes(); track m.cliente) {
         <div class="tarjeta" style="margin-top:12px">
           <div class="pagina-cab" style="margin-bottom:8px"><div><h3 style="margin:0">{{ m.cliente }}</h3>
@@ -176,6 +178,11 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             <div class="acciones">
               <button class="pequeno" (click)="copiar(m.texto)">Copiar</button>
               <a class="boton pequeno wa" [href]="m.enlace" target="_blank" rel="noopener noreferrer"><app-icono nombre="enviar" [tam]="15" />Abrir WhatsApp</a>
+              @if (puedeOperarRndc && m.pendientesRndc?.length) {
+                <button class="pequeno oscuro" (click)="crearDocumentos(m)" [disabled]="expidiendo()"
+                  [title]="'Expide remesa y manifiesto de ' + m.pendientesRndc.length + ' viaje(s) en el RNDC'">
+                  <app-icono nombre="documento" [tam]="15" />{{ expidiendo() ? 'Enviando al RNDC…' : 'Crear remesas y manifiestos (' + m.pendientesRndc.length + ')' }}</button>
+              }
               @if (puedeRegistrar) { <button class="pequeno primario" (click)="marcarReportado(m)">Marcar reportado</button> }
             </div></div>
           <pre class="wa-texto">{{ m.texto }}</pre>
@@ -205,6 +212,9 @@ export class Viajes {
   private avisos = inject(Avisos);
   readonly puedeRegistrar = this.auth.tiene(P.VIAJES_REGISTRAR);
   readonly puedeEditarTodos = this.auth.tiene(P.VIAJES_EDITAR_TODOS);
+  readonly puedeOperarRndc = this.auth.tiene(P.RNDC_OPERAR);
+  private claveRndc = inject(RndcClave);
+  readonly expidiendo = signal(false);
   readonly periodos: [Periodo, string][] = [['hoy', 'Hoy'], ['ayer', 'Ayer'], ['semana', '7 días'], ['mes', 'Este mes'], ['rango', 'Rango']];
   readonly periodo = signal<Periodo>('hoy');
   readonly waAbierto = signal(false);
@@ -377,6 +387,30 @@ export class Viajes {
 
   async copiar(texto: string) {
     try { await navigator.clipboard.writeText(texto); this.avisos.ok('Mensaje copiado'); } catch { this.avisos.mostrar('No se pudo copiar; seleccione el texto manualmente', 'error'); }
+  }
+
+  // Expide remesa y manifiesto en el RNDC para los viajes del mensaje que aún no los tienen.
+  async crearDocumentos(m: any) {
+    const ids: string[] = m.pendientesRndc || [];
+    if (!ids.length) return;
+    if (!confirm(`¿Crear remesa y manifiesto en el RNDC para ${ids.length} viaje(s) de ${m.cliente}?`)) return;
+    const clave = await this.claveRndc.obtener();
+    if (!clave) return;
+    this.expidiendo.set(true);
+    try {
+      const r = await this.api.post<any[]>('/rndc/despachar-lote', { clave, viajes: ids });
+      const ok = r.filter(x => x.manifiesto?.estado === 'aceptado');
+      const fallos = r.filter(x => x.manifiesto?.estado !== 'aceptado').map(x => x.error || x.manifiesto?.mensaje || x.remesa?.mensaje || 'rechazado por el RNDC');
+      if (fallos.some(f => /usuario|contrase|clave|password/i.test(f))) this.claveRndc.olvidar();
+      if (!fallos.length) this.avisos.ok(`${m.cliente}: ${ok.length} manifiesto(s) aceptados (${ok.map(x => x.manifiesto.numero).join(', ')})`);
+      else this.avisos.mostrar(`${m.cliente}: ${ok.length} de ${ids.length} manifestados. ${fallos[0]}`, 'error');
+    } catch (e) {
+      this.avisos.error(e);
+    } finally {
+      this.expidiendo.set(false);
+      this.cargarWhatsapp();
+      this.cargar();
+    }
   }
 
   async marcarReportado(m: any) {
