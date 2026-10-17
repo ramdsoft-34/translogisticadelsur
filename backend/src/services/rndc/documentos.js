@@ -101,7 +101,7 @@ export function contextoViaje(empresa, viaje, vehiculo) {
     : viaje.tarifaRef?.destinatario?.numId ? viaje.tarifaRef.destinatario
       : viaje.destinatarioAuto?.numId ? viaje.destinatarioAuto : null;
   const pagoSaldo = cfg.pagoSaldo === 'dias' ? sumarDias(viaje.fecha, Number(cfg.diasPagoSaldo) || 0) : finDeMes(viaje.fecha);
-  const pbv = Number(vehiculo?.pbv) || 0;
+  const v = valoresManifiesto(empresa, viaje, vehiculo);
   return {
     NIT: nitEmpresa(empresa),
     PLACA: viaje.placa,
@@ -119,20 +119,38 @@ export function contextoViaje(empresa, viaje, vehiculo) {
     DEST_ID: dest?.numId || idCliente(cliente),
     // Sin destinatario propio, el destinatario es el cliente con su sede registrada en el RNDC
     DEST_SEDE: dest ? (dest.sede || '') : (cliente.sedeRemitente || ''),
-    COD_ORIGEN: viaje.codOrigen || cfg.codOrigen || '',
+    // El origen del manifiesto debe ser el municipio de la remesa: el de la sede del remitente (MAN353)
+    COD_ORIGEN: viaje.codOrigenSede || viaje.codOrigen || cfg.codOrigen || '',
     // El RNDC exige que el destino del manifiesto sea el municipio de la remesa, es decir,
     // el de la sede del destinatario (MAN354). Si se conoce, manda sobre el destino escrito.
     COD_DESTINO: viaje.codDestinoSede || viaje.codDestino || viaje.tarifaRef?.codMunicipio || '',
     PESO: numero(viaje.pesoKg),
-    FLETE: numero(viaje.flete),
-    ANTICIPO: numero(viaje.anticipo),
-    RETEFUENTE: numero(retencionFuente(viaje.flete, cfg.retefuentePct ?? 1)),
-    FOPAT: pbv > PBV_FOPAT ? numero(Math.round((Number(viaje.flete) || 0) * 0.001)) : '0',
+    FLETE: numero(v.flete),
+    // El anticipo no puede superar el neto a pagar (MAN270)
+    ANTICIPO: numero(v.anticipo),
+    RETEFUENTE: numero(v.retefuente),
+    FOPAT: numero(v.fopat),
     OPERACION: viaje.tarifaRef?.operacion || cfg.operacion || 'G',
     OBSERVACIONES: txt(viaje.observaciones).slice(0, 200),
     REMESA: viaje.remesa?.numero || '',
     MANIFIESTO: viaje.manifiesto?.numero || '',
   };
+}
+
+// Valores del manifiesto como los calcula el RNDC:
+//   neto = flete − retención en la fuente − retención ICA − FOPAT;  anticipo ≤ neto;  saldo = neto − anticipo.
+// FOPAT (0,1 % del flete) aplica si el peso bruto del vehículo supera 10.500 kg o si el RNDC ya lo exigió.
+export function valoresManifiesto(empresa, viaje, vehiculo) {
+  const cfg = empresa.rndc || {};
+  const flete = Math.round(Number(viaje.flete) || 0);
+  const retefuente = retencionFuente(flete, cfg.retefuentePct ?? 1);
+  const ica = Math.round(flete * (Number(cfg.reteIca) || 0) / 1000);
+  const fopatAplica = !!cfg.aplicarFopat && (vehiculo?.aplicaFopat === true || (Number(vehiculo?.pbv) || 0) > PBV_FOPAT);
+  const fopat = fopatAplica ? Math.round(flete * 0.001) : 0;
+  const neto = flete - retefuente - ica - fopat;
+  const registrado = Math.round(Number(viaje.anticipo) || 0);
+  const anticipo = Math.min(registrado, Math.max(0, neto));
+  return { flete, retefuente, ica, fopat, fopatAplica, neto, anticipo, saldo: neto - anticipo, anticipoAjustado: anticipo !== registrado, anticipoRegistrado: registrado };
 }
 
 // El RNDC rechaza (REM019) remesas cuyo punto de cargue y de descargue son la misma dirección:

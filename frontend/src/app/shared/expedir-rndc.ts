@@ -112,7 +112,24 @@ import { FORMATOS, isoDia } from './formato';
               <div class="campo"><span class="etiqueta">Anticipo</span><strong>{{ f.anticipo | pesos }}</strong></div>
             }
             <div class="campo ancho"><label for="ex-obs">Observaciones</label><input id="ex-obs" name="obs" maxlength="200" [(ngModel)]="f.observaciones" /></div>
-          </div></fieldset>
+          </div>
+          @if (p.valores; as val) {
+            <table class="valores" aria-label="Valores del viaje como los calcula el RNDC">
+              <tbody>
+                <tr><td>Valor a pagar por el viaje</td><td class="num">{{ val.flete | pesos }}</td></tr>
+                <tr><td>Retención en la fuente</td><td class="num">{{ val.retefuente | pesos }}</td></tr>
+                <tr><td>Retención ICA</td><td class="num">{{ val.ica | pesos }}</td></tr>
+                <tr><td>Retención FOPAT (0,1 %){{ val.fopatAplica ? '' : ' · no aplica' }}</td><td class="num">{{ val.fopat | pesos }}</td></tr>
+                <tr class="total"><td>Neto a pagar</td><td class="num">{{ val.neto | pesos }}</td></tr>
+                <tr><td>Valor anticipo</td><td class="num">{{ val.anticipo | pesos }}</td></tr>
+                <tr class="total"><td>Saldo por pagar</td><td class="num">{{ val.saldo | pesos }}</td></tr>
+              </tbody>
+            </table>
+            @if (val.anticipoAjustado) {
+              <p class="nota-valores">El anticipo registrado ({{ val.anticipoRegistrado | pesos }}) supera el neto a pagar: se enviará y guardará como {{ val.anticipo | pesos }}, como lo exige el RNDC.</p>
+            }
+          }
+          </fieldset>
         </form>
 
         <details class="variables"><summary>Ver lo que se enviará al RNDC</summary>
@@ -139,6 +156,11 @@ import { FORMATOS, isoDia } from './formato';
     .mensaje { margin-bottom: 12px; }
     .respuesta { display: flex; flex-direction: column; gap: 4px; }
     .respuesta span { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+    .valores { width: min(420px, 100%); margin-top: 14px; border: 1px solid var(--gris-2); border-radius: var(--radio); border-collapse: separate; }
+    .valores td { padding: 6px 12px; font-size: 13.5px; border-bottom: 1px solid var(--gris-15); }
+    .valores tr:last-child td { border-bottom: 0; }
+    .valores .total td { font-weight: 700; background: var(--gris-1); }
+    .nota-valores { margin: 8px 0 0; font-size: 13px; color: var(--ambar-texto); }
     .que-hacer { margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: var(--gris-0); color: var(--gris-8); font-size: 13.5px; }
     h3 { margin: 6px 0 8px; font-size: 14px; }
     .maestros { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 6px; }
@@ -212,6 +234,10 @@ export class ExpedirRndc {
     const t = String(m || '');
     if (/MAN130|titular no existe/i.test(t)) return 'El titular no está registrado en el RNDC. Use «Registrar de nuevo» junto al TITULAR (arriba) o cambie el titular en «Viaje» y presione «Corregir y reenviar».';
     if (/conductor.*no existe|MAN12\d/i.test(t)) return 'El conductor no está registrado en el RNDC. Use «Registrar de nuevo» junto al CONDUCTOR o elija otro conductor y reenvíe.';
+    if (/MAN353|municipio origen/i.test(t)) return 'El origen del manifiesto debe ser el municipio de la remesa (el de la sede del remitente). La plataforma ya lo toma así: presione «Corregir y reenviar».';
+    if (/MAN275|FOPAT/i.test(t)) return 'El RNDC exige la retención FOPAT (0,1 % del flete) para este vehículo. La plataforma ya la calcula: presione «Corregir y reenviar».';
+    if (/MAN270|anticipo supera/i.test(t)) return 'El anticipo no puede ser mayor que el neto a pagar (flete menos retenciones). La plataforma lo ajusta al neto: presione «Corregir y reenviar».';
+    if (/REM060|REM380|REM382|cantidad/i.test(t)) return 'Falta la cantidad cargada. Escriba el peso de la carga en kg en «Carga (remesa)» y presione «Corregir y reenviar».';
     if (/MAN354|municipio destino/i.test(t)) return 'El destino del manifiesto debe ser el mismo municipio de la remesa (el de la sede del destinatario). La plataforma ya lo toma así: presione «Corregir y reenviar».';
     if (/REM019|cargue y la direccion del punto de descargue/i.test(t)) return 'El destinatario no puede ser el mismo remitente en la misma sede. Elija en «Carga» la sede del cliente en el destino o quién recibe.';
     if (/REM180|REM200|destinatario/i.test(t)) return 'El destinatario o su sede no existen en el RNDC. Elija en «Carga» el destinatario y la sede correctos.';

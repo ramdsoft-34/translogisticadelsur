@@ -172,6 +172,8 @@ const vehiculoSchema = new Schema({
   modelo: { type: Number, default: null }, color: str(), carroceria: str(), combustible: str(),
   pesoVacio: { type: Number, default: null }, capacidad: { type: Number, default: null },
   pbv: { type: Number, default: null }, unidadMedida: str({ default: '1' }),
+  // true si el RNDC exige la retención FOPAT para este vehículo (se aprende del rechazo MAN275)
+  aplicaFopat: { type: Boolean, default: null },
   soat: { numero: str(), vence: fecha, aseguradoraNit: str() },
   venceTecnomecanica: fecha,
   propietario: idTercero(), tenedor: idTercero(),
