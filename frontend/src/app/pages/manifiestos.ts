@@ -122,6 +122,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                       @case ('anulados') {
                         <button class="pequeno primario" (click)="expedir.set(v._id)" [disabled]="trabajando()">
                           <app-icono nombre="enviar" [tam]="15" />{{ v.manifiesto.estado === 'anulado' ? 'Expedir reemplazo' : 'Expedir de nuevo' }}</button>
+                        @if (v.remesa.estado === 'aceptado' && v.manifiesto.estado !== 'aceptado') {
+                          <button class="pequeno peligro" (click)="abrirAnular(v)" title="La remesa sigue vigente en el RNDC">Anular remesa</button>
+                        }
                       }
                       @case ('pendientes') {
                         <button class="pequeno primario" (click)="expedir.set(v._id)" [disabled]="trabajando()">
@@ -273,21 +276,28 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
           <select id="a-doc" name="doc" [(ngModel)]="a.documento" (ngModelChange)="a.motivo = ''">
             @for (d of documentosAnulables(); track d[0]) { <option [value]="d[0]">{{ d[1] }}</option> }
           </select></div>
-        <div class="campo"><label for="a-mot">Motivo</label>
+        <div class="campo"><label for="a-mot">{{ a.documento === 'ambos' ? 'Motivo del manifiesto' : 'Motivo' }}</label>
           <select id="a-mot" name="mot" [(ngModel)]="a.motivo" required><option value="">Seleccione…</option>
             @for (m of motivos(a.documento); track m[0]) { <option [value]="m[0]">{{ m[1] }}</option> }</select>
-          @if (a.documento === 'manifiesto' && catalogos()?.motivosReemplazo.includes(a.motivo)) {
-            <small>Se marcará como reemplazo: al volver a enviar, el nuevo manifiesto indicará cuál reemplaza y reutilizará la remesa (manual RNDC 8.9.2).</small>
+          @if (a.documento === 'ambos') {
+            <label for="a-motr" class="sub">Motivo de la remesa</label>
+            <select id="a-motr" name="motr" [(ngModel)]="a.motivoRemesa" required><option value="">Seleccione…</option>
+              @for (m of motivos('remesa'); track m[0]) { <option [value]="m[0]">{{ m[1] }}</option> }</select>
+            <small>Se anula primero el manifiesto y luego la remesa, en el orden que exige el RNDC.</small>
+          }
+          @if ((a.documento === 'manifiesto' || a.documento === 'ambos') && catalogos()?.motivosReemplazo.includes(a.motivo)) {
+            <small>Se marcará como reemplazo: al volver a enviar, el nuevo manifiesto conserva el número con un punto al final ({{ anularViaje()?.manifiesto?.numero }}.) e indica cuál reemplaza (manual RNDC 8.9.2).</small>
           }</div>
         <div class="campo"><label for="a-obs">Observaciones</label><textarea id="a-obs" name="obs" maxlength="200" [(ngModel)]="a.observaciones" required></textarea></div>
         <div class="mensaje alerta">La anulación queda registrada en el RNDC y no se puede deshacer. El RNDC limita las anulaciones de manifiestos al 6 % mensual (sin contar reemplazos).</div>
       </form>
       <ng-container pie>
         <button type="button" (click)="anularViaje.set(null)">Cancelar</button>
-        <button class="peligro" type="submit" form="form-anular" [disabled]="trabajando() || !a.motivo || !a.observaciones">Anular</button>
+        <button class="peligro" type="submit" form="form-anular" [disabled]="trabajando() || !a.motivo || !a.observaciones || (a.documento === 'ambos' && !a.motivoRemesa)">{{ a.documento === 'ambos' ? 'Anular ambos' : 'Anular' }}</button>
       </ng-container>
     </app-modal>`,
   styles: [`
+    label.sub { margin-top: 10px; }
     .secciones { display: flex; flex-direction: column; gap: 14px; }
     .pendientes-correo { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; }
     .destinos { max-width: 240px; font-size: 13px; }
@@ -545,18 +555,19 @@ export class Manifiestos {
     if (!v) return [];
     if (v.estado === 'cumplido') return [['cumplidoManifiesto', 'Cumplido del manifiesto'], ...(v.cumplidoRemesa?.estado === 'aceptado' ? [['cumplidoRemesa', 'Cumplido de la remesa'] as [string, string]] : [])];
     if (v.estado === 'remesa') return [['remesa', `Remesa ${v.remesa.numero}`]];
-    return [['manifiesto', `Manifiesto ${v.manifiesto.numero}`]];
+    return [['manifiesto', `Solo el manifiesto ${v.manifiesto.numero}`],
+      ...(v.remesa?.estado === 'aceptado' ? [['ambos', `Manifiesto ${v.manifiesto.numero} y remesa ${v.remesa.numero}`] as [string, string]] : [])];
   }
 
   motivos(doc: string): [string, string][] {
     const c = this.catalogos();
     if (!c) return [];
-    return Object.entries(doc === 'manifiesto' ? c.motivoAnulacionManifiesto : doc === 'remesa' ? c.motivoAnulacionRemesa : c.motivoAnulacionCumplido);
+    return Object.entries(doc === 'manifiesto' || doc === 'ambos' ? c.motivoAnulacionManifiesto : doc === 'remesa' ? c.motivoAnulacionRemesa : c.motivoAnulacionCumplido);
   }
 
   abrirAnular(v: Viaje) {
     this.anularViaje.set(v);
-    this.anulacion.set({ documento: this.documentosAnulables()[0]?.[0] || 'manifiesto', motivo: '', observaciones: '' });
+    this.anulacion.set({ documento: this.documentosAnulables()[0]?.[0] || 'manifiesto', motivo: '', motivoRemesa: '', observaciones: '' });
   }
 
   async anular() {
@@ -565,6 +576,7 @@ export class Manifiestos {
     const r = await this.conClave(c => this.api.post<any>(`/rndc/viajes/${v._id}/anular`, { clave: c, ...this.anulacion() }));
     if (!r) return;
     if (r.ok) { this.avisos.ok(`Anulación aceptada (radicado ${r.radicado})`); this.anularViaje.set(null); }
+    else if (r.manifiesto?.ok) { this.anularViaje.set(null); this.avisos.mostrar(r.mensaje, 'error'); }
     else { this.revisarClave([r.mensaje]); this.avisos.mostrar(`El RNDC rechazó la anulación: ${r.mensaje}`, 'error'); }
     this.cargar();
   }

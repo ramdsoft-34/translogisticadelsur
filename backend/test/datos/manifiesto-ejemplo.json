@@ -1,0 +1,10 @@
+{ "empresa": "COOPERATIVA DE TRANSPORTES ESPANA", "empNit": "9001099592", "empDir": "CRA 67-CASA 4 B/TERRAZAS BRICEÑO", "empTel": "3006173837", "empCiudad": "PASTO NARINO",
+  "numero": "M10000001", "radicado": "100000001", "seguro": "X", "fechaRad": "2026/10/17 01:52", "fechaExp": "2026/10/17", "tipo": "General",
+  "origen": "CUJACAL PASTO NARINO", "destino": "LLORENTE TUMACO NARINO", "titular": "PEDRO PRUEBA TITULAR", "titDoc": "10000001", "titDir": "CALLE 1 # 2-3", "titTel": "0", "titCiudad": "PASTO NARINO",
+  "placa": "ABC123", "marca": "FOTON", "remolque": "", "config": "2", "pesoVacio": "3500", "pesoVacioRemolque": "0", "soatAseg": "890903407 SEGUROS GENERALES", "soatNum": "11111111", "soatVence": "2026/10/24",
+  "condNom": "CARLOS PRUEBA CONDUCTOR", "condDoc": "10000002", "condDir": "CALLE PRINCIPAL", "condTel": "7000000 0", "condLic": "C2-10000002", "condCiudad": "PASTO NARINO",
+  "remesa": "R10000001", "unidad": "Kilogramos", "cantidad": 5000, "naturaleza": "Carga Normal", "empaque": "Paquetes.", "mercanciaCod": "009980", "mercancia": "VIVERES ABARROTES Y ELECTRODOMESTICOS",
+  "remNit": "8909009431", "remNom": "COLOMBIANA DE COMERCIO", "remDir": "VARIANTE PERIMETRAL PANAMERICANA KM14", "remLugar": "CUJACAL PASTO NARINO",
+  "desNit": "8909009431", "desNom": "COLOMBIANA DE COMERCIO", "desDir": "CALLE PRINCIPAL", "desLugar": "LLORENTE TUMACO NARINO", "dueno": "Empresa de Transporte",
+  "flete": 1650000, "rete": 16500, "ica": 0, "fopat": 0, "neto": 1633500, "anticipo": 900000, "saldo": 733500, "lugarPago": "PASTO NARINO", "fechaPago": "2026/10/31",
+  "carguePor": "REMITENTE", "descarguePor": "DESTINATARIO", "observaciones": "" }

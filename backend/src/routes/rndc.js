@@ -48,7 +48,7 @@ r.get('/catalogos', (_req, res) => {
 // ── Configuración RNDC de la empresa ────────────────────────────────────────
 const configSchema = z.object({
   ambiente: z.enum(['SIMULADO', 'PRUEBAS', 'PRODUCCION']).optional(),
-  usuario: t(60), prefijoRemesa: t(8), prefijoManifiesto: t(8), codOrigen: divipola,
+  usuario: t(60), razonSocial: t(120), prefijoRemesa: t(8), prefijoManifiesto: t(8), codOrigen: divipola,
   poliza: z.object({ numero: t(20), vence: z.union([z.string(), z.null()]).optional().transform(v => (v ? parseFecha(v) : null)),
     aseguradoraNit: t(11), dueno: z.enum(['E', 'G', 'N']).optional().default('E') }).optional(),
   mercancia: z.object({ codigo: t(6), descripcion: t(60) }).optional(),
@@ -230,13 +230,15 @@ r.post('/viajes/:id/cumplir', operar, async (req, res) => {
 
 r.post('/viajes/:id/anular', operar, async (req, res) => {
   const d = z.object({
-    clave, documento: z.enum(['remesa', 'manifiesto', 'cumplidoRemesa', 'cumplidoManifiesto']),
-    motivo: z.string().trim().length(1), observaciones: z.string().trim().min(3, 'explique el motivo').max(200),
+    clave, documento: z.enum(['remesa', 'manifiesto', 'ambos', 'cumplidoRemesa', 'cumplidoManifiesto']),
+    motivo: z.string().trim().length(1), motivoRemesa: z.string().trim().max(1).optional().default(''),
+    observaciones: z.string().trim().min(3, 'explique el motivo').max(200),
     manifiestoNuevo: t(15),
   }).parse(req.body);
-  const validos = { remesa: cat.MOTIVO_ANULACION_REMESA, manifiesto: cat.MOTIVO_ANULACION_MANIFIESTO,
+  const validos = { remesa: cat.MOTIVO_ANULACION_REMESA, manifiesto: cat.MOTIVO_ANULACION_MANIFIESTO, ambos: cat.MOTIVO_ANULACION_MANIFIESTO,
     cumplidoRemesa: cat.MOTIVO_ANULACION_CUMPLIDO, cumplidoManifiesto: cat.MOTIVO_ANULACION_CUMPLIDO }[d.documento];
   if (!validos[d.motivo]) throw new ErrorHttp(400, 'Motivo de anulación no válido');
+  if (d.documento === 'ambos' && !cat.MOTIVO_ANULACION_REMESA[d.motivoRemesa]) throw new ErrorHttp(400, 'Elija el motivo de anulación de la remesa');
   const resultado = await op.anular(req.empresaId, req.params.id, d.clave, req.usuario._id, d);
   await auditar(req, 'rndc_anular', { entidad: 'Viaje', entidadId: req.params.id, detalle: { documento: d.documento, motivo: d.motivo, ok: resultado.ok } });
   res.json(resultado);

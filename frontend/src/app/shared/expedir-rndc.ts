@@ -26,6 +26,10 @@ import { Confirmar } from './confirmar';
           <span>Cliente: <strong>{{ viaje()?.cliente?.nombre }}</strong></span>
           <span>Remesa: <span class="chip" [class]="chip(p.documentos.remesa.estado)">{{ p.documentos.remesa.numero || 'nueva' }} · {{ p.documentos.remesa.estado || 'sin enviar' }}</span></span>
           <span>Manifiesto: <span class="chip" [class]="chip(p.documentos.manifiesto.estado)">{{ p.documentos.manifiesto.numero || 'nuevo' }} · {{ p.documentos.manifiesto.estado || 'sin enviar' }}</span></span>
+          @if (p.reemplazo?.remesa || p.reemplazo?.manifiesto) {
+            <span class="chip ok sin-punto" title="El reemplazo conserva el número anulado con «A» (remesa) o «.» (manifiesto)">Reemplazo:
+              {{ p.reemplazo.remesa }}{{ p.reemplazo.remesa && p.reemplazo.manifiesto ? ' · ' : '' }}{{ p.reemplazo.manifiesto }}</span>
+          }
           @if (p.ambiente !== 'PRODUCCION') { <span class="chip alerta sin-punto">Ambiente {{ p.ambiente === 'SIMULADO' ? 'simulador' : 'de pruebas' }}</span> }
         </div>
 

@@ -564,9 +564,29 @@ test('RNDC: anulación de manifiesto por cambio de conductor y reemplazo', async
   assert.ok((await ids('anulados=1')).includes(s.viaje2));
   const nuevo = await s.manif.post(`/api/rndc/viajes/${s.viaje2}/despachar`, { clave: CLAVE_RNDC });
   assert.equal(nuevo.body.manifiesto.estado, 'aceptado', JSON.stringify(nuevo.body));
-  assert.notEqual(nuevo.body.manifiesto.numero, v.manifiesto.numero, 'el reemplazo usa un número nuevo');
+  assert.equal(nuevo.body.manifiesto.numero, `${v.manifiesto.numero}.`, 'el reemplazo conserva el número con un punto al final');
   const enviado = sim.estado.manifiestos.get(`9001112221|${nuevo.body.manifiesto.numero}`);
   assert.equal(enviado.MANNROMANIFIESTOTRANSBORDO, v.manifiesto.numero);
+});
+
+test('RNDC: anular manifiesto y remesa a la vez; el reemplazo conserva los números (R…A y M….)', async () => {
+  const v = await s.reportero.post('/api/viajes', { fecha: '2026-11-07', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const d = (await s.manif.post(`/api/rndc/viajes/${v.body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  assert.equal(d.manifiesto.estado, 'aceptado', JSON.stringify(d));
+  const sinMotivo = await s.manif.post(`/api/rndc/viajes/${v.body._id}/anular`, { clave: CLAVE_RNDC, documento: 'ambos', motivo: 'V', observaciones: 'Cambio de vehiculo' });
+  assert.equal(sinMotivo.status, 400);
+  const r = await s.manif.post(`/api/rndc/viajes/${v.body._id}/anular`, { clave: CLAVE_RNDC, documento: 'ambos', motivo: 'V', motivoRemesa: 'D', observaciones: 'Cambio de vehiculo' });
+  assert.equal(r.body.ok, true, JSON.stringify(r.body));
+  let x = (await s.manif.get(`/api/viajes/${v.body._id}`)).body;
+  assert.equal(x.estado, 'registrado');
+  assert.equal(x.remesa.estado, 'anulado');
+  assert.equal(x.manifiesto.estado, 'anulado');
+  const previa = (await s.manif.get(`/api/rndc/viajes/${v.body._id}/vista-previa`)).body;
+  assert.deepEqual(previa.reemplazo, { remesa: `${d.remesa.numero}A`, manifiesto: `${d.manifiesto.numero}.` });
+  const nuevo = (await s.manif.post(`/api/rndc/viajes/${v.body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  assert.equal(nuevo.remesa.numero, `${d.remesa.numero}A`);
+  assert.equal(nuevo.manifiesto.numero, `${d.manifiesto.numero}.`);
+  assert.equal(nuevo.manifiesto.estado, 'aceptado', JSON.stringify(nuevo));
 });
 
 test('RNDC: cumplido de remesa y manifiesto', async () => {

@@ -170,8 +170,8 @@ export async function vistaPrevia(empresaId, viajeId) {
   const empresa = await empresaConRndc(empresaId);
   const { v, vehiculo } = await cargarViaje(empresaId, viajeId);
   const ctx = contextoViaje(empresa, v, vehiculo);
-  const numR = v.remesa?.numero || `${empresa.rndc?.prefijoRemesa || ''}(siguiente)`;
-  const numM = v.manifiesto?.numero || `${empresa.rndc?.prefijoManifiesto || ''}(siguiente)`;
+  const numR = v.remesa?.estado === 'anulado' ? numeroReemplazo('remesa', v.remesa.numero) : v.remesa?.numero || `${empresa.rndc?.prefijoRemesa || ''}(siguiente)`;
+  const numM = v.manifiesto?.estado === 'anulado' ? numeroReemplazo('manifiesto', v.manifiesto.numero) : v.manifiesto?.numero || `${empresa.rndc?.prefijoManifiesto || ''}(siguiente)`;
   const remesa = variablesRemesa(empresa, v, ctx, numR);
   const manifiesto = variablesManifiesto(empresa, v, ctx, numM);
   const remolque = v.remolque ? await Vehiculo.findOne({ empresa: empresaId, placa: v.remolque }).lean() : null;
@@ -181,6 +181,8 @@ export async function vistaPrevia(empresaId, viajeId) {
     ambiente: empresa.rndc?.ambiente,
     estado: v.estado, requiereManifiesto: v.requiereManifiesto !== false,
     documentos: { remesa: v.remesa || {}, manifiesto: v.manifiesto || {} },
+    // Números con los que saldrá el reemplazo de lo anulado
+    reemplazo: { remesa: v.remesa?.estado === 'anulado' ? numR : '', manifiesto: v.manifiesto?.estado === 'anulado' ? numM : '' },
     remesaAceptada,
     // Respuesta textual del RNDC en el último rechazo (para corregir y reenviar)
     ultimoError: ultimo && !(v.manifiesto?.estado === 'aceptado')
@@ -229,6 +231,16 @@ export async function numeroUsado(empresaId, clave, numero) {
   return Viaje.findOne(f).select('numero').lean();
 }
 
+// Reemplazo de un documento anulado: conserva el número original con una marca al final,
+// «A» en la remesa (R10062959 → R10062959A) y «.» en el manifiesto (M10062959 → M10062959.).
+export const MARCA_REEMPLAZO = { remesa: 'A', manifiesto: '.' };
+export const numeroReemplazo = (clave, anulado) => `${anulado}${MARCA_REEMPLAZO[clave]}`;
+async function numeroDeReemplazo(empresaId, clave, anulado) {
+  let numero = numeroReemplazo(clave, anulado);
+  for (let i = 0; i < 20 && (await numeroUsado(empresaId, clave, numero)); i += 1) numero = numeroReemplazo(clave, numero);
+  return numero;
+}
+
 // Siguiente consecutivo libre: si la numeración se bajó, salta los números ya usados.
 async function numeroDocumento(empresa, clave, prefijo) {
   for (let i = 0; i < 5000; i += 1) {
@@ -262,7 +274,8 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
       if (destinoIgualOrigen(ctx)) problemas.push(PROBLEMA_DESTINO);
       if (!(Number(v.pesoKg) > 0)) problemas.push(PROBLEMA_CANTIDAD);
       if (problemas.length) throw new ErrorHttp(422, 'Faltan datos para la remesa', problemas);
-      if (!numR || v.remesa?.estado === 'anulado') numR = await numeroDocumento(empresa, 'remesa', empresa.rndc?.prefijoRemesa);
+      if (v.remesa?.estado === 'anulado') numR = await numeroDeReemplazo(empresa._id, 'remesa', v.remesa.numero);
+      else if (!numR) numR = await numeroDocumento(empresa, 'remesa', empresa.rndc?.prefijoRemesa);
       const vars = variablesRemesa(empresa, v, ctx, numR);
       const res = await registrar(empresa, cred, 3, vars, meta);
       const doc = { numero: numR, radicado: res.radicado, fecha: new Date(), estado: res.ok ? 'aceptado' : 'rechazado', mensaje: res.mensaje, qr: '' };
@@ -280,7 +293,8 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
       resultado.ajustes = [`Anticipo ajustado de ${val.anticipoRegistrado} a ${val.anticipo} (neto a pagar)`];
     }
     let numM = v.manifiesto?.numero;
-    if (!numM || v.manifiesto?.estado === 'anulado') numM = await numeroDocumento(empresa, 'manifiesto', empresa.rndc?.prefijoManifiesto);
+    if (v.manifiesto?.estado === 'anulado') numM = await numeroDeReemplazo(empresa._id, 'manifiesto', v.manifiesto.numero);
+    else if (!numM) numM = await numeroDocumento(empresa, 'manifiesto', empresa.rndc?.prefijoManifiesto);
     const vars = variablesManifiesto(empresa, v, ctx, numM);
     const problemas = validarVariables(4, vars);
     if (problemas.length) {
@@ -337,11 +351,26 @@ export async function cumplir(empresaId, viajeId, clave, usuarioId, datos) {
 }
 
 // Anulación de un documento del viaje (procesos 9, 32, 28, 29).
+// Con documento «ambos» anula el manifiesto y luego la remesa (el orden que exige el RNDC);
+// la remesa lleva su propio motivo (motivoRemesa).
 export async function anular(empresaId, viajeId, clave, usuarioId, datos) {
   const empresa = await empresaConRndc(empresaId);
   const cred = credenciales(empresa, clave);
   await bloquear(empresaId, viajeId);
   try {
+    if (datos.documento !== 'ambos') return await anularDocumento(empresa, cred, empresaId, viajeId, usuarioId, datos);
+    const manifiesto = await anularDocumento(empresa, cred, empresaId, viajeId, usuarioId, { ...datos, documento: 'manifiesto' });
+    if (!manifiesto.ok) return { ...manifiesto, mensaje: `Manifiesto: ${manifiesto.mensaje}` };
+    const remesa = await anularDocumento(empresa, cred, empresaId, viajeId, usuarioId, { ...datos, documento: 'remesa', motivo: datos.motivoRemesa });
+    return { ok: remesa.ok, radicado: [manifiesto.radicado, remesa.radicado].filter(Boolean).join(' y '), manifiesto, remesa,
+      mensaje: remesa.ok ? '' : `El manifiesto quedó anulado, pero el RNDC rechazó la anulación de la remesa: ${remesa.mensaje}. Anúlela desde «Anulados».` };
+  } finally {
+    await desbloquear(empresaId, viajeId);
+  }
+}
+
+async function anularDocumento(empresa, cred, empresaId, viajeId, usuarioId, datos) {
+  {
     const { v } = await cargarViaje(empresaId, viajeId);
     const doc = datos.documento;
     const requisitos = {
@@ -370,8 +399,6 @@ export async function anular(empresaId, viajeId, clave, usuarioId, datos) {
       await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: set });
     }
     return { ok: res.ok, radicado: res.radicado, mensaje: res.mensaje };
-  } finally {
-    await desbloquear(empresaId, viajeId);
   }
 }
 

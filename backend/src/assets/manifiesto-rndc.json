@@ -1,0 +1,1454 @@
+{
+"pagina": [
+855.0,
+612.0
+],
+"dibujos": [
+{
+"t": "r",
+"x": 29.1,
+"y": 205.36,
+"w": 181.42,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 116.39,
+"y": 102.71,
+"w": 85.04,
+"h": 25.51,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 28.85,
+"y": 323.43,
+"w": 340.16,
+"h": 12.75,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 683.6,
+"y": 230.86,
+"w": 111.0,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 661.85,
+"y": 256.36,
+"w": 132.75,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 591.35,
+"y": 256.36,
+"w": 70.5,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 508.85,
+"y": 256.36,
+"w": 82.5,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 323.93,
+"y": 256.36,
+"w": 184.91,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 210.38,
+"y": 256.36,
+"w": 113.39,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 508.85,
+"y": 230.86,
+"w": 174.75,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 384.09,
+"y": 230.86,
+"w": 124.75,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 571.85,
+"y": 205.36,
+"w": 111.75,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 508.85,
+"y": 205.36,
+"w": 63.0,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 323.93,
+"y": 205.36,
+"w": 184.91,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 93.83,
+"y": 230.86,
+"w": 82.2,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 210.55,
+"y": 205.36,
+"w": 113.39,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 29.27,
+"y": 230.86,
+"w": 64.63,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 252.5,
+"y": 230.86,
+"w": 70.87,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 176.04,
+"y": 230.86,
+"w": 76.54,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 28.85,
+"y": 128.06,
+"w": 87.87,
+"h": 25.51,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 29.01,
+"y": 256.36,
+"w": 181.42,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 116.34,
+"y": 128.06,
+"w": 85.04,
+"h": 25.51,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 201.08,
+"y": 128.06,
+"w": 170.08,
+"h": 25.51,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 512.6,
+"y": 128.06,
+"w": 170.08,
+"h": 25.51,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 28.85,
+"y": 190.27,
+"w": 765.64,
+"h": 15.0,
+"relleno": "#e3e3e3",
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 493.1,
+"y": 84.68,
+"w": 189.75,
+"h": 19.84,
+"relleno": "#e3e3e3",
+"trazo": null,
+"grosor": 0
+},
+{
+"t": "r",
+"x": 493.1,
+"y": 107.8,
+"w": 189.75,
+"h": 16.84,
+"relleno": "#e3e3e3",
+"trazo": null,
+"grosor": 0
+},
+{
+"t": "l",
+"x1": 794.48,
+"y1": 205.27,
+"x2": 794.48,
+"y2": 232.2,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 28.85,
+"y1": 264.41,
+"x2": 28.85,
+"y2": 291.33,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 661.85,
+"y": 281.86,
+"w": 132.75,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 591.35,
+"y": 281.86,
+"w": 70.5,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 508.85,
+"y": 281.86,
+"w": 82.5,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 323.77,
+"y": 281.86,
+"w": 185.08,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 210.22,
+"y": 281.86,
+"w": 113.39,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 28.85,
+"y": 281.86,
+"w": 181.42,
+"h": 25.5,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 541.92,
+"y": 323.72,
+"w": 172.91,
+"h": 12.75,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 369.0,
+"y": 323.72,
+"w": 172.91,
+"h": 12.75,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 28.85,
+"y": 307.21,
+"w": 765.64,
+"h": 16.5,
+"relleno": "#e3e3e3",
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 714.83,
+"y": 323.72,
+"w": 79.5,
+"h": 12.75,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 85.54,
+"y1": 324.35,
+"x2": 85.54,
+"y2": 337.85,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 142.23,
+"y1": 324.35,
+"x2": 142.23,
+"y2": 337.85,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 179.08,
+"y1": 324.35,
+"x2": 179.08,
+"y2": 337.85,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 232.94,
+"y1": 324.35,
+"x2": 232.94,
+"y2": 337.85,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 28.85,
+"y1": 292.47,
+"x2": 28.85,
+"y2": 320.82,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 370.89,
+"y": 128.06,
+"w": 141.73,
+"h": 25.51,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 28.85,
+"y": 153.57,
+"w": 172.01,
+"h": 25.51,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 200.51,
+"y": 153.57,
+"w": 170.08,
+"h": 25.51,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 370.99,
+"y": 153.57,
+"w": 141.73,
+"h": 25.51,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 512.72,
+"y": 153.57,
+"w": 170.08,
+"h": 25.51,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 682.8,
+"y1": 179.08,
+"x2": 794.2,
+"y2": 179.08,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 794.48,
+"y1": 179.08,
+"x2": 794.48,
+"y2": 206.01,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 28.85,
+"y1": 179.08,
+"x2": 28.85,
+"y2": 196.09,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 369.0,
+"y1": 336.6,
+"x2": 369.0,
+"y2": 377.1,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 232.94,
+"y1": 336.6,
+"x2": 232.94,
+"y2": 377.1,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 179.08,
+"y1": 336.6,
+"x2": 179.08,
+"y2": 377.1,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 142.23,
+"y1": 336.6,
+"x2": 142.23,
+"y2": 377.1,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 85.54,
+"y1": 336.6,
+"x2": 85.54,
+"y2": 377.1,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 714.83,
+"y1": 336.6,
+"x2": 714.83,
+"y2": 377.1,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 541.92,
+"y1": 336.6,
+"x2": 541.92,
+"y2": 377.1,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 794.2,
+"y1": 336.6,
+"x2": 794.2,
+"y2": 377.1,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 28.85,
+"y1": 336.6,
+"x2": 28.85,
+"y2": 377.1,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 28.85,
+"y1": 376.63,
+"x2": 794.2,
+"y2": 376.63,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 29.13,
+"y": 392.03,
+"w": 765.35,
+"h": 99.21,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 158.39,
+"y": 473.66,
+"w": 107.72,
+"h": 13.61,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 286.8,
+"y1": 392.02,
+"x2": 286.8,
+"y2": 488.4,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "l",
+"x1": 493.73,
+"y1": 392.02,
+"x2": 493.73,
+"y2": 488.4,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 293.97,
+"y": 457.65,
+"w": 195.59,
+"h": 14.17,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 293.64,
+"y": 429.05,
+"w": 195.59,
+"h": 14.17,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 434.04,
+"y": 393.76,
+"w": 51.02,
+"h": 19.84,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 320.65,
+"y": 393.79,
+"w": 79.37,
+"h": 19.84,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 158.38,
+"y": 460.05,
+"w": 107.72,
+"h": 13.61,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 158.41,
+"y": 419.23,
+"w": 107.72,
+"h": 13.61,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 29.13,
+"y": 491.23,
+"w": 765.35,
+"h": 12.76,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 313.07,
+"y": 504.27,
+"w": 252.12,
+"h": 34.02,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 158.41,
+"y": 392.02,
+"w": 107.72,
+"h": 13.61,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 158.41,
+"y": 405.63,
+"w": 107.72,
+"h": 13.61,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 158.41,
+"y": 432.84,
+"w": 107.72,
+"h": 13.61,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 158.41,
+"y": 446.45,
+"w": 107.72,
+"h": 13.61,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 29.6,
+"y": 504.17,
+"w": 283.46,
+"h": 34.02,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 564.76,
+"y": 504.27,
+"w": 229.77,
+"h": 34.02,
+"relleno": null,
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 29.13,
+"y": 377.85,
+"w": 257.95,
+"h": 14.17,
+"relleno": "#e3e3e3",
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 287.08,
+"y": 377.85,
+"w": 206.93,
+"h": 14.17,
+"relleno": "#e3e3e3",
+"trazo": "#000000",
+"grosor": 0.75
+},
+{
+"t": "r",
+"x": 494.01,
+"y": 377.85,
+"w": 300.47,
+"h": 14.17,
+"relleno": "#e3e3e3",
+"trazo": "#000000",
+"grosor": 0.75
+}
+],
+"textos": [
+{
+"x": 490.96,
+"y": 36.65,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "\"La impresión en soporte cartular (papel) de este acto administrativo"
+},
+{
+"x": 490.96,
+"y": 44.15,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "producido por medios electronicos en cumplimiento de la ley 527 de"
+},
+{
+"x": 490.96,
+"y": 51.65,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "1999 (Articulos 6 al 13) y de la ley 962 de 2005 (Articulo 6), es una"
+},
+{
+"x": 490.96,
+"y": 59.15,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "reproducción del documento original que se encuentra en formato"
+},
+{
+"x": 490.96,
+"y": 66.65,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "electrónico en la Base de Datos del RNDC en el Ministerio de"
+},
+{
+"x": 490.96,
+"y": 74.15,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "Transporte, cuya representación digital goza de autenticidad,"
+},
+{
+"x": 490.96,
+"y": 81.65,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "integridad y no repudio\""
+},
+{
+"x": 33.81,
+"y": 214.38,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "TITULAR MANIFIESTO"
+},
+{
+"x": 734.53,
+"y": 238.47,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "F.Vencimiento SOAT"
+},
+{
+"x": 520.91,
+"y": 136.18,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "DESTINO DEL VIAJE"
+},
+{
+"x": 604.73,
+"y": 264.82,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "No de LICENCIA"
+},
+{
+"x": 207.94,
+"y": 136.81,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "ORIGEN DEL VIAJE"
+},
+{
+"x": 521.05,
+"y": 264.82,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "TELEFONOS"
+},
+{
+"x": 578.43,
+"y": 214.38,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "CIUDAD"
+},
+{
+"x": 682.15,
+"y": 264.82,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "CIUDAD CONDUCTOR"
+},
+{
+"x": 521.28,
+"y": 238.47,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "COMPAÑIA SEGUROS SOAT"
+},
+{
+"x": 689.57,
+"y": 238.47,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "No POLIZA"
+},
+{
+"x": 519.99,
+"y": 214.38,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "TELEFONOS"
+},
+{
+"x": 364.14,
+"y": 264.82,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "DIRECCION"
+},
+{
+"x": 394.34,
+"y": 238.47,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "PesoVacío     PesoVacíoRemolque"
+},
+{
+"x": 330.13,
+"y": 214.38,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "DIRECCION"
+},
+{
+"x": 217.87,
+"y": 264.82,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "DOCUMENTO IDENTIFICACION"
+},
+{
+"x": 176.89,
+"y": 238.47,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "PLACA SEMIREMOLQUE"
+},
+{
+"x": 220.48,
+"y": 214.38,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "DOCUMENTO  IDENTIFICACION"
+},
+{
+"x": 52.92,
+"y": 264.82,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "CONDUCTOR"
+},
+{
+"x": 327.94,
+"y": 238.47,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "CONFIGURACION"
+},
+{
+"x": 121.38,
+"y": 238.47,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "MARCA"
+},
+{
+"x": 41.53,
+"y": 238.4,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "PLACA"
+},
+{
+"x": 33.55,
+"y": 136.81,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "FECHA DE EXPEDICION"
+},
+{
+"x": 239.67,
+"y": 47.6,
+"tam": 12.0,
+"negrita": true,
+"color": "#000000",
+"texto": "MANIFIESTO ELECTRONICO DE CARGA"
+},
+{
+"x": 128.0,
+"y": 136.81,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "TIPO DE MANIFIESTO"
+},
+{
+"x": 283.87,
+"y": 202.12,
+"tam": 10.0,
+"negrita": true,
+"color": "#000000",
+"texto": "INFORMACION DEL TITULAR, VEHICULO Y CONDUCTORES"
+},
+{
+"x": 603.81,
+"y": 290.9,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "No de LICENCIA"
+},
+{
+"x": 621.82,
+"y": 302.87,
+"tam": 8.0,
+"negrita": false,
+"color": "#000000",
+"texto": " - "
+},
+{
+"x": 521.05,
+"y": 290.9,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "TELEFONOS"
+},
+{
+"x": 684.15,
+"y": 290.9,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "CIUDAD CONDUCTOR 2"
+},
+{
+"x": 364.14,
+"y": 290.9,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "DIRECCION CONDUCTOR 2"
+},
+{
+"x": 217.71,
+"y": 290.9,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "DOCUMENTO IDENTIFICACION"
+},
+{
+"x": 77.41,
+"y": 290.9,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "CONDUCTOR Nro. 2"
+},
+{
+"x": 301.15,
+"y": 320.92,
+"tam": 10.0,
+"negrita": true,
+"color": "#000000",
+"texto": "INFORMACION DE LA MERCANCIA TRANSPORTADA"
+},
+{
+"x": 241.32,
+"y": 333.65,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "Empaque"
+},
+{
+"x": 284.02,
+"y": 333.65,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "Producto Transportado"
+},
+{
+"x": 188.22,
+"y": 333.65,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "Naturaleza"
+},
+{
+"x": 390.97,
+"y": 334.53,
+"tam": 7.0,
+"negrita": false,
+"color": "#000000",
+"texto": "Información Remitente  / Lugar Cargue"
+},
+{
+"x": 559.33,
+"y": 334.53,
+"tam": 7.0,
+"negrita": false,
+"color": "#000000",
+"texto": "Información Destinatario / Lugar Descargue"
+},
+{
+"x": 733.97,
+"y": 333.65,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "Dueño Poliza"
+},
+{
+"x": 148.45,
+"y": 334.53,
+"tam": 7.0,
+"negrita": false,
+"color": "#000000",
+"texto": "Cantidad"
+},
+{
+"x": 91.5,
+"y": 334.53,
+"tam": 7.0,
+"negrita": false,
+"color": "#000000",
+"texto": "Unidad Medida"
+},
+{
+"x": 33.98,
+"y": 334.53,
+"tam": 7.0,
+"negrita": false,
+"color": "#000000",
+"texto": "Nro. Remesa"
+},
+{
+"x": 255.78,
+"y": 238.47,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "PLACA SEMIREMOL  2"
+},
+{
+"x": 118.49,
+"y": 110.13,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "FECHA HORA RADICACION"
+},
+{
+"x": 379.33,
+"y": 135.86,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "MUNICIPIO INTERMEDIO"
+},
+{
+"x": 35.41,
+"y": 162.32,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "ORIGEN TRAYECTO EN VACIO 1"
+},
+{
+"x": 208.18,
+"y": 162.32,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "DESTINO TRAYECTO EN VACIO 1"
+},
+{
+"x": 375.56,
+"y": 162.32,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "ORIGEN TRAYECTO EN VACIO 2"
+},
+{
+"x": 519.99,
+"y": 162.32,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "DESTINO TRAYECTO EN VACIO 2"
+},
+{
+"x": 32.37,
+"y": 188.3,
+"tam": 6.0,
+"negrita": true,
+"color": "#000000",
+"texto": "VIA A UTILIZAR : "
+},
+{
+"x": 44.34,
+"y": 416.14,
+"tam": 7.0,
+"negrita": false,
+"color": "#000000",
+"texto": "RETENCION EN LA FUENTE"
+},
+{
+"x": 44.83,
+"y": 462.17,
+"tam": 7.0,
+"negrita": false,
+"color": "#000000",
+"texto": "VALOR NETO A PAGAR"
+},
+{
+"x": 58.75,
+"y": 473.51,
+"tam": 7.0,
+"negrita": false,
+"color": "#000000",
+"texto": "VALOR ANTICIPO"
+},
+{
+"x": 59.84,
+"y": 487.68,
+"tam": 7.0,
+"negrita": false,
+"color": "#000000",
+"texto": "SALDO A PAGAR"
+},
+{
+"x": 35.98,
+"y": 501.74,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "VALOR TOTAL DEL VIAJE EN LETRAS:"
+},
+{
+"x": 294.65,
+"y": 426.85,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "CARGUE PAGADO POR"
+},
+{
+"x": 295.61,
+"y": 456.95,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "DESCARGUE PAGADO POR"
+},
+{
+"x": 316.26,
+"y": 515.2,
+"tam": 8.0,
+"negrita": true,
+"color": "#000000",
+"texto": "Firma y Huella TITULAR MANIFIESTO  o  ACEPTACION DIGITAL"
+},
+{
+"x": 49.26,
+"y": 402.64,
+"tam": 7.0,
+"negrita": false,
+"color": "#000000",
+"texto": "VALOR TOTAL DEL VIAJE"
+},
+{
+"x": 63.92,
+"y": 431.15,
+"tam": 7.0,
+"negrita": false,
+"color": "#000000",
+"texto": "RETENCION ICA"
+},
+{
+"x": 292.09,
+"y": 403.42,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "LUGAR"
+},
+{
+"x": 292.09,
+"y": 410.92,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "DE PAGO"
+},
+{
+"x": 408.31,
+"y": 406.25,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "FECHA"
+},
+{
+"x": 568.14,
+"y": 514.87,
+"tam": 8.0,
+"negrita": true,
+"color": "#000000",
+"texto": "Firma y Huella del CONDUCTOR  o  ACEPTACION DIGITAL"
+},
+{
+"x": 31.14,
+"y": 515.9,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "Si es víctima de algún fraude o conoce de alguna irregularidad en el Registro Nacional de Despachos de"
+},
+{
+"x": 31.14,
+"y": 523.4,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "Carga RNDC denúncielo a la Superintendencia de Puertos y Transporte, en la línea  gratuita nacional"
+},
+{
+"x": 31.14,
+"y": 530.9,
+"tam": 6.0,
+"negrita": false,
+"color": "#000000",
+"texto": "018000 915615  y a través del correo electrónico: atencionciudadano@supertransporte.gov.co"
+},
+{
+"x": 187.13,
+"y": 389.31,
+"tam": 10.0,
+"negrita": true,
+"color": "#000000",
+"texto": "VALORES"
+},
+{
+"x": 502.5,
+"y": 389.48,
+"tam": 10.0,
+"negrita": true,
+"color": "#000000",
+"texto": "OBSERVACIONES"
+},
+{
+"x": 55.58,
+"y": 446.06,
+"tam": 7.0,
+"negrita": false,
+"color": "#000000",
+"texto": "RETENCION FOPAT "
+}
+],
+"imagenes": {
+"transporte": [
+30.51,
+30.25,
+100.04,
+58.87
+],
+"supertransporte": [
+31.02,
+88.37,
+83.91,
+37.68
+],
+"qr": [
+683.93,
+30.02,
+119.7,
+119.7
+]
+}
+}

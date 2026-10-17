@@ -88,6 +88,8 @@ type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
             <div class="tarjeta">
               <h2>Mercancía, póliza y tiempos de la remesa</h2>
               <div class="formulario">
+                <div class="campo ancho"><label for="rs">Razón social registrada en el RNDC</label><input id="rs" name="rs" maxlength="120" [(ngModel)]="c.razonSocial" placeholder="Ej. COOPERATIVA DE TRANSPORTES ESPANA" />
+                  <small>Tal como aparece en los manifiestos que imprime el RNDC; va en el encabezado del PDF.</small></div>
                 <div class="campo"><label for="mc">Código de producto (RNDC)</label><input id="mc" name="mc" maxlength="6" [(ngModel)]="c.mercancia.codigo" /></div>
                 <div class="campo"><label for="md">Descripción corta</label><input id="md" name="md" maxlength="60" [(ngModel)]="c.mercancia.descripcion" /></div>
                 <div class="campo"><label for="nc">Naturaleza de la carga</label><select id="nc" name="nc" [(ngModel)]="c.naturalezaCarga">@for (n of naturaleza(); track n[0]) { <option [value]="n[0]">{{ n[1] }}</option> }</select></div>
@@ -235,7 +237,7 @@ export class Configuracion {
 
   async guardarConfig() {
     const c = this.cfg();
-    const campos = ['ambiente', 'usuario', 'codOrigen', 'poliza', 'mercancia', 'naturalezaCarga', 'tipoEmpaque',
+    const campos = ['ambiente', 'usuario', 'razonSocial', 'codOrigen', 'poliza', 'mercancia', 'naturalezaCarga', 'tipoEmpaque',
       'unidadMedida', 'operacion', 'retefuentePct', 'reteIca', 'responsablePagoCargue', 'responsablePagoDescargue', 'horaCitaCargue',
       'horaCitaDescargue', 'horasPactoCargue', 'horasPactoDescargue', 'aceptacionElectronica', 'pagoSaldo', 'diasPagoSaldo',
       'codMunicipioPagoSaldo', 'nitMonitoreoFlota', 'aplicarFopat', 'extras', 'consecutivoRemesa', 'consecutivoManifiesto'];

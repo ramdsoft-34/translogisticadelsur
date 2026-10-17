@@ -30,6 +30,7 @@ const empresaSchema = new Schema({
   rndc: {
     ambiente: { type: String, enum: ['SIMULADO', 'PRUEBAS', 'PRODUCCION'], default: 'SIMULADO' },
     usuario: str(),                       // usuario web service asignado por el Ministerio
+    razonSocial: str(),                   // nombre de la empresa tal como está registrada en el RNDC (encabezado del manifiesto)
     prefijoRemesa: str(), prefijoManifiesto: str(),
     codOrigen: str(),                     // DIVIPOLA (8 dígitos) del origen habitual
     poliza: { numero: str(), vence: fecha, aseguradoraNit: str(), dueno: str({ default: 'E' }) },
