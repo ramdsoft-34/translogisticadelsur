@@ -26,3 +26,13 @@ test('Manifiesto: el PDF usa la página y los textos del formato oficial', async
   assert.ok(pdf.length > 20000);
   assert.match(textoQR({ ...d, radicado: '126061258', seguro: 'ABC' }), /^MEC:126061258\r\nFecha:2026\/10\/17\r\nPlaca:ABC123\r\nConfig:2\r\nOrig:CUJACAL PASTO NARINO\r\nDest:LLORENTE TUMACO NARI/);
 });
+
+test('Municipios: los nombres del RNDC con centro poblado se resuelven al centro poblado, no al municipio', async () => {
+  const { buscadorMunicipios } = await import('../src/services/importacion/excel.js');
+  const filas = JSON.parse(fs.readFileSync(new URL('../data/municipios.json', import.meta.url), 'utf8'));
+  const buscar = buscadorMunicipios(filas.map(([codigo, nombre, departamento]) => ({ codigo, nombre, departamento })));
+  assert.equal(buscar('EL PLATEADO ARGELIA CAUCA'), '19050006');
+  assert.equal(buscar('LLORENTE TUMACO NARINO'), '52835031');
+  assert.equal(buscar('CATAMBUCO PASTO NARINO'), '52001001');
+  assert.equal(buscar('ARGELIA CAUCA'), '19050000');
+});

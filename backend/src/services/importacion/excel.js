@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import ExcelJS from 'exceljs';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { normalizar } from '../../utils/texto.js';
+import { lugarRndc } from '../../utils/lugares.js';
 
 export const MAX_BYTES = 15 * 1024 * 1024;
 export const MAX_FILAS = 10000;
@@ -118,6 +119,9 @@ export function buscadorMunicipios(municipios) {
   const porNombre = new Map();
   for (const m of municipios) {
     exacto.set(normalizar(`${m.nombre} ${m.departamento}`), m.codigo);
+    // También como lo escribe el RNDC (ej. LLORENTE TUMACO NARINO)
+    const rndc = normalizar(lugarRndc(m));
+    if (!exacto.has(rndc)) exacto.set(rndc, m.codigo);
     const n = normalizar(m.nombre);
     if (!porNombre.has(n)) porNombre.set(n, []);
     porNombre.get(n).push(m);

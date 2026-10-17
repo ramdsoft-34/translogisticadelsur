@@ -45,6 +45,18 @@ import { Confirmar } from './confirmar';
         @if (faltan().length) {
           <div class="mensaje error"><strong>Faltan datos según el diccionario del RNDC:</strong><ul>@for (x of faltan(); track x) { <li>{{ x }}</li> }</ul></div>
         }
+        @if (destinoManifiestoMal()) {
+          <!-- MAN354: el municipio de la sede del destinatario no coincide con el que tiene el RNDC -->
+          <div class="resolver" role="group" aria-label="Corregir el destino del manifiesto">
+            <strong>El destino del manifiesto debe ser el municipio que el RNDC tiene para la sede del destinatario.</strong>
+            <span>Se enviará a <strong>{{ p.destinoManifiesto }}</strong>{{ p.destinatario?.nombreSede ? ' (sede ' + p.destinatario.sede + ' ' + p.destinatario.nombreSede + ')' : '' }}.
+              Si el RNDC la tiene en otro lugar (por ejemplo un centro poblado como El Plateado), actualice la sede desde el RNDC y reenvíe.</span>
+            <div class="opciones">
+              <button type="button" class="primario pequeno" (click)="traerSedes(p.destinatario)" [disabled]="trabajando()">
+                <app-icono nombre="enviar" [tam]="14" />Actualizar la sede del destinatario desde el RNDC</button>
+            </div>
+          </div>
+        }
         @if (problemaDestino()) {
           <!-- REM019: se resuelve aquí mismo eligiendo quién recibe -->
           <div class="resolver" role="group" aria-label="Elegir quién recibe">
@@ -63,7 +75,7 @@ import { Confirmar } from './confirmar';
               } @else {
                 <span>{{ p.cliente?.nombre }} no tiene una sede registrada en ese municipio (solo tiene {{ p.sedesCliente?.length || 0 }} sede(s) en la plataforma). Puede:</span>
                 <ol>
-                  <li><button type="button" class="primario pequeno" (click)="traerSedesCliente()" [disabled]="trabajando()">
+                  <li><button type="button" class="primario pequeno" (click)="traerSedes(p.cliente)" [disabled]="trabajando()">
                     <app-icono nombre="enviar" [tam]="14" />Buscar las sedes de {{ p.cliente?.nombre }} en el RNDC</button>
                     <small>Trae las sedes que el cliente tenga registradas en el RNDC (pide la contraseña).</small></li>
                   @if (otrasSedes().length) {
@@ -309,7 +321,7 @@ export class ExpedirRndc {
     if (/MAN275|FOPAT/i.test(t)) return 'El RNDC exige la retención FOPAT (0,1 % del flete) para este vehículo. La plataforma ya la calcula: presione «Corregir y reenviar».';
     if (/MAN270|anticipo supera/i.test(t)) return 'El anticipo no puede ser mayor que el neto a pagar (flete menos retenciones). La plataforma lo ajusta al neto: presione «Corregir y reenviar».';
     if (/REM060|REM380|REM382|cantidad/i.test(t)) return 'Falta la cantidad cargada. Escriba el peso de la carga en kg en «Carga (remesa)» y presione «Corregir y reenviar».';
-    if (/MAN354|municipio destino/i.test(t)) return 'El destino del manifiesto debe ser el mismo municipio de la remesa (el de la sede del destinatario). La plataforma ya lo toma así: presione «Corregir y reenviar».';
+    if (/MAN354|municipio destino/i.test(t)) return 'El destino del manifiesto debe ser el municipio que el RNDC tiene para la sede del destinatario de la remesa. Use «Actualizar la sede del destinatario desde el RNDC» (abajo) y luego «Corregir y reenviar».';
     if (/DUPLICADO|REM030|ya fu[eé] radicado/i.test(t)) return 'Ese número ya está radicado en el RNDC (lo usó otro documento o un envío anterior). Escriba en «Números en el RNDC» un número que no se haya usado y presione «Corregir y reenviar».';
     if (/REM019|cargue y la direccion del punto de descargue/i.test(t)) return 'El destinatario no puede ser el mismo remitente en la misma sede. Elija en «Carga» la sede del cliente en el destino o quién recibe.';
     if (/REM180|REM200|destinatario/i.test(t)) return 'El destinatario o su sede no existen en el RNDC. Elija en «Carga» el destinatario y la sede correctos.';
@@ -332,9 +344,11 @@ export class ExpedirRndc {
     this.elegirSede(sede);
     if (await this.guardar(true)) this.avisos.ok(`Recibe la sede ${sede}`);
   }
-  async traerSedesCliente() {
-    const cli = this.previa()?.cliente; const id = this.viajeId();
-    if (!cli || !id) return;
+  readonly destinoManifiestoMal = computed(() => /MAN354/.test(this.previa()?.ultimoError?.mensaje || '') && !!this.previa()?.destinatario?.numId);
+  // Trae del RNDC las sedes de un tercero (cliente o destinatario) con su municipio real
+  async traerSedes(cli: { tipoId: string; numId: string } | null | undefined) {
+    const id = this.viajeId();
+    if (!cli?.numId || !id) return;
     const c = await this.clave.obtener();
     if (!c) return;
     this.trabajando.set(true);
@@ -342,8 +356,15 @@ export class ExpedirRndc {
       const [r] = await this.api.post<any[]>('/rndc/importar/terceros', { clave: c, roles: ['destinatario'], documentos: [{ tipoId: cli.tipoId, numId: cli.numId }] });
       if (!r?.ok) { this.avisos.mostrar(r?.mensaje || 'El RNDC no devolvió sedes', 'error'); if (/usuario|contrase|clave/i.test(r?.mensaje || '')) this.clave.olvidar(); return; }
       const antes = this.previa()?.sedesCliente?.length || 0;
+      const destinoAntes = this.previa()?.destinoManifiesto;
       const p = await this.api.get<any>(`/rndc/viajes/${id}/vista-previa`);
       this.previa.set(p);
+      if (this.destinoManifiestoMal()) {
+        this.avisos.ok(p.destinoManifiesto !== destinoAntes
+          ? `Sede actualizada: el manifiesto irá a ${p.destinoManifiesto}. Presione «Corregir y reenviar».`
+          : `Sedes actualizadas desde el RNDC; el destino sigue en ${p.destinoManifiesto}.`);
+        return;
+      }
       const nuevas = (p.sedesCliente?.length || 0) - antes;
       this.avisos.ok(nuevas > 0 ? `Se trajeron ${nuevas} sede(s) nueva(s) del RNDC` : 'El RNDC no tiene más sedes de este cliente');
       if (!this.sedesEnDestino().length && nuevas >= 0) this.avisos.mostrar('El cliente no tiene sede en el municipio de destino: elija otra sede u otro destinatario', 'info');
@@ -361,7 +382,7 @@ export class ExpedirRndc {
     this.form.update(f => ({ ...f, destinatario: s ? { tipoId: s.tipoId, numId: s.numId, sede: s.sede } : { tipoId: '', numId: '', sede: '' } }));
   }
   origenDestinatario(o: string) {
-    return ({ viaje: 'definido en este viaje', tarifa: 'definido en la tarifa del destino', municipio: 'sede del cliente en el municipio de destino',
+    return ({ remesa: 'el de la remesa ya aceptada', viaje: 'definido en este viaje', tarifa: 'definido en la tarifa del destino', municipio: 'sede del cliente en el municipio de destino',
       cliente: 'el mismo cliente: no hay sede registrada en el municipio de destino; elija quién recibe' } as Record<string, string>)[o] || o;
   }
 

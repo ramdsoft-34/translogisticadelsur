@@ -32,6 +32,15 @@ function credenciales(empresa, clave) {
   return { usuario: usuario || 'SIMULADO', clave };
 }
 
+// Variables (NOMBRE → valor) del último envío aceptado de un proceso del viaje
+export async function variablesEnviadas(empresaId, viajeId, proceso) {
+  const t = await TransaccionRndc.findOne({ empresa: empresaId, viaje: viajeId, tipo: 1, proceso, ok: true }).sort({ createdAt: -1 }).lean();
+  const cuerpo = t?.solicitud?.match(/<variables>([\s\S]*?)<\/variables>/i)?.[1];
+  if (!cuerpo) return null;
+  const des = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  return Object.fromEntries([...cuerpo.matchAll(/<([A-Z0-9_]+)>([^<]*)<\/\1>/g)].map(m => [m[1], des(m[2])]));
+}
+
 export async function cargarViaje(empresaId, viajeId) {
   const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId })
     .populate(['cliente', 'conductor', 'titular', 'tarifaRef'].map(x => pob(empresaId, x))).lean();
@@ -41,9 +50,10 @@ export async function cargarViaje(empresaId, viajeId) {
   if (!v.destinatario?.numId && !v.tarifaRef?.destinatario?.numId && v.cliente) {
     const codDestino = v.codDestino || v.tarifaRef?.codMunicipio;
     if (codDestino) {
-      const sedes = await Tercero.find({ empresa: empresaId, tipoId: v.cliente.tipoId || 'N', numId: idCliente(v.cliente), codMunicipio: codDestino })
+      // La sede en ese municipio exacto; si no, en un centro poblado del mismo municipio (ej. El Plateado en Argelia)
+      const sedes = await Tercero.find({ empresa: empresaId, tipoId: v.cliente.tipoId || 'N', numId: idCliente(v.cliente), codMunicipio: new RegExp(`^${codDestino.slice(0, 5)}`) })
         .select('tipoId numId sede codMunicipio').lean();
-      sedes.sort((a, b) => (Number(a.sede?.codigo) || 0) - (Number(b.sede?.codigo) || 0));
+      sedes.sort((a, b) => (a.codMunicipio === codDestino ? 0 : 1) - (b.codMunicipio === codDestino ? 0 : 1) || (Number(a.sede?.codigo) || 0) - (Number(b.sede?.codigo) || 0));
       const s = sedes.find(x => txt(x.sede?.codigo) && txt(x.sede.codigo) !== txt(v.cliente.sedeRemitente));
       if (s) v.destinatarioAuto = { tipoId: s.tipoId, numId: s.numId, sede: s.sede.codigo, nombreSede: s.sede.nombre || '' };
     }
@@ -55,7 +65,15 @@ export async function cargarViaje(empresaId, viajeId) {
     if (sedeRem?.codMunicipio) v.codOrigenSede = sedeRem.codMunicipio;
   }
   // Municipio de la sede del destinatario: será el destino del manifiesto
-  const dest = v.destinatario?.numId ? v.destinatario : v.tarifaRef?.destinatario?.numId ? v.tarifaRef.destinatario : v.destinatarioAuto;
+  let dest = v.destinatario?.numId ? v.destinatario : v.tarifaRef?.destinatario?.numId ? v.tarifaRef.destinatario : v.destinatarioAuto;
+  // Con la remesa aceptada manda el destinatario que se le envió al RNDC (el manifiesto debe ir a ese municipio)
+  if (v.remesa?.estado === 'aceptado') {
+    const R = await variablesEnviadas(empresaId, v._id, 3);
+    if (R?.NUMIDDESTINATARIO) {
+      dest = { tipoId: R.CODTIPOIDDESTINATARIO, numId: R.NUMIDDESTINATARIO, sede: R.CODSEDEDESTINATARIO };
+      v.destinatarioRemesa = dest;
+    }
+  }
   if (dest?.numId && txt(dest.sede)) {
     const sede = await Tercero.findOne({ empresa: empresaId, tipoId: dest.tipoId || 'N', numId: dest.numId, 'sede.codigo': txt(dest.sede) })
       .select('codMunicipio sede').lean();
@@ -198,8 +216,8 @@ export async function vistaPrevia(empresaId, viajeId) {
       v.titular && String(v.titular._id) !== String(v.conductor?._id) ? { ...estadoMaestro(empresa, 'tercero', 'Titular', comoTitular(v.titular)), comoTitular: true } : null,
     ].filter(Boolean),
     destinatario: {
-      tipoId: ctx.DEST_TIPO, numId: ctx.DEST_ID, sede: ctx.DEST_SEDE,
-      origen: v.destinatario?.numId ? 'viaje' : v.tarifaRef?.destinatario?.numId ? 'tarifa' : v.destinatarioAuto ? 'municipio' : 'cliente',
+      tipoId: v.destinatarioRemesa?.tipoId || ctx.DEST_TIPO, numId: v.destinatarioRemesa?.numId || ctx.DEST_ID, sede: v.destinatarioRemesa ? v.destinatarioRemesa.sede : ctx.DEST_SEDE,
+      origen: v.destinatarioRemesa ? 'remesa' : v.destinatario?.numId ? 'viaje' : v.tarifaRef?.destinatario?.numId ? 'tarifa' : v.destinatarioAuto ? 'municipio' : 'cliente',
       nombreSede: v.nombreSedeDestino || v.destinatarioAuto?.nombreSede || '',
       municipio: v.codDestinoSede || '',
     },
@@ -210,7 +228,10 @@ export async function vistaPrevia(empresaId, viajeId) {
       return { codigo, nombre: m ? `${m.nombre} (${m.departamento || ''})` : '' };
     })(),
     cliente: v.cliente ? { tipoId: v.cliente.tipoId || 'N', numId: idCliente(v.cliente), nombre: v.cliente.nombre, sedeRemitente: txt(v.cliente.sedeRemitente) } : null,
-    destinoManifiesto: ctx.COD_DESTINO,
+    destinoManifiesto: await (async () => {
+      const m = ctx.COD_DESTINO ? await Municipio.findOne({ codigo: ctx.COD_DESTINO }).select('nombre departamento').lean() : null;
+      return m ? `${ctx.COD_DESTINO} · ${m.nombre} (${m.departamento})` : ctx.COD_DESTINO;
+    })(),
     origenManifiesto: ctx.COD_ORIGEN,
     valores: valoresManifiesto(empresa, v, vehiculo),
     // Sedes registradas del cliente, para elegir quién recibe si no hay sede en el municipio de destino

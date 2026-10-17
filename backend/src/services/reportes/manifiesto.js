@@ -13,12 +13,15 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
-import { Municipio, Tercero, Vehiculo, TransaccionRndc } from '../../models/index.js';
+import { Municipio, Tercero, Vehiculo } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { contextoViaje, variablesRemesa, variablesManifiesto } from '../rndc/documentos.js';
 import { fmtMilManifiesto, numeroALetras, quitarTildes, txt, enColombia, soloDigitos, normalizar } from '../../utils/texto.js';
 import { pdfABuffer } from './comun.js';
-import { cargarViaje } from '../rndc/operaciones.js';
+import { lugarRndc } from '../../utils/lugares.js';
+
+export { lugarRndc };
+import { cargarViaje, variablesEnviadas as enviadas } from '../rndc/operaciones.js';
 
 const recurso = (r) => fileURLToPath(new URL(`../../assets/${r}`, import.meta.url));
 const PLANTILLA = JSON.parse(fs.readFileSync(recurso('manifiesto-rndc.json'), 'utf8'));
@@ -45,18 +48,6 @@ export function radicacionRndc(d) {
   return `${c.getUTCFullYear()}/${dd(c.getUTCMonth() + 1)}/${dd(c.getUTCDate())} ${dd(h)}:${dd(c.getUTCMinutes())}`;
 }
 
-// Municipios cuyo nombre en el RNDC difiere del catálogo DIVIPOLA vigente
-const MUNICIPIO_RNDC = { 11001: 'BOGOTA', 52835: 'TUMACO', 86573: 'LEGUIZAMO' };
-const DEPARTAMENTO_RNDC = { 11: 'BOGOTA D. C.' };
-// "CENTRO POBLADO MUNICIPIO DEPARTAMENTO" en mayúsculas sin tildes (ej. CUJACAL PASTO NARINO)
-export function lugarRndc(m) {
-  if (!m) return '';
-  const p = txt(m.nombre).match(/^(.*?)\s*\((.+)\)$/);
-  const centro = p ? p[1] : '';
-  const municipio = MUNICIPIO_RNDC[m.codigo.slice(0, 5)] || (p ? p[2] : m.nombre);
-  const depto = DEPARTAMENTO_RNDC[m.codigo.slice(0, 2)] || m.departamento;
-  return sinTildes([centro, municipio, depto].join(' ')).replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
-}
 async function lugar(codigo) {
   if (!txt(codigo)) return '';
   const m = await Municipio.findOne({ codigo: txt(codigo) }).lean();
@@ -96,15 +87,6 @@ export function textoQR(d) {
   if (d.qrObs) datos.push(`Obs:${p(d.qrObs, 120)}`);
   datos.push(`Seguro:${d.seguro}`);
   return datos.join('\r\n');
-}
-
-// Variables (NOMBRE → valor) del último envío aceptado de un proceso del viaje
-async function enviadas(empresaId, viajeId, proceso) {
-  const t = await TransaccionRndc.findOne({ empresa: empresaId, viaje: viajeId, tipo: 1, proceso, ok: true }).sort({ createdAt: -1 }).lean();
-  const cuerpo = t?.solicitud?.match(/<variables>([\s\S]*?)<\/variables>/i)?.[1];
-  if (!cuerpo) return null;
-  const des = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
-  return Object.fromEntries([...cuerpo.matchAll(/<([A-Z0-9_]+)>([^<]*)<\/\1>/g)].map(m => [m[1], des(m[2])]));
 }
 
 // Tercero tal como está registrado (por documento y, si se indica, sede)
