@@ -187,8 +187,12 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         } @empty { <tr><td colspan="5" class="vacio">Este viaje no tiene correos enviados. Revise que el cliente tenga destinatarios en Configuración → Correo.</td></tr> }</tbody>
       </table></div>
       <ng-container pie>
-        <button type="button" (click)="correosViaje.set(null)">Cerrar</button>
-        <button type="button" class="primario" confirmar="Clic otra vez para enviar" (confirmado)="enviarDeNuevo()" [disabled]="trabajando()"><app-icono nombre="enviar" [tam]="16" />Enviar de nuevo</button>
+        <button type="button" (click)="correosViaje.set(null)" style="margin-right:auto">Cerrar</button>
+        <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="enviarDeNuevo(['manifiesto'])" [disabled]="trabajando()"
+          title="Envía solo el PDF del manifiesto a los destinatarios del cliente"><app-icono nombre="enviar" [tam]="16" />Reenviar manifiesto</button>
+        <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="enviarDeNuevo(['salida'])" [disabled]="trabajando()"
+          title="Envía solo la carta de salida a los destinatarios del cliente"><app-icono nombre="enviar" [tam]="16" />Reenviar carta de salida</button>
+        <button type="button" class="primario" confirmar="Clic otra vez para enviar" (confirmado)="enviarDeNuevo()" [disabled]="trabajando()"><app-icono nombre="enviar" [tam]="16" />Reenviar ambos</button>
       </ng-container>
     </app-modal>
 
@@ -472,14 +476,15 @@ export class Manifiestos {
     } catch (x) { this.avisos.error(x); } finally { this.trabajando.set(false); }
   }
 
-  async enviarDeNuevo() {
+  async enviarDeNuevo(tipos?: ('manifiesto' | 'salida')[]) {
     const v = this.correosViaje();
     if (!v) return;
     this.trabajando.set(true);
     try {
-      const r = await this.api.post<any[]>(`/correo/viajes/${v._id}/enviar`, {});
+      const r = await this.api.post<any[]>(`/correo/viajes/${v._id}/enviar`, tipos ? { tipos } : {});
       const fallos = r.filter(x => x.estado !== 'enviado');
-      if (!fallos.length) this.avisos.ok(`${r.length} correo(s) enviados`); else this.avisos.mostrar(`No se pudo enviar: ${fallos[0].error}`, 'error');
+      const que = tipos?.length === 1 ? (tipos[0] === 'salida' ? 'Carta de salida enviada' : 'Manifiesto enviado') : `${r.length} correo(s) enviados`;
+      if (!fallos.length) this.avisos.ok(que); else this.avisos.mostrar(`No se pudo enviar: ${fallos[0].error}`, 'error');
       await this.cargarCorreos(this.viajes());
     } catch (x) { this.avisos.error(x); } finally { this.trabajando.set(false); }
   }

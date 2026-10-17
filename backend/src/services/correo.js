@@ -147,7 +147,8 @@ export async function programarEnvios(empresaId, viajeId, { origen = 'automatico
   const cliente = await Cliente.findOne({ empresa: empresaId, _id: v.cliente }).lean();
   const cfg = cliente?.envios;
   if (!cfg?.activo || !cfg.destinatarios?.length) return [];
-  const documentos = (tipos || ['manifiesto', 'salida']).filter(t => cfg.documentos?.[t]);
+  // Un reenvío manual de un documento elegido sale aunque el cliente no lo tenga en sus envíos automáticos
+  const documentos = origen === 'manual' && tipos?.length ? tipos : (tipos || ['manifiesto', 'salida']).filter(t => cfg.documentos?.[t]);
   const creados = [];
   for (const tipo of documentos) {
     // Un manifiesto ya enviado no se vuelve a mandar en automático

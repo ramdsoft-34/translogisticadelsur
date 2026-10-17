@@ -529,6 +529,12 @@ test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazab
   const re = await s.manif.post(`/api/correo/envios/${manual[0]._id}/reintentar`, {});
   assert.equal(re.body.estado, 'enviado', JSON.stringify(re.body));
   assert.equal(re.body.intentos, 2);
+  // Reenvío individual: solo la carta de salida, al instante
+  const antes = buzonPruebas.length;
+  const soloSalida = (await s.manif.post(`/api/correo/viajes/${v.body._id}/enviar`, { tipos: ['salida'] })).body;
+  assert.deepEqual(soloSalida.map(x => [x.tipo, x.estado]), [['salida', 'enviado']]);
+  assert.equal(buzonPruebas.length, antes + 1);
+  assert.ok(!buzonPruebas.at(-1).attachments, 'la carta de salida va sin el PDF del manifiesto');
   assert.equal((await s.reportero.get(`/api/correo/envios?viaje=${v.body._id}`)).status, 403);
   delete process.env.CORREO_TRANSPORTE;
 });
