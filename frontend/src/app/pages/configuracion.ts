@@ -57,7 +57,7 @@ type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
                   <small>Solo letras y números; debe terminar en número.</small></div>
                 <div class="ancho mensaje alerta">Los próximos consecutivos deben continuar después del <strong>último número expedido en el RNDC</strong>,
                   incluidos los que se hicieron con la plantilla de Excel o en el portal del Ministerio. Si se repite un número, el RNDC lo rechaza.
-                  Solo se pueden aumentar.</div>
+                  Se puede corregir hacia atrás si el número no se ha usado; al expedir, la plataforma salta los números que ya tengan documento.</div>
               </div>
             </div>
             <div class="tarjeta">

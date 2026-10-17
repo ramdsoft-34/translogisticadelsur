@@ -184,9 +184,20 @@ export async function vistaPrevia(empresaId, viajeId) {
   };
 }
 
+// Número que ya tiene algún viaje (aceptado, anulado o rechazado): el RNDC no admite repetirlo.
+export async function numeroUsado(empresaId, clave, numero) {
+  const campo = clave === 'remesa' ? 'remesa.numero' : 'manifiesto.numero';
+  const f = { empresa: empresaId, $or: [{ [campo]: numero }, ...(clave === 'manifiesto' ? [{ manifiestoReemplazado: numero }] : [])] };
+  return Viaje.findOne(f).select('numero').lean();
+}
+
+// Siguiente consecutivo libre: si la numeración se bajó, salta los números ya usados.
 async function numeroDocumento(empresa, clave, prefijo) {
-  const n = await siguiente(empresa._id, clave);
-  return `${prefijo || ''}${n}`;
+  for (let i = 0; i < 5000; i += 1) {
+    const numero = `${prefijo || ''}${await siguiente(empresa._id, clave)}`;
+    if (!(await numeroUsado(empresa._id, clave, numero))) return numero;
+  }
+  throw new ErrorHttp(409, `No se encontró un consecutivo de ${clave} libre; revise la numeración en Configuración`);
 }
 
 // Expide la remesa (proceso 3) y luego el manifiesto (proceso 4) con esa remesa.

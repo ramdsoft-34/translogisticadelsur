@@ -198,7 +198,10 @@ test('RNDC: consecutivo con letras y números', async () => {
   assert.equal(cfg.consecutivoRemesa, 'R500');
   assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R-500' })).status, 400, 'solo letras y números');
   assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'REM' })).status, 400, 'debe terminar en número');
-  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R499' })).status, 400, 'no se baja la numeración');
+  // Se puede bajar si el número no está usado (corrección de un número mal escrito)
+  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R499' })).status, 200);
+  assert.equal((await s.adminA.get('/api/rndc/config')).body.consecutivoRemesa, 'R499');
+  await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R500' });
   // Cambio de serie con ceros a la izquierda: se conservan
   assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoManifiesto: 'mc0700' })).status, 200);
   const c2 = (await s.adminA.get('/api/rndc/config')).body;
@@ -512,6 +515,25 @@ test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazab
   assert.equal(re.body.intentos, 2);
   assert.equal((await s.reportero.get(`/api/correo/envios?viaje=${v.body._id}`)).status, 403);
   delete process.env.CORREO_TRANSPORTE;
+});
+
+test('RNDC: al bajar el consecutivo no se repiten números ya expedidos', async () => {
+  const usado = (await s.manif.get(`/api/viajes/${s.viaje}`)).body.remesa.numero;     // R500
+  const r1 = await s.adminA.put('/api/rndc/config', { consecutivoRemesa: usado });
+  assert.equal(r1.status, 400);
+  assert.match(r1.body.error, /ya se usó en el viaje/);
+  const actual = (await s.adminA.get('/api/rndc/config')).body.consecutivoRemesa;
+  // Un número libre justo antes del usado: el siguiente despacho debe saltar R500
+  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R499' })).status, 200);
+  const a = await s.reportero.post('/api/viajes', { fecha: '2026-11-06', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const b = await s.reportero.post('/api/viajes', { fecha: '2026-11-06', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const ra = (await s.manif.post(`/api/rndc/viajes/${a.body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  const rb = (await s.manif.post(`/api/rndc/viajes/${b.body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  assert.equal(ra.remesa.numero, 'R499');
+  assert.notEqual(rb.remesa.numero, usado, 'salta el número ya expedido');
+  assert.equal(rb.remesa.estado, 'aceptado', JSON.stringify(rb));
+  // Se restablece la numeración que traían las demás pruebas
+  await s.adminA.put('/api/rndc/config', { consecutivoRemesa: `R${Math.max(Number(actual.slice(1)), Number(rb.remesa.numero.slice(1)) + 1)}` });
 });
 
 test('RNDC: anulación de manifiesto por cambio de conductor y reemplazo', async () => {

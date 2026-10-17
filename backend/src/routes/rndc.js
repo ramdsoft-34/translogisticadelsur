@@ -88,13 +88,16 @@ r.put('/config', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
   // El consecutivo completo define el prefijo y el próximo número
   const empresaAntes = await Empresa.findById(req.empresaId).select('rndc').lean();
   const nuevos = {};
+  const bajados = [];
   for (const [claveC, texto, campoPrefijo] of [['remesa', consecutivoRemesa, 'prefijoRemesa'], ['manifiesto', consecutivoManifiesto, 'prefijoManifiesto']]) {
     if (!texto) continue;
     const nuevo = partirConsecutivo(texto);
     const actual = partirConsecutivo(`${empresaAntes.rndc?.[campoPrefijo] || ''}${await proximo(req.empresaId, claveC)}`);
-    if (nuevo.prefijo === actual.prefijo && nuevo.numero < actual.numero) {
-      throw new ErrorHttp(400, `El próximo consecutivo de ${claveC} no puede ser menor que ${actual.prefijo}${actual.numero}: esos números ya pudieron usarse`);
-    }
+    // Se puede bajar (p. ej. para corregir un número mal escrito) si ese número no está usado;
+    // al expedir, la plataforma salta los que ya tengan documento.
+    const usado = await op.numeroUsado(req.empresaId, claveC, `${nuevo.prefijo}${nuevo.numero}`);
+    if (usado) throw new ErrorHttp(400, `El consecutivo ${nuevo.prefijo}${nuevo.numero} ya se usó en el viaje N° ${usado.numero}: escriba uno que no se haya expedido`);
+    if (nuevo.prefijo === actual.prefijo && nuevo.numero < actual.numero) bajados.push(`${claveC}: ${actual.prefijo}${actual.numero} → ${nuevo.prefijo}${nuevo.numero}`);
     d[campoPrefijo] = nuevo.prefijo;
     nuevos[claveC] = nuevo.numero;
   }
@@ -112,7 +115,7 @@ r.put('/config', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
     await Contador.updateOne({ empresa: req.empresaId, clave: claveC }, { $set: { valor: n - 1 } }, { upsert: true });
   }
   await auditar(req, 'editar_config_rndc', { entidad: 'Empresa', entidadId: req.empresaId,
-    detalle: { ...d, siguienteRemesa, siguienteManifiesto, consecutivoRemesa, consecutivoManifiesto } });
+    detalle: { ...d, siguienteRemesa, siguienteManifiesto, consecutivoRemesa, consecutivoManifiesto, ...(bajados.length ? { consecutivoBajado: bajados } : {}) } });
   res.json({ ok: true });
 });
 
