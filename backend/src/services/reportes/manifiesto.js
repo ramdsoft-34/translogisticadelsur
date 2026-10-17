@@ -5,12 +5,13 @@
 // Seguro; separados por CR+LF y sin CR+LF después del último.
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
-import { Municipio, Vehiculo, Viaje, pob } from '../../models/index.js';
+import { Municipio } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { contextoViaje, nitEmpresa } from '../rndc/documentos.js';
 import { fmtMilManifiesto, numeroALetras, quitarTildes, txt, enColombia, fmtFechaHora } from '../../utils/texto.js';
 import { NATURALEZA_CARGA, RESPONSABLE_PAGO } from '../rndc/catalogos.js';
 import { pdfABuffer } from './comun.js';
+import { cargarViaje } from '../rndc/operaciones.js';
 import { fileURLToPath } from 'node:url';
 
 // Logos oficiales del formato del manifiesto (tomados de un manifiesto expedido por el RNDC)
@@ -43,11 +44,9 @@ async function textoMunicipio(codigo) {
 
 // Reúne los datos del manifiesto de un viaje de la empresa.
 export async function datosManifiesto(empresa, viajeId) {
-  const v = await Viaje.findOne({ empresa: empresa._id, _id: viajeId })
-    .populate(['cliente', 'conductor', 'titular', 'tarifaRef'].map(x => pob(empresa._id, x))).lean();
-  if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
+  // Mismos datos (destinatario y destino) que se enviaron al RNDC
+  const { v, vehiculo } = await cargarViaje(empresa._id, viajeId);
   if (v.manifiesto?.estado !== 'aceptado' && v.estado !== 'cumplido') throw new ErrorHttp(409, 'El viaje no tiene un manifiesto aceptado por el RNDC');
-  const vehiculo = await Vehiculo.findOne({ empresa: empresa._id, placa: v.placa }).lean();
   const ctx = contextoViaje(empresa, v, vehiculo);
   const cfg = empresa.rndc || {};
   const titular = v.titular || v.conductor;

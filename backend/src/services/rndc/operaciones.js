@@ -31,7 +31,7 @@ function credenciales(empresa, clave) {
   return { usuario: usuario || 'SIMULADO', clave };
 }
 
-async function cargarViaje(empresaId, viajeId) {
+export async function cargarViaje(empresaId, viajeId) {
   const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId })
     .populate(['cliente', 'conductor', 'titular', 'tarifaRef'].map(x => pob(empresaId, x))).lean();
   if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
@@ -46,6 +46,13 @@ async function cargarViaje(empresaId, viajeId) {
       const s = sedes.find(x => txt(x.sede?.codigo) && txt(x.sede.codigo) !== txt(v.cliente.sedeRemitente));
       if (s) v.destinatarioAuto = { tipoId: s.tipoId, numId: s.numId, sede: s.sede.codigo, nombreSede: s.sede.nombre || '' };
     }
+  }
+  // Municipio de la sede del destinatario: será el destino del manifiesto
+  const dest = v.destinatario?.numId ? v.destinatario : v.tarifaRef?.destinatario?.numId ? v.tarifaRef.destinatario : v.destinatarioAuto;
+  if (dest?.numId && txt(dest.sede)) {
+    const sede = await Tercero.findOne({ empresa: empresaId, tipoId: dest.tipoId || 'N', numId: dest.numId, 'sede.codigo': txt(dest.sede) })
+      .select('codMunicipio sede').lean();
+    if (sede?.codMunicipio) { v.codDestinoSede = sede.codMunicipio; v.nombreSedeDestino = sede.sede?.nombre || ''; }
   }
   return { v, vehiculo };
 }
@@ -139,8 +146,9 @@ export function faltantesMaestro(empresa, tipo, doc) {
 const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
 function estadoMaestro(empresa, tipo, rol, doc) {
   if (!doc) return null;
+  const importado = doc.rndc?.estado === 'enviado' && /^Importado/i.test(doc.rndc?.mensaje || '');
   return { tipo, rol, id: doc._id, referencia: tipo === 'vehiculo' ? doc.placa : `${nombreDe(doc)} (${doc.tipoId} ${doc.numId})`,
-    estado: doc.rndc?.estado || 'sin_enviar', mensaje: doc.rndc?.mensaje || '', faltantes: faltantesMaestro(empresa, tipo, doc) };
+    estado: importado ? 'importado' : (doc.rndc?.estado || 'sin_enviar'), mensaje: doc.rndc?.mensaje || '', faltantes: faltantesMaestro(empresa, tipo, doc) };
 }
 
 // Vista previa de lo que se enviaría (sin clave y sin consumir consecutivos), con el
@@ -174,8 +182,10 @@ export async function vistaPrevia(empresaId, viajeId) {
     destinatario: {
       tipoId: ctx.DEST_TIPO, numId: ctx.DEST_ID, sede: ctx.DEST_SEDE,
       origen: v.destinatario?.numId ? 'viaje' : v.tarifaRef?.destinatario?.numId ? 'tarifa' : v.destinatarioAuto ? 'municipio' : 'cliente',
-      nombreSede: v.destinatarioAuto?.nombreSede || '',
+      nombreSede: v.nombreSedeDestino || v.destinatarioAuto?.nombreSede || '',
+      municipio: v.codDestinoSede || '',
     },
+    destinoManifiesto: ctx.COD_DESTINO,
     remesa: { variables: remesa, problemas: remesaAceptada ? [] : [
       ...validarVariables(3, remesa.map(([n, x]) => [n, n === 'CONSECUTIVOREMESA' ? 'X' : x])),
       ...(destinoIgualOrigen(ctx) ? [PROBLEMA_DESTINO] : []),

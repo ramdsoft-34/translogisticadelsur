@@ -120,7 +120,9 @@ export function contextoViaje(empresa, viaje, vehiculo) {
     // Sin destinatario propio, el destinatario es el cliente con su sede registrada en el RNDC
     DEST_SEDE: dest ? (dest.sede || '') : (cliente.sedeRemitente || ''),
     COD_ORIGEN: viaje.codOrigen || cfg.codOrigen || '',
-    COD_DESTINO: viaje.codDestino || viaje.tarifaRef?.codMunicipio || '',
+    // El RNDC exige que el destino del manifiesto sea el municipio de la remesa, es decir,
+    // el de la sede del destinatario (MAN354). Si se conoce, manda sobre el destino escrito.
+    COD_DESTINO: viaje.codDestinoSede || viaje.codDestino || viaje.tarifaRef?.codMunicipio || '',
     PESO: numero(viaje.pesoKg),
     FLETE: numero(viaje.flete),
     ANTICIPO: numero(viaje.anticipo),

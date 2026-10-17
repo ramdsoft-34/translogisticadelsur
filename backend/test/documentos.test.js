@@ -25,3 +25,9 @@ test('Terceros: la licencia solo se exige a conductores', () => {
   const p = problemasMaestro(11, variablesTercero(empresa, conductor), conductor);
   assert.ok(p.some(x => x.startsWith('NUMLICENCIACONDUCCION')));
 });
+
+test('Manifiesto: el destino es el municipio de la sede del destinatario (MAN354)', () => {
+  const v = { fecha: new Date(), cliente, conductor: {}, codDestino: '52835000', codDestinoSede: '52835031', destinatario: { tipoId: 'N', numId: '8909009431', sede: '131' } };
+  assert.equal(contextoViaje(empresa, v, null).COD_DESTINO, '52835031');
+  assert.equal(contextoViaje(empresa, { ...v, codDestinoSede: '' }, null).COD_DESTINO, '52835000');
+});

@@ -33,7 +33,8 @@ import { FORMATOS, isoDia } from './formato';
           <div class="mensaje error respuesta">
             <strong>El RNDC respondió ({{ e.proceso === 3 ? 'remesa' : e.proceso === 4 ? 'manifiesto' : 'proceso ' + e.proceso }}, {{ e.fecha | fechaHora }}):</strong>
             <span>{{ e.mensaje }}</span>
-            <small>Corrija los datos abajo (o el vehículo / conductor) y vuelva a enviar.</small>
+            @if (ayudaError(e.mensaje); as ay) { <div class="que-hacer"><strong>Qué hacer:</strong> {{ ay }}</div> }
+            @else { <small>Corrija los datos abajo (o el vehículo / las personas) y vuelva a enviar.</small> }
           </div>
         }
         @if (faltan().length) {
@@ -51,8 +52,10 @@ import { FORMATOS, isoDia } from './formato';
               <span class="chip" [class]="chipMaestro(m.estado)" [title]="m.mensaje || ''">{{ estadoMaestro(m.estado) }}</span>
               @if (m.faltantes?.length) { <small class="falta">Falta: {{ etiquetas(m.faltantes) }}</small> }
               @if (m.estado === 'error' && m.mensaje) { <small class="falta">{{ m.mensaje }}</small> }
-              @if (m.id && m.estado !== 'enviado' && !m.faltantes?.length) {
-                <button type="button" class="pequeno" (click)="registrarMaestro(m)" [disabled]="trabajando()"><app-icono nombre="enviar" [tam]="14" />Registrar en el RNDC</button>
+              @if (m.id && !m.faltantes?.length) {
+                <button type="button" class="pequeno" [class.primario]="m.estado !== 'enviado'" (click)="registrarMaestro(m)" [disabled]="trabajando()"
+                  [title]="m.estado === 'enviado' ? 'Volver a enviarlo al RNDC (si el RNDC dice que no existe)' : 'Registrarlo en el RNDC'">
+                  <app-icono nombre="enviar" [tam]="14" />{{ m.estado === 'enviado' ? 'Registrar de nuevo' : 'Registrar en el RNDC' }}</button>
               }
               @if (m.estado === 'no_existe' || m.faltantes?.length) { <small>Complételo en {{ m.tipo === 'vehiculo' ? 'Vehículos' : 'Conductores y terceros' }}.</small> }
             </li>
@@ -74,8 +77,12 @@ import { FORMATOS, isoDia } from './formato';
               <div class="campo"><span class="etiqueta">Remolque</span><button type="button" class="pequeno" (click)="mostrarRemolque.set(true)">Agregar remolque</button></div>
             }
             <app-buscar-tercero etiqueta="Conductor" rol="conductor" [(valor)]="f.conductor" />
+            <app-buscar-tercero etiqueta="Titular del manifiesto" [(valor)]="f.titular" placeholder="Vacío = el conductor" />
           </div>
-          <p class="sutil" style="margin:10px 0 0;font-size:12.5px">El titular del manifiesto se toma del vehículo (titular habitual); si no tiene, es el conductor.</p></fieldset>
+          <p class="sutil" style="margin:10px 0 0;font-size:12.5px">Por defecto el titular es el del vehículo; si no tiene, el conductor. Puede cambiarlo aquí si el RNDC lo rechaza.
+            @if (p.destinoManifiesto && p.destinatario?.municipio && p.destinatario.municipio !== f.codDestino) {
+              <br />El manifiesto irá al municipio <strong>{{ p.destinoManifiesto }}</strong>, el de la sede del destinatario{{ p.destinatario.nombreSede ? ' (' + p.destinatario.nombreSede + ')' : '' }}, como lo exige el RNDC.
+            }</p></fieldset>
 
           @if (!p.remesaAceptada) {
             <fieldset><legend>Carga (remesa)</legend><div class="formulario">
@@ -132,6 +139,7 @@ import { FORMATOS, isoDia } from './formato';
     .mensaje { margin-bottom: 12px; }
     .respuesta { display: flex; flex-direction: column; gap: 4px; }
     .respuesta span { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+    .que-hacer { margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: var(--gris-0); color: var(--gris-8); font-size: 13.5px; }
     h3 { margin: 6px 0 8px; font-size: 14px; }
     .maestros { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 6px; }
     .maestros li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 12px; border: 1px solid var(--gris-2); border-radius: var(--radio); }
@@ -182,7 +190,7 @@ export class ExpedirRndc {
       this.viaje.set(v);
       this.form.set({
         fecha: isoDia(v.fecha), codOrigen: v.codOrigen || '', codDestino: v.codDestino || v.tarifaRef?.codMunicipio || '',
-        placa: v.placa, remolque: v.remolque || '', conductor: v.conductor?._id || '', titular: v.titular?._id || '',
+        placa: v.placa, remolque: v.remolque || '', conductor: v.conductor?._id || '', titular: v.titular?._id || '', titularInicial: v.titular?._id || '',
         pesoKg: v.pesoKg, destinatario: { tipoId: v.destinatario?.tipoId || '', numId: v.destinatario?.numId || '', sede: v.destinatario?.sede || '' },
         flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones || '',
       });
@@ -195,7 +203,22 @@ export class ExpedirRndc {
 
   chip(e: string) { return ({ aceptado: 'ok', rechazado: 'error', anulado: 'alerta' } as Record<string, string>)[e] || ''; }
   chipMaestro(e: string) { return ({ enviado: 'ok', error: 'error', no_existe: 'error' } as Record<string, string>)[e] || 'alerta'; }
-  estadoMaestro(e: string) { return ({ enviado: 'Registrado', error: 'Con error', no_existe: 'No está en Vehículos' } as Record<string, string>)[e] || 'Sin registrar'; }
+  estadoMaestro(e: string) {
+    return ({ enviado: 'Registrado', error: 'Con error', no_existe: 'No está en Vehículos', importado: 'Importado del Excel (sin confirmar)' } as Record<string, string>)[e] || 'Sin registrar';
+  }
+
+  // Explicación sencilla de los rechazos más comunes del RNDC
+  ayudaError(m: string) {
+    const t = String(m || '');
+    if (/MAN130|titular no existe/i.test(t)) return 'El titular no está registrado en el RNDC. Use «Registrar de nuevo» junto al TITULAR (arriba) o cambie el titular en «Viaje» y presione «Corregir y reenviar».';
+    if (/conductor.*no existe|MAN12\d/i.test(t)) return 'El conductor no está registrado en el RNDC. Use «Registrar de nuevo» junto al CONDUCTOR o elija otro conductor y reenvíe.';
+    if (/MAN354|municipio destino/i.test(t)) return 'El destino del manifiesto debe ser el mismo municipio de la remesa (el de la sede del destinatario). La plataforma ya lo toma así: presione «Corregir y reenviar».';
+    if (/REM019|cargue y la direccion del punto de descargue/i.test(t)) return 'El destinatario no puede ser el mismo remitente en la misma sede. Elija en «Carga» la sede del cliente en el destino o quién recibe.';
+    if (/REM180|REM200|destinatario/i.test(t)) return 'El destinatario o su sede no existen en el RNDC. Elija en «Carga» el destinatario y la sede correctos.';
+    if (/placa|veh[ií]culo.*no existe/i.test(t)) return 'El vehículo no está registrado en el RNDC. Use «Registrar de nuevo» junto al VEHÍCULO y reenvíe.';
+    if (/usuario|contrase/i.test(t)) return 'La contraseña del RNDC no es correcta. Vuelva a enviar y escríbala de nuevo.';
+    return '';
+  }
   etiquetas(f: any[]) { return f.map(x => x.etiqueta).join(', '); }
   origenDestinatario(o: string) {
     return ({ viaje: 'definido en este viaje', tarifa: 'definido en la tarifa del destino', municipio: 'sede del cliente en el municipio de destino',
@@ -208,6 +231,8 @@ export class ExpedirRndc {
     const c: any = { codOrigen: f.codOrigen || '', codDestino: f.codDestino || '', placa: String(f.placa || '').toUpperCase(),
       remolque: String(f.remolque || '').toUpperCase(), observaciones: f.observaciones || '' };
     if (f.conductor) c.conductor = f.conductor;
+    // El titular solo se envía si se cambió aquí (si no, el servidor lo toma del vehículo)
+    if ((f.titular || '') !== (f.titularInicial || '')) c.titular = f.titular || null;
     if (!p.remesaAceptada) { c.fecha = f.fecha; c.pesoKg = Number(f.pesoKg) || 0; c.destinatario = f.destinatario.tipoId ? f.destinatario : { tipoId: '', numId: '', sede: '' }; }
     if (this.puedeValores) { c.flete = Number(f.flete) || 0; c.anticipo = Number(f.anticipo) || 0; }
     return c;
@@ -258,7 +283,7 @@ export class ExpedirRndc {
     if (!c) return;
     this.trabajando.set(true);
     try {
-      const r = await this.api.post<any>(`/rndc/${m.tipo === 'vehiculo' ? 'vehiculos' : 'terceros'}/${m.id}/enviar`, { clave: c });
+      const r = await this.api.post<any>(`/rndc/${m.tipo === 'vehiculo' ? 'vehiculos' : 'terceros'}/${m.id}/enviar`, { clave: c, forzar: true });
       if (r.ok) this.avisos.ok(`${m.referencia}: ${r.sinCambios ? 'ya estaba registrado' : 'registrado en el RNDC'}`);
       else { this.avisos.mostrar(`El RNDC rechazó ${m.referencia}: ${r.mensaje}`, 'error'); if (/usuario|contrase|clave/i.test(r.mensaje || '')) this.clave.olvidar(); }
     } catch (e) { this.avisos.error(e); } finally {
