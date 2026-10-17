@@ -45,6 +45,7 @@ import { Confirmar } from './confirmar';
         @if (faltan().length) {
           <div class="mensaje error"><strong>Faltan datos según el diccionario del RNDC:</strong><ul>@for (x of faltan(); track x) { <li>{{ x }}</li> }</ul></div>
         }
+        @let f = form();
         @if (destinoManifiestoMal()) {
           <!-- MAN354: el municipio de la sede del destinatario no coincide con el que tiene el RNDC -->
           <div class="resolver" role="group" aria-label="Corregir el destino del manifiesto">
@@ -52,8 +53,15 @@ import { Confirmar } from './confirmar';
             <span>Se enviará a <strong>{{ p.destinoManifiesto }}</strong>{{ p.destinatario?.nombreSede ? ' (sede ' + p.destinatario.sede + ' ' + p.destinatario.nombreSede + ')' : '' }}.
               Si el RNDC la tiene en otro lugar (por ejemplo un centro poblado como El Plateado), actualice la sede desde el RNDC y reenvíe.</span>
             <div class="opciones">
-              <button type="button" class="primario pequeno" (click)="traerSedes(p.destinatario)" [disabled]="trabajando()">
+              @if (p.destinoSugerido; as s) {
+                <button type="button" class="primario pequeno" (click)="fijarDestino(s.codigo)" [disabled]="trabajando()">Usar {{ s.codigo }} · {{ s.nombre }}</button>
+              }
+              <button type="button" class="pequeno" [class.primario]="!p.destinoSugerido" (click)="traerSedes(p.destinatario)" [disabled]="trabajando()">
                 <app-icono nombre="enviar" [tam]="14" />Actualizar la sede del destinatario desde el RNDC</button>
+            </div>
+            <div class="fijar">
+              <app-municipio etiqueta="O elija el municipio o centro poblado de destino del manifiesto" [(codigo)]="f.codDestinoManifiesto" />
+              <button type="button" class="pequeno" (click)="fijarDestino(f.codDestinoManifiesto)" [disabled]="trabajando() || !f.codDestinoManifiesto">Usar este destino</button>
             </div>
           </div>
         }
@@ -116,7 +124,6 @@ import { Confirmar } from './confirmar';
 
         <!-- Datos del envío: solo los que van en la remesa y el manifiesto -->
         <form id="form-expedir" (ngSubmit)="enviar()">
-          @let f = form();
           <fieldset><legend>Viaje</legend><div class="formulario">
             <div class="campo"><label for="ex-fecha">Fecha</label><input id="ex-fecha" type="date" name="fecha" [(ngModel)]="f.fecha" [disabled]="p.remesaAceptada" required />
               @if (p.remesaAceptada) { <small>Fijada por la remesa aceptada.</small> }</div>
@@ -236,6 +243,8 @@ import { Confirmar } from './confirmar';
     .nota-valores { margin: 8px 0 0; font-size: 13px; color: var(--ambar-texto); }
     .resolver { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding: 12px 14px; border-radius: var(--radio);
       border: 1px solid var(--ambar-borde, var(--gris-2)); background: var(--ambar-claro, var(--gris-0)); font-size: 13.5px; }
+    .resolver .fijar { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+    .resolver .fijar app-municipio { flex: 1 1 320px; }
     .resolver .opciones { display: flex; flex-wrap: wrap; gap: 8px; }
     .resolver ol { margin: 0; padding-left: 20px; display: grid; gap: 10px; }
     .resolver li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
@@ -297,7 +306,7 @@ export class ExpedirRndc {
         placa: v.placa, remolque: v.remolque || '', conductor: v.conductor?._id || '', titular: v.titular?._id || '', titularInicial: v.titular?._id || '',
         pesoKg: v.pesoKg, destinatario: { tipoId: v.destinatario?.tipoId || '', numId: v.destinatario?.numId || '', sede: v.destinatario?.sede || '' },
         flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones || '',
-        numeroRemesa: p.numeros?.manualRemesa || '', numeroManifiesto: p.numeros?.manualManifiesto || '',
+        codDestinoManifiesto: p.destinoManifiestoFijo || '', numeroRemesa: p.numeros?.manualRemesa || '', numeroManifiesto: p.numeros?.manualManifiesto || '',
       });
       // Si el viaje no tiene origen propio se muestra el que se enviará (el de la empresa)
       const origen = p.manifiesto.variables.find((x: string[]) => x[0] === 'CODMUNICIPIOORIGENMANIFIESTO')?.[1];
@@ -343,6 +352,11 @@ export class ExpedirRndc {
     if (!sede) return;
     this.elegirSede(sede);
     if (await this.guardar(true)) this.avisos.ok(`Recibe la sede ${sede}`);
+  }
+  async fijarDestino(codigo: string) {
+    if (!codigo) return;
+    this.form.update(f => ({ ...f, codDestinoManifiesto: codigo }));
+    if (await this.guardar(true)) this.avisos.ok(`El manifiesto irá a ${this.previa()?.destinoManifiesto}. Presione «Corregir y reenviar».`);
   }
   readonly destinoManifiestoMal = computed(() => /MAN354/.test(this.previa()?.ultimoError?.mensaje || '') && !!this.previa()?.destinatario?.numId);
   // Trae del RNDC las sedes de un tercero (cliente o destinatario) con su municipio real
@@ -396,6 +410,7 @@ export class ExpedirRndc {
     if ((f.titular || '') !== (f.titularInicial || '')) c.titular = f.titular || null;
     if (!p.remesaAceptada) { c.fecha = f.fecha; c.pesoKg = Number(f.pesoKg) || 0; c.destinatario = f.destinatario.tipoId ? f.destinatario : { tipoId: '', numId: '', sede: '' }; }
     if (this.puedeValores) { c.flete = Number(f.flete) || 0; c.anticipo = Number(f.anticipo) || 0; }
+    if (f.codDestinoManifiesto !== undefined) c.codDestinoManifiesto = f.codDestinoManifiesto || '';
     if (!p.remesaAceptada) c.numeroRemesa = String(f.numeroRemesa || '').trim().toUpperCase();
     if (p.documentos.manifiesto.estado !== 'aceptado') c.numeroManifiesto = String(f.numeroManifiesto || '').trim().toUpperCase();
     return c;

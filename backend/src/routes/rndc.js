@@ -130,7 +130,7 @@ r.get('/viajes/:id/vista-previa', operar, async (req, res) => {
 const oid = z.string().refine(v => mongoose.isValidObjectId(v), 'identificador inválido');
 const datosExpedicion = z.object({
   fecha: z.string().optional().transform(v => (v ? parseFecha(v) : undefined)),
-  codOrigen: divipola.optional(), codDestino: divipola.optional(),
+  codOrigen: divipola.optional(), codDestino: divipola.optional(), codDestinoManifiesto: divipola.optional(),
   placa: z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^[A-Z0-9]{5,6}$/, 'placa inválida')).optional(),
   remolque: z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^([A-Z0-9]{5,6})?$/, 'remolque inválido')).optional(),
   conductor: oid.optional(), titular: oid.nullable().optional(),

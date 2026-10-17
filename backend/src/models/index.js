@@ -203,6 +203,7 @@ const viajeSchema = new Schema({
   tarifaRef: { type: Schema.Types.ObjectId, ref: 'Tarifa', default: null },
   destino: str({ required: true }),
   codOrigen: str(), codDestino: str(),
+  codDestinoManifiesto: str(),          // fijado a mano cuando el RNDC tiene la sede del destinatario en otro lugar (MAN354)
   placa: str({ required: true, uppercase: true }),
   remolque: str({ uppercase: true }),
   conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },   // obligatorio al registrar (lo exige la API)

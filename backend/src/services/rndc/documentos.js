@@ -123,7 +123,8 @@ export function contextoViaje(empresa, viaje, vehiculo) {
     COD_ORIGEN: viaje.codOrigenSede || viaje.codOrigen || cfg.codOrigen || '',
     // El RNDC exige que el destino del manifiesto sea el municipio de la remesa, es decir,
     // el de la sede del destinatario (MAN354). Si se conoce, manda sobre el destino escrito.
-    COD_DESTINO: viaje.codDestinoSede || viaje.codDestino || viaje.tarifaRef?.codMunicipio || '',
+    // Destino del manifiesto: el fijado a mano (tras un MAN354), si no el de la sede del destinatario
+    COD_DESTINO: viaje.codDestinoManifiesto || viaje.codDestinoSede || viaje.codDestino || viaje.tarifaRef?.codMunicipio || '',
     PESO: numero(viaje.pesoKg),
     FLETE: numero(v.flete),
     // El anticipo no puede superar el neto a pagar (MAN270)

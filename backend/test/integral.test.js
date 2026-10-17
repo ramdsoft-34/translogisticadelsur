@@ -463,6 +463,22 @@ test('Remesa: destinatario en la sede del municipio de destino y bloqueo de orig
   await s.manif.del(`/api/viajes/${v.body._id}`);
 });
 
+test('MAN354: sede «EL PLATEADO» guardada en Argelia → se sugiere el centro poblado y el destino se puede fijar', async () => {
+  await s.manif.post('/api/maestros/terceros', { tipoId: 'N', numId: '8001234567', nombres: 'Distribuidora Sur', sede: { codigo: '34', nombre: 'EL PLATEADO' },
+    direccion: 'Calle principal', codMunicipio: '19050000', celular: '3000000001', roles: ['destinatario'] });
+  const v = await s.reportero.post('/api/viajes', { fecha: '2026-11-05', cliente: s.cliente, destino: 'Argelia', codDestino: '19050000', placa: 'ABC123', conductor: s.conductor, flete: 900000 });
+  const p1 = (await s.manif.get(`/api/rndc/viajes/${v.body._id}/vista-previa`)).body;
+  assert.deepEqual([p1.destinatario.sede, p1.destinatario.origen], ['34', 'municipio']);
+  assert.match(p1.destinoManifiesto, /^19050000/);
+  assert.equal(p1.destinoSugerido?.codigo, '19050006', JSON.stringify(p1.destinoSugerido));
+  const p2 = (await s.manif.put(`/api/rndc/viajes/${v.body._id}/datos`, { codDestinoManifiesto: '19050006' })).body;
+  assert.match(p2.destinoManifiesto, /^19050006 · EL PLATEADO \(ARGELIA\)/);
+  assert.equal(p2.destinoSugerido, null);
+  const vars = Object.fromEntries(p2.manifiesto.variables);
+  assert.equal(vars.CODMUNICIPIODESTINOMANIFIESTO, '19050006');
+  await s.manif.del(`/api/viajes/${v.body._id}`);
+});
+
 test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazabilidad y reintento', async () => {
   process.env.CORREO_TRANSPORTE = 'memoria';
   const { buzonPruebas } = await import('../src/services/correo.js');

@@ -12,7 +12,7 @@ import {
   variablesAnulacion, variablesTercero, variablesVehiculo, huella, idCliente, destinoIgualOrigen, PROBLEMA_DESTINO, valoresManifiesto,
 } from './documentos.js';
 import { TIPOS_ID_CONDUCTOR, MOTIVOS_REEMPLAZO } from './catalogos.js';
-import { txt, hoyColombia } from '../../utils/texto.js';
+import { txt, hoyColombia, normalizar, escaparRegex } from '../../utils/texto.js';
 
 const BLOQUEO_MS = 3 * 60 * 1000;
 const PROBLEMA_CANTIDAD = 'Cantidad cargada: escriba el peso de la carga en kg (el RNDC no acepta cero ni vacío)';
@@ -78,6 +78,13 @@ export async function cargarViaje(empresaId, viajeId) {
     const sede = await Tercero.findOne({ empresa: empresaId, tipoId: dest.tipoId || 'N', numId: dest.numId, 'sede.codigo': txt(dest.sede) })
       .select('codMunicipio sede').lean();
     if (sede?.codMunicipio) { v.codDestinoSede = sede.codMunicipio; v.nombreSedeDestino = sede.sede?.nombre || ''; }
+    // Sede guardada con el municipio pero con nombre de un centro poblado de ese municipio
+    // (ej. sede «EL PLATEADO» en Argelia → 19050006): se sugiere ese centro poblado
+    if (sede?.codMunicipio?.endsWith('000') && txt(sede.sede?.nombre)) {
+      const cp = await Municipio.findOne({ codigo: new RegExp(`^${sede.codMunicipio.slice(0, 5)}`), nombre: new RegExp(`^${escaparRegex(normalizar(sede.sede.nombre))} \\(`) })
+        .select('codigo nombre departamento').lean();
+      if (cp) v.destinoSugerido = { codigo: cp.codigo, nombre: `${cp.nombre} (${cp.departamento})` };
+    }
   }
   return { v, vehiculo };
 }
@@ -228,6 +235,8 @@ export async function vistaPrevia(empresaId, viajeId) {
       return { codigo, nombre: m ? `${m.nombre} (${m.departamento || ''})` : '' };
     })(),
     cliente: v.cliente ? { tipoId: v.cliente.tipoId || 'N', numId: idCliente(v.cliente), nombre: v.cliente.nombre, sedeRemitente: txt(v.cliente.sedeRemitente) } : null,
+    destinoSugerido: v.destinoSugerido && v.destinoSugerido.codigo !== ctx.COD_DESTINO ? v.destinoSugerido : null,
+    destinoManifiestoFijo: v.codDestinoManifiesto || '',
     destinoManifiesto: await (async () => {
       const m = ctx.COD_DESTINO ? await Municipio.findOne({ codigo: ctx.COD_DESTINO }).select('nombre departamento').lean() : null;
       return m ? `${ctx.COD_DESTINO} · ${m.nombre} (${m.departamento})` : ctx.COD_DESTINO;
