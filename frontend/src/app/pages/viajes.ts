@@ -12,6 +12,7 @@ import { Moneda } from '../shared/moneda';
 import { CargarMas } from '../shared/cargar-mas';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { PlantillasWhatsapp } from '../shared/plantillas-whatsapp';
+import { Confirmar } from '../shared/confirmar';
 
 interface Formulario {
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
@@ -28,12 +29,13 @@ const vacio = (): Formulario => ({
 
 type Periodo = 'hoy' | 'ayer' | 'semana' | 'mes' | 'rango';
 const POR_PAGINA = 50;
+const leerSeguir = () => { try { return localStorage.getItem('tls_seguir_registrando') !== '0'; } catch { return true; } };
 const diasAtras = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return isoLocal(d); };
 const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
@@ -108,16 +110,25 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       @if (viajes().length) { <app-cargar-mas [mostrados]="viajes().length" [total]="total()" [cargando]="cargandoMas()" unidad="viajes" (mas)="cargarMas()" /> }
     </div>
 
-    <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : 'Registrar viaje'" [abierto]="abierto()" (cerrar)="abierto.set(false)" [ancho]="true">
+    <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : (registradosTanda().length ? 'Registrar otro viaje' : 'Registrar viaje')" [abierto]="abierto()" (cerrar)="cerrarFormulario()" [ancho]="true">
       @let f = form();
+      @if (!f._id && registradosTanda().length) {
+        <div class="tanda" role="status">
+          <strong>{{ registradosTanda().length }} registrado(s):</strong>
+          @for (r of registradosTanda(); track r.numero) { <span class="chip ok sin-punto">N° {{ r.numero }} · {{ r.placa }}{{ r.sinManifiesto ? ' · sin manifiesto' : '' }}</span> }
+          <small class="sutil">Se conservan el cliente, el destino y los valores; escriba la placa y el conductor del siguiente.</small>
+        </div>
+      }
       @if (bloqueado()) {
         <div class="mensaje info" style="margin-bottom:14px">Este viaje ya tiene documentos en el RNDC: solo puede cambiar observaciones, cantidad, auxiliar y tarifa.</div>
       }
       <form id="form-viaje" (ngSubmit)="guardar()" class="secciones">
+        @if (f._id) {
         <label class="casilla requiere">
           <input type="checkbox" name="requiere" [(ngModel)]="f.requiereManifiesto" [disabled]="bloqueado() || !!f.historico" />
           <span><strong>Requiere manifiesto de carga</strong><small>Desmárquelo si este viaje no debe expedir remesa ni manifiesto en el RNDC; no aparecerá en «Manifiestos RNDC».</small></span>
         </label>
+        }
         @if (f.historico) {
           <div class="mensaje info">Viaje histórico importado del Excel: no aparece en «Manifiestos RNDC».
             @if (puedeEditarTodos) { <label class="casilla" style="margin-top:6px"><input type="checkbox" name="habilitar" [(ngModel)]="habilitarRndc" />Habilitarlo para expedir sus documentos en el RNDC</label> }</div>
@@ -171,9 +182,23 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         <div class="campo"><label for="v-obs">Observaciones (van en el manifiesto)</label><textarea id="v-obs" name="obs" maxlength="200" rows="3" [(ngModel)]="f.observaciones"></textarea></div>
       </form>
       <ng-container pie>
-        @if (form()._id && !bloqueado() && puedeRegistrar) { <button class="peligro" type="button" (click)="eliminar()" style="margin-right:auto">Eliminar</button> }
-        <button type="button" (click)="abierto.set(false)">Cancelar</button>
-        @if (puedeRegistrar) { <button class="primario" type="submit" form="form-viaje" [disabled]="guardando()">{{ guardando() ? 'Guardando…' : 'Guardar viaje' }}</button> }
+        @if (form()._id && !bloqueado() && puedeRegistrar) { <button class="peligro" type="button" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()" style="margin-right:auto">Eliminar</button> }
+        @if (!form()._id && puedeRegistrar) {
+          <label class="casilla seguir" title="Después de guardar, el formulario queda listo para el siguiente viaje del mismo cliente">
+            <input type="checkbox" [checked]="seguirRegistrando()" (change)="alternarSeguir()" />Registrar otro del mismo cliente</label>
+        }
+        <button type="button" (click)="cerrarFormulario()">{{ registradosTanda().length ? 'Terminar' : 'Cancelar' }}</button>
+        @if (puedeRegistrar) {
+          @if (form()._id) {
+            <button class="primario" type="submit" form="form-viaje" [disabled]="guardando()">{{ guardando() ? 'Guardando…' : 'Guardar viaje' }}</button>
+          } @else {
+            <div class="pregunta-manifiesto" role="group" aria-label="¿Requiere manifiesto de carga?">
+              <span>¿Requiere manifiesto?</span>
+              <button type="button" class="primario" (click)="guardar(true)" [disabled]="guardando()">{{ guardando() ? 'Guardando…' : 'Sí, guardar' }}</button>
+              <button type="button" (click)="guardar(false)" [disabled]="guardando()">No, guardar</button>
+            </div>
+          }
+        }
       </ng-container>
     </app-modal>
 
@@ -223,6 +248,12 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     @media (max-width: 760px) { .rejilla { grid-template-columns: 1fr; } }
     .wa-texto { white-space: pre-wrap; font-family: inherit; background: var(--gris-1); border-radius: 10px; padding: 12px; margin: 0; font-size: 13.5px; }
     .boton.wa { background: var(--whatsapp); border-color: var(--whatsapp); color: #fff; }
+    .tanda { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-bottom: 14px; padding: 10px 12px; border-radius: var(--radio);
+      background: var(--verde-claro); border: 1px solid var(--verde-borde); font-size: 13.5px; }
+    .tanda small { flex-basis: 100%; }
+    .seguir { margin-right: auto; font-size: 13.5px; }
+    .pregunta-manifiesto { display: flex; align-items: center; gap: 8px; padding-left: 10px; border-left: 1px solid var(--gris-2); }
+    .pregunta-manifiesto span { font-weight: 600; font-size: 13.5px; white-space: nowrap; }
     .requiere { align-items: flex-start; padding: 12px 14px; border: 1px solid var(--gris-2); border-radius: var(--radio); }
     .requiere span { display: flex; flex-direction: column; gap: 2px; }
     .requiere small { color: var(--gris-5); font-size: 12.5px; }
@@ -322,7 +353,7 @@ export class Viajes {
   estadoTexto(e: string) { return ESTADOS_VIAJE[e] || e; }
   claseEstado(e: string) { return ({ manifestado: 'marca', cumplido: 'ok', anulado: 'error', remesa: 'alerta' } as Record<string, string>)[e] || ''; }
 
-  nuevo() { this.form.set(vacio()); this.bloqueado.set(false); this.abierto.set(true); }
+  nuevo() { this.form.set(vacio()); this.bloqueado.set(false); this.registradosTanda.set([]); this.abierto.set(true); }
 
   editar(v: Viaje) {
     this.numeroEditado.set(v.numero);
@@ -365,8 +396,20 @@ export class Viajes {
     } catch { /* sin sugerencia */ }
   }
 
-  async guardar() {
+  // Viajes registrados seguidos del mismo cliente (sin cerrar el formulario)
+  readonly registradosTanda = signal<{ numero: number; placa: string; sinManifiesto: boolean }[]>([]);
+  readonly seguirRegistrando = signal(leerSeguir());
+  alternarSeguir() {
+    this.seguirRegistrando.set(!this.seguirRegistrando());
+    try { localStorage.setItem('tls_seguir_registrando', this.seguirRegistrando() ? '1' : '0'); } catch { /* sin almacenamiento */ }
+  }
+  cerrarFormulario() { this.abierto.set(false); if (this.registradosTanda().length) this.cargar(); this.registradosTanda.set([]); }
+
+  // Al crear, la respuesta «¿Requiere manifiesto?» (Sí / No) define cómo se guarda el viaje.
+  async guardar(requiere?: boolean) {
     const f = this.form();
+    if (!f._id && requiere === undefined) { this.avisos.mostrar('Elija «Sí, guardar» o «No, guardar» según si el viaje requiere manifiesto', 'info'); return; }
+    if (!f._id) f.requiereManifiesto = !!requiere;
     if (!f.conductor && !this.bloqueado()) { this.avisos.mostrar('Seleccione el conductor', 'error'); return; }
     const cuerpo: any = { ...f, placa: f.placa.toUpperCase(), remolque: (f.remolque || '').toUpperCase(), tarifaRef: f.tarifaRef || null };
     delete cuerpo._id; delete cuerpo.estado; delete cuerpo.titular;
@@ -381,15 +424,22 @@ export class Viajes {
       if (f._id) await this.api.put(`/viajes/${f._id}`, cuerpo);
       else {
         const v = await this.api.post<Viaje>('/viajes', cuerpo);
-        this.avisos.ok(`Viaje N° ${v.numero} registrado`);
+        this.avisos.ok(`Viaje N° ${v.numero} registrado${requiere ? '' : ' (sin manifiesto)'}`);
+        if (this.seguirRegistrando()) {
+          // Listo para el siguiente: mismo cliente, destino, fecha y valores; vehículo y conductor nuevos
+          this.registradosTanda.update(l => [...l, { numero: v.numero, placa: v.placa, sinManifiesto: !requiere }]);
+          this.form.set({ ...f, placa: '', remolque: '', conductor: '', titular: '', observaciones: '', requiereManifiesto: true });
+          setTimeout(() => document.getElementById('v-placa')?.focus(), 50);
+          return;
+        }
       }
       this.abierto.set(false);
+      this.registradosTanda.set([]);
       this.cargar();
     } catch (e) { this.avisos.error(e); } finally { this.guardando.set(false); }
   }
 
   async eliminar() {
-    if (!confirm('¿Eliminar este viaje? Esta acción no se puede deshacer.')) return;
     try {
       await this.api.delete(`/viajes/${this.form()._id}`);
       this.avisos.ok('Viaje eliminado');

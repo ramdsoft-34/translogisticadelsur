@@ -6,10 +6,11 @@ import { Avisos } from '../core/avisos.service';
 import { P } from '../core/modelos';
 import { Icono } from '../shared/icono';
 import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
+import { Confirmar } from '../shared/confirmar';
 
 @Component({
   selector: 'app-liquidaciones',
-  imports: [FormsModule, Icono, ...FORMATOS],
+  imports: [FormsModule, Icono, Confirmar, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Liquidación de fletes</h1>
       <p class="sutil">Relación de viajes por cliente y periodo: lo que se cobra, lo que se paga al conductor y la utilidad. Un viaje liquidado no se vuelve a cobrar.</p></div></div>
@@ -54,7 +55,7 @@ import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
               <td><div class="acciones" style="justify-content:flex-end">
                 <button class="pequeno" (click)="descargar(l, 'xlsx')">Excel</button><button class="pequeno" (click)="descargar(l, 'pdf')">PDF</button>
                 @if (puedeGestionar && l.estado === 'borrador') { <button class="pequeno" (click)="estado(l, 'facturada')">Marcar facturada</button> }
-                @if (puedeGestionar && l.estado !== 'anulada') { <button class="pequeno peligro" (click)="estado(l, 'anulada')">Anular</button> }
+                @if (puedeGestionar && l.estado !== 'anulada') { <button class="pequeno peligro" confirmar="Clic otra vez para anular" (confirmado)="estado(l, 'anulada')">Anular</button> }
               </div></td></tr>
           } @empty { <tr><td colspan="8" class="vacio">Aún no hay liquidaciones</td></tr> }</tbody></table>
       </div>
@@ -93,7 +94,6 @@ export class Liquidaciones {
   }
 
   async estado(l: any, estado: string) {
-    if (estado === 'anulada' && !confirm('¿Anular la liquidación? Sus viajes quedarán libres para liquidarse de nuevo.')) return;
     try { await this.api.put(`/liquidaciones/${l._id}/estado`, { estado }); this.cargar(); } catch (e) { this.avisos.error(e); }
   }
 

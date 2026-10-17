@@ -10,12 +10,13 @@ import { SelectorMunicipio } from '../shared/municipio';
 import { FORMATOS, isoDia } from '../shared/formato';
 import { VisorAuditoria } from '../shared/auditoria';
 import { ConfigCorreo } from '../shared/config-correo';
+import { Confirmar } from '../shared/confirmar';
 
 type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
 
 @Component({
   selector: 'app-configuracion',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, VisorAuditoria, ConfigCorreo, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, VisorAuditoria, ConfigCorreo, Confirmar, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Configuración</h1><p class="sutil">{{ auth.usuario()?.empresa?.nombre }}</p></div></div>
     <div class="pestanas">
@@ -45,6 +46,13 @@ type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
                     <option value="PRUEBAS" [disabled]="!c.ambientesHabilitados?.PRUEBAS">Pruebas del Ministerio{{ c.ambientesHabilitados?.PRUEBAS ? '' : ' (deshabilitado en el servidor)' }}</option>
                     <option value="PRODUCCION" [disabled]="!c.ambientesHabilitados?.PRODUCCION">Producción{{ c.ambientesHabilitados?.PRODUCCION ? '' : ' (deshabilitado en el servidor)' }}</option>
                   </select></div>
+                @if (c.ambiente === 'PRODUCCION' && ambienteGuardado() !== 'PRODUCCION') {
+                  <div class="ancho mensaje alerta">
+                    <strong>Va a activar el RNDC de PRODUCCIÓN:</strong> los documentos que se envíen serán reales ante el Ministerio de Transporte.
+                    Próxima remesa <strong>{{ c.consecutivoRemesa }}</strong> · próximo manifiesto <strong>{{ c.consecutivoManifiesto }}</strong>.
+                    <label class="casilla" style="margin-top:6px"><input type="checkbox" name="confProd" [(ngModel)]="confirmoProduccion" />Confirmo que esos números siguen al último expedido en el RNDC (incluido el Excel)</label>
+                  </div>
+                }
                 <div class="campo"><label for="usu">Usuario web service RNDC</label><input id="usu" name="usu" [(ngModel)]="c.usuario" autocomplete="off" />
                   <small>Lo asigna el Ministerio de Transporte. La contraseña se pide al enviar y no se guarda.</small></div>
                 <div class="campo"><label for="sr">Próximo consecutivo de remesa</label>
@@ -145,7 +153,7 @@ type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
           </ul>
           <div class="acciones" style="margin-top:12px">
             <input type="file" accept=".xlsx,.xlsm" (change)="elegirPlantilla($event)" aria-label="Plantilla de Excel" />
-            <button class="primario" (click)="importarPlantilla()" [disabled]="!archivoPlantilla() || importando()">{{ importando() ? 'Importando…' : 'Importar' }}</button>
+            <button class="primario" confirmar="Clic otra vez para importar" (confirmado)="importarPlantilla()" [disabled]="!archivoPlantilla() || importando()">{{ importando() ? 'Importando…' : 'Importar' }}</button>
           </div>
           @if (resultadoPlantilla(); as r) {
             <div class="mensaje ok" style="margin-top:14px">
@@ -223,6 +231,8 @@ export class Configuracion {
     } catch (e) { this.avisos.error(e); }
   }
 
+  confirmoProduccion = false;
+
   async guardarConfig() {
     const c = this.cfg();
     const campos = ['ambiente', 'usuario', 'codOrigen', 'poliza', 'mercancia', 'naturalezaCarga', 'tipoEmpaque',
@@ -235,10 +245,9 @@ export class Configuracion {
     for (const k of ['consecutivoRemesa', 'consecutivoManifiesto']) {
       if (!/^[A-Z0-9]*[0-9]$/.test(cuerpo[k] || '')) { this.avisos.mostrar('Los consecutivos solo llevan letras y números y deben terminar en número', 'error'); return; }
     }
-    if (c.ambiente === 'PRODUCCION' && this.ambienteGuardado() !== 'PRODUCCION' && !confirm(
-      'Va a activar el RNDC de PRODUCCIÓN: los documentos que se envíen serán reales ante el Ministerio de Transporte.\n\n' +
-      `Próxima remesa: ${c.consecutivoRemesa}\nPróximo manifiesto: ${c.consecutivoManifiesto}\n\n` +
-      '¿Confirma que esos números siguen al último expedido en el RNDC (incluido el Excel)?')) return;
+    if (c.ambiente === 'PRODUCCION' && this.ambienteGuardado() !== 'PRODUCCION' && !this.confirmoProduccion) {
+      this.avisos.mostrar('Marque la confirmación de producción que aparece debajo del ambiente', 'error'); return;
+    }
     this.guardando.set(true);
     try {
       await this.api.put('/rndc/config', cuerpo);
@@ -257,7 +266,7 @@ export class Configuracion {
 
   async importarPlantilla() {
     const f = this.archivoPlantilla();
-    if (!f || !confirm(`¿Importar «${f.name}» en ${this.auth.usuario()?.empresa?.nombre}?`)) return;
+    if (!f) return;
     this.importando.set(true);
     try {
       this.resultadoPlantilla.set(await this.api.subir('/importaciones/plantilla-viajes', f));

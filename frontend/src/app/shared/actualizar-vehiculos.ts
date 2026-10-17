@@ -6,6 +6,7 @@ import { RndcClave } from '../core/rndc-clave.service';
 import { Modal } from './modal';
 import { Icono } from './icono';
 import { FORMATOS } from './formato';
+import { Confirmar } from './confirmar';
 
 type Modo = 'uno' | 'todos' | 'lotes';
 const ETIQUETAS: Record<string, string> = {
@@ -23,7 +24,7 @@ const ESTADOS: Record<string, [string, string]> = {
 // uno por placa, todos o por lotes de 30. El servidor consulta de una placa a la vez.
 @Component({
   selector: 'app-actualizar-vehiculos',
-  imports: [FormsModule, Modal, Icono, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, Confirmar, ...FORMATOS],
   template: `
     <app-modal titulo="Actualizar vehículos desde el RNDC" [abierto]="abierto()" (cerrar)="cerrar.emit()" [ancho]="true">
       <div class="pestanas" role="tablist">
@@ -80,7 +81,7 @@ const ESTADOS: Record<string, [string, string]> = {
             <div class="acciones">
               @if (p.estado === 'esperando') { <button class="primario" type="button" (click)="continuar()" [disabled]="trabajando()">Continuar con el lote {{ p.loteActual + 1 }}</button> }
               @if (p.estado === 'pausado') { <button class="primario" type="button" (click)="continuar()" [disabled]="trabajando()">Reanudar</button> }
-              @if (['ejecutando', 'esperando', 'pausado'].includes(p.estado)) { <button type="button" class="peligro" (click)="detener()" [disabled]="trabajando()">Detener</button> }
+              @if (['ejecutando', 'esperando', 'pausado'].includes(p.estado)) { <button type="button" class="peligro" confirmar="Clic otra vez para detener" (confirmado)="detener()" [disabled]="trabajando()">Detener</button> }
             </div>
 
             @for (l of lotesRecientes(); track l.numero) {
@@ -228,7 +229,6 @@ export class ActualizarVehiculos {
   }
 
   async detener() {
-    if (!confirm('¿Detener la actualización? Lo ya actualizado se conserva.')) return;
     this.trabajando.set(true);
     try { this.proceso.set(await this.api.post<any>('/rndc/vehiculos/actualizacion/detener', {})); this.iniciarSondeo(); }
     catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }

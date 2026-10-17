@@ -10,6 +10,7 @@ import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
 import { FORMATOS, hoyIso, isoDia } from '../shared/formato';
 import { ExpedirRndc } from '../shared/expedir-rndc';
+import { Confirmar } from '../shared/confirmar';
 import { SelectorMunicipio } from '../shared/municipio';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { Auth } from '../core/auth.service';
@@ -28,7 +29,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
 
 @Component({
   selector: 'app-manifiestos',
-  imports: [FormsModule, Modal, Icono, Moneda, CargarMas, ExpedirRndc, SelectorMunicipio, BuscarTercero, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, Moneda, CargarMas, ExpedirRndc, SelectorMunicipio, BuscarTercero, Confirmar, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Manifiestos RNDC</h1><p class="sutil">Aquí se expiden las remesas y los manifiestos: revise los datos, envíelos al RNDC y, si hay un rechazo, corríjalos y reenvíe.
@@ -184,7 +185,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       </table></div>
       <ng-container pie>
         <button type="button" (click)="correosViaje.set(null)">Cerrar</button>
-        <button type="button" class="primario" (click)="enviarDeNuevo()" [disabled]="trabajando()"><app-icono nombre="enviar" [tam]="16" />Enviar de nuevo</button>
+        <button type="button" class="primario" confirmar="Clic otra vez para enviar" (confirmado)="enviarDeNuevo()" [disabled]="trabajando()"><app-icono nombre="enviar" [tam]="16" />Enviar de nuevo</button>
       </ng-container>
     </app-modal>
 
@@ -463,7 +464,7 @@ export class Manifiestos {
 
   async enviarDeNuevo() {
     const v = this.correosViaje();
-    if (!v || !confirm('¿Enviar de nuevo los documentos de este viaje a los destinatarios del cliente?')) return;
+    if (!v) return;
     this.trabajando.set(true);
     try {
       const r = await this.api.post<any[]>(`/correo/viajes/${v._id}/enviar`, {});

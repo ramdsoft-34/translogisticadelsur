@@ -4,6 +4,7 @@ import { Api } from '../core/api.service';
 import { Avisos } from '../core/avisos.service';
 import { Modal } from './modal';
 import { Icono } from './icono';
+import { Confirmar } from './confirmar';
 
 type Campo = 'encabezado' | 'linea' | 'pie';
 const nueva = () => ({ _id: '', nombre: '', encabezado: '{saludo},\n\nReporte de vehículos - {fecha}\n\n{cliente}',
@@ -13,7 +14,7 @@ const nueva = () => ({ _id: '', nombre: '', encabezado: '{saludo},\n\nReporte de
 // (marcadores) y formato (separación entre viajes). Vista previa con los viajes reales.
 @Component({
   selector: 'app-plantillas-whatsapp',
-  imports: [FormsModule, Modal, Icono],
+  imports: [FormsModule, Modal, Icono, Confirmar],
   template: `
     <app-modal titulo="Plantillas del reporte de WhatsApp" [abierto]="abierto()" (cerrar)="cerrar.emit()" [ancho]="true">
       <div class="disposicion">
@@ -66,7 +67,7 @@ const nueva = () => ({ _id: '', nombre: '', encabezado: '{saludo},\n\nReporte de
         </div>
       </div>
       <ng-container pie>
-        @if (form()._id && !esBase()) { <button type="button" class="peligro" (click)="eliminar()" style="margin-right:auto">Eliminar</button> }
+        @if (form()._id && !esBase()) { <button type="button" class="peligro" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()" style="margin-right:auto">Eliminar</button> }
         <button type="button" (click)="cerrar.emit()">Cerrar</button>
         @if (!esBase()) { <button class="primario" type="submit" form="form-plantilla" [disabled]="guardando()">{{ guardando() ? 'Guardando…' : 'Guardar plantilla' }}</button> }
       </ng-container>
@@ -166,7 +167,6 @@ export class PlantillasWhatsapp {
 
   async eliminar() {
     const f = this.form();
-    if (!confirm(`¿Eliminar la plantilla «${f.nombre}»?`)) return;
     try {
       await this.api.delete(`/viajes/plantillas-whatsapp/${f._id}`);
       this.avisos.ok('Plantilla eliminada');

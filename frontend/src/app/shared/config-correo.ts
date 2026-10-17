@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Avisos } from '../core/avisos.service';
 import { Modal } from './modal';
+import { Confirmar } from './confirmar';
 
 const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/).map(x => x.trim().toLowerCase()).filter(Boolean))];
 
@@ -10,7 +11,7 @@ const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/)
 // documentos que recibe y formato de la carta de salida.
 @Component({
   selector: 'app-config-correo',
-  imports: [FormsModule, Modal],
+  imports: [FormsModule, Modal, Confirmar],
   template: `
     @if (smtp(); as c) {
       <form class="tarjeta" (ngSubmit)="guardarYProbar()">
@@ -61,7 +62,8 @@ const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/)
         <div class="paso"><span class="num">3</span><strong>Guarde y reciba un correo de prueba</strong></div>
         <div class="acciones">
           <button class="primario" type="submit" [disabled]="trabajando() || !c.remitenteCorreo || (!clave && !c.tieneClave)">{{ trabajando() ? 'Probando…' : 'Guardar y probar' }}</button>
-          @if (c.activo) { <button type="button" (click)="desactivar()" [disabled]="trabajando()">Pausar envíos</button> }
+          <button type="button" (click)="soloGuardar()" [disabled]="trabajando() || !c.remitenteCorreo">Guardar</button>
+          @if (c.activo) { <button type="button" confirmar="Clic otra vez para pausar" (confirmado)="desactivar()" [disabled]="trabajando()">Pausar envíos</button> }
         </div>
         @if (resultadoPrueba(); as r) {
           <div class="mensaje" [class.ok]="r.ok" [class.error]="!r.ok" style="margin-top:12px">
@@ -282,8 +284,12 @@ export class ConfigCorreo {
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 
+  // Guarda los cambios sin enviar el correo de prueba (conserva si los envíos están activos)
+  async soloGuardar() {
+    if (await this.guardarCuenta(this.smtp().activo || undefined)) this.avisos.ok('Configuración del correo guardada');
+  }
+
   async desactivar() {
-    if (!confirm('¿Pausar el envío automático de documentos por correo?')) return;
     this.smtp.update(c => ({ ...c, activo: false }));
     await this.guardarCuenta(false);
   }

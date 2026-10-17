@@ -11,12 +11,13 @@ import { Moneda } from './moneda';
 import { SelectorMunicipio } from './municipio';
 import { BuscarTercero } from './buscar-tercero';
 import { FORMATOS, isoDia } from './formato';
+import { Confirmar } from './confirmar';
 
 // Expedición de remesa y manifiesto de un viaje: revisar y corregir los datos,
 // enviar al RNDC y, si hay rechazo, ver la respuesta real del RNDC, corregir y reenviar.
 @Component({
   selector: 'app-expedir-rndc',
-  imports: [FormsModule, Modal, Icono, Moneda, SelectorMunicipio, BuscarTercero, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, Moneda, SelectorMunicipio, BuscarTercero, Confirmar, ...FORMATOS],
   template: `
     <app-modal [titulo]="'Expedir viaje N° ' + (viaje()?.numero || '')" [abierto]="!!viajeId()" (cerrar)="cerrar.emit()" [ancho]="true">
       @if (previa(); as p) {
@@ -150,7 +151,7 @@ import { FORMATOS, isoDia } from './formato';
       }
       <ng-container pie>
         @if (previa()?.estado === 'registrado') {
-          <button type="button" (click)="sinManifiesto()" [disabled]="trabajando()" style="margin-right:auto" title="Quitar este viaje de la lista de manifiestos">No requiere manifiesto</button>
+          <button type="button" confirmar="Clic otra vez: sin manifiesto" (confirmado)="sinManifiesto()" [disabled]="trabajando()" style="margin-right:auto" title="Quitar este viaje de la lista de manifiestos">No requiere manifiesto</button>
         }
         <button type="button" (click)="cerrar.emit()">Cerrar</button>
         <button type="button" (click)="guardar()" [disabled]="trabajando() || !previa()">Guardar cambios</button>
@@ -339,7 +340,7 @@ export class ExpedirRndc {
 
   async sinManifiesto() {
     const id = this.viajeId();
-    if (!id || !confirm('¿Marcar este viaje como «no requiere manifiesto»? Saldrá de la lista de Manifiestos RNDC.')) return;
+    if (!id) return;
     this.trabajando.set(true);
     try {
       await this.api.put(`/rndc/viajes/${id}/datos`, { requiereManifiesto: false });

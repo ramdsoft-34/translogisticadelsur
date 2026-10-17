@@ -64,9 +64,16 @@ const empresaVacia = () => ({ nombre: '', nit: '', dv: '', direccion: '', telefo
             <small style="margin-left:8px">Último acceso: {{ (a.ultimoAcceso | fechaHora) || 'nunca' }}</small></span></div>
           <div class="campo" style="justify-content:flex-end"><div class="acciones">
             <button type="button" class="pequeno" (click)="alternarAdmin(a)">{{ a.activo ? 'Desactivar' : 'Activar' }}</button>
-            <button type="button" class="pequeno" (click)="restablecer(a)">Restablecer clave</button>
+            <button type="button" class="pequeno" (click)="restableciendo.set(!restableciendo())">Restablecer clave</button>
             <button class="primario pequeno" type="submit">Guardar</button></div></div>
         </form>
+        @if (restableciendo()) {
+          <form class="acciones" style="margin-top:12px" (ngSubmit)="restablecer(a)">
+            <input type="password" name="nueva" [(ngModel)]="claveNueva" autocomplete="new-password" placeholder="Nueva contraseña temporal" aria-label="Nueva contraseña temporal" style="max-width:280px" />
+            <button class="primario pequeno" type="submit" [disabled]="claveNueva.length < 8">Guardar clave</button>
+            <small class="sutil">Mínimo 8 caracteres con letras y números; deberá cambiarla al ingresar.</small>
+          </form>
+        }
       } @else {
       <h3 style="margin-top:16px">Crear administrador</h3>
       <form class="formulario" (ngSubmit)="crearAdmin()">
@@ -134,10 +141,13 @@ export class AdminEmpresas {
     try { await this.api.put(`/admin/administradores/${a._id}`, { activo: !a.activo }); this.administradores(this.empresaAdmins()); } catch (x) { this.avisos.error(x); }
   }
 
+  readonly restableciendo = signal(false);
+  claveNueva = '';
   async restablecer(a: any) {
-    const clave = prompt(`Nueva contraseña temporal para ${a.email} (mínimo 8 caracteres con letras y números):`);
-    if (!clave) return;
-    try { await this.api.put(`/admin/administradores/${a._id}`, { password: clave }); this.avisos.ok('Contraseña restablecida; deberá cambiarla al ingresar'); }
-    catch (x) { this.avisos.error(x); }
+    try {
+      await this.api.put(`/admin/administradores/${a._id}`, { password: this.claveNueva });
+      this.avisos.ok('Contraseña restablecida; deberá cambiarla al ingresar');
+      this.claveNueva = ''; this.restableciendo.set(false);
+    } catch (x) { this.avisos.error(x); }
   }
 }
