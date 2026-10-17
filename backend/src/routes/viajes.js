@@ -117,7 +117,9 @@ r.get('/resumen', permitir(P.VIAJES_VER), async (req, res) => {
   const [hoyN, porEstado, mes] = await Promise.all([
     Viaje.countDocuments(deEmpresa(req, { fecha: hoy })),
     // Los históricos importados del Excel no cuentan como pendientes de RNDC
-    Viaje.aggregate([{ $match: { ...base, historico: { $ne: true }, requiereManifiesto: { $ne: false } } }, { $group: { _id: '$estado', n: { $sum: 1 } } }]),
+    // Igual que «Por enviar» en Manifiestos RNDC: sin históricos, sin los que no requieren manifiesto y sin anulados
+    Viaje.aggregate([{ $match: { ...base, historico: { $ne: true }, requiereManifiesto: { $ne: false },
+      $nor: [{ 'remesa.estado': 'anulado' }, { 'manifiesto.estado': 'anulado' }] } }, { $group: { _id: '$estado', n: { $sum: 1 } } }]),
     Viaje.aggregate([{ $match: { ...base, fecha: { $gte: inicioMes }, estado: { $ne: 'anulado' } } },
       { $group: { _id: null, viajes: { $sum: 1 }, tarifa: { $sum: '$tarifa' }, flete: { $sum: '$flete' }, anticipo: { $sum: '$anticipo' } } }]),
   ]);

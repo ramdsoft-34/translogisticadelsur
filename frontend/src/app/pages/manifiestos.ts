@@ -50,9 +50,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
 
     <div class="pestanas">
       <button [class.activa]="pestana() === 'pendientes'" (click)="ir('pendientes')">Por enviar</button>
-      <button [class.activa]="pestana() === 'anulados'" (click)="ir('anulados')" title="Viajes con la remesa o el manifiesto anulados en el RNDC">Anulados</button>
       <button [class.activa]="pestana() === 'manifestados'" (click)="ir('manifestados')">Manifestados</button>
       <button [class.activa]="pestana() === 'cumplidos'" (click)="ir('cumplidos')">Cumplidos</button>
+      <button [class.activa]="pestana() === 'anulados'" (click)="ir('anulados')" title="Viajes con la remesa o el manifiesto anulados en el RNDC">Anulados</button>
       <button [class.activa]="pestana() === 'correos'" (click)="ir('correos')">Correos</button>
       <button [class.activa]="pestana() === 'historial'" (click)="ir('historial')">Historial RNDC</button>
     </div>
@@ -73,7 +73,13 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         <tbody>@for (e of envios(); track e._id) {
           <tr><td>{{ e.createdAt | fechaHora }}</td><td>{{ e.documento }}</td>
             <td>{{ e.tipo === 'salida' ? 'Carta de salida' : 'Manifiesto PDF' }}<br /><span class="sutil">{{ e.origen === 'manual' ? 'Manual' : 'Automático' }}{{ e.usuario?.nombre ? ' · ' + e.usuario.nombre : '' }}</span></td>
-            <td class="sutil">{{ e.destinatarios.join(', ') }}@if (e.cc?.length) { <br />CC: {{ e.cc.join(', ') }} }</td>
+            <td class="destinos">
+              @if (e.destinatarios.length + (e.cc?.length || 0) <= 2) { <span class="sutil">{{ listaDestinos(e) }}</span> }
+              @else {
+                <details><summary>{{ e.destinatarios.length }} destinatario(s){{ e.cc?.length ? ' + ' + e.cc.length + ' CC' : '' }}</summary>
+                  <ul>@for (d of e.destinatarios; track d) { <li>{{ d }}</li> }@for (d of e.cc || []; track d) { <li>CC: {{ d }}</li> }</ul></details>
+              }
+            </td>
             <td><span class="chip" [class]="claseCorreo(e.estado)">{{ textoCorreo(e.estado) }}</span>
               @if (e.enviadoEn) { <br /><span class="sutil">{{ e.enviadoEn | fechaHora }}</span> }
               @if (e.error) { <div class="error-correo">{{ e.error }}</div> }</td>
@@ -160,7 +166,10 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         <thead><tr><th>Fecha</th><th>Documento</th><th>Destinatarios</th><th>Estado</th><th></th></tr></thead>
         <tbody>@for (e of enviosViaje(); track e._id) {
           <tr><td>{{ e.createdAt | fechaHora }}</td><td>{{ e.tipo === 'salida' ? 'Carta de salida' : 'Manifiesto PDF' }}</td>
-            <td class="sutil">{{ e.destinatarios.join(', ') }}</td>
+            <td class="destinos">
+              <details><summary>{{ e.destinatarios.length }} destinatario(s){{ e.cc?.length ? ' + ' + e.cc.length + ' CC' : '' }}</summary>
+                <ul>@for (d of e.destinatarios; track d) { <li>{{ d }}</li> }@for (d of e.cc || []; track d) { <li>CC: {{ d }}</li> }</ul></details>
+            </td>
             <td><span class="chip" [class]="claseCorreo(e.estado)">{{ textoCorreo(e.estado) }}</span> <span class="sutil">· {{ e.intentos }} intento(s)</span>
               @if (e.error) { <div class="error-correo">{{ e.error }}</div> }</td>
             <td>@if (e.estado === 'error') { <button class="pequeno" (click)="reintentar(e)" [disabled]="trabajando()">Reintentar</button> }</td></tr>
@@ -272,6 +281,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     </app-modal>`,
   styles: [`
     .secciones { display: flex; flex-direction: column; gap: 14px; }
+    .destinos { max-width: 240px; font-size: 13px; }
+    .destinos summary { color: var(--gris-7); }
+    .destinos ul { margin: 6px 0 0; padding-left: 16px; font-size: 12.5px; color: var(--gris-5); word-break: break-all; }
     .error-correo { margin-top: 4px; font-size: 12.5px; color: var(--rojo-texto); max-width: 360px; }
     .chip-boton { border: 0; background: none; padding: 0; min-height: 0; cursor: pointer; }
     .rejilla { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
@@ -413,6 +425,7 @@ export class Manifiestos {
   }
 
   verCorreos(v: Viaje) { this.correosViaje.set(v); }
+  listaDestinos(e: any) { return [...e.destinatarios, ...(e.cc || []).map((x: string) => `CC: ${x}`)].join(', '); }
 
   async reintentar(e: any) {
     this.trabajando.set(true);
