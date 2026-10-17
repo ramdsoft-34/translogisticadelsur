@@ -45,10 +45,14 @@ type Pestana = 'rndc' | 'usuarios' | 'importar' | 'auditoria';
                   </select></div>
                 <div class="campo"><label for="usu">Usuario web service RNDC</label><input id="usu" name="usu" [(ngModel)]="c.usuario" autocomplete="off" />
                   <small>Lo asigna el Ministerio de Transporte. La contraseña se pide al enviar y no se guarda.</small></div>
-                <div class="campo"><label for="pr">Prefijo de remesas</label><input id="pr" name="pr" maxlength="8" [(ngModel)]="c.prefijoRemesa" /></div>
-                <div class="campo"><label for="sr">Próximo consecutivo de remesa</label><input id="sr" type="number" min="1" name="sr" [(ngModel)]="c.siguienteRemesa" /></div>
-                <div class="campo"><label for="pm">Prefijo de manifiestos</label><input id="pm" name="pm" maxlength="8" [(ngModel)]="c.prefijoManifiesto" /></div>
-                <div class="campo"><label for="sm">Próximo consecutivo de manifiesto</label><input id="sm" type="number" min="1" name="sm" [(ngModel)]="c.siguienteManifiesto" /></div>
+                <div class="campo"><label for="sr">Próximo consecutivo de remesa</label>
+                  <input id="sr" name="sr" maxlength="15" [ngModel]="c.consecutivoRemesa" (ngModelChange)="c.consecutivoRemesa = limpiarConsecutivo($event)"
+                    placeholder="R10063903" style="text-transform:uppercase" autocomplete="off" />
+                  <small>Solo letras y números; debe terminar en número.</small></div>
+                <div class="campo"><label for="sm">Próximo consecutivo de manifiesto</label>
+                  <input id="sm" name="sm" maxlength="15" [ngModel]="c.consecutivoManifiesto" (ngModelChange)="c.consecutivoManifiesto = limpiarConsecutivo($event)"
+                    placeholder="M10063903" style="text-transform:uppercase" autocomplete="off" />
+                  <small>Solo letras y números; debe terminar en número.</small></div>
                 <div class="ancho mensaje alerta">Los próximos consecutivos deben continuar después del <strong>último número expedido en el RNDC</strong>,
                   incluidos los que se hicieron con la plantilla de Excel o en el portal del Ministerio. Si se repite un número, el RNDC lo rechaza.
                   Solo se pueden aumentar.</div>
@@ -218,16 +222,19 @@ export class Configuracion {
 
   async guardarConfig() {
     const c = this.cfg();
-    const campos = ['ambiente', 'usuario', 'prefijoRemesa', 'prefijoManifiesto', 'codOrigen', 'poliza', 'mercancia', 'naturalezaCarga', 'tipoEmpaque',
+    const campos = ['ambiente', 'usuario', 'codOrigen', 'poliza', 'mercancia', 'naturalezaCarga', 'tipoEmpaque',
       'unidadMedida', 'operacion', 'retefuentePct', 'reteIca', 'responsablePagoCargue', 'responsablePagoDescargue', 'horaCitaCargue',
       'horaCitaDescargue', 'horasPactoCargue', 'horasPactoDescargue', 'aceptacionElectronica', 'pagoSaldo', 'diasPagoSaldo',
-      'codMunicipioPagoSaldo', 'nitMonitoreoFlota', 'aplicarFopat', 'extras', 'siguienteRemesa', 'siguienteManifiesto'];
+      'codMunicipioPagoSaldo', 'nitMonitoreoFlota', 'aplicarFopat', 'extras', 'consecutivoRemesa', 'consecutivoManifiesto'];
     const cuerpo: any = Object.fromEntries(campos.map(k => [k, c[k]]));
     cuerpo.poliza = { ...c.poliza, vence: c.poliza.vence || null };
     cuerpo.extras = (c.extras || []).filter((x: any) => x.variable);
+    for (const k of ['consecutivoRemesa', 'consecutivoManifiesto']) {
+      if (!/^[A-Z0-9]*[0-9]$/.test(cuerpo[k] || '')) { this.avisos.mostrar('Los consecutivos solo llevan letras y números y deben terminar en número', 'error'); return; }
+    }
     if (c.ambiente === 'PRODUCCION' && this.ambienteGuardado() !== 'PRODUCCION' && !confirm(
       'Va a activar el RNDC de PRODUCCIÓN: los documentos que se envíen serán reales ante el Ministerio de Transporte.\n\n' +
-      `Próxima remesa: ${c.prefijoRemesa}${c.siguienteRemesa}\nPróximo manifiesto: ${c.prefijoManifiesto}${c.siguienteManifiesto}\n\n` +
+      `Próxima remesa: ${c.consecutivoRemesa}\nPróximo manifiesto: ${c.consecutivoManifiesto}\n\n` +
       '¿Confirma que esos números siguen al último expedido en el RNDC (incluido el Excel)?')) return;
     this.guardando.set(true);
     try {
@@ -237,6 +244,9 @@ export class Configuracion {
       this.ir('rndc');
     } catch (e) { this.avisos.error(e); } finally { this.guardando.set(false); }
   }
+
+  // Mayúsculas y solo letras o números (sin espacios, guiones ni símbolos)
+  limpiarConsecutivo(v: string) { return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 15); }
 
   nombreAmbiente(a: string) { return ({ SIMULADO: 'simulador local', PRUEBAS: 'pruebas del Ministerio', PRODUCCION: 'PRODUCCIÓN' } as Record<string, string>)[a] || a; }
 

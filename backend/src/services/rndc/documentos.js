@@ -114,7 +114,8 @@ export function contextoViaje(empresa, viaje, vehiculo) {
     SEDE_CLIENTE: cliente.sedeRemitente || '',
     DEST_TIPO: dest?.tipoId || cliente.tipoId || 'N',
     DEST_ID: dest?.numId || idCliente(cliente),
-    DEST_SEDE: dest?.sede || '',
+    // Sin destinatario propio, el destinatario es el cliente con su sede registrada en el RNDC
+    DEST_SEDE: dest ? (dest.sede || '') : (cliente.sedeRemitente || ''),
     COD_ORIGEN: viaje.codOrigen || cfg.codOrigen || '',
     COD_DESTINO: viaje.codDestino || viaje.tarifaRef?.codMunicipio || '',
     PESO: numero(viaje.pesoKg),

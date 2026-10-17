@@ -192,6 +192,22 @@ test('RNDC: configuración (solo admin) y bloqueo de ambientes oficiales', async
   assert.equal(cfg.body.mercancia.codigo, '009980');
 });
 
+test('RNDC: consecutivo con letras y números', async () => {
+  const cfg = (await s.adminA.get('/api/rndc/config')).body;
+  assert.equal(cfg.consecutivoRemesa, 'R500');
+  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R-500' })).status, 400, 'solo letras y números');
+  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'REM' })).status, 400, 'debe terminar en número');
+  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R499' })).status, 400, 'no se baja la numeración');
+  // Cambio de serie con ceros a la izquierda: se conservan
+  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoManifiesto: 'mc0700' })).status, 200);
+  const c2 = (await s.adminA.get('/api/rndc/config')).body;
+  assert.equal(c2.consecutivoManifiesto, 'MC0700');
+  assert.equal(c2.prefijoManifiesto, 'MC0');
+  // Se vuelve a la serie de las demás pruebas
+  await s.adminA.put('/api/rndc/config', { consecutivoManifiesto: 'M700' });
+  assert.equal((await s.adminA.get('/api/rndc/config')).body.consecutivoManifiesto, 'M700');
+});
+
 test('RNDC: el reportero no puede despachar', async () => {
   assert.equal((await s.reportero.post(`/api/rndc/viajes/${s.viaje}/despachar`, { clave: CLAVE_RNDC })).status, 403);
 });

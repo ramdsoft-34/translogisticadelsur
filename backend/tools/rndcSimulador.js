@@ -30,7 +30,9 @@ export function crearSimulador() {
 
   function registrar(proceso, xml) {
     const v = variables(xml);
-    const faltan = Object.entries(DICCIONARIO[proceso] || {}).filter(([n, [, , req]]) => req === 'S' && !v[n]).map(([n]) => n);
+    // Como el RNDC real: la licencia solo se pide si el tercero la reporta (conductores)
+    const faltan = Object.entries(DICCIONARIO[proceso] || {}).filter(([n, [, , req]]) => req === 'S' && !v[n])
+      .filter(([n]) => !(proceso === 11 && /LICENCIA/.test(n) && !v.NUMLICENCIACONDUCCION)).map(([n]) => n);
     if (faltan.length) return error(`Faltan variables obligatorias: ${faltan.join(', ')}`);
     const nit = v.NUMNITEMPRESATRANSPORTE;
     switch (proceso) {

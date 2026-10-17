@@ -21,6 +21,16 @@ const operar = permitir(P.RNDC_OPERAR);
 const clave = z.string().min(1, 'Escriba la contraseña del RNDC').max(100);
 const t = (max) => z.string().trim().max(max).optional().default('');
 const divipola = z.string().trim().regex(/^(\d{8})?$/, 'DIVIPOLA de 8 dígitos').optional().default('');
+const consecutivo = z.string().trim().toUpperCase()
+  .regex(/^[A-Z0-9]{1,15}$/, 'Solo letras y números (máximo 15)')
+  .regex(/\d$/, 'Debe terminar en número para poder continuar la numeración');
+
+// «R0045» → { prefijo: 'R00', numero: 45 }: los ceros a la izquierda quedan en el prefijo
+// para conservar el formato; el número que sigue se incrementa.
+export function partirConsecutivo(texto) {
+  const m = String(texto).match(/^(.*?)(0*)([1-9]\d*|0)$/);
+  return { prefijo: `${m[1]}${m[2]}`, numero: Number(m[3]) };
+}
 
 // ── Catálogos y estado ──────────────────────────────────────────────────────
 r.get('/catalogos', (_req, res) => {
@@ -53,35 +63,55 @@ const configSchema = z.object({
   // Próximos consecutivos (solo para continuar una numeración existente; no se pueden bajar)
   siguienteRemesa: z.coerce.number().int().min(1).optional(),
   siguienteManifiesto: z.coerce.number().int().min(1).optional(),
+  // Consecutivo completo con letras y números (ej. R10063903); debe terminar en número
+  consecutivoRemesa: consecutivo.optional(),
+  consecutivoManifiesto: consecutivo.optional(),
 });
 
 r.get('/config', permitir(P.CONFIG_GESTIONAR, P.RNDC_OPERAR), async (req, res) => {
   const e = await Empresa.findById(req.empresaId).select('nombre nit dv rndc').lean();
+  const [sr, sm] = [await proximo(req.empresaId, 'remesa'), await proximo(req.empresaId, 'manifiesto')];
   res.json({
     ...e.rndc,
-    siguienteRemesa: await proximo(req.empresaId, 'remesa'),
-    siguienteManifiesto: await proximo(req.empresaId, 'manifiesto'),
+    siguienteRemesa: sr,
+    siguienteManifiesto: sm,
+    consecutivoRemesa: `${e.rndc?.prefijoRemesa || ''}${sr}`,
+    consecutivoManifiesto: `${e.rndc?.prefijoManifiesto || ''}${sm}`,
     ambientesHabilitados: { SIMULADO: true, PRUEBAS: env.rndc.permitirPruebas, PRODUCCION: env.rndc.permitirProduccion },
     endpoints: cat.ENDPOINTS,
   });
 });
 
 r.put('/config', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
-  const { siguienteRemesa, siguienteManifiesto, ...d } = configSchema.partial().parse(req.body);
+  const { siguienteRemesa, siguienteManifiesto, consecutivoRemesa, consecutivoManifiesto, ...d } = configSchema.partial().parse(req.body);
+  // El consecutivo completo define el prefijo y el próximo número
+  const empresaAntes = await Empresa.findById(req.empresaId).select('rndc').lean();
+  const nuevos = {};
+  for (const [claveC, texto, campoPrefijo] of [['remesa', consecutivoRemesa, 'prefijoRemesa'], ['manifiesto', consecutivoManifiesto, 'prefijoManifiesto']]) {
+    if (!texto) continue;
+    const nuevo = partirConsecutivo(texto);
+    const actual = partirConsecutivo(`${empresaAntes.rndc?.[campoPrefijo] || ''}${await proximo(req.empresaId, claveC)}`);
+    if (nuevo.prefijo === actual.prefijo && nuevo.numero < actual.numero) {
+      throw new ErrorHttp(400, `El próximo consecutivo de ${claveC} no puede ser menor que ${actual.prefijo}${actual.numero}: esos números ya pudieron usarse`);
+    }
+    d[campoPrefijo] = nuevo.prefijo;
+    nuevos[claveC] = nuevo.numero;
+  }
   if (d.ambiente === 'PRODUCCION' && !env.rndc.permitirProduccion) {
     throw new ErrorHttp(400, 'Este servidor no tiene habilitado el ambiente de producción del RNDC (RNDC_PERMITIR_PRODUCCION)');
   }
   if (d.ambiente === 'PRUEBAS' && !env.rndc.permitirPruebas) throw new ErrorHttp(400, 'Este servidor no tiene habilitado el ambiente de pruebas del RNDC');
   const set = Object.fromEntries(Object.entries(d).filter(([, v]) => v !== undefined).map(([k, v]) => [`rndc.${k}`, v]));
   if (Object.keys(set).length) await Empresa.updateOne({ _id: req.empresaId }, { $set: set }, { runValidators: true });
+  for (const [claveC, n] of Object.entries(nuevos)) await Contador.updateOne({ empresa: req.empresaId, clave: claveC }, { $set: { valor: n - 1 } }, { upsert: true });
   for (const [claveC, n] of [['remesa', siguienteRemesa], ['manifiesto', siguienteManifiesto]]) {
-    if (!n) continue;
+    if (!n || nuevos[claveC]) continue;
     const actual = await proximo(req.empresaId, claveC);
     if (n < actual) throw new ErrorHttp(400, `El próximo consecutivo de ${claveC} no puede ser menor que ${actual}`);
     await Contador.updateOne({ empresa: req.empresaId, clave: claveC }, { $set: { valor: n - 1 } }, { upsert: true });
   }
   await auditar(req, 'editar_config_rndc', { entidad: 'Empresa', entidadId: req.empresaId,
-    detalle: { ...d, siguienteRemesa, siguienteManifiesto } });
+    detalle: { ...d, siguienteRemesa, siguienteManifiesto, consecutivoRemesa, consecutivoManifiesto } });
   res.json({ ok: true });
 });
 

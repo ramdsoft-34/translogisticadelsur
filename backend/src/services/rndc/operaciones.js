@@ -98,8 +98,12 @@ const CAMPOS_VEHICULO = {
 // Problemas según el diccionario oficial, más dos condiciones del manual:
 // los conductores llevan número y categoría de licencia, y las personas naturales, apellido.
 export function problemasMaestro(proceso, variables, doc) {
-  const problemas = validarVariables(proceso, variables);
+  let problemas = validarVariables(proceso, variables);
   if (proceso === 11) {
+    // El diccionario marca la fecha de la licencia como obligatoria, pero el RNDC registra
+    // terceros sin licencia (titulares, propietarios): solo se exige a quien conduce o la tiene.
+    const conLicencia = (doc.roles || []).includes('conductor') || txt(doc.licencia?.numero);
+    if (!conLicencia) problemas = problemas.filter(p => !/LICENCIA/.test(p));
     if ((doc.roles || []).includes('conductor')) {
       if (!txt(doc.licencia?.numero)) problemas.push('NUMLICENCIACONDUCCION: es obligatorio para conductores');
       if (!txt(doc.licencia?.categoria)) problemas.push('CODCATEGORIALICENCIACONDUCCION: es obligatorio para conductores');
