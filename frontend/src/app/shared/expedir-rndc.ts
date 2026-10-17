@@ -124,6 +124,20 @@ import { Confirmar } from './confirmar';
               <br />El manifiesto irá al municipio <strong>{{ p.destinoManifiesto }}</strong>, el de la sede del destinatario{{ p.destinatario.nombreSede ? ' (' + p.destinatario.nombreSede + ')' : '' }}, como lo exige el RNDC.
             }</p></fieldset>
 
+          @if (p.documentos.manifiesto.estado !== 'aceptado') {
+            <fieldset [class.resaltar]="duplicado()"><legend>Números en el RNDC</legend><div class="formulario">
+              <div class="campo"><label for="ex-nr">N° de remesa</label>
+                <input id="ex-nr" name="nr" maxlength="15" [(ngModel)]="f.numeroRemesa" [disabled]="p.remesaAceptada" style="text-transform:uppercase"
+                  [placeholder]="p.remesaAceptada ? p.documentos.remesa.numero : 'Automático: ' + p.numeros?.remesa" />
+                @if (p.remesaAceptada) { <small>Aceptada con este número.</small> }</div>
+              <div class="campo"><label for="ex-nm">N° de manifiesto</label>
+                <input id="ex-nm" name="nm" maxlength="15" [(ngModel)]="f.numeroManifiesto" style="text-transform:uppercase"
+                  [placeholder]="'Automático: ' + p.numeros?.manifiesto" /></div>
+            </div>
+            <p class="sutil nota-num">Déjelos vacíos para usar la numeración automática. Escríbalos solo si el RNDC respondió que el número ya fue radicado (DUPLICADO).</p>
+            </fieldset>
+          }
+
           @if (!p.remesaAceptada) {
             <fieldset><legend>Carga (remesa)</legend><div class="formulario">
               <div class="campo"><label for="ex-peso">Cantidad cargada (kg)</label><input id="ex-peso" type="number" min="0" name="peso" [(ngModel)]="f.pesoKg" required /></div>
@@ -215,6 +229,8 @@ import { Confirmar } from './confirmar';
     .resolver li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
     .resolver li small { flex-basis: 100%; color: var(--gris-6); }
     .resolver select { max-width: 380px; }
+    fieldset.resaltar { border-color: var(--ambar); box-shadow: 0 0 0 1px var(--ambar); }
+    .nota-num { margin: 8px 0 0; font-size: 12.5px; }
     .que-hacer { margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: var(--gris-0); color: var(--gris-8); font-size: 13.5px; }
     h3 { margin: 6px 0 8px; font-size: 14px; }
     .maestros { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 6px; }
@@ -269,6 +285,7 @@ export class ExpedirRndc {
         placa: v.placa, remolque: v.remolque || '', conductor: v.conductor?._id || '', titular: v.titular?._id || '', titularInicial: v.titular?._id || '',
         pesoKg: v.pesoKg, destinatario: { tipoId: v.destinatario?.tipoId || '', numId: v.destinatario?.numId || '', sede: v.destinatario?.sede || '' },
         flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones || '',
+        numeroRemesa: p.numeros?.manualRemesa || '', numeroManifiesto: p.numeros?.manualManifiesto || '',
       });
       // Si el viaje no tiene origen propio se muestra el que se enviará (el de la empresa)
       const origen = p.manifiesto.variables.find((x: string[]) => x[0] === 'CODMUNICIPIOORIGENMANIFIESTO')?.[1];
@@ -293,6 +310,7 @@ export class ExpedirRndc {
     if (/MAN270|anticipo supera/i.test(t)) return 'El anticipo no puede ser mayor que el neto a pagar (flete menos retenciones). La plataforma lo ajusta al neto: presione «Corregir y reenviar».';
     if (/REM060|REM380|REM382|cantidad/i.test(t)) return 'Falta la cantidad cargada. Escriba el peso de la carga en kg en «Carga (remesa)» y presione «Corregir y reenviar».';
     if (/MAN354|municipio destino/i.test(t)) return 'El destino del manifiesto debe ser el mismo municipio de la remesa (el de la sede del destinatario). La plataforma ya lo toma así: presione «Corregir y reenviar».';
+    if (/DUPLICADO|REM030|ya fu[eé] radicado/i.test(t)) return 'Ese número ya está radicado en el RNDC (lo usó otro documento o un envío anterior). Escriba en «Números en el RNDC» un número que no se haya usado y presione «Corregir y reenviar».';
     if (/REM019|cargue y la direccion del punto de descargue/i.test(t)) return 'El destinatario no puede ser el mismo remitente en la misma sede. Elija en «Carga» la sede del cliente en el destino o quién recibe.';
     if (/REM180|REM200|destinatario/i.test(t)) return 'El destinatario o su sede no existen en el RNDC. Elija en «Carga» el destinatario y la sede correctos.';
     if (/placa|veh[ií]culo.*no existe/i.test(t)) return 'El vehículo no está registrado en el RNDC. Use «Registrar de nuevo» junto al VEHÍCULO y reenvíe.';
@@ -302,6 +320,7 @@ export class ExpedirRndc {
   etiquetas(f: any[]) { return f.map(x => x.etiqueta).join(', '); }
 
   // REM019: el destinatario quedó igual al remitente; se elige quién recibe aquí mismo
+  readonly duplicado = computed(() => /DUPLICADO|REM030|ya fu[eé] radicado/i.test(this.previa()?.ultimoError?.mensaje || ''));
   readonly problemaDestino = computed(() => !!this.previa()?.remesa?.problemas?.some((x: string) => /REM019/.test(x)));
   readonly sedesEnDestino = computed(() => {
     const p = this.previa();
@@ -356,6 +375,8 @@ export class ExpedirRndc {
     if ((f.titular || '') !== (f.titularInicial || '')) c.titular = f.titular || null;
     if (!p.remesaAceptada) { c.fecha = f.fecha; c.pesoKg = Number(f.pesoKg) || 0; c.destinatario = f.destinatario.tipoId ? f.destinatario : { tipoId: '', numId: '', sede: '' }; }
     if (this.puedeValores) { c.flete = Number(f.flete) || 0; c.anticipo = Number(f.anticipo) || 0; }
+    if (!p.remesaAceptada) c.numeroRemesa = String(f.numeroRemesa || '').trim().toUpperCase();
+    if (p.documentos.manifiesto.estado !== 'aceptado') c.numeroManifiesto = String(f.numeroManifiesto || '').trim().toUpperCase();
     return c;
   }
 

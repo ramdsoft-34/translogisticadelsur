@@ -139,6 +139,9 @@ const datosExpedicion = z.object({
   flete: z.coerce.number().min(0).optional(), anticipo: z.coerce.number().min(0).optional(),
   observaciones: t(500).optional(),
   requiereManifiesto: z.boolean().optional(),
+  // Número escrito a mano (vacío = automático); letras, números, punto o guion
+  numeroRemesa: z.string().trim().toUpperCase().regex(/^([A-Z0-9.-]{1,15})?$/, 'número de remesa inválido').optional(),
+  numeroManifiesto: z.string().trim().toUpperCase().regex(/^([A-Z0-9.-]{1,15})?$/, 'número de manifiesto inválido').optional(),
 });
 const CAMPOS_REMESA = ['fecha', 'pesoKg', 'destinatario'];
 
@@ -158,6 +161,19 @@ r.put('/viajes/:id/datos', operar, async (req, res) => {
   if (('flete' in d || 'anticipo' in d) && v.liquidacion) throw new ErrorHttp(409, 'El viaje ya está en una liquidación de fletes: no se cambian sus valores');
   for (const k of ['conductor', 'titular']) {
     if (d[k] && !(await Tercero.exists(deEmpresa(req, { _id: d[k] })))) throw new ErrorHttp(400, `El ${k} indicado no pertenece a su empresa`);
+  }
+  // Números a mano: solo para documentos aún no aceptados y que ningún otro viaje tenga
+  for (const [clave, campo] of [['remesa', 'numeroRemesa'], ['manifiesto', 'numeroManifiesto']]) {
+    if (!(campo in d)) continue;
+    const numero = d[campo];
+    delete d[campo];
+    if (numero === (v.numerosManuales?.[clave] || '')) continue;
+    if (numero && v[clave]?.estado === 'aceptado') throw new ErrorHttp(409, `La ${clave} ya fue aceptada con el número ${v[clave].numero}`);
+    if (numero) {
+      const usado = await op.numeroUsado(req.empresaId, clave, numero, v._id);
+      if (usado) throw new ErrorHttp(400, `El número ${numero} ya lo tiene el viaje N° ${usado.numero}`);
+    }
+    d[`numerosManuales.${clave}`] = numero;
   }
   const antes = v.toObject();
   if (d.conductor) {

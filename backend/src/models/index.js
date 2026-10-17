@@ -224,6 +224,8 @@ const viajeSchema = new Schema({
   cumplidoManifiesto: { type: documentoRndc, default: nuevoDoc },
   liquidacion: { type: Schema.Types.ObjectId, ref: 'Liquidacion', default: null },
   manifiestoReemplazado: str(),
+  // Números escritos a mano para el próximo envío (p. ej. tras un DUPLICADO del RNDC)
+  numerosManuales: { remesa: str({ uppercase: true }), manifiesto: str({ uppercase: true }) },
   // No todos los viajes generan remesa y manifiesto (p. ej. carga propia o urbana).
   requiereManifiesto: { type: Boolean, default: true },
   // Dónde se creó: en Viajes (bitácora) o directamente en Manifiestos RNDC

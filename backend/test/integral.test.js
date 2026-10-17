@@ -558,6 +558,30 @@ test('RNDC: al bajar el consecutivo no se repiten números ya expedidos', async 
   await s.adminA.put('/api/rndc/config', { consecutivoRemesa: `R${Math.max(Number(actual.slice(1)), Number(rb.remesa.numero.slice(1)) + 1)}` });
 });
 
+test('RNDC: tras un DUPLICADO se escriben a mano los números de remesa y manifiesto', async () => {
+  const v = await s.reportero.post('/api/viajes', { fecha: '2026-11-08', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const id = v.body._id;
+  const usado = (await s.manif.get(`/api/viajes/${s.viaje}`)).body.remesa.numero;
+  const r1 = await s.manif.put(`/api/rndc/viajes/${id}/datos`, { numeroRemesa: usado });
+  assert.equal(r1.status, 400);
+  assert.match(r1.body.error, /ya lo tiene el viaje/);
+  const cfg = (await s.adminA.get('/api/rndc/config')).body;
+  const libreR = `R${cfg.siguienteRemesa + 40}`;
+  const libreM = `M${cfg.siguienteManifiesto + 40}`;
+  const r2 = await s.manif.put(`/api/rndc/viajes/${id}/datos`, { numeroRemesa: libreR.toLowerCase(), numeroManifiesto: libreM });
+  assert.equal(r2.status, 200, JSON.stringify(r2.body));
+  assert.equal(r2.body.numeros.remesa, libreR);
+  assert.equal(r2.body.numeros.manifiesto, libreM);
+  const d = (await s.manif.post(`/api/rndc/viajes/${id}/despachar`, { clave: CLAVE_RNDC })).body;
+  assert.equal(d.remesa.numero, libreR);
+  assert.equal(d.manifiesto.numero, libreM, JSON.stringify(d));
+  const x = (await s.manif.get(`/api/viajes/${id}`)).body;
+  assert.equal(x.numerosManuales.remesa, '');
+  const cfg2 = (await s.adminA.get('/api/rndc/config')).body;
+  assert.equal(cfg2.siguienteRemesa, cfg.siguienteRemesa + 41, 'el consecutivo avanza para no repetir el número');
+  assert.equal(cfg2.siguienteManifiesto, cfg.siguienteManifiesto + 41);
+});
+
 test('RNDC: anulación de manifiesto por cambio de conductor y reemplazo', async () => {
   const r = await s.manif.post(`/api/rndc/viajes/${s.viaje2}/anular`, { clave: CLAVE_RNDC, documento: 'manifiesto', motivo: 'C', observaciones: 'Cambio de conductor' });
   assert.equal(r.body.ok, true, JSON.stringify(r.body));

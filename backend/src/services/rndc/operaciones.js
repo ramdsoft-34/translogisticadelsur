@@ -2,7 +2,7 @@
 // cumplir, anular, registrar maestros y consultar. Cada envío queda en
 // TransaccionRndc. La clave del usuario web service se recibe en cada
 // operación y nunca se guarda.
-import { Empresa, Viaje, Vehiculo, Tercero, Municipio, TransaccionRndc, siguiente, pob } from '../../models/index.js';
+import { Empresa, Viaje, Vehiculo, Tercero, Municipio, TransaccionRndc, Contador, siguiente, pob } from '../../models/index.js';
 import { buscadorMunicipios } from '../importacion/excel.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { enviar, registrarTransaccion } from './cliente.js';
@@ -170,8 +170,9 @@ export async function vistaPrevia(empresaId, viajeId) {
   const empresa = await empresaConRndc(empresaId);
   const { v, vehiculo } = await cargarViaje(empresaId, viajeId);
   const ctx = contextoViaje(empresa, v, vehiculo);
-  const numR = v.remesa?.estado === 'anulado' ? numeroReemplazo('remesa', v.remesa.numero) : v.remesa?.numero || `${empresa.rndc?.prefijoRemesa || ''}(siguiente)`;
-  const numM = v.manifiesto?.estado === 'anulado' ? numeroReemplazo('manifiesto', v.manifiesto.numero) : v.manifiesto?.numero || `${empresa.rndc?.prefijoManifiesto || ''}(siguiente)`;
+  const manual = { remesa: txt(v.numerosManuales?.remesa), manifiesto: txt(v.numerosManuales?.manifiesto) };
+  const numR = manual.remesa || (v.remesa?.estado === 'anulado' ? numeroReemplazo('remesa', v.remesa.numero) : v.remesa?.numero || `${empresa.rndc?.prefijoRemesa || ''}(siguiente)`);
+  const numM = manual.manifiesto || (v.manifiesto?.estado === 'anulado' ? numeroReemplazo('manifiesto', v.manifiesto.numero) : v.manifiesto?.numero || `${empresa.rndc?.prefijoManifiesto || ''}(siguiente)`);
   const remesa = variablesRemesa(empresa, v, ctx, numR);
   const manifiesto = variablesManifiesto(empresa, v, ctx, numM);
   const remolque = v.remolque ? await Vehiculo.findOne({ empresa: empresaId, placa: v.remolque }).lean() : null;
@@ -182,7 +183,9 @@ export async function vistaPrevia(empresaId, viajeId) {
     estado: v.estado, requiereManifiesto: v.requiereManifiesto !== false,
     documentos: { remesa: v.remesa || {}, manifiesto: v.manifiesto || {} },
     // Números con los que saldrá el reemplazo de lo anulado
-    reemplazo: { remesa: v.remesa?.estado === 'anulado' ? numR : '', manifiesto: v.manifiesto?.estado === 'anulado' ? numM : '' },
+    reemplazo: { remesa: v.remesa?.estado === 'anulado' && !manual.remesa ? numR : '', manifiesto: v.manifiesto?.estado === 'anulado' && !manual.manifiesto ? numM : '' },
+    // Números con los que se enviará (escritos a mano o automáticos)
+    numeros: { remesa: numR, manifiesto: numM, manualRemesa: manual.remesa, manualManifiesto: manual.manifiesto },
     remesaAceptada,
     // Respuesta textual del RNDC en el último rechazo (para corregir y reenviar)
     ultimoError: ultimo && !(v.manifiesto?.estado === 'aceptado')
@@ -224,10 +227,12 @@ export async function vistaPrevia(empresaId, viajeId) {
   };
 }
 
-// Número que ya tiene algún viaje (aceptado, anulado o rechazado): el RNDC no admite repetirlo.
-export async function numeroUsado(empresaId, clave, numero) {
+// Número que ya tiene algún viaje (aceptado, anulado o rechazado, o escrito a mano para el
+// próximo envío): el RNDC no admite repetirlo. `excepto` deja fuera al viaje que se edita.
+export async function numeroUsado(empresaId, clave, numero, excepto = null) {
   const campo = clave === 'remesa' ? 'remesa.numero' : 'manifiesto.numero';
-  const f = { empresa: empresaId, $or: [{ [campo]: numero }, ...(clave === 'manifiesto' ? [{ manifiestoReemplazado: numero }] : [])] };
+  const f = { empresa: empresaId, ...(excepto ? { _id: { $ne: excepto } } : {}),
+    $or: [{ [campo]: numero }, { [`numerosManuales.${clave}`]: numero }, ...(clave === 'manifiesto' ? [{ manifiestoReemplazado: numero }] : [])] };
   return Viaje.findOne(f).select('numero').lean();
 }
 
@@ -239,6 +244,15 @@ async function numeroDeReemplazo(empresaId, clave, anulado) {
   let numero = numeroReemplazo(clave, anulado);
   for (let i = 0; i < 20 && (await numeroUsado(empresaId, clave, numero)); i += 1) numero = numeroReemplazo(clave, numero);
   return numero;
+}
+
+// Número escrito a mano: si sigue la numeración de la empresa, el consecutivo avanza hasta él
+// para que los siguientes documentos no lo repitan.
+async function avanzarConsecutivo(empresa, clave, numero) {
+  const prefijo = (clave === 'remesa' ? empresa.rndc?.prefijoRemesa : empresa.rndc?.prefijoManifiesto) || '';
+  const m = String(numero).match(/^(.*?)(\d+)$/);
+  if (!m || m[1] !== prefijo) return;
+  await Contador.updateOne({ empresa: empresa._id, clave, valor: { $lt: Number(m[2]) } }, { $set: { valor: Number(m[2]) } });
 }
 
 // Siguiente consecutivo libre: si la numeración se bajó, salta los números ya usados.
@@ -274,12 +288,14 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
       if (destinoIgualOrigen(ctx)) problemas.push(PROBLEMA_DESTINO);
       if (!(Number(v.pesoKg) > 0)) problemas.push(PROBLEMA_CANTIDAD);
       if (problemas.length) throw new ErrorHttp(422, 'Faltan datos para la remesa', problemas);
-      if (v.remesa?.estado === 'anulado') numR = await numeroDeReemplazo(empresa._id, 'remesa', v.remesa.numero);
+      if (txt(v.numerosManuales?.remesa)) numR = txt(v.numerosManuales.remesa);
+      else if (v.remesa?.estado === 'anulado') numR = await numeroDeReemplazo(empresa._id, 'remesa', v.remesa.numero);
       else if (!numR) numR = await numeroDocumento(empresa, 'remesa', empresa.rndc?.prefijoRemesa);
       const vars = variablesRemesa(empresa, v, ctx, numR);
       const res = await registrar(empresa, cred, 3, vars, meta);
       const doc = { numero: numR, radicado: res.radicado, fecha: new Date(), estado: res.ok ? 'aceptado' : 'rechazado', mensaje: res.mensaje, qr: '' };
-      await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: { remesa: doc, ...(res.ok ? { estado: 'remesa' } : {}) } });
+      await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: { remesa: doc, ...(res.ok ? { estado: 'remesa', 'numerosManuales.remesa': '' } : {}) } });
+      if (res.ok && txt(v.numerosManuales?.remesa)) await avanzarConsecutivo(empresa, 'remesa', numR);
       resultado.remesa = doc;
       if (!res.ok) return resultado;
       ctx.REMESA = numR;
@@ -293,7 +309,8 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
       resultado.ajustes = [`Anticipo ajustado de ${val.anticipoRegistrado} a ${val.anticipo} (neto a pagar)`];
     }
     let numM = v.manifiesto?.numero;
-    if (v.manifiesto?.estado === 'anulado') numM = await numeroDeReemplazo(empresa._id, 'manifiesto', v.manifiesto.numero);
+    if (txt(v.numerosManuales?.manifiesto)) numM = txt(v.numerosManuales.manifiesto);
+    else if (v.manifiesto?.estado === 'anulado') numM = await numeroDeReemplazo(empresa._id, 'manifiesto', v.manifiesto.numero);
     else if (!numM) numM = await numeroDocumento(empresa, 'manifiesto', empresa.rndc?.prefijoManifiesto);
     const vars = variablesManifiesto(empresa, v, ctx, numM);
     const problemas = validarVariables(4, vars);
@@ -308,7 +325,8 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
       await Vehiculo.updateOne({ empresa: empresaId, _id: vehiculo._id }, { $set: { aplicaFopat: true } });
       doc.mensaje = `${res.mensaje} — La plataforma ya marcó el vehículo ${v.placa} para aplicar FOPAT: presione «Corregir y reenviar».`;
     }
-    await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: { manifiesto: doc, ...(res.ok ? { estado: 'manifestado' } : {}) } });
+    await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: { manifiesto: doc, ...(res.ok ? { estado: 'manifestado', 'numerosManuales.manifiesto': '' } : {}) } });
+    if (res.ok && txt(v.numerosManuales?.manifiesto)) await avanzarConsecutivo(empresa, 'manifiesto', numM);
     resultado.manifiesto = doc;
     return resultado;
   } finally {
