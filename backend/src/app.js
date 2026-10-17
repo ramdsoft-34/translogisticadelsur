@@ -6,6 +6,7 @@ import { env } from './config/env.js';
 import { manejarErrores, noEncontrado } from './middleware/errores.js';
 import auth from './routes/auth.js';
 import superadmin from './routes/superadmin.js';
+import correo from './routes/correo.js';
 import usuarios from './routes/usuarios.js';
 import maestros from './routes/maestros.js';
 import viajes from './routes/viajes.js';
@@ -35,6 +36,7 @@ export function crearApp() {
   app.use('/api/maestros', maestros);
   app.use('/api/viajes', viajes);
   app.use('/api/rndc', rndc);
+  app.use('/api/correo', correo);
   app.use('/api/liquidaciones', liquidaciones);
   app.use('/api/reportes', reportes);
   app.use('/api/importaciones', importaciones);

@@ -9,16 +9,18 @@ import { Icono } from '../shared/icono';
 import { SelectorMunicipio } from '../shared/municipio';
 import { FORMATOS, isoDia } from '../shared/formato';
 import { VisorAuditoria } from '../shared/auditoria';
+import { ConfigCorreo } from '../shared/config-correo';
 
-type Pestana = 'rndc' | 'usuarios' | 'importar' | 'auditoria';
+type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
 
 @Component({
   selector: 'app-configuracion',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, VisorAuditoria, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, VisorAuditoria, ConfigCorreo, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Configuración</h1><p class="sutil">{{ auth.usuario()?.empresa?.nombre }}</p></div></div>
     <div class="pestanas">
       @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'rndc'" (click)="ir('rndc')">Conexión RNDC y valores</button> }
+      @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'correo'" (click)="ir('correo')">Correo</button> }
       @if (auth.tiene(P.USUARIOS_GESTIONAR)) { <button [class.activa]="pestana() === 'usuarios'" (click)="ir('usuarios')">Usuarios</button> }
       @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'importar'" (click)="ir('importar')">Importar plantilla Excel</button> }
       @if (auth.tiene(P.AUDITORIA_VER)) { <button [class.activa]="pestana() === 'auditoria'" (click)="ir('auditoria')">Auditoría</button> }
@@ -112,6 +114,7 @@ type Pestana = 'rndc' | 'usuarios' | 'importar' | 'auditoria';
           </form>
         }
       }
+      @case ('correo') { <app-config-correo /> }
       @case ('usuarios') {
         <div class="acciones" style="justify-content:flex-end;margin-bottom:12px"><button class="primario" (click)="nuevoUsuario()"><app-icono nombre="mas" />Nuevo usuario</button></div>
         <div class="tabla-caja"><table>

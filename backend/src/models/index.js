@@ -51,6 +51,14 @@ const empresaSchema = new Schema({
     // (ej. RETENCIONFUENTEMANIFIESTO, TIPOCONSOLIDADA). Admiten marcadores {..}.
     extras: { type: [{ proceso: Number, variable: String, valor: String, _id: false }], default: [] },
   },
+  // Cuenta de correo para enviar documentos (la contraseña se guarda cifrada con AES-256-GCM)
+  smtp: {
+    activo: { type: Boolean, default: false },
+    host: str(), puerto: { type: Number, default: 587 },
+    seguridad: { type: String, enum: ['starttls', 'tls'], default: 'starttls' },   // 587 STARTTLS | 465 TLS directo
+    usuario: str(), claveCifrada: { type: String, default: '', select: false },
+    remitenteNombre: str(), remitenteCorreo: str({ lowercase: true }), responderA: str({ lowercase: true }),
+  },
 }, { timestamps: true });
 empresaSchema.index({ nit: 1 }, { unique: true });
 
@@ -96,6 +104,17 @@ const clienteSchema = new Schema({
   correos: { type: [String], default: [] },
   whatsapp: str(),                       // número para el reporte de vehículos (opcional)
   activo: { type: Boolean, default: true },
+  // Envío de documentos por correo cuando el RNDC acepta remesa y manifiesto
+  envios: {
+    activo: { type: Boolean, default: false },
+    destinatarios: { type: [String], default: [] },
+    cc: { type: [String], default: [] },
+    documentos: {
+      manifiesto: { type: Boolean, default: true },      // PDF del manifiesto adjunto
+      salida: { type: Boolean, default: false },         // correo de autorización de salida
+    },
+    salida: { asunto: str(), cuerpo: str({ maxlength: 3000 }) },
+  },
 }, { timestamps: true });
 clienteSchema.plugin(tenantPlugin);
 clienteSchema.index({ empresa: 1, nombre: 1 }, { unique: true, collation: { locale: 'es', strength: 1 } });
@@ -232,6 +251,25 @@ const plantillaWhatsappSchema = new Schema({
 plantillaWhatsappSchema.plugin(tenantPlugin);
 plantillaWhatsappSchema.index({ empresa: 1, nombre: 1 }, { unique: true, collation: { locale: 'es', strength: 1 } });
 
+// ── Envíos de documentos por correo (trazabilidad y reintentos) ─────────────
+const envioCorreoSchema = new Schema({
+  viaje: { type: Schema.Types.ObjectId, ref: 'Viaje', required: true },
+  cliente: { type: Schema.Types.ObjectId, ref: 'Cliente', default: null },
+  tipo: { type: String, enum: ['manifiesto', 'salida'], required: true },
+  documento: str(),                         // n.° del manifiesto
+  destinatarios: { type: [String], default: [] }, cc: { type: [String], default: [] },
+  asunto: str(),
+  estado: { type: String, enum: ['pendiente', 'enviando', 'enviado', 'error'], default: 'pendiente' },
+  intentos: { type: Number, default: 0 },
+  error: str(), idMensaje: str(), respuesta: str(),
+  enviadoEn: fecha,
+  origen: { type: String, enum: ['automatico', 'manual'], default: 'automatico' },
+  usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+envioCorreoSchema.plugin(tenantPlugin);
+envioCorreoSchema.index({ empresa: 1, viaje: 1, createdAt: -1 });
+envioCorreoSchema.index({ empresa: 1, estado: 1 });
+
 // ── Liquidación de fletes (relación para facturar y pagar) ──────────────────
 const liquidacionSchema = new Schema({
   numero: { type: Number, required: true },
@@ -306,6 +344,7 @@ export const TransaccionRndc = modelo('TransaccionRndc', transaccionSchema);
 export const Contador = modelo('Contador', contadorSchema);
 export const Auditoria = modelo('Auditoria', auditoriaSchema);
 export const PlantillaWhatsapp = modelo('PlantillaWhatsapp', plantillaWhatsappSchema);
+export const EnvioCorreo = modelo('EnvioCorreo', envioCorreoSchema);
 
 // Siguiente valor de un contador de la empresa (atómico). `minimo` permite
 // continuar una numeración existente (ej. último manifiesto expedido).

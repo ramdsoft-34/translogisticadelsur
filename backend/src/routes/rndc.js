@@ -12,6 +12,7 @@ import { env } from '../config/env.js';
 import { parseFecha } from '../utils/texto.js';
 import { titularDePlaca } from './viajes.js';
 import * as masiva from '../services/rndc/actualizacionVehiculos.js';
+import { programarEnvios } from '../services/correo.js';
 import { estadoLimitador } from '../services/rndc/limitador.js';
 
 const r = Router();
@@ -172,6 +173,7 @@ r.post('/viajes/:id/despachar', operar, async (req, res) => {
   const { clave: c } = z.object({ clave }).parse(req.body);
   const resultado = await op.despachar(req.empresaId, req.params.id, c, req.usuario._id);
   await auditar(req, 'rndc_despachar', { entidad: 'Viaje', entidadId: req.params.id, detalle: resumen(resultado) });
+  enviarCorreosSiAceptado(req, req.params.id, resultado);
   res.json(resultado);
 });
 
@@ -181,7 +183,9 @@ r.post('/despachar-lote', operar, async (req, res) => {
   const resultados = [];
   for (const id of viajes) {
     try {
-      resultados.push({ viaje: id, ...(await op.despachar(req.empresaId, id, c, req.usuario._id)) });
+      const r1 = await op.despachar(req.empresaId, id, c, req.usuario._id);
+      resultados.push({ viaje: id, ...r1 });
+      enviarCorreosSiAceptado(req, id, r1);
     } catch (e) {
       resultados.push({ viaje: id, error: e.message, detalles: e.detalles });
       if (e.status === 403) break;     // ambiente bloqueado: no tiene sentido seguir
@@ -229,6 +233,14 @@ r.post('/viajes/:id/anular', operar, async (req, res) => {
   await auditar(req, 'rndc_anular', { entidad: 'Viaje', entidadId: req.params.id, detalle: { documento: d.documento, motivo: d.motivo, ok: resultado.ok } });
   res.json(resultado);
 });
+
+// Correos a los destinatarios del cliente: solo cuando el RNDC aceptó el manifiesto
+// (que exige la remesa aceptada). Se hace en segundo plano para no demorar la respuesta.
+function enviarCorreosSiAceptado(req, viajeId, resultado) {
+  if (resultado?.manifiesto?.estado !== 'aceptado') return;
+  programarEnvios(req.empresaId, viajeId, { origen: 'automatico', usuario: req.usuario._id })
+    .catch(e => console.error('No se pudieron programar los correos del viaje', String(viajeId), e.message));
+}
 
 function resumen(resultado) {
   return Object.fromEntries(Object.entries(resultado).filter(([, v]) => v).map(([k, v]) => [k, { numero: v.numero, estado: v.estado, radicado: v.radicado }]));

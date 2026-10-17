@@ -460,12 +460,70 @@ test('Remesa: destinatario en la sede del municipio de destino y bloqueo de orig
   await s.manif.del(`/api/viajes/${v.body._id}`);
 });
 
+test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazabilidad y reintento', async () => {
+  process.env.CORREO_TRANSPORTE = 'memoria';
+  const { buzonPruebas } = await import('../src/services/correo.js');
+  const { descifrar } = await import('../src/utils/cifrado.js');
+  buzonPruebas.length = 0;
+  const smtp = { activo: true, host: 'smtp.prueba.local', puerto: 587, seguridad: 'starttls', usuario: 'envios@transportesa.test',
+    clave: 'Secreto-SMTP-1', remitenteNombre: 'Transportes A', remitenteCorreo: 'envios@transportesa.test' };
+  assert.equal((await s.manif.put('/api/correo/config', smtp)).status, 403, 'solo el administrador configura el correo');
+  assert.equal((await s.adminA.put('/api/correo/config', smtp)).status, 200);
+  const cfg = (await s.adminA.get('/api/correo/config')).body;
+  assert.equal(cfg.tieneClave, true);
+  assert.equal(cfg.claveCifrada, undefined, 'la contraseña no se devuelve');
+  const guardada = (await M.Empresa.findById(s.empresaA).select('+smtp.claveCifrada').lean()).smtp.claveCifrada;
+  assert.notEqual(guardada, 'Secreto-SMTP-1');
+  assert.equal(descifrar(guardada), 'Secreto-SMTP-1', 'cifrada y recuperable solo por el servidor');
+  // Destinatarios y documentos del cliente
+  const cfgCli = await s.adminA.put(`/api/correo/clientes/${s.cliente}`, { activo: true, destinatarios: ['logistica@cliente.test'], cc: ['copia@cliente.test'],
+    documentos: { manifiesto: true, salida: true }, salida: {} });
+  assert.equal(cfgCli.status, 200, JSON.stringify(cfgCli.body));
+  // Sin aceptación del RNDC no se envía nada
+  const v = await s.reportero.post('/api/viajes', { fecha: '2026-11-05', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  assert.equal((await s.manif.post(`/api/correo/viajes/${v.body._id}/enviar`, {})).status, 409);
+  await s.manif.post(`/api/rndc/viajes/${v.body._id}/despachar`, { clave: 'clave-incorrecta' });
+  await new Promise(r => setTimeout(r, 300));
+  assert.equal(buzonPruebas.length, 0, 'un rechazo del RNDC no envía correos');
+  // Aceptado: manifiesto PDF + carta de salida, a los destinatarios del cliente
+  const ok = await s.manif.post(`/api/rndc/viajes/${v.body._id}/despachar`, { clave: CLAVE_RNDC });
+  assert.equal(ok.body.manifiesto.estado, 'aceptado', JSON.stringify(ok.body));
+  for (let i = 0; i < 50 && buzonPruebas.length < 2; i += 1) await new Promise(r => setTimeout(r, 100));
+  assert.equal(buzonPruebas.length, 2);
+  const man = buzonPruebas.find(m => m.attachments?.length);
+  assert.deepEqual(man.to, ['logistica@cliente.test']);
+  assert.deepEqual(man.cc, ['copia@cliente.test']);
+  assert.equal(man.attachments[0].contentType, 'application/pdf');
+  assert.equal(man.attachments[0].content.subarray(0, 4).toString(), '%PDF');
+  const sal = buzonPruebas.find(m => !m.attachments);
+  assert.match(sal.subject, /^Autorización de salida ABC123 - Distribuidora Sur$/);
+  assert.match(sal.text, /Señores:\nDISTRIBUIDORA SUR\n/);
+  assert.match(sal.text, /  - Placa:      ABC123\n  - Conductor:  Pedro Pérez\n  - Destino:    Tumaco/);
+  const envios = (await s.manif.get(`/api/correo/envios?viaje=${v.body._id}`)).body;
+  assert.deepEqual(envios.map(x => x.estado).sort(), ['enviado', 'enviado']);
+  // Falla (cuenta desactivada): queda el error y se puede reintentar
+  await s.adminA.put('/api/correo/config', { ...smtp, activo: false, clave: undefined });
+  const manual = (await s.manif.post(`/api/correo/viajes/${v.body._id}/enviar`, { tipos: ['manifiesto'] })).body;
+  assert.equal(manual[0].estado, 'error');
+  assert.match(manual[0].error, /no está configurada/);
+  await s.adminA.put('/api/correo/config', { ...smtp, clave: undefined });
+  const re = await s.manif.post(`/api/correo/envios/${manual[0]._id}/reintentar`, {});
+  assert.equal(re.body.estado, 'enviado', JSON.stringify(re.body));
+  assert.equal(re.body.intentos, 2);
+  assert.equal((await s.reportero.get(`/api/correo/envios?viaje=${v.body._id}`)).status, 403);
+  delete process.env.CORREO_TRANSPORTE;
+});
+
 test('RNDC: anulación de manifiesto por cambio de conductor y reemplazo', async () => {
   const r = await s.manif.post(`/api/rndc/viajes/${s.viaje2}/anular`, { clave: CLAVE_RNDC, documento: 'manifiesto', motivo: 'C', observaciones: 'Cambio de conductor' });
   assert.equal(r.body.ok, true, JSON.stringify(r.body));
   let v = (await s.manif.get(`/api/viajes/${s.viaje2}`)).body;
   assert.equal(v.estado, 'remesa');
   assert.equal(v.manifiestoReemplazado, v.manifiesto.numero);
+  // Con documento anulado sale de «Por enviar» y queda en «Anulados»
+  const ids = async (q) => (await s.manif.get(`/api/viajes?estado=registrado,remesa&rndc=1&${q}`)).body.viajes.map(x => x._id);
+  assert.ok(!(await ids('anulados=0')).includes(s.viaje2));
+  assert.ok((await ids('anulados=1')).includes(s.viaje2));
   const nuevo = await s.manif.post(`/api/rndc/viajes/${s.viaje2}/despachar`, { clave: CLAVE_RNDC });
   assert.equal(nuevo.body.manifiesto.estado, 'aceptado', JSON.stringify(nuevo.body));
   assert.notEqual(nuevo.body.manifiesto.numero, v.manifiesto.numero, 'el reemplazo usa un número nuevo');

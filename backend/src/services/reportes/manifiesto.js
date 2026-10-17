@@ -11,6 +11,13 @@ import { contextoViaje, nitEmpresa } from '../rndc/documentos.js';
 import { fmtMilManifiesto, numeroALetras, quitarTildes, txt, enColombia, fmtFechaHora } from '../../utils/texto.js';
 import { NATURALEZA_CARGA, RESPONSABLE_PAGO } from '../rndc/catalogos.js';
 import { pdfABuffer } from './comun.js';
+import { fileURLToPath } from 'node:url';
+
+// Logos oficiales del formato del manifiesto (tomados de un manifiesto expedido por el RNDC)
+const LOGO_TRANSPORTE = fileURLToPath(new URL('../../assets/logos/transporte.jpg', import.meta.url));
+const LOGO_SUPERTRANSPORTE = fileURLToPath(new URL('../../assets/logos/supertransporte.jpg', import.meta.url));
+// Margen de la hoja (el formato del RNDC deja unos 30 pt alrededor)
+const MARGEN = 28;
 
 const dd = (n) => String(n).padStart(2, '0');
 const fechaRndc = (d) => { if (!d) return ''; const f = new Date(d); return `${f.getUTCFullYear()}/${dd(f.getUTCMonth() + 1)}/${dd(f.getUTCDate())}`; };
@@ -85,14 +92,14 @@ const LEY = '"La impresión en soporte cartular (papel) de este acto administrat
 const FRAUDE = 'Si es víctima de algún fraude o conoce de alguna irregularidad en el Registro Nacional de Despachos de Carga RNDC denúnciela a la Superintendencia de Transporte, línea gratuita nacional 018000 915615.';
 
 export async function manifiestoPdf(d) {
-  const doc = new PDFDocument({ size: 'LETTER', layout: 'landscape', margin: 9, info: { Title: `Manifiesto ${d.numero}` } });
-  const anchoUtil = doc.page.width - 18;
-  const altoUtil = doc.page.height - 18;
+  const doc = new PDFDocument({ size: 'LETTER', layout: 'landscape', margin: MARGEN, info: { Title: `Manifiesto ${d.numero}` } });
+  const anchoUtil = doc.page.width - 2 * MARGEN;
+  const altoUtil = doc.page.height - 2 * MARGEN;
   const k = Math.min(1, altoUtil / ALTURAS.reduce((a, b) => a + b, 0));
   const colW = anchoUtil / 24;
-  const filaY = [9];
+  const filaY = [MARGEN];
   ALTURAS.forEach((h, i) => filaY.push(filaY[i] + h * k));
-  const X = (c) => 9 + (c - 1) * colW;
+  const X = (c) => MARGEN + (c - 1) * colW;
 
   const caja = (r1, c1, r2, c2, etq, valor, { tam = 9, alin = 'left', borde = true, negr = false, fondo = null, vcentro = false } = {}) => {
     const x = X(c1); const y = filaY[r1 - 1]; const w = X(c2 + 1) - x; const h = filaY[r2] - y;
@@ -116,14 +123,18 @@ export async function manifiestoPdf(d) {
   };
   const titulo = (r, c1, c2, t) => caja(r, c1, r, c2, '', t, { tam: 10, alin: 'center', negr: true, fondo: '#D9D9D9', vcentro: true });
 
-  caja(1, 1, 1, 14, '', 'MANIFIESTO ELECTRÓNICO DE CARGA', { tam: 13, alin: 'center', borde: false, negr: true, vcentro: true });
-  caja(2, 1, 2, 14, '', d.empresa, { tam: 11, alin: 'center', borde: false, negr: true, vcentro: true });
-  caja(3, 1, 3, 14, '', `NIT: ${d.empNit}`, { tam: 10, alin: 'center', borde: false, negr: true, vcentro: true });
-  caja(4, 1, 4, 14, '', [d.empDir, d.empTel ? `Tel: ${d.empTel}` : '', d.empCiudad].filter(Boolean).join('   '), { tam: 9, alin: 'center', borde: false, vcentro: true });
+  // Logos: Ministerio de Transporte (arriba) y Superintendencia de Transporte (abajo), como el formato oficial
+  const lx = X(1); const lw = X(4) - X(1) - 6;
+  doc.image(LOGO_TRANSPORTE, lx, filaY[0], { fit: [lw, filaY[4] - filaY[0] - 2], align: 'left', valign: 'center' });
+  doc.image(LOGO_SUPERTRANSPORTE, lx, filaY[4] + 1, { fit: [lw, filaY[6] - filaY[4] - 2], align: 'left', valign: 'center' });
+  caja(1, 4, 1, 14, '', 'MANIFIESTO ELECTRÓNICO DE CARGA', { tam: 13, alin: 'center', borde: false, negr: true, vcentro: true });
+  caja(2, 4, 2, 14, '', d.empresa, { tam: 11, alin: 'center', borde: false, negr: true, vcentro: true });
+  caja(3, 4, 3, 14, '', `NIT: ${d.empNit}`, { tam: 10, alin: 'center', borde: false, negr: true, vcentro: true });
+  caja(4, 4, 4, 14, '', [d.empDir, d.empTel ? `Tel: ${d.empTel}` : '', d.empCiudad].filter(Boolean).join('   '), { tam: 9, alin: 'center', borde: false, vcentro: true });
   caja(1, 15, 4, 20, '', LEY, { tam: 6, borde: false });
   caja(5, 15, 5, 20, '', `Manifiesto: ${d.numero}`, { tam: 12, borde: false, negr: true, fondo: '#E6E6E6', vcentro: true });
   caja(6, 15, 6, 20, '', `Autorización: ${d.radicado}`, { tam: 12, borde: false, negr: true, fondo: '#E6E6E6', vcentro: true });
-  caja(5, 1, 6, 6, 'FECHA Y HORA DE RADICACIÓN', d.fechaRad, { tam: 10 });
+  caja(5, 4, 6, 7, 'FECHA Y HORA DE RADICACIÓN', d.fechaRad, { tam: 10 });
   const qx = X(21); const qy = filaY[0]; const qw = X(25) - qx; const qh = filaY[6] - qy;
   if (d.seguro && d.radicado) {
     const png = await QRCode.toBuffer(textoQR(d), { errorCorrectionLevel: 'L', margin: 0, scale: 6 });

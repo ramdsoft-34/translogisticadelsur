@@ -15,9 +15,15 @@ import { BuscarTercero } from '../shared/buscar-tercero';
 import { Auth } from '../core/auth.service';
 import { P } from '../core/modelos';
 
-type Pestana = 'pendientes' | 'manifestados' | 'cumplidos' | 'historial';
-const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
-  pendientes: 'registrado,remesa', manifestados: 'manifestado', cumplidos: 'cumplido',
+type Pestana = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'correos' | 'historial';
+type PestanaViajes = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos';
+// Filtro de cada pestaña. Con remesa o manifiesto anulados el viaje sale de «Por enviar» y queda en «Anulados».
+const FILTROS: Record<PestanaViajes, Record<string, string | number>> = {
+  pendientes: { estado: 'registrado,remesa', anulados: 0 }, anulados: { estado: 'registrado,remesa', anulados: 1 },
+  manifestados: { estado: 'manifestado' }, cumplidos: { estado: 'cumplido' },
+};
+const ESTADO_CORREO: Record<string, [string, string]> = {
+  enviado: ['Enviado', 'ok'], error: ['Error', 'error'], pendiente: ['Pendiente', 'alerta'], enviando: ['Enviando', 'alerta'],
 };
 
 @Component({
@@ -44,18 +50,44 @@ const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
 
     <div class="pestanas">
       <button [class.activa]="pestana() === 'pendientes'" (click)="ir('pendientes')">Por enviar</button>
+      <button [class.activa]="pestana() === 'anulados'" (click)="ir('anulados')" title="Viajes con la remesa o el manifiesto anulados en el RNDC">Anulados</button>
       <button [class.activa]="pestana() === 'manifestados'" (click)="ir('manifestados')">Manifestados</button>
       <button [class.activa]="pestana() === 'cumplidos'" (click)="ir('cumplidos')">Cumplidos</button>
-      <button [class.activa]="pestana() === 'historial'" (click)="ir('historial')">Historial de envíos</button>
+      <button [class.activa]="pestana() === 'correos'" (click)="ir('correos')">Correos</button>
+      <button [class.activa]="pestana() === 'historial'" (click)="ir('historial')">Historial RNDC</button>
     </div>
+    @if (pestana() === 'anulados') {
+      <p class="sutil" style="margin:-6px 0 12px">Viajes con la remesa o el manifiesto anulados. Si el manifiesto se anuló para reemplazarlo, expida aquí el nuevo.</p>
+    }
 
-    @if (pestana() !== 'historial') {
+    @if (pestana() === 'correos') {
+      <div class="filtros">
+        <div class="segmentos">
+          @for (e of [['', 'Todos'], ['error', 'Con error'], ['enviado', 'Enviados'], ['pendiente', 'Pendientes']]; track e[0]) {
+            <button type="button" [class.activo]="filtroCorreo() === e[0]" (click)="filtroCorreo.set(e[0]); cargar()">{{ e[1] }}</button>
+          }
+        </div>
+      </div>
+      <div class="tabla-caja"><table>
+        <thead><tr><th>Fecha</th><th>Manifiesto</th><th>Documento</th><th>Destinatarios</th><th>Estado</th><th>Intentos</th><th></th></tr></thead>
+        <tbody>@for (e of envios(); track e._id) {
+          <tr><td>{{ e.createdAt | fechaHora }}</td><td>{{ e.documento }}</td>
+            <td>{{ e.tipo === 'salida' ? 'Carta de salida' : 'Manifiesto PDF' }}<br /><span class="sutil">{{ e.origen === 'manual' ? 'Manual' : 'Automático' }}{{ e.usuario?.nombre ? ' · ' + e.usuario.nombre : '' }}</span></td>
+            <td class="sutil">{{ e.destinatarios.join(', ') }}@if (e.cc?.length) { <br />CC: {{ e.cc.join(', ') }} }</td>
+            <td><span class="chip" [class]="claseCorreo(e.estado)">{{ textoCorreo(e.estado) }}</span>
+              @if (e.enviadoEn) { <br /><span class="sutil">{{ e.enviadoEn | fechaHora }}</span> }
+              @if (e.error) { <div class="error-correo">{{ e.error }}</div> }</td>
+            <td class="num">{{ e.intentos }}</td>
+            <td>@if (e.estado === 'error') { <button class="pequeno" (click)="reintentar(e)" [disabled]="trabajando()">Reintentar</button> }</td></tr>
+        } @empty { <tr><td colspan="7" class="vacio">Sin correos registrados</td></tr> }</tbody>
+      </table></div>
+    } @else if (pestana() !== 'historial') {
       <div class="tabla-caja">
         <table>
           <thead><tr>
             @if (pestana() === 'pendientes') { <th><input type="checkbox" aria-label="Seleccionar todos" [checked]="todos()" (change)="alternarTodos()" /></th> }
             <th>N°</th><th>Fecha</th><th>Cliente / destino</th><th>Placa</th><th>Conductor</th><th class="num">Flete</th>
-            <th>Remesa</th><th>Manifiesto</th><th></th></tr></thead>
+            <th>Remesa</th><th>Manifiesto</th>@if (conCorreo()) { <th>Correo</th> }<th></th></tr></thead>
           <tbody>
             @for (v of viajes(); track v._id) {
               <tr>
@@ -66,9 +98,17 @@ const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
                 <td>@if (v.remesa.numero) { {{ v.remesa.numero }}<br /><span class="chip" [class]="chip(v.remesa.estado)">{{ v.remesa.estado || 'sin enviar' }}</span> }</td>
                 <td>@if (v.manifiesto.numero) { {{ v.manifiesto.numero }}<br /><span class="chip" [class]="chip(v.manifiesto.estado)">{{ v.manifiesto.estado || 'sin enviar' }}</span> }
                   @if (v.manifiesto.radicado && v.manifiesto.estado === 'aceptado') { <br /><span class="sutil">Rad. {{ v.manifiesto.radicado }}</span> }</td>
+                @if (conCorreo()) {
+                  <td>@if (resumenCorreo(v._id); as rc) { <button type="button" class="chip-boton" (click)="verCorreos(v)" [title]="rc.titulo"><span class="chip" [class]="rc.clase">{{ rc.texto }}</span></button> }
+                    @else { <button type="button" class="pequeno texto" (click)="verCorreos(v)">Sin envío</button> }</td>
+                }
                 <td>
                   <div class="acciones" style="justify-content:flex-end">
                     @switch (pestana()) {
+                      @case ('anulados') {
+                        <button class="pequeno primario" (click)="expedir.set(v._id)" [disabled]="trabajando()">
+                          <app-icono nombre="enviar" [tam]="15" />{{ v.manifiesto.estado === 'anulado' ? 'Expedir reemplazo' : 'Expedir de nuevo' }}</button>
+                      }
                       @case ('pendientes') {
                         <button class="pequeno primario" (click)="expedir.set(v._id)" [disabled]="trabajando()">
                           <app-icono nombre="enviar" [tam]="15" />{{ mensajeError(v) ? 'Corregir y reenviar' : 'Expedir' }}</button>
@@ -113,6 +153,24 @@ const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
         </table>
       </div>
     }
+
+    <!-- Correos de un viaje -->
+    <app-modal [titulo]="'Correos del viaje N° ' + (correosViaje()?.numero || '')" [abierto]="!!correosViaje()" (cerrar)="correosViaje.set(null)" [ancho]="true">
+      <div class="tabla-caja" style="box-shadow:none"><table>
+        <thead><tr><th>Fecha</th><th>Documento</th><th>Destinatarios</th><th>Estado</th><th></th></tr></thead>
+        <tbody>@for (e of enviosViaje(); track e._id) {
+          <tr><td>{{ e.createdAt | fechaHora }}</td><td>{{ e.tipo === 'salida' ? 'Carta de salida' : 'Manifiesto PDF' }}</td>
+            <td class="sutil">{{ e.destinatarios.join(', ') }}</td>
+            <td><span class="chip" [class]="claseCorreo(e.estado)">{{ textoCorreo(e.estado) }}</span> <span class="sutil">· {{ e.intentos }} intento(s)</span>
+              @if (e.error) { <div class="error-correo">{{ e.error }}</div> }</td>
+            <td>@if (e.estado === 'error') { <button class="pequeno" (click)="reintentar(e)" [disabled]="trabajando()">Reintentar</button> }</td></tr>
+        } @empty { <tr><td colspan="5" class="vacio">Este viaje no tiene correos enviados. Revise que el cliente tenga destinatarios en Configuración → Correo.</td></tr> }</tbody>
+      </table></div>
+      <ng-container pie>
+        <button type="button" (click)="correosViaje.set(null)">Cerrar</button>
+        <button type="button" class="primario" (click)="enviarDeNuevo()" [disabled]="trabajando()"><app-icono nombre="enviar" [tam]="16" />Enviar de nuevo</button>
+      </ng-container>
+    </app-modal>
 
     <!-- Manifiesto y remesa sin registrar antes el viaje -->
     <app-modal titulo="Nuevo manifiesto y remesa" [abierto]="directoAbierto()" (cerrar)="directoAbierto.set(false)" [ancho]="true">
@@ -214,6 +272,8 @@ const ESTADOS: Record<Exclude<Pestana, 'historial'>, string> = {
     </app-modal>`,
   styles: [`
     .secciones { display: flex; flex-direction: column; gap: 14px; }
+    .error-correo { margin-top: 4px; font-size: 12.5px; color: var(--rojo-texto); max-width: 360px; }
+    .chip-boton { border: 0; background: none; padding: 0; min-height: 0; cursor: pointer; }
     .rejilla { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
     .rejilla .campo > label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     @media (max-width: 760px) { .rejilla { grid-template-columns: 1fr; } }
@@ -234,6 +294,13 @@ export class Manifiestos {
   readonly procesos = computed(() => this.catalogos()?.procesos || {});
   readonly ambiente = signal('');
   readonly expedir = signal<string | null>(null);
+  // Correos de documentos
+  readonly envios = signal<any[]>([]);
+  readonly enviosPorViaje = signal<Map<string, any[]>>(new Map());
+  readonly filtroCorreo = signal('');
+  readonly correosViaje = signal<Viaje | null>(null);
+  readonly enviosViaje = computed(() => this.enviosPorViaje().get(this.correosViaje()?._id || '') || []);
+  readonly conCorreo = computed(() => ['manifestados', 'cumplidos'].includes(this.pestana()));
   // Manifiesto directo (sin registrar antes el viaje)
   private auth = inject(Auth);
   readonly puedeCrear = this.auth.tiene(P.VIAJES_REGISTRAR);
@@ -259,10 +326,12 @@ export class Manifiestos {
     this.cargando.set(true);
     try {
       if (this.pestana() === 'historial') this.transacciones.set(await this.api.get<any[]>('/rndc/transacciones', { limite: 200 }));
+      else if (this.pestana() === 'correos') this.envios.set(await this.api.get<any[]>('/correo/envios', { limite: 300, ...(this.filtroCorreo() ? { estado: this.filtroCorreo() } : {}) }));
       else {
         this.pagina = 1;
-        const r = await this.api.get<any>('/viajes', { estado: ESTADOS[this.pestana() as Exclude<Pestana, 'historial'>], pagina: 1, limite: 50, historico: 0, rndc: 1 });
+        const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], pagina: 1, limite: 50, historico: 0, rndc: 1 });
         this.viajes.set(r.viajes); this.total.set(r.total);
+        this.cargarCorreos(r.viajes);
       }
     } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
   }
@@ -272,12 +341,13 @@ export class Manifiestos {
   readonly total = signal(0);
   readonly cargandoMas = signal(false);
   async cargarMas() {
-    if (this.pestana() === 'historial' || this.cargandoMas() || this.viajes().length >= this.total()) return;
+    if (['historial', 'correos'].includes(this.pestana()) || this.cargandoMas() || this.viajes().length >= this.total()) return;
     this.cargandoMas.set(true);
     try {
-      const r = await this.api.get<any>('/viajes', { estado: ESTADOS[this.pestana() as Exclude<Pestana, 'historial'>], pagina: this.pagina + 1, limite: 50, historico: 0, rndc: 1 });
+      const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], pagina: this.pagina + 1, limite: 50, historico: 0, rndc: 1 });
       this.pagina += 1;
       this.viajes.update(l => [...l, ...r.viajes]);
+      this.cargarCorreos(this.viajes());
     } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }
   }
 
@@ -313,6 +383,56 @@ export class Manifiestos {
       this.ir('pendientes');
       this.expedir.set(v._id);
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+
+  // ── Correos de documentos ──
+  textoCorreo(e: string) { return ESTADO_CORREO[e]?.[0] || e; }
+  claseCorreo(e: string) { return ESTADO_CORREO[e]?.[1] || ''; }
+
+  private async cargarCorreos(lista: Viaje[]) {
+    if (!this.conCorreo() || !lista.length) return;
+    try {
+      const envios = await this.api.get<any[]>('/correo/envios', { viajes: lista.map(v => v._id).join(','), limite: 1000 });
+      const m = new Map<string, any[]>();
+      for (const e of envios) m.set(e.viaje, [...(m.get(e.viaje) || []), e]);
+      this.enviosPorViaje.set(m);
+    } catch { /* sin permiso para ver correos */ }
+  }
+
+  // Estado más reciente de cada documento enviado del viaje
+  resumenCorreo(viajeId: string) {
+    const l = this.enviosPorViaje().get(viajeId);
+    if (!l?.length) return null;
+    const ultimo = new Map<string, any>();
+    for (const e of l) if (!ultimo.has(e.tipo)) ultimo.set(e.tipo, e);
+    const estados = [...ultimo.values()];
+    const error = estados.some(e => e.estado === 'error');
+    const todos = estados.every(e => e.estado === 'enviado');
+    return { texto: error ? 'Error' : todos ? 'Enviado' : 'Pendiente', clase: error ? 'error' : todos ? 'ok' : 'alerta',
+      titulo: estados.map(e => `${e.tipo === 'salida' ? 'Carta de salida' : 'Manifiesto'}: ${this.textoCorreo(e.estado)}`).join(' · ') };
+  }
+
+  verCorreos(v: Viaje) { this.correosViaje.set(v); }
+
+  async reintentar(e: any) {
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.post<any>(`/correo/envios/${e._id}/reintentar`, {});
+      if (r?.estado === 'enviado') this.avisos.ok('Correo enviado'); else this.avisos.mostrar(`No se pudo enviar: ${r?.error || 'error desconocido'}`, 'error');
+      this.cargar();
+    } catch (x) { this.avisos.error(x); } finally { this.trabajando.set(false); }
+  }
+
+  async enviarDeNuevo() {
+    const v = this.correosViaje();
+    if (!v || !confirm('¿Enviar de nuevo los documentos de este viaje a los destinatarios del cliente?')) return;
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.post<any[]>(`/correo/viajes/${v._id}/enviar`, {});
+      const fallos = r.filter(x => x.estado !== 'enviado');
+      if (!fallos.length) this.avisos.ok(`${r.length} correo(s) enviados`); else this.avisos.mostrar(`No se pudo enviar: ${fallos[0].error}`, 'error');
+      await this.cargarCorreos(this.viajes());
+    } catch (x) { this.avisos.error(x); } finally { this.trabajando.set(false); }
   }
 
   entradas(o: Record<string, string> | undefined) { return Object.entries(o || {}); }

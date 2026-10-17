@@ -80,6 +80,10 @@ function filtroLista(req) {
   if (req.query.historico === '1') f.historico = true;
   // Solo los viajes que deben expedir remesa y manifiesto (módulo Manifiestos RNDC)
   if (req.query.rndc === '1') f.requiereManifiesto = { $ne: false };
+  // Con remesa o manifiesto anulados en el RNDC: fuera de «Por enviar» (anulados=0) o solo ellos (anulados=1)
+  const anulado = [{ 'remesa.estado': 'anulado' }, { 'manifiesto.estado': 'anulado' }];
+  if (req.query.anulados === '0') f.$nor = anulado;
+  if (req.query.anulados === '1') (f.$and ||= []).push({ $or: anulado });
   if (req.query.q) {
     const re = new RegExp(escaparRegex(req.query.q), 'i');
     f.$or = [{ destino: re }, { placa: re }, { 'manifiesto.numero': re }, { 'remesa.numero': re }, { observaciones: re }];
