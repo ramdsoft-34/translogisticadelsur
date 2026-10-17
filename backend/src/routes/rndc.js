@@ -256,10 +256,11 @@ function resumen(resultado) {
 
 // ── Maestros ────────────────────────────────────────────────────────────────
 r.post('/terceros/:id/enviar', operar, async (req, res) => {
-  const { clave: c, forzar } = z.object({ clave, forzar: z.boolean().optional() }).parse(req.body);
+  const { clave: c, forzar, titular } = z.object({ clave, forzar: z.boolean().optional(), titular: z.boolean().optional() }).parse(req.body);
   const doc = await Tercero.findOne(deEmpresa(req, { _id: req.params.id })).lean();
   if (!doc) throw new ErrorHttp(404, 'Tercero no encontrado');
-  const resultado = await op.registrarMaestro(req.empresaId, c, req.usuario._id, Tercero, doc, forzar);
+  // Como titular de un viaje se registra sin licencia si la tiene incompleta
+  const resultado = await op.registrarMaestro(req.empresaId, c, req.usuario._id, Tercero, titular ? op.comoTitular(doc) : doc, forzar);
   await auditar(req, 'rndc_tercero', { entidad: 'Tercero', entidadId: doc._id, detalle: { ok: resultado.ok, sinCambios: resultado.sinCambios } });
   res.json(resultado);
 });

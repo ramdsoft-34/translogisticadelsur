@@ -150,6 +150,12 @@ export function faltantesMaestro(empresa, tipo, doc) {
   });
 }
 
+// Como titular (sin conducir este viaje) no se exige licencia: si está incompleta no se envía.
+export function comoTitular(doc) {
+  if (!doc || (txt(doc.licencia?.numero) && txt(doc.licencia?.categoria) && doc.licencia?.vence)) return doc;
+  return { ...doc, licencia: {}, roles: (doc.roles || []).filter(r => r !== 'conductor') };
+}
+
 const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
 function estadoMaestro(empresa, tipo, rol, doc) {
   if (!doc) return null;
@@ -184,7 +190,7 @@ export async function vistaPrevia(empresaId, viajeId) {
       vehiculo ? estadoMaestro(empresa, 'vehiculo', 'Vehículo', vehiculo) : { tipo: 'vehiculo', rol: 'Vehículo', referencia: v.placa, estado: 'no_existe', faltantes: [] },
       v.remolque ? (remolque ? estadoMaestro(empresa, 'vehiculo', 'Remolque', remolque) : { tipo: 'vehiculo', rol: 'Remolque', referencia: v.remolque, estado: 'no_existe', faltantes: [] }) : null,
       estadoMaestro(empresa, 'tercero', 'Conductor', v.conductor),
-      v.titular && String(v.titular._id) !== String(v.conductor?._id) ? estadoMaestro(empresa, 'tercero', 'Titular', v.titular) : null,
+      v.titular && String(v.titular._id) !== String(v.conductor?._id) ? { ...estadoMaestro(empresa, 'tercero', 'Titular', comoTitular(v.titular)), comoTitular: true } : null,
     ].filter(Boolean),
     destinatario: {
       tipoId: ctx.DEST_TIPO, numId: ctx.DEST_ID, sede: ctx.DEST_SEDE,
@@ -192,6 +198,13 @@ export async function vistaPrevia(empresaId, viajeId) {
       nombreSede: v.nombreSedeDestino || v.destinatarioAuto?.nombreSede || '',
       municipio: v.codDestinoSede || '',
     },
+    // Destino del viaje y su municipio, para resolver el destinatario (REM019) en la misma ventana
+    destinoViaje: await (async () => {
+      const codigo = v.codDestino || v.tarifaRef?.codMunicipio || '';
+      const m = codigo ? await Municipio.findOne({ codigo }).select('nombre departamento').lean() : null;
+      return { codigo, nombre: m ? `${m.nombre} (${m.departamento || ''})` : '' };
+    })(),
+    cliente: v.cliente ? { tipoId: v.cliente.tipoId || 'N', numId: idCliente(v.cliente), nombre: v.cliente.nombre, sedeRemitente: txt(v.cliente.sedeRemitente) } : null,
     destinoManifiesto: ctx.COD_DESTINO,
     origenManifiesto: ctx.COD_ORIGEN,
     valores: valoresManifiesto(empresa, v, vehiculo),

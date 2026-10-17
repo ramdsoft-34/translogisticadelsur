@@ -41,6 +41,41 @@ import { Confirmar } from './confirmar';
         @if (faltan().length) {
           <div class="mensaje error"><strong>Faltan datos según el diccionario del RNDC:</strong><ul>@for (x of faltan(); track x) { <li>{{ x }}</li> }</ul></div>
         }
+        @if (problemaDestino()) {
+          <!-- REM019: se resuelve aquí mismo eligiendo quién recibe -->
+          <div class="resolver" role="group" aria-label="Elegir quién recibe">
+            @if (!p.destinoViaje?.codigo) {
+              <strong>El viaje no tiene municipio de destino.</strong>
+              <span>Elíjalo en «Destino» (sección Viaje, abajo) y presione «Guardar cambios».</span>
+            } @else {
+              <strong>¿Quién recibe en {{ p.destinoViaje.nombre || p.destinoViaje.codigo }}?</strong>
+              @if (sedesEnDestino().length) {
+                <span>Elija la sede de {{ p.cliente?.nombre }} que recibe:</span>
+                <div class="opciones">
+                  @for (x of sedesEnDestino(); track x.sede) {
+                    <button type="button" class="primario pequeno" (click)="usarSede(x.sede)" [disabled]="trabajando()">Sede {{ x.sede }} · {{ x.nombre }}</button>
+                  }
+                </div>
+              } @else {
+                <span>{{ p.cliente?.nombre }} no tiene una sede registrada en ese municipio (solo tiene {{ p.sedesCliente?.length || 0 }} sede(s) en la plataforma). Puede:</span>
+                <ol>
+                  <li><button type="button" class="primario pequeno" (click)="traerSedesCliente()" [disabled]="trabajando()">
+                    <app-icono nombre="enviar" [tam]="14" />Buscar las sedes de {{ p.cliente?.nombre }} en el RNDC</button>
+                    <small>Trae las sedes que el cliente tenga registradas en el RNDC (pide la contraseña).</small></li>
+                  @if (otrasSedes().length) {
+                    <li><label for="ex-otra-sede">Usar otra sede del cliente</label>
+                      <select id="ex-otra-sede" [ngModel]="''" (ngModelChange)="usarSede($event)" [disabled]="trabajando()">
+                        <option value="">Elegir sede…</option>
+                        @for (x of otrasSedes(); track x.sede) { <option [value]="x.sede">Sede {{ x.sede }} · {{ x.nombre }} ({{ x.codMunicipio }})</option> }
+                      </select>
+                      <small>El destino del manifiesto será el municipio de esa sede.</small></li>
+                  }
+                  <li>O escriba otro destinatario (documento y sede) en «Carga (remesa)», abajo.</li>
+                </ol>
+              }
+            }
+          </div>
+        }
         @if (p.avisos.length) { <div class="mensaje alerta"><strong>Revise:</strong><ul>@for (a of p.avisos; track a) { <li>{{ a }}</li> }</ul></div> }
 
         <!-- Vehículo y personas: deben existir en el RNDC -->
@@ -169,6 +204,13 @@ import { Confirmar } from './confirmar';
     .valores tr:last-child td { border-bottom: 0; }
     .valores .total td { font-weight: 700; background: var(--gris-1); }
     .nota-valores { margin: 8px 0 0; font-size: 13px; color: var(--ambar-texto); }
+    .resolver { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding: 12px 14px; border-radius: var(--radio);
+      border: 1px solid var(--ambar-borde, var(--gris-2)); background: var(--ambar-claro, var(--gris-0)); font-size: 13.5px; }
+    .resolver .opciones { display: flex; flex-wrap: wrap; gap: 8px; }
+    .resolver ol { margin: 0; padding-left: 20px; display: grid; gap: 10px; }
+    .resolver li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+    .resolver li small { flex-basis: 100%; color: var(--gris-6); }
+    .resolver select { max-width: 380px; }
     .que-hacer { margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: var(--gris-0); color: var(--gris-8); font-size: 13.5px; }
     h3 { margin: 6px 0 8px; font-size: 14px; }
     .maestros { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 6px; }
@@ -255,6 +297,36 @@ export class ExpedirRndc {
   }
   etiquetas(f: any[]) { return f.map(x => x.etiqueta).join(', '); }
 
+  // REM019: el destinatario quedó igual al remitente; se elige quién recibe aquí mismo
+  readonly problemaDestino = computed(() => !!this.previa()?.remesa?.problemas?.some((x: string) => /REM019/.test(x)));
+  readonly sedesEnDestino = computed(() => {
+    const p = this.previa();
+    return (p?.sedesCliente || []).filter((x: any) => x.codMunicipio === p?.destinoViaje?.codigo && x.sede !== p?.cliente?.sedeRemitente);
+  });
+  readonly otrasSedes = computed(() => (this.previa()?.sedesCliente || []).filter((x: any) => x.sede !== this.previa()?.cliente?.sedeRemitente));
+  async usarSede(sede: string) {
+    if (!sede) return;
+    this.elegirSede(sede);
+    if (await this.guardar(true)) this.avisos.ok(`Recibe la sede ${sede}`);
+  }
+  async traerSedesCliente() {
+    const cli = this.previa()?.cliente; const id = this.viajeId();
+    if (!cli || !id) return;
+    const c = await this.clave.obtener();
+    if (!c) return;
+    this.trabajando.set(true);
+    try {
+      const [r] = await this.api.post<any[]>('/rndc/importar/terceros', { clave: c, roles: ['destinatario'], documentos: [{ tipoId: cli.tipoId, numId: cli.numId }] });
+      if (!r?.ok) { this.avisos.mostrar(r?.mensaje || 'El RNDC no devolvió sedes', 'error'); if (/usuario|contrase|clave/i.test(r?.mensaje || '')) this.clave.olvidar(); return; }
+      const antes = this.previa()?.sedesCliente?.length || 0;
+      const p = await this.api.get<any>(`/rndc/viajes/${id}/vista-previa`);
+      this.previa.set(p);
+      const nuevas = (p.sedesCliente?.length || 0) - antes;
+      this.avisos.ok(nuevas > 0 ? `Se trajeron ${nuevas} sede(s) nueva(s) del RNDC` : 'El RNDC no tiene más sedes de este cliente');
+      if (!this.sedesEnDestino().length && nuevas >= 0) this.avisos.mostrar('El cliente no tiene sede en el municipio de destino: elija otra sede u otro destinatario', 'info');
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+
   // Sede del cliente elegida como destinatario (si el destinatario es el mismo cliente)
   sedeElegida() {
     const f = this.form(); const p = this.previa();
@@ -328,7 +400,7 @@ export class ExpedirRndc {
     if (!c) return;
     this.trabajando.set(true);
     try {
-      const r = await this.api.post<any>(`/rndc/${m.tipo === 'vehiculo' ? 'vehiculos' : 'terceros'}/${m.id}/enviar`, { clave: c, forzar: true });
+      const r = await this.api.post<any>(`/rndc/${m.tipo === 'vehiculo' ? 'vehiculos' : 'terceros'}/${m.id}/enviar`, { clave: c, forzar: true, ...(m.comoTitular ? { titular: true } : {}) });
       if (r.ok) this.avisos.ok(`${m.referencia}: ${r.sinCambios ? 'ya estaba registrado' : 'registrado en el RNDC'}`);
       else { this.avisos.mostrar(`El RNDC rechazó ${m.referencia}: ${r.mensaje}`, 'error'); if (/usuario|contrase|clave/i.test(r.mensaje || '')) this.clave.olvidar(); }
     } catch (e) { this.avisos.error(e); } finally {
