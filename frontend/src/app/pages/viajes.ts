@@ -116,7 +116,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         <div class="tanda" role="status">
           <strong>{{ registradosTanda().length }} registrado(s):</strong>
           @for (r of registradosTanda(); track r.numero) { <span class="chip ok sin-punto">N° {{ r.numero }} · {{ r.placa }}{{ r.sinManifiesto ? ' · sin manifiesto' : '' }}</span> }
-          <small class="sutil">Se conservan el cliente, el destino y los valores; escriba la placa y el conductor del siguiente.</small>
+          <small class="sutil">Se conservan el cliente y la fecha; escriba el destino, la placa y el conductor del siguiente.</small>
         </div>
       }
       @if (bloqueado()) {
@@ -143,16 +143,14 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
                 @for (c of clientesActivos(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }
               </select></div>
             <div class="campo"><label for="v-dest">Destino</label>
-              <select id="v-dest" name="tarifaRef" [(ngModel)]="f.tarifaRef" (ngModelChange)="cambiarDestino($event)" [disabled]="bloqueado() || !f.cliente">
-                <option value="">Otro destino (escribir)</option>
-                @for (t of tarifasCliente(); track t._id) { <option [value]="t._id">{{ t.destino }}</option> }
-              </select></div>
-            @if (!f.tarifaRef) {
-              <div class="campo"><label for="v-dest2">Nombre del destino</label><input id="v-dest2" name="destino" [(ngModel)]="f.destino" [disabled]="bloqueado()" required /></div>
-              <app-municipio etiqueta="Municipio de destino" [(codigo)]="f.codDestino" />
+              <input id="v-dest" name="destino" list="lista-destinos" [ngModel]="f.destino" (ngModelChange)="escribirDestino($event)"
+                [disabled]="bloqueado() || !f.cliente" [placeholder]="f.cliente ? 'Escriba para buscar el destino' : 'Primero elija el cliente'" autocomplete="off" required />
+              <datalist id="lista-destinos">@for (t of tarifasCliente(); track t._id) { <option [value]="t.destino"></option> }</datalist></div>
+            @if (f.destino && !f.tarifaRef) {
+              <app-municipio etiqueta="Municipio de destino (destino nuevo)" [(codigo)]="f.codDestino" />
             }
           </div>
-          <p class="nota">Al escoger un destino del cliente se llenan la tarifa, el flete y el anticipo.</p>
+          <p class="nota">Escriba y elija un destino de la lista: se llenan la tarifa, el flete y el anticipo. Si no está, escriba el nombre y elija el municipio.</p>
         </fieldset>
 
         <fieldset><legend>Vehículo y conductor</legend>
@@ -369,7 +367,16 @@ export class Viajes {
     this.abierto.set(true);
   }
 
-  cambiarCliente(_: string) { this.form.update(f => ({ ...f, tarifaRef: '' })); }
+  cambiarCliente(_: string) { this.form.update(f => ({ ...f, tarifaRef: '', destino: '', codDestino: '' })); }
+
+  // Destino con sugerencias: si coincide con un destino del cliente se toman su tarifa y valores;
+  // si no, es un destino nuevo (se pide el municipio).
+  escribirDestino(texto: string) {
+    const clave = (x: string) => String(x || '').trim().toLocaleLowerCase('es');
+    const t = this.tarifasCliente().find(x => clave(x.destino) === clave(texto));
+    if (t) { this.form.update(f => ({ ...f, tarifaRef: t._id, destino: t.destino })); this.cambiarDestino(t._id); return; }
+    this.form.update(f => ({ ...f, destino: texto, ...(f.tarifaRef ? { tarifaRef: '', codDestino: '' } : {}) }));
+  }
 
   // Al escoger un destino con tarifa se sugieren sus valores.
   cambiarDestino(id: string) {
@@ -428,8 +435,10 @@ export class Viajes {
         if (this.seguirRegistrando()) {
           // Listo para el siguiente: mismo cliente, destino, fecha y valores; vehículo y conductor nuevos
           this.registradosTanda.update(l => [...l, { numero: v.numero, placa: v.placa, sinManifiesto: !requiere }]);
-          this.form.set({ ...f, placa: '', remolque: '', conductor: '', titular: '', observaciones: '', requiereManifiesto: true });
-          setTimeout(() => document.getElementById('v-placa')?.focus(), 50);
+          // El destino (y sus valores) cambian en cada viaje: se dejan vacíos
+          this.form.set({ ...f, tarifaRef: '', destino: '', codDestino: '', tarifa: null, flete: null, anticipo: null, pesoKg: null, cantidad: 1,
+            conAuxiliar: false, placa: '', remolque: '', conductor: '', titular: '', observaciones: '', requiereManifiesto: true });
+          setTimeout(() => document.getElementById('v-dest')?.focus(), 50);
           return;
         }
       }
