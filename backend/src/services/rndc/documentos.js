@@ -96,7 +96,10 @@ export function contextoViaje(empresa, viaje, vehiculo) {
   const cliente = viaje.cliente || {};
   const conductor = viaje.conductor || {};
   const titular = viaje.titular || conductor;
-  const dest = viaje.destinatario?.numId ? viaje.destinatario : (viaje.tarifaRef?.destinatario?.numId ? viaje.tarifaRef.destinatario : null);
+  // Destinatario: el del viaje, el de la tarifa o la sede del cliente en el municipio de destino
+  const dest = viaje.destinatario?.numId ? viaje.destinatario
+    : viaje.tarifaRef?.destinatario?.numId ? viaje.tarifaRef.destinatario
+      : viaje.destinatarioAuto?.numId ? viaje.destinatarioAuto : null;
   const pagoSaldo = cfg.pagoSaldo === 'dias' ? sumarDias(viaje.fecha, Number(cfg.diasPagoSaldo) || 0) : finDeMes(viaje.fecha);
   const pbv = Number(vehiculo?.pbv) || 0;
   return {
@@ -129,6 +132,13 @@ export function contextoViaje(empresa, viaje, vehiculo) {
     MANIFIESTO: viaje.manifiesto?.numero || '',
   };
 }
+
+// El RNDC rechaza (REM019) remesas cuyo punto de cargue y de descargue son la misma dirección:
+// pasa cuando el destinatario es el mismo remitente con la misma sede.
+export function destinoIgualOrigen(ctx) {
+  return ctx.DEST_TIPO === ctx.TIPO_CLIENTE && ctx.DEST_ID === ctx.NIT_CLIENTE && String(ctx.DEST_SEDE || '') === String(ctx.SEDE_CLIENTE || '');
+}
+export const PROBLEMA_DESTINO = 'Destinatario: es el mismo remitente en la misma sede (el RNDC lo rechaza con REM019). Elija quién recibe en destino o la sede del cliente en ese municipio';
 
 // ── Remesa (proceso 3) ──────────────────────────────────────────────────────
 export function variablesRemesa(empresa, viaje, ctx, consecutivo) {

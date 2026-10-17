@@ -112,6 +112,7 @@ test('Maestros: cliente, destino/tarifa, conductor y vehículo', async () => {
   s.cliente = cli.body._id;
   const tar = await s.adminA.post('/api/maestros/tarifas', {
     cliente: s.cliente, destino: 'Tumaco', codMunicipio: '52835000', tarifaCliente: 2000000, tarifaAuxiliar: 50000,
+    destinatario: { tipoId: 'N', numId: '8001234567', sede: '2' },
     fleteConductor: 1500000, auxiliarPagado: 40000, anticipoHabitual: 500000, pesoKg: 5000,
   });
   assert.equal(tar.status, 201, JSON.stringify(tar.body));
@@ -437,6 +438,26 @@ test('Plantillas de WhatsApp: crear, predeterminar, vista previa y eliminar', as
   assert.equal((await s.adminB.put(`/api/viajes/plantillas-whatsapp/${p.body._id}`, { nombre: 'X', linea: 'x' })).status, 404, 'otra empresa no la ve');
   assert.equal((await s.reportero.del(`/api/viajes/plantillas-whatsapp/${p.body._id}`)).status, 200);
   assert.equal((await s.reportero.get('/api/viajes/reporte-whatsapp?fecha=2026-11-02&incluirReportados=1')).body.plantilla, 'base');
+});
+
+test('Remesa: destinatario en la sede del municipio de destino y bloqueo de origen = destino', async () => {
+  // Tarifa sin destinatario y viaje sin destinatario
+  const t2 = await s.adminA.post('/api/maestros/tarifas', { cliente: s.cliente, destino: 'Ipiales', codMunicipio: '52356000', tarifaCliente: 900000, fleteConductor: 700000 });
+  assert.equal(t2.status, 201, JSON.stringify(t2.body));
+  const v = await s.reportero.post('/api/viajes', { fecha: '2026-11-04', cliente: s.cliente, tarifaRef: t2.body._id, destino: 'Ipiales', placa: 'ABC123', conductor: s.conductor });
+  // Sin sede del cliente en Ipiales: sería el mismo remitente y sede → se bloquea antes de enviar
+  const p1 = (await s.manif.get(`/api/rndc/viajes/${v.body._id}/vista-previa`)).body;
+  assert.ok(p1.remesa.problemas.some(x => x.includes('REM019')), JSON.stringify(p1.remesa.problemas));
+  const antes = (await s.adminA.get('/api/rndc/config')).body.consecutivoRemesa;
+  assert.equal((await s.manif.post(`/api/rndc/viajes/${v.body._id}/despachar`, { clave: CLAVE_RNDC })).status, 422);
+  assert.equal((await s.adminA.get('/api/rndc/config')).body.consecutivoRemesa, antes, 'el rechazo por datos no consume consecutivo');
+  // Con la sede del cliente registrada en Ipiales se usa sola
+  await s.manif.post('/api/maestros/terceros', { tipoId: 'N', numId: '8001234567', nombres: 'Distribuidora Sur', sede: { codigo: '6', nombre: 'IPIALES' },
+    direccion: 'Ipiales', codMunicipio: '52356000', celular: '3000000000', roles: ['destinatario'] });
+  const p2 = (await s.manif.get(`/api/rndc/viajes/${v.body._id}/vista-previa`)).body;
+  assert.deepEqual([p2.destinatario.numId, p2.destinatario.sede, p2.destinatario.origen], ['8001234567', '6', 'municipio']);
+  assert.ok(!p2.remesa.problemas.some(x => x.includes('REM019')));
+  await s.manif.del(`/api/viajes/${v.body._id}`);
 });
 
 test('RNDC: anulación de manifiesto por cambio de conductor y reemplazo', async () => {

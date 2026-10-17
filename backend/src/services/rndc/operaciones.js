@@ -9,7 +9,7 @@ import { enviar, registrarTransaccion } from './cliente.js';
 import { xmlRegistro, xmlConsulta, bloqueRemesas, interpretarRegistro, interpretarConsulta, validarVariables, ocultarClave } from './xml.js';
 import {
   contextoViaje, variablesRemesa, variablesManifiesto, variablesCumplidoRemesa, variablesCumplidoManifiesto,
-  variablesAnulacion, variablesTercero, variablesVehiculo, huella,
+  variablesAnulacion, variablesTercero, variablesVehiculo, huella, idCliente, destinoIgualOrigen, PROBLEMA_DESTINO,
 } from './documentos.js';
 import { TIPOS_ID_CONDUCTOR, MOTIVOS_REEMPLAZO } from './catalogos.js';
 import { txt, hoyColombia } from '../../utils/texto.js';
@@ -36,6 +36,17 @@ async function cargarViaje(empresaId, viajeId) {
     .populate(['cliente', 'conductor', 'titular', 'tarifaRef'].map(x => pob(empresaId, x))).lean();
   if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
   const vehiculo = await Vehiculo.findOne({ empresa: empresaId, placa: v.placa }).lean();
+  // Sin destinatario en el viaje ni en la tarifa: la sede del cliente en el municipio de destino
+  if (!v.destinatario?.numId && !v.tarifaRef?.destinatario?.numId && v.cliente) {
+    const codDestino = v.codDestino || v.tarifaRef?.codMunicipio;
+    if (codDestino) {
+      const sedes = await Tercero.find({ empresa: empresaId, tipoId: v.cliente.tipoId || 'N', numId: idCliente(v.cliente), codMunicipio: codDestino })
+        .select('tipoId numId sede codMunicipio').lean();
+      sedes.sort((a, b) => (Number(a.sede?.codigo) || 0) - (Number(b.sede?.codigo) || 0));
+      const s = sedes.find(x => txt(x.sede?.codigo) && txt(x.sede.codigo) !== txt(v.cliente.sedeRemitente));
+      if (s) v.destinatarioAuto = { tipoId: s.tipoId, numId: s.numId, sede: s.sede.codigo, nombreSede: s.sede.nombre || '' };
+    }
+  }
   return { v, vehiculo };
 }
 
@@ -160,7 +171,15 @@ export async function vistaPrevia(empresaId, viajeId) {
       estadoMaestro(empresa, 'tercero', 'Conductor', v.conductor),
       v.titular && String(v.titular._id) !== String(v.conductor?._id) ? estadoMaestro(empresa, 'tercero', 'Titular', v.titular) : null,
     ].filter(Boolean),
-    remesa: { variables: remesa, problemas: remesaAceptada ? [] : validarVariables(3, remesa.map(([n, x]) => [n, n === 'CONSECUTIVOREMESA' ? 'X' : x])) },
+    destinatario: {
+      tipoId: ctx.DEST_TIPO, numId: ctx.DEST_ID, sede: ctx.DEST_SEDE,
+      origen: v.destinatario?.numId ? 'viaje' : v.tarifaRef?.destinatario?.numId ? 'tarifa' : v.destinatarioAuto ? 'municipio' : 'cliente',
+      nombreSede: v.destinatarioAuto?.nombreSede || '',
+    },
+    remesa: { variables: remesa, problemas: remesaAceptada ? [] : [
+      ...validarVariables(3, remesa.map(([n, x]) => [n, n === 'CONSECUTIVOREMESA' ? 'X' : x])),
+      ...(destinoIgualOrigen(ctx) ? [PROBLEMA_DESTINO] : []),
+    ] },
     manifiesto: { variables: manifiesto, problemas: validarVariables(4, manifiesto.map(([n, x]) => [n, n === 'NUMMANIFIESTOCARGA' ? 'X' : x])) },
   };
 }
@@ -189,10 +208,12 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
     // 1. Remesa
     let numR = v.remesa?.numero;
     if (v.remesa?.estado !== 'aceptado') {
+      // Se valida antes de tomar el consecutivo: un rechazo por datos no deja saltos en la numeración
+      const problemas = validarVariables(3, variablesRemesa(empresa, v, ctx, numR || 'X'));
+      if (destinoIgualOrigen(ctx)) problemas.push(PROBLEMA_DESTINO);
+      if (problemas.length) throw new ErrorHttp(422, 'Faltan datos para la remesa', problemas);
       if (!numR || v.remesa?.estado === 'anulado') numR = await numeroDocumento(empresa, 'remesa', empresa.rndc?.prefijoRemesa);
       const vars = variablesRemesa(empresa, v, ctx, numR);
-      const problemas = validarVariables(3, vars);
-      if (problemas.length) throw new ErrorHttp(422, 'Faltan datos para la remesa', problemas);
       const res = await registrar(empresa, cred, 3, vars, meta);
       const doc = { numero: numR, radicado: res.radicado, fecha: new Date(), estado: res.ok ? 'aceptado' : 'rechazado', mensaje: res.mensaje, qr: '' };
       await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: { remesa: doc, ...(res.ok ? { estado: 'remesa' } : {}) } });

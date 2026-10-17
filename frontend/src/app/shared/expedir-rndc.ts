@@ -81,12 +81,19 @@ import { FORMATOS, isoDia } from './formato';
             <fieldset><legend>Carga (remesa)</legend><div class="formulario">
               <div class="campo"><label for="ex-peso">Cantidad cargada (kg)</label><input id="ex-peso" type="number" min="0" name="peso" [(ngModel)]="f.pesoKg" required /></div>
               <div class="campo"><label for="ex-dt">Destinatario</label>
-                <select id="ex-dt" name="dtipo" [(ngModel)]="f.destinatario.tipoId"><option value="">El mismo cliente</option>@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
+                <select id="ex-dt" name="dtipo" [(ngModel)]="f.destinatario.tipoId"><option value="">Automático (tarifa o sede del cliente en destino)</option>@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
               @if (f.destinatario.tipoId) {
                 <div class="campo"><label for="ex-dn">Documento del destinatario</label><input id="ex-dn" name="dnum" [(ngModel)]="f.destinatario.numId" maxlength="15" /></div>
                 <div class="campo"><label for="ex-ds">Sede del destinatario</label><input id="ex-ds" name="dsede" [(ngModel)]="f.destinatario.sede" maxlength="6" /></div>
               }
-            </div></fieldset>
+            </div>
+            @if (p.destinatario; as d) {
+              <p class="dest" [class.mal]="d.origen === 'cliente'">
+                Se enviará como destinatario: <strong>{{ d.tipoId }} {{ d.numId }} · sede {{ d.sede || '(sin sede)' }}{{ d.nombreSede ? ' ' + d.nombreSede : '' }}</strong>
+                — {{ origenDestinatario(d.origen) }}
+              </p>
+            }
+            </fieldset>
           }
 
           <fieldset><legend>Valores (manifiesto)</legend><div class="formulario">
@@ -132,6 +139,8 @@ import { FORMATOS, isoDia } from './formato';
     .ref { font-weight: 600; }
     .falta { color: var(--rojo-texto); flex-basis: 100%; }
     fieldset + fieldset { margin-top: 12px; }
+    .dest { margin: 10px 0 0; font-size: 13px; color: var(--gris-7); }
+    .dest.mal { color: var(--rojo-texto); }
     .variables { margin-top: 14px; }
     .variables table { font-size: 12.5px; }
     .variables td { padding: 4px 8px; }
@@ -188,6 +197,10 @@ export class ExpedirRndc {
   chipMaestro(e: string) { return ({ enviado: 'ok', error: 'error', no_existe: 'error' } as Record<string, string>)[e] || 'alerta'; }
   estadoMaestro(e: string) { return ({ enviado: 'Registrado', error: 'Con error', no_existe: 'No está en Vehículos' } as Record<string, string>)[e] || 'Sin registrar'; }
   etiquetas(f: any[]) { return f.map(x => x.etiqueta).join(', '); }
+  origenDestinatario(o: string) {
+    return ({ viaje: 'definido en este viaje', tarifa: 'definido en la tarifa del destino', municipio: 'sede del cliente en el municipio de destino',
+      cliente: 'el mismo cliente: no hay sede registrada en el municipio de destino; elija quién recibe' } as Record<string, string>)[o] || o;
+  }
 
   // Solo se envían los datos permitidos según el estado y el rol.
   private cuerpo() {
