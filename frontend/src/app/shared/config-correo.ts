@@ -52,6 +52,12 @@ const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/)
           </div>
         </details>
 
+        <div class="agrupar">
+          <label for="sm-agr">Enviar los manifiestos de cada cliente juntos, en un solo correo, </label>
+          <input id="sm-agr" type="number" min="0" max="240" name="agr" [(ngModel)]="c.agruparMinutos" />
+          <span>minutos después del último manifiesto expedido (0 = en el siguiente minuto).</span>
+        </div>
+
         <div class="paso"><span class="num">3</span><strong>Guarde y reciba un correo de prueba</strong></div>
         <div class="acciones">
           <button class="primario" type="submit" [disabled]="trabajando() || !c.remitenteCorreo || (!clave && !c.tieneClave)">{{ trabajando() ? 'Probando…' : 'Guardar y probar' }}</button>
@@ -178,6 +184,8 @@ const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/)
     .proveedores button small { color: var(--gris-5); font-weight: 400; font-size: 12px; }
     .proveedores button.activo { border: 2px solid var(--primario-borde); background: var(--primario-claro); }
     .avanzado { margin-top: 14px; }
+    .agrupar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; font-size: 14px; color: var(--gris-7); }
+    .agrupar input { width: 80px; text-align: center; }
     .guia ol { padding-left: 20px; display: grid; gap: 8px; line-height: 1.5; }
     @media (max-width: 760px) { .proveedores { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     h2 { margin-bottom: 4px; }
@@ -251,7 +259,7 @@ export class ConfigCorreo {
   async cargar() {
     try {
       const [c, l] = await Promise.all([this.api.get<any>('/correo/config'), this.api.get<any>('/correo/clientes')]);
-      this.smtp.set({ activo: false, host: '', puerto: 587, seguridad: 'starttls', usuario: '', remitenteNombre: '', remitenteCorreo: '', responderA: '', ...c });
+      this.smtp.set({ activo: false, host: '', puerto: 587, seguridad: 'starttls', usuario: '', remitenteNombre: '', remitenteCorreo: '', responderA: '', agruparMinutos: 15, ...c });
       this.detectarProveedor(this.smtp());
       this.clientes.set(l.clientes); this.salidaBase = l.salidaBase; this.marcadores.set(Object.entries(l.marcadores) as [string, string][]);
     } catch (e) { this.avisos.error(e); }
@@ -287,6 +295,7 @@ export class ConfigCorreo {
       const correo = String(c.remitenteCorreo || '').trim().toLowerCase();
       await this.api.put('/correo/config', { activo: activar ?? !!c.activo, host: c.host || '', puerto: Number(c.puerto) || 587, seguridad: c.seguridad,
         usuario: (c.usuario || '').trim() || correo, remitenteNombre: c.remitenteNombre || '', remitenteCorreo: correo, responderA: c.responderA || '',
+        agruparMinutos: Math.max(0, Math.min(240, Number(c.agruparMinutos ?? 15) || 0)),
         // Las contraseñas de aplicación de Gmail/Microsoft se muestran con espacios: se quitan
         ...(this.clave ? { clave: ['gmail', 'microsoft'].includes(this.proveedor()) ? this.clave.replace(/\s+/g, '') : this.clave } : {}) });
       this.clave = '';

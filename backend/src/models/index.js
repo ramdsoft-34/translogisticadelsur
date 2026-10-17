@@ -58,6 +58,8 @@ const empresaSchema = new Schema({
     seguridad: { type: String, enum: ['starttls', 'tls'], default: 'starttls' },   // 587 STARTTLS | 465 TLS directo
     usuario: str(), claveCifrada: { type: String, default: '', select: false },
     remitenteNombre: str(), remitenteCorreo: str({ lowercase: true }), responderA: str({ lowercase: true }),
+    // Minutos sin manifiestos nuevos de un cliente antes de enviarle todos juntos en un solo correo
+    agruparMinutos: { type: Number, default: 15 },
   },
 }, { timestamps: true });
 empresaSchema.index({ nit: 1 }, { unique: true });
@@ -266,6 +268,7 @@ const envioCorreoSchema = new Schema({
   error: str(), idMensaje: str(), respuesta: str(),
   enviadoEn: fecha,
   origen: { type: String, enum: ['automatico', 'manual'], default: 'automatico' },
+  grupo: { type: Schema.Types.ObjectId, default: null },   // manifiestos que salieron en el mismo correo
   usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
 }, { timestamps: true });
 envioCorreoSchema.plugin(tenantPlugin);

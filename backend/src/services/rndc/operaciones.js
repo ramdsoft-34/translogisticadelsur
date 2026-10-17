@@ -195,6 +195,11 @@ export async function vistaPrevia(empresaId, viajeId) {
     destinoManifiesto: ctx.COD_DESTINO,
     origenManifiesto: ctx.COD_ORIGEN,
     valores: valoresManifiesto(empresa, v, vehiculo),
+    // Sedes registradas del cliente, para elegir quién recibe si no hay sede en el municipio de destino
+    sedesCliente: v.cliente ? (await Tercero.find({ empresa: empresaId, tipoId: v.cliente.tipoId || 'N', numId: idCliente(v.cliente) })
+      .select('tipoId numId sede codMunicipio').limit(400).lean())
+      .map(x => ({ tipoId: x.tipoId, numId: x.numId, sede: x.sede?.codigo || '', nombre: x.sede?.nombre || '', codMunicipio: x.codMunicipio || '' }))
+      .sort((a, b2) => (Number(a.sede) || 0) - (Number(b2.sede) || 0)) : [],
     remesa: { variables: remesa, problemas: remesaAceptada ? [] : [
       ...validarVariables(3, remesa.map(([n, x]) => [n, n === 'CONSECUTIVOREMESA' ? 'X' : x])),
       ...(destinoIgualOrigen(ctx) ? [PROBLEMA_DESTINO] : []),

@@ -488,22 +488,38 @@ test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazab
   await s.manif.post(`/api/rndc/viajes/${v.body._id}/despachar`, { clave: 'clave-incorrecta' });
   await new Promise(r => setTimeout(r, 300));
   assert.equal(buzonPruebas.length, 0, 'un rechazo del RNDC no envía correos');
-  // Aceptado: manifiesto PDF + carta de salida, a los destinatarios del cliente
+  // Aceptados dos viajes del mismo cliente: la carta de salida sale por vehículo y los manifiestos quedan pendientes
   const ok = await s.manif.post(`/api/rndc/viajes/${v.body._id}/despachar`, { clave: CLAVE_RNDC });
   assert.equal(ok.body.manifiesto.estado, 'aceptado', JSON.stringify(ok.body));
+  const v2 = await s.reportero.post('/api/viajes', { fecha: '2026-11-05', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const ok2 = await s.manif.post(`/api/rndc/viajes/${v2.body._id}/despachar`, { clave: CLAVE_RNDC });
+  assert.equal(ok2.body.manifiesto.estado, 'aceptado', JSON.stringify(ok2.body));
   for (let i = 0; i < 50 && buzonPruebas.length < 2; i += 1) await new Promise(r => setTimeout(r, 100));
-  assert.equal(buzonPruebas.length, 2);
+  assert.equal(buzonPruebas.length, 2, 'dos cartas de salida');
+  assert.ok(buzonPruebas.every(m => !m.attachments));
+  assert.equal((await s.manif.get('/api/correo/envios?estado=pendiente')).body.length, 2, 'manifiestos esperando para agruparse');
+  // Un solo correo con los dos manifiestos del cliente
+  const grupo = (await s.manif.post('/api/correo/pendientes/enviar', {})).body;
+  assert.equal(grupo.length, 1);
+  assert.equal(grupo[0].cantidad, 2);
+  assert.equal(buzonPruebas.length, 3);
   const man = buzonPruebas.find(m => m.attachments?.length);
   assert.deepEqual(man.to, ['logistica@cliente.test']);
   assert.deepEqual(man.cc, ['copia@cliente.test']);
+  assert.equal(man.attachments.length, 2);
+  assert.match(man.subject, /^MANIFIESTOS DISTRIBUIDORA SUR - .+ \(2\)$/);
   assert.equal(man.attachments[0].contentType, 'application/pdf');
   assert.equal(man.attachments[0].content.subarray(0, 4).toString(), '%PDF');
+  // Lo ya enviado no se repite
+  assert.equal((await s.manif.post('/api/correo/pendientes/enviar', {})).body.length, 0);
   const sal = buzonPruebas.find(m => !m.attachments);
   assert.match(sal.subject, /^Autorización de salida ABC123 - Distribuidora Sur$/);
   assert.match(sal.text, /Señores:\nDISTRIBUIDORA SUR\n/);
   assert.match(sal.text, /  - Placa:      ABC123\n  - Conductor:  Pedro Pérez\n  - Destino:    Tumaco/);
   const envios = (await s.manif.get(`/api/correo/envios?viaje=${v.body._id}`)).body;
   assert.deepEqual(envios.map(x => x.estado).sort(), ['enviado', 'enviado']);
+  const [m1, m2] = await Promise.all([v, v2].map(async x => (await s.manif.get(`/api/correo/envios?viaje=${x.body._id}`)).body.find(e => e.tipo === 'manifiesto')));
+  assert.equal(String(m1.grupo), String(m2.grupo), 'salieron en el mismo correo');
   // Falla (cuenta desactivada): queda el error y se puede reintentar
   await s.adminA.put('/api/correo/config', { ...smtp, activo: false, clave: undefined });
   const manual = (await s.manif.post(`/api/correo/viajes/${v.body._id}/enviar`, { tipos: ['manifiesto'] })).body;

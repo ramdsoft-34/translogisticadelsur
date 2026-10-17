@@ -61,6 +61,13 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     }
 
     @if (pestana() === 'correos') {
+      @if (pendientesCorreo() > 0) {
+        <div class="mensaje info pendientes-correo">
+          <span><strong>{{ pendientesCorreo() }} manifiesto(s) esperando para enviarse agrupados.</strong>
+            Cada cliente recibe un solo correo con todos sus manifiestos, unos minutos después del último que se expida.</span>
+          <button type="button" class="primario pequeno" (click)="enviarPendientes()" [disabled]="trabajando()"><app-icono nombre="enviar" [tam]="15" />Enviar ahora</button>
+        </div>
+      }
       <div class="filtros">
         <div class="segmentos">
           @for (e of [['', 'Todos'], ['error', 'Con error'], ['enviado', 'Enviados'], ['pendiente', 'Pendientes']]; track e[0]) {
@@ -281,6 +288,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     </app-modal>`,
   styles: [`
     .secciones { display: flex; flex-direction: column; gap: 14px; }
+    .pendientes-correo { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; }
     .destinos { max-width: 240px; font-size: 13px; }
     .destinos summary { color: var(--gris-7); }
     .destinos ul { margin: 6px 0 0; padding-left: 16px; font-size: 12.5px; color: var(--gris-5); word-break: break-all; }
@@ -313,6 +321,7 @@ export class Manifiestos {
   readonly correosViaje = signal<Viaje | null>(null);
   readonly enviosViaje = computed(() => this.enviosPorViaje().get(this.correosViaje()?._id || '') || []);
   readonly conCorreo = computed(() => ['manifestados', 'cumplidos'].includes(this.pestana()));
+  readonly pendientesCorreo = signal(0);
   // Manifiesto directo (sin registrar antes el viaje)
   private auth = inject(Auth);
   readonly puedeCrear = this.auth.tiene(P.VIAJES_REGISTRAR);
@@ -338,7 +347,11 @@ export class Manifiestos {
     this.cargando.set(true);
     try {
       if (this.pestana() === 'historial') this.transacciones.set(await this.api.get<any[]>('/rndc/transacciones', { limite: 200 }));
-      else if (this.pestana() === 'correos') this.envios.set(await this.api.get<any[]>('/correo/envios', { limite: 300, ...(this.filtroCorreo() ? { estado: this.filtroCorreo() } : {}) }));
+      else if (this.pestana() === 'correos') {
+        const [l, p] = await Promise.all([this.api.get<any[]>('/correo/envios', { limite: 300, ...(this.filtroCorreo() ? { estado: this.filtroCorreo() } : {}) }),
+          this.api.get<any[]>('/correo/envios', { estado: 'pendiente', limite: 1000 })]);
+        this.envios.set(l); this.pendientesCorreo.set(p.filter(x => x.tipo === 'manifiesto').length);
+      }
       else {
         this.pagina = 1;
         const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], pagina: 1, limite: 50, historico: 0, rndc: 1 });
@@ -432,6 +445,18 @@ export class Manifiestos {
     try {
       const r = await this.api.post<any>(`/correo/envios/${e._id}/reintentar`, {});
       if (r?.estado === 'enviado') this.avisos.ok('Correo enviado'); else this.avisos.mostrar(`No se pudo enviar: ${r?.error || 'error desconocido'}`, 'error');
+      this.cargar();
+    } catch (x) { this.avisos.error(x); } finally { this.trabajando.set(false); }
+  }
+
+  async enviarPendientes() {
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.post<any[]>('/correo/pendientes/enviar', {});
+      const fallos = r.filter(x => x.estado !== 'enviado');
+      if (!r.length) this.avisos.mostrar('No había manifiestos pendientes', 'info');
+      else if (!fallos.length) this.avisos.ok(`${r.length} correo(s) enviados con ${r.reduce((a, x) => a + x.cantidad, 0)} manifiesto(s)`);
+      else this.avisos.mostrar(`No se pudo enviar: ${fallos[0].error}`, 'error');
       this.cargar();
     } catch (x) { this.avisos.error(x); } finally { this.trabajando.set(false); }
   }

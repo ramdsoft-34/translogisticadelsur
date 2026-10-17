@@ -7,7 +7,7 @@ import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../midd
 import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
 import { cifrar } from '../utils/cifrado.js';
-import { enviarPrueba, programarEnvios, procesarEnvio, cartaSalida, datosCorreo, SALIDA_BASE, MARCADORES_SALIDA } from '../services/correo.js';
+import { enviarPrueba, programarEnvios, procesarEnvio, enviarPendientes, enviarGrupoCliente, cartaSalida, datosCorreo, SALIDA_BASE, MARCADORES_SALIDA } from '../services/correo.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -30,9 +30,10 @@ r.put('/config', gestionar, async (req, res) => {
     puerto: z.coerce.number().int().min(1).max(65535), seguridad: z.enum(['starttls', 'tls']),
     usuario: z.string().trim().max(120), clave: z.string().max(200).optional(),
     remitenteNombre: z.string().trim().max(80), remitenteCorreo: correo.or(z.literal('')), responderA: correo.or(z.literal('')).optional().default(''),
+    agruparMinutos: z.coerce.number().int().min(0).max(240).optional(),
   }).parse(req.body);
   if (d.activo && (!d.host || !d.remitenteCorreo)) throw new ErrorHttp(400, 'Para activar el envío indique el servidor y el correo remitente');
-  const set = Object.fromEntries(Object.entries(d).filter(([k]) => k !== 'clave').map(([k, v]) => [`smtp.${k}`, v]));
+  const set = Object.fromEntries(Object.entries(d).filter(([k, v]) => k !== 'clave' && v !== undefined).map(([k, v]) => [`smtp.${k}`, v]));
   if (d.clave) set['smtp.claveCifrada'] = cifrar(d.clave);       // vacío = conservar la actual
   await Empresa.updateOne({ _id: req.empresaId }, { $set: set });
   await auditar(req, 'editar_config_correo', { entidad: 'Empresa', entidadId: req.empresaId,
@@ -104,9 +105,23 @@ r.post('/envios/:id/reintentar', operar, async (req, res) => {
   if (!e) throw new ErrorHttp(404, 'Envío no encontrado');
   if (e.estado === 'enviado') throw new ErrorHttp(409, 'Este correo ya fue enviado; use «Enviar de nuevo» en el viaje');
   if (e.estado === 'enviando') throw new ErrorHttp(409, 'Este correo se está enviando');
-  const x = await procesarEnvio(req.empresaId, e._id);
+  let x;
+  if (e.tipo === 'manifiesto' && e.origen === 'automatico') {
+    // Se vuelve a enviar el grupo completo (y cualquier otro pendiente del cliente) en un solo correo
+    await EnvioCorreo.updateMany(deEmpresa(req, e.grupo ? { grupo: e.grupo, estado: 'error' } : { _id: e._id }), { $set: { estado: 'pendiente' } });
+    const g = await enviarGrupoCliente(req.empresaId, e.cliente);
+    x = { ...e, estado: g?.estado || 'error', error: g?.error || '', intentos: e.intentos + 1 };
+  } else x = await procesarEnvio(req.empresaId, e._id);
   await auditar(req, 'reintentar_correo', { entidad: 'EnvioCorreo', entidadId: e._id, detalle: { tipo: e.tipo, estado: x?.estado, error: x?.error } });
   res.json(x);
+});
+
+// Enviar ya los manifiestos pendientes (sin esperar a que se junten más).
+r.post('/pendientes/enviar', operar, async (req, res) => {
+  const d = z.object({ cliente: z.string().optional() }).parse(req.body);
+  const resultados = await enviarPendientes(req.empresaId, { cliente: d.cliente && mongoose.isValidObjectId(d.cliente) ? d.cliente : undefined });
+  await auditar(req, 'enviar_pendientes_correo', { detalle: { grupos: resultados.length, manifiestos: resultados.reduce((a, x) => a + x.cantidad, 0) } });
+  res.json(resultados);
 });
 
 // Envío manual (p. ej. reenviar a un cliente que no lo recibió o recién configurado).

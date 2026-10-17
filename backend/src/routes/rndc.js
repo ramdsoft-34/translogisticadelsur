@@ -12,7 +12,7 @@ import { env } from '../config/env.js';
 import { parseFecha } from '../utils/texto.js';
 import { titularDePlaca } from './viajes.js';
 import * as masiva from '../services/rndc/actualizacionVehiculos.js';
-import { programarEnvios } from '../services/correo.js';
+import { programarEnvios, enviarPendientes } from '../services/correo.js';
 import { estadoLimitador } from '../services/rndc/limitador.js';
 
 const r = Router();
@@ -188,13 +188,18 @@ r.post('/despachar-lote', operar, async (req, res) => {
     try {
       const r1 = await op.despachar(req.empresaId, id, c, req.usuario._id);
       resultados.push({ viaje: id, ...r1 });
-      enviarCorreosSiAceptado(req, id, r1);
     } catch (e) {
       resultados.push({ viaje: id, error: e.message, detalles: e.detalles });
       if (e.status === 403) break;     // ambiente bloqueado: no tiene sentido seguir
     }
   }
   await auditar(req, 'rndc_despachar_lote', { detalle: { viajes: viajes.length } });
+  // Correos del lote: un solo correo por cliente con todos los manifiestos aceptados, al terminar
+  const aceptados = resultados.filter(x => x.manifiesto?.estado === 'aceptado').map(x => x.viaje);
+  (async () => {
+    for (const id of aceptados) await programarEnvios(req.empresaId, id, { origen: 'automatico', usuario: req.usuario._id }).catch(() => {});
+    if (aceptados.length) await enviarPendientes(req.empresaId);
+  })().catch(e => console.error('Correos del lote:', e.message));
   res.json(resultados);
 });
 

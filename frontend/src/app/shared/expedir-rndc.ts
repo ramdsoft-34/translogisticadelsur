@@ -87,7 +87,14 @@ import { FORMATOS, isoDia } from './formato';
           @if (!p.remesaAceptada) {
             <fieldset><legend>Carga (remesa)</legend><div class="formulario">
               <div class="campo"><label for="ex-peso">Cantidad cargada (kg)</label><input id="ex-peso" type="number" min="0" name="peso" [(ngModel)]="f.pesoKg" required /></div>
-              <div class="campo"><label for="ex-dt">Destinatario</label>
+              @if (p.sedesCliente?.length) {
+                <div class="campo"><label for="ex-sede">Sede del cliente que recibe</label>
+                  <select id="ex-sede" name="sedeCli" [ngModel]="sedeElegida()" (ngModelChange)="elegirSede($event)">
+                    <option value="">Automático / otro destinatario</option>
+                    @for (x of p.sedesCliente; track x.sede) { <option [value]="x.sede">Sede {{ x.sede }} · {{ x.nombre }} ({{ x.codMunicipio }})</option> }
+                  </select></div>
+              }
+              <div class="campo"><label for="ex-dt">Otro destinatario</label>
                 <select id="ex-dt" name="dtipo" [(ngModel)]="f.destinatario.tipoId"><option value="">Automático (tarifa o sede del cliente en destino)</option>@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
               @if (f.destinatario.tipoId) {
                 <div class="campo"><label for="ex-dn">Documento del destinatario</label><input id="ex-dn" name="dnum" [(ngModel)]="f.destinatario.numId" maxlength="15" /></div>
@@ -246,6 +253,17 @@ export class ExpedirRndc {
     return '';
   }
   etiquetas(f: any[]) { return f.map(x => x.etiqueta).join(', '); }
+
+  // Sede del cliente elegida como destinatario (si el destinatario es el mismo cliente)
+  sedeElegida() {
+    const f = this.form(); const p = this.previa();
+    const s = p?.sedesCliente?.find((x: any) => x.numId === f.destinatario?.numId && x.sede === f.destinatario?.sede);
+    return s ? s.sede : '';
+  }
+  elegirSede(sede: string) {
+    const s = this.previa()?.sedesCliente?.find((x: any) => x.sede === sede);
+    this.form.update(f => ({ ...f, destinatario: s ? { tipoId: s.tipoId, numId: s.numId, sede: s.sede } : { tipoId: '', numId: '', sede: '' } }));
+  }
   origenDestinatario(o: string) {
     return ({ viaje: 'definido en este viaje', tarifa: 'definido en la tarifa del destino', municipio: 'sede del cliente en el municipio de destino',
       cliente: 'el mismo cliente: no hay sede registrada en el municipio de destino; elija quién recibe' } as Record<string, string>)[o] || o;

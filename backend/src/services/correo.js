@@ -6,7 +6,9 @@
 // - Cada envío queda en EnvioCorreo con su estado, destinatarios, intentos y error,
 //   y se puede reintentar. Una falla de conexión se reintenta sola una vez.
 import nodemailer from 'nodemailer';
+import mongoose from 'mongoose';
 import { Empresa, Viaje, Cliente, EnvioCorreo, pob } from '../models/index.js';
+import { fmtFecha } from '../utils/texto.js';
 import { datosManifiesto, manifiestoPdf, nombreArchivo } from './reportes/manifiesto.js';
 import { aplicarPlantilla, saludo } from './whatsapp.js';
 import { descifrar } from '../utils/cifrado.js';
@@ -148,9 +150,90 @@ export async function programarEnvios(empresaId, viajeId, { origen = 'automatico
   const documentos = (tipos || ['manifiesto', 'salida']).filter(t => cfg.documentos?.[t]);
   const creados = [];
   for (const tipo of documentos) {
+    // Un manifiesto ya enviado no se vuelve a mandar en automático
+    if (origen === 'automatico' && tipo === 'manifiesto'
+      && await EnvioCorreo.exists({ empresa: empresaId, viaje: viajeId, tipo, estado: { $in: ['pendiente', 'enviando', 'enviado'] } })) continue;
     const envio = await EnvioCorreo.create({ empresa: empresaId, viaje: viajeId, cliente: cliente._id, tipo, documento: v.manifiesto.numero,
       destinatarios: cfg.destinatarios, cc: cfg.cc || [], origen, usuario });
-    creados.push(await procesarEnvio(empresaId, envio._id, { automatico: origen === 'automatico' }));
+    // Los manifiestos automáticos esperan para salir agrupados por cliente; la carta de salida es por vehículo
+    if (origen === 'automatico' && tipo === 'manifiesto') creados.push(envio.toObject());
+    else creados.push(await procesarEnvio(empresaId, envio._id, { automatico: origen === 'automatico' }));
   }
   return creados;
+}
+
+// ── Manifiestos agrupados: un correo por cliente con todos sus PDF pendientes ──
+async function mensajeGrupo(empresa, smtp, envios) {
+  const lineas = []; const adjuntos = [];
+  for (const e of envios) {
+    const d = await datosManifiesto(empresa, e.viaje);
+    lineas.push(`  - ${d.numero} · Placa ${d.placa} · ${d.condNom} · ${d.destino}`);
+    adjuntos.push({ filename: nombreArchivo(d), content: await manifiestoPdf(d), contentType: 'application/pdf' });
+  }
+  const cliente = await Cliente.findOne({ empresa: empresa._id, _id: envios[0].cliente }).select('nombre').lean();
+  const nombre = txt(cliente?.nombre).toUpperCase();
+  const texto = [`${saludo()},`, '', `MANIFIESTOS ${nombre}`, '', ...lineas, '',
+    `Adjuntamos ${envios.length === 1 ? 'el manifiesto de carga' : `los ${envios.length} manifiestos de carga`} expedidos en el RNDC.`, '',
+    'Cordialmente,', txt(empresa.nombre).toUpperCase()].join('\n');
+  return { from: { name: smtp.remitenteNombre || empresa.nombre, address: smtp.remitenteCorreo },
+    to: envios[0].destinatarios, cc: envios[0].cc?.length ? envios[0].cc : undefined, replyTo: smtp.responderA || undefined,
+    subject: `MANIFIESTOS ${nombre} - ${fmtFecha(new Date())}${envios.length > 1 ? ` (${envios.length})` : ''}`,
+    text: texto, html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(texto)}</div>`, attachments: adjuntos };
+}
+
+// Envía en un solo correo todos los manifiestos pendientes de un cliente.
+export async function enviarGrupoCliente(empresaId, clienteId) {
+  const grupo = new mongoose.Types.ObjectId();
+  const r = await EnvioCorreo.updateMany({ empresa: empresaId, cliente: clienteId, tipo: 'manifiesto', estado: 'pendiente' },
+    { $set: { estado: 'enviando', grupo }, $inc: { intentos: 1 } });
+  if (!r.modifiedCount) return null;
+  const envios = await EnvioCorreo.find({ empresa: empresaId, grupo }).sort({ documento: 1 }).lean();
+  try {
+    const { empresa, smtp } = await cuentaCorreo(empresaId);
+    const m = await mensajeGrupo(empresa, smtp, envios);
+    const res = await transporte(smtp).sendMail(m);
+    const set = { estado: 'enviado', error: '', idMensaje: res.messageId || '', respuesta: txt(res.response).slice(0, 300), enviadoEn: new Date(), asunto: m.subject };
+    await EnvioCorreo.updateMany({ empresa: empresaId, grupo }, { $set: set });
+    return { grupo, cantidad: envios.length, estado: 'enviado', asunto: m.subject };
+  } catch (e) {
+    const error = e.sinCuenta ? e.message : `${e.code ? `${e.code}: ` : ''}${e.message}`.slice(0, 500);
+    await EnvioCorreo.updateMany({ empresa: empresaId, grupo }, { $set: { estado: 'error', error } });
+    return { grupo, cantidad: envios.length, estado: 'error', error };
+  }
+}
+
+// Envía los grupos pendientes. Con `soloVencidos`, solo los clientes sin manifiestos nuevos en los
+// últimos minutos configurados (así se juntan los que se expiden seguidos).
+export async function enviarPendientes(empresaId, { cliente, soloVencidos = false } = {}) {
+  const f = { empresa: empresaId, tipo: 'manifiesto', estado: 'pendiente', ...(cliente ? { cliente } : {}) };
+  const pendientes = await EnvioCorreo.find(f).select('cliente createdAt').lean();
+  const ultimo = new Map();
+  for (const p of pendientes) {
+    const k = String(p.cliente);
+    if (!ultimo.has(k) || p.createdAt > ultimo.get(k)) ultimo.set(k, p.createdAt);
+  }
+  let espera = 0;
+  if (soloVencidos) {
+    const e = await Empresa.findById(empresaId).select('smtp.agruparMinutos').lean();
+    espera = Math.max(0, Number(e?.smtp?.agruparMinutos ?? 15)) * 60 * 1000;
+  }
+  const resultados = [];
+  for (const [k, fecha] of ultimo) {
+    if (soloVencidos && Date.now() - new Date(fecha).getTime() < espera) continue;
+    const r = await enviarGrupoCliente(empresaId, k);
+    if (r) resultados.push({ cliente: k, ...r });
+  }
+  return resultados;
+}
+
+// Revisa cada minuto los manifiestos pendientes de todas las empresas.
+let temporizadorAgrupador = null;
+export function iniciarAgrupador() {
+  if (temporizadorAgrupador) return;
+  temporizadorAgrupador = setInterval(async () => {
+    try {
+      for (const e of await Empresa.find({ 'smtp.activo': true }).select('_id').lean()) await enviarPendientes(e._id, { soloVencidos: true });
+    } catch (err) { console.error('Agrupador de correos:', err.message); }
+  }, 60 * 1000);
+  temporizadorAgrupador.unref?.();
 }
