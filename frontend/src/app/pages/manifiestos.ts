@@ -11,6 +11,7 @@ import { Icono } from '../shared/icono';
 import { FORMATOS, hoyIso, isoDia } from '../shared/formato';
 import { ExpedirRndc } from '../shared/expedir-rndc';
 import { Confirmar } from '../shared/confirmar';
+import { filtrar } from '../shared/filtro';
 import { SelectorMunicipio } from '../shared/municipio';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { Auth } from '../core/auth.service';
@@ -25,6 +26,7 @@ const FILTROS: Record<PestanaViajes, Record<string, string | number>> = {
 };
 const ESTADO_CORREO: Record<string, [string, string]> = {
   enviado: ['Enviado', 'ok'], error: ['Error', 'error'], pendiente: ['Pendiente', 'alerta'], enviando: ['Enviando', 'alerta'],
+  por_aprobar: ['Por aprobar', 'alerta'], descartado: ['Descartado', ''],
 };
 
 @Component({
@@ -37,6 +39,11 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       <div class="acciones">
         @if (pestana() === 'pendientes' && seleccion().size) {
           <button (click)="enviarLote()" [disabled]="trabajando()"><app-icono nombre="enviar" />Enviar {{ seleccion().size }} seleccionado(s)</button>
+        }
+        @if (pestana() === 'manifestados' && seleccion().size) {
+          <button type="button" confirmar="Clic otra vez para descartar" (confirmado)="descartarCorreos([...seleccion()])" [disabled]="trabajando()">Descartar correos</button>
+          <button type="button" class="primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([...seleccion()])" [disabled]="trabajando()">
+            <app-icono nombre="correo" />Aprobar y enviar correos ({{ seleccion().size }})</button>
         }
         @if (puedeCrear) { <button class="primario" (click)="nuevoManifiesto()"><app-icono nombre="mas" />Nuevo manifiesto</button> }
       </div>
@@ -57,6 +64,36 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       <button [class.activa]="pestana() === 'correos'" (click)="ir('correos')">Correos</button>
       <button [class.activa]="pestana() === 'historial'" (click)="ir('historial')">Historial RNDC</button>
     </div>
+    <section class="barra" aria-label="Filtros">
+      @if (pestana() !== 'correos' && pestana() !== 'historial') {
+        <div class="campo"><label for="m-desde">Desde</label><input id="m-desde" type="date" [(ngModel)]="filtro.desde" (change)="cargar()" /></div>
+        <div class="campo"><label for="m-hasta">Hasta</label><input id="m-hasta" type="date" [(ngModel)]="filtro.hasta" (change)="cargar()" /></div>
+        <div class="campo"><label for="m-cli">Cliente</label>
+          <select id="m-cli" [(ngModel)]="filtro.cliente" (change)="cargar()"><option value="">Todos</option>
+            @for (c of clientesFiltro(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }</select></div>
+        <div class="campo crece"><label for="m-q">Buscar</label>
+          <input id="m-q" type="search" placeholder="Placa, destino, remesa o manifiesto (Enter)" [(ngModel)]="filtro.q" (keyup.enter)="cargar()" (search)="cargar()" /></div>
+        @if (filtro.desde || filtro.hasta || filtro.cliente || filtro.q) { <button type="button" class="pequeno texto" (click)="limpiarFiltros()">Quitar filtros</button> }
+      } @else {
+        @if (pestana() === 'historial') {
+          <div class="campo"><label for="m-res">Resultado</label>
+            <select id="m-res" [ngModel]="resultadoHist()" (ngModelChange)="resultadoHist.set($event)">
+              <option value="">Todos</option><option value="ok">Aceptados</option><option value="error">Rechazados</option></select></div>
+        }
+        <div class="campo crece"><label for="m-t">Buscar</label>
+          <input id="m-t" type="search" [placeholder]="pestana() === 'correos' ? 'Manifiesto, destinatario, estado o error' : 'Referencia, proceso, usuario o mensaje'"
+            [ngModel]="texto()" (ngModelChange)="texto.set($event)" /></div>
+      }
+    </section>
+
+    @if (pestana() === 'manifestados' && porAprobar().length) {
+      <div class="mensaje alerta pendientes-correo">
+        <span><strong>{{ porAprobar().length }} viaje(s) con correos por aprobar.</strong>
+          Los correos al cliente no salen solos: revíselos y apruébelos (un correo por cliente con sus manifiestos y la carta de salida de cada vehículo).</span>
+        <button type="button" class="primario pequeno" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos(porAprobar())" [disabled]="trabajando()">
+          <app-icono nombre="correo" [tam]="15" />Aprobar todos</button>
+      </div>
+    }
     @if (pestana() === 'anulados') {
       <p class="sutil" style="margin:-6px 0 12px">Viajes con la remesa o el manifiesto anulados. Si el manifiesto se anuló para reemplazarlo, expida aquí el nuevo.</p>
     }
@@ -71,16 +108,16 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       }
       <div class="filtros">
         <div class="segmentos">
-          @for (e of [['', 'Todos'], ['error', 'Con error'], ['enviado', 'Enviados'], ['pendiente', 'Pendientes']]; track e[0]) {
+          @for (e of [['', 'Todos'], ['por_aprobar', 'Por aprobar'], ['error', 'Con error'], ['enviado', 'Enviados'], ['pendiente', 'Pendientes'], ['descartado', 'Descartados']]; track e[0]) {
             <button type="button" [class.activo]="filtroCorreo() === e[0]" (click)="filtroCorreo.set(e[0]); cargar()">{{ e[1] }}</button>
           }
         </div>
       </div>
       <div class="tabla-caja"><table>
         <thead><tr><th>Fecha</th><th>Manifiesto</th><th>Documento</th><th>Destinatarios</th><th>Estado</th><th>Intentos</th><th></th></tr></thead>
-        <tbody>@for (e of envios(); track e._id) {
-          <tr><td>{{ e.createdAt | fechaHora }}</td><td>{{ e.documento }}</td>
-            <td>{{ e.tipo === 'salida' ? 'Carta de salida' : 'Manifiesto PDF' }}<br /><span class="sutil">{{ e.origen === 'manual' ? 'Manual' : 'Automático' }}{{ e.usuario?.nombre ? ' · ' + e.usuario.nombre : '' }}</span></td>
+        <tbody>@for (e of enviosVisibles(); track e._id) {
+          <tr><td data-etiqueta="Fecha">{{ e.createdAt | fechaHora }}</td><td data-etiqueta="Manifiesto">{{ e.documento }}</td>
+            <td data-etiqueta="Documento">{{ e.tipo === 'salida' ? 'Carta de salida' : 'Manifiesto PDF' }}<br /><span class="sutil">{{ e.origen === 'manual' ? 'Manual' : 'Automático' }}{{ e.usuario?.nombre ? ' · ' + e.usuario.nombre : '' }}</span></td>
             <td class="destinos">
               @if (e.destinatarios.length + (e.cc?.length || 0) <= 2) { <span class="sutil">{{ listaDestinos(e) }}</span> }
               @else {
@@ -97,26 +134,26 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       </table></div>
     } @else if (pestana() !== 'historial') {
       <div class="tabla-caja">
-        <table>
+        <table class="tabla-movil">
           <thead><tr>
-            @if (pestana() === 'pendientes') { <th><input type="checkbox" aria-label="Seleccionar todos" [checked]="todos()" (change)="alternarTodos()" /></th> }
+            @if (conSeleccion()) { <th><input type="checkbox" aria-label="Seleccionar todos" [checked]="todos()" (change)="alternarTodos()" /></th> }
             <th>N°</th><th>Fecha</th><th>Cliente / destino</th><th>Placa</th><th>Conductor</th><th class="num">Flete</th>
             <th>Remesa</th><th>Manifiesto</th>@if (conCorreo()) { <th>Correo</th> }<th></th></tr></thead>
           <tbody>
             @for (v of viajes(); track v._id) {
               <tr>
-                @if (pestana() === 'pendientes') { <td><input type="checkbox" [attr.aria-label]="'Seleccionar viaje ' + v.numero" [checked]="seleccion().has(v._id)" (change)="alternar(v._id)" /></td> }
-                <td>{{ v.numero }}</td><td>{{ v.fecha | dia }}</td>
-                <td>{{ v.cliente?.nombre }}<br /><span class="sutil">{{ v.destino }}</span></td>
-                <td><strong>{{ v.placa }}</strong></td><td>{{ v.conductorNombre }}</td><td class="num">{{ v.flete | pesos }}</td>
-                <td>@if (v.remesa.numero) { {{ v.remesa.numero }}<br /><span class="chip" [class]="chip(v.remesa.estado)">{{ v.remesa.estado || 'sin enviar' }}</span> }</td>
-                <td>@if (v.manifiesto.numero) { {{ v.manifiesto.numero }}<br /><span class="chip" [class]="chip(v.manifiesto.estado)">{{ v.manifiesto.estado || 'sin enviar' }}</span> }
+                @if (conSeleccion()) { <td data-etiqueta="Elegir"><input type="checkbox" [attr.aria-label]="'Seleccionar viaje ' + v.numero" [checked]="seleccion().has(v._id)" (change)="alternar(v._id)" /></td> }
+                <td data-etiqueta="N°">{{ v.numero }}</td><td data-etiqueta="Fecha">{{ v.fecha | dia }}</td>
+                <td data-etiqueta="Cliente">{{ v.cliente?.nombre }}<br /><span class="sutil">{{ v.destino }}</span></td>
+                <td data-etiqueta="Placa"><strong>{{ v.placa }}</strong></td><td data-etiqueta="Conductor">{{ v.conductorNombre }}</td><td data-etiqueta="Flete" class="num">{{ v.flete | pesos }}</td>
+                <td data-etiqueta="Remesa">@if (v.remesa.numero) { {{ v.remesa.numero }}<br /><span class="chip" [class]="chip(v.remesa.estado)">{{ v.remesa.estado || 'sin enviar' }}</span> }</td>
+                <td data-etiqueta="Manifiesto">@if (v.manifiesto.numero) { {{ v.manifiesto.numero }}<br /><span class="chip" [class]="chip(v.manifiesto.estado)">{{ v.manifiesto.estado || 'sin enviar' }}</span> }
                   @if (v.manifiesto.radicado && v.manifiesto.estado === 'aceptado') { <br /><span class="sutil">Rad. {{ v.manifiesto.radicado }}</span> }</td>
                 @if (conCorreo()) {
-                  <td>@if (resumenCorreo(v._id); as rc) { <button type="button" class="chip-boton" (click)="verCorreos(v)" [title]="rc.titulo"><span class="chip" [class]="rc.clase">{{ rc.texto }}</span></button> }
+                  <td data-etiqueta="Correo">@if (resumenCorreo(v._id); as rc) { <button type="button" class="chip-boton" (click)="verCorreos(v)" [title]="rc.titulo"><span class="chip" [class]="rc.clase">{{ rc.texto }}</span></button> }
                     @else { <button type="button" class="pequeno texto" (click)="verCorreos(v)">Sin envío</button> }</td>
                 }
-                <td>
+                <td class="celda-acciones">
                   <div class="acciones" style="justify-content:flex-end">
                     @switch (pestana()) {
                       @case ('anulados') {
@@ -132,6 +169,10 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                         @if (v.estado === 'remesa') { <button class="pequeno peligro" (click)="abrirAnular(v)" title="Anular la remesa aceptada">Anular remesa</button> }
                       }
                       @case ('manifestados') {
+                        @if (tienePorAprobar(v._id)) {
+                          <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([v._id])" [disabled]="trabajando()"
+                            title="Envía al cliente el manifiesto y la carta de salida de este viaje"><app-icono nombre="correo" [tam]="15" />Aprobar correo</button>
+                        }
                         <button class="pequeno" (click)="pdf(v)"><app-icono nombre="descargar" [tam]="15" />PDF</button>
                         <button class="pequeno primario" (click)="abrirCumplido(v)">Cumplir</button>
                         <button class="pequeno peligro" (click)="abrirAnular(v)">Anular</button>
@@ -160,7 +201,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         <table>
           <thead><tr><th>Fecha</th><th>Proceso</th><th>Referencia</th><th>Usuario</th><th>Resultado</th><th>Ambiente</th></tr></thead>
           <tbody>
-            @for (t of transacciones(); track t._id) {
+            @for (t of transaccionesVisibles(); track t._id) {
               <tr><td>{{ t.createdAt | fechaHora }}</td><td>{{ procesos()[t.proceso] || t.proceso }}{{ t.tipo !== 1 ? ' (consulta)' : '' }}</td>
                 <td>{{ t.referencia }}</td><td>{{ t.usuario?.nombre }}</td>
                 <td>@if (t.ok) { <span class="chip ok">Aceptado {{ t.radicado ? '· ' + t.radicado : '' }}</span> } @else { <span class="chip error" [title]="t.mensaje">Rechazado</span><div class="sutil">{{ t.mensaje }}</div> }</td>
@@ -331,6 +372,19 @@ export class Manifiestos {
   readonly expedir = signal<string | null>(null);
   // Correos de documentos
   readonly envios = signal<any[]>([]);
+  // Filtros: los de las listas de viajes van al servidor; los de Correos e Historial, sobre lo cargado
+  filtro = { desde: '', hasta: '', cliente: '', q: '' };
+  readonly texto = signal('');
+  readonly resultadoHist = signal('');
+  readonly clientesFiltro = signal<any[]>([]);
+  readonly enviosVisibles = computed(() => filtrar(this.envios().map(e => ({ ...e, _estado: this.textoCorreo(e.estado) })), this.texto()));
+  readonly transaccionesVisibles = computed(() => filtrar(this.transacciones()
+    .filter(t => !this.resultadoHist() || (this.resultadoHist() === 'ok') === !!t.ok)
+    .map(t => ({ ...t, _proceso: this.procesos()[t.proceso] || '' })), this.texto()));
+  private filtrosViajes() {
+    return Object.fromEntries(Object.entries(this.filtro).filter(([, v]) => v));
+  }
+  limpiarFiltros() { this.filtro = { desde: '', hasta: '', cliente: '', q: '' }; this.cargar(); }
   readonly enviosPorViaje = signal<Map<string, any[]>>(new Map());
   readonly filtroCorreo = signal('');
   readonly correosViaje = signal<Viaje | null>(null);
@@ -352,11 +406,12 @@ export class Manifiestos {
 
   constructor() {
     this.cargar();
+    this.api.get<any[]>('/maestros/clientes').then(c => this.clientesFiltro.set(c)).catch(() => {});
     this.api.get('/rndc/catalogos').then(c => this.catalogos.set(c)).catch(() => {});
     this.api.get<any>('/rndc/config').then(c => this.ambiente.set(c.ambiente)).catch(() => {});
   }
 
-  ir(p: Pestana) { this.pestana.set(p); this.seleccion.set(new Set()); this.cargar(); }
+  ir(p: Pestana) { this.pestana.set(p); this.seleccion.set(new Set()); this.texto.set(''); this.cargar(); }
 
   async cargar() {
     this.cargando.set(true);
@@ -369,7 +424,7 @@ export class Manifiestos {
       }
       else {
         this.pagina = 1;
-        const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], pagina: 1, limite: 50, historico: 0, rndc: 1 });
+        const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: 1, limite: 50, historico: 0, rndc: 1 });
         this.viajes.set(r.viajes); this.total.set(r.total);
         this.cargarCorreos(r.viajes);
       }
@@ -384,7 +439,7 @@ export class Manifiestos {
     if (['historial', 'correos'].includes(this.pestana()) || this.cargandoMas() || this.viajes().length >= this.total()) return;
     this.cargandoMas.set(true);
     try {
-      const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], pagina: this.pagina + 1, limite: 50, historico: 0, rndc: 1 });
+      const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: this.pagina + 1, limite: 50, historico: 0, rndc: 1 });
       this.pagina += 1;
       this.viajes.update(l => [...l, ...r.viajes]);
       this.cargarCorreos(this.viajes());
@@ -448,11 +503,41 @@ export class Manifiestos {
     const estados = [...ultimo.values()];
     const error = estados.some(e => e.estado === 'error');
     const todos = estados.every(e => e.estado === 'enviado');
-    return { texto: error ? 'Error' : todos ? 'Enviado' : 'Pendiente', clase: error ? 'error' : todos ? 'ok' : 'alerta',
+    const aprobar = estados.some(e => e.estado === 'por_aprobar');
+    const descartado = estados.every(e => e.estado === 'descartado');
+    return { texto: error ? 'Error' : aprobar ? 'Por aprobar' : todos ? 'Enviado' : descartado ? 'Descartado' : 'Pendiente',
+      clase: error ? 'error' : todos ? 'ok' : descartado ? '' : 'alerta',
       titulo: estados.map(e => `${e.tipo === 'salida' ? 'Carta de salida' : 'Manifiesto'}: ${this.textoCorreo(e.estado)}`).join(' · ') };
   }
 
   verCorreos(v: Viaje) { this.correosViaje.set(v); }
+
+  // ── Aprobación de correos: nada sale al cliente sin confirmación ──
+  readonly conSeleccion = computed(() => this.pestana() === 'pendientes' || (this.pestana() === 'manifestados' && this.conCorreo()));
+  tienePorAprobar(viajeId: string) { return (this.enviosPorViaje().get(viajeId) || []).some(e => e.estado === 'por_aprobar'); }
+  readonly porAprobar = computed(() => this.viajes().filter(v => (this.enviosPorViaje().get(v._id) || []).some(e => e.estado === 'por_aprobar')).map(v => v._id));
+  async aprobarCorreos(viajes: string[]) {
+    if (!viajes.length) return;
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.post<any>('/correo/aprobar', { viajes });
+      const fallos = r.resultados.filter((x: any) => x.estado === 'error');
+      if (!r.aprobados) this.avisos.mostrar('Los viajes elegidos no tienen correos por aprobar', 'info');
+      else if (fallos.length) this.avisos.mostrar(`Se aprobaron ${r.aprobados} correo(s), pero ${fallos.length} falló: ${fallos[0].error}`, 'error');
+      else this.avisos.ok(`${r.aprobados} correo(s) aprobados y enviados`);
+      this.seleccion.set(new Set());
+      await this.cargarCorreos(this.viajes());
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+  async descartarCorreos(viajes: string[]) {
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.post<any>('/correo/descartar', { viajes });
+      this.avisos.ok(`${r.descartados} correo(s) descartados; no se enviarán`);
+      this.seleccion.set(new Set());
+      await this.cargarCorreos(this.viajes());
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
   listaDestinos(e: any) { return [...e.destinatarios, ...(e.cc || []).map((x: string) => `CC: ${x}`)].join(', '); }
 
   async reintentar(e: any) {

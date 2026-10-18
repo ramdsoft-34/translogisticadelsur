@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -11,6 +11,8 @@ import { FORMATOS, isoDia } from '../shared/formato';
 import { VisorAuditoria } from '../shared/auditoria';
 import { ConfigCorreo } from '../shared/config-correo';
 import { Confirmar } from '../shared/confirmar';
+import { filtrar } from '../shared/filtro';
+import { RndcClave } from '../core/rndc-clave.service';
 
 type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
 
@@ -66,6 +68,22 @@ type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
                 <div class="ancho mensaje alerta">Los próximos consecutivos deben continuar después del <strong>último número expedido en el RNDC</strong>,
                   incluidos los que se hicieron con la plantilla de Excel o en el portal del Ministerio. Si se repite un número, el RNDC lo rechaza.
                   Se puede corregir hacia atrás si el número no se ha usado; al expedir, la plataforma salta los números que ya tengan documento.</div>
+                <div class="ancho verificar-consec">
+                  <button type="button" (click)="verificarConsecutivos()" [disabled]="verificandoConsec()" title="Consulta en el RNDC las remesas y manifiestos radicados en los últimos 20 días">
+                    <app-icono nombre="enviar" [tam]="15" />{{ verificandoConsec() ? 'Consultando el RNDC…' : 'Verificar consecutivos con el RNDC' }}</button>
+                  @if (consec(); as k) {
+                    <div class="tabla-caja" style="box-shadow:none;margin-top:10px"><table>
+                      <thead><tr><th>Documento</th><th>Último radicado en el RNDC</th><th>Siguiente en la plataforma</th><th></th></tr></thead>
+                      <tbody>@for (d of [['remesa', 'Remesa'], ['manifiesto', 'Manifiesto']]; track d[0]) {
+                        @let x = k[d[0]];
+                        <tr><td>{{ d[1] }}</td><td>{{ x.ultimoRndc || (x.ok ? 'Ninguno en el periodo' : x.mensaje) }}</td><td>{{ x.siguientePlataforma }}</td>
+                          <td>@if (x.sugerido) {
+                                <button type="button" class="pequeno primario" confirmar="Clic otra vez para ajustar" (confirmado)="ajustarConsecutivo(d[0], x.sugerido)">Ajustar a {{ x.sugerido }}</button>
+                              } @else if (x.ultimoRndc) { <span class="chip ok sin-punto">Correcto</span> }</td></tr>
+                      }</tbody></table></div>
+                    <small class="sutil">Consultado del {{ k.desde }} al {{ k.hasta }}.</small>
+                  }
+                </div>
               </div>
             </div>
             <div class="tarjeta">
@@ -126,10 +144,13 @@ type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
       }
       @case ('correo') { <app-config-correo /> }
       @case ('usuarios') {
-        <div class="acciones" style="justify-content:flex-end;margin-bottom:12px"><button class="primario" (click)="nuevoUsuario()"><app-icono nombre="mas" />Nuevo usuario</button></div>
+        <div class="acciones" style="margin-bottom:12px"><div class="filtro-rapido"><input type="search" placeholder="Buscar nombre, correo o rol" aria-label="Buscar nombre, correo o rol" [value]="qUsu()" (input)="qUsu.set($any($event.target).value)" /></div>
+          <select aria-label="Filtrar por rol" [value]="rolUsu()" (change)="rolUsu.set($any($event.target).value)"><option value="">Todos los roles</option>
+            @for (r of roles(); track r.clave) { <option [value]="r.clave">{{ r.nombre }}</option> }</select>
+          <button class="primario" (click)="nuevoUsuario()" style="margin-left:auto"><app-icono nombre="mas" />Nuevo usuario</button></div>
         <div class="tabla-caja"><table>
           <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Último acceso</th><th>Estado</th><th></th></tr></thead>
-          <tbody>@for (u of usuarios(); track u._id) {
+          <tbody>@for (u of usuariosVisibles(); track u._id) {
             <tr><td>{{ u.nombre }}</td><td>{{ u.email }}</td><td>{{ rolNombre(u.rol) }}</td><td>{{ u.ultimoAcceso | fechaHora }}</td>
               <td><span class="chip" [class.ok]="u.activo">{{ u.activo ? 'Activo' : 'Inactivo' }}</span></td>
               <td><button class="pequeno" (click)="editarUsuario(u)">Editar</button></td></tr>
@@ -196,11 +217,16 @@ export class Configuracion {
   private api = inject(Api);
   readonly auth = inject(Auth);
   private avisos = inject(Avisos);
+  private clave = inject(RndcClave);
   readonly P = P;
   readonly pestana = signal<Pestana>(this.auth.tiene(P.CONFIG_GESTIONAR) ? 'rndc' : 'usuarios');
   readonly cfg = signal<any>(null);
   readonly naturaleza = signal<[string, string][]>([]);
   readonly usuarios = signal<any[]>([]);
+  readonly qUsu = signal('');
+  readonly rolUsu = signal('');
+  readonly usuariosVisibles = computed(() => filtrar(this.usuarios().filter(u => !this.rolUsu() || u.rol === this.rolUsu())
+    .map(u => ({ ...u, _rol: this.rolNombre(u.rol) })), this.qUsu()));
   readonly roles = signal<{ clave: string; nombre: string; asignable?: boolean }[]>([]);
   readonly archivoPlantilla = signal<File | null>(null);
   readonly resultadoPlantilla = signal<any>(null);
@@ -260,6 +286,31 @@ export class Configuracion {
   }
 
   // Mayúsculas y solo letras o números (sin espacios, guiones ni símbolos)
+  readonly consec = signal<any>(null);
+  readonly verificandoConsec = signal(false);
+  async verificarConsecutivos() {
+    const c = await this.clave.obtener();
+    if (!c) return;
+    this.verificandoConsec.set(true);
+    try {
+      const k = await this.api.post<any>('/rndc/consecutivos/verificar', { clave: c });
+      this.consec.set(k);
+      if (k.remesa.sugerido || k.manifiesto.sugerido) this.avisos.mostrar('La plataforma va por detrás del RNDC: ajuste el consecutivo para evitar DUPLICADOS', 'error');
+      else this.avisos.ok('Los consecutivos siguen al último número radicado en el RNDC');
+    } catch (e: any) {
+      if (/usuario|contrase|clave/i.test(e?.error?.error || '')) this.clave.olvidar();
+      this.avisos.error(e);
+    } finally { this.verificandoConsec.set(false); }
+  }
+  async ajustarConsecutivo(doc: string, numero: string) {
+    try {
+      await this.api.put('/rndc/config', doc === 'remesa' ? { consecutivoRemesa: numero } : { consecutivoManifiesto: numero });
+      this.avisos.ok(`Próximo ${doc}: ${numero}`);
+      this.consec.update(k => ({ ...k, [doc]: { ...k[doc], sugerido: '', siguientePlataforma: numero } }));
+      this.cfg.update(c => ({ ...c, [doc === 'remesa' ? 'consecutivoRemesa' : 'consecutivoManifiesto']: numero }));
+    } catch (e) { this.avisos.error(e); }
+  }
+
   limpiarConsecutivo(v: string) { return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 15); }
 
   nombreAmbiente(a: string) { return ({ SIMULADO: 'simulador local', PRUEBAS: 'pruebas del Ministerio', PRODUCCION: 'PRODUCCIÓN' } as Record<string, string>)[a] || a; }

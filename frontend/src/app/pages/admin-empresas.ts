@@ -1,10 +1,11 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Avisos } from '../core/avisos.service';
 import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
 import { FORMATOS } from '../shared/formato';
+import { filtrar } from '../shared/filtro';
 
 const empresaVacia = () => ({ nombre: '', nit: '', dv: '', direccion: '', telefono: '', ciudad: '', correo: '', activa: true,
   administrador: { nombre: '', email: '', password: '' } });
@@ -17,9 +18,10 @@ const empresaVacia = () => ({ nombre: '', nit: '', dv: '', direccion: '', telefo
       <div><h1>Empresas</h1><p class="sutil">Cada empresa trabaja con sus propios datos y usuarios. Aquí se crean las empresas y sus administradores.</p></div>
       <button class="primario" (click)="nueva()"><app-icono nombre="mas" />Nueva empresa</button>
     </div>
+    <div class="filtro-rapido"><input type="search" placeholder="Buscar empresa, NIT o ciudad" aria-label="Buscar empresa, NIT o ciudad" [value]="q()" (input)="q.set($any($event.target).value)" /></div>
     <div class="tabla-caja"><table>
       <thead><tr><th>Empresa</th><th>NIT</th><th>Ciudad</th><th class="num">Usuarios</th><th>RNDC</th><th>Estado</th><th></th></tr></thead>
-      <tbody>@for (e of empresas(); track e._id) {
+      <tbody>@for (e of empresasVisibles(); track e._id) {
         <tr><td><strong>{{ e.nombre }}</strong></td><td>{{ e.nit }}{{ e.dv ? '-' + e.dv : '' }}</td><td>{{ e.ciudad }}</td>
           <td class="num">{{ e.usuarios }}</td><td>{{ e.rndc?.ambiente }}</td>
           <td><span class="chip" [class.ok]="e.activa" [class.error]="!e.activa">{{ e.activa ? 'Activa' : 'Inactiva' }}</span></td>
@@ -89,6 +91,8 @@ export class AdminEmpresas {
   private api = inject(Api);
   private avisos = inject(Avisos);
   readonly empresas = signal<any[]>([]);
+  readonly q = signal('');
+  readonly empresasVisibles = computed(() => filtrar(this.empresas(), this.q()));
   readonly abierto = signal(false);
   readonly form = signal<any>(empresaVacia());
   readonly empresaAdmins = signal<any>(null);

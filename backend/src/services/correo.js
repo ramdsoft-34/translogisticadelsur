@@ -149,18 +149,47 @@ export async function programarEnvios(empresaId, viajeId, { origen = 'automatico
   if (!cfg?.activo || !cfg.destinatarios?.length) return [];
   // Un reenvío manual de un documento elegido sale aunque el cliente no lo tenga en sus envíos automáticos
   const documentos = origen === 'manual' && tipos?.length ? tipos : (tipos || ['manifiesto', 'salida']).filter(t => cfg.documentos?.[t]);
+  // Un envío manual reemplaza lo que estuviera por aprobar del mismo documento
+  if (origen === 'manual') await EnvioCorreo.updateMany({ empresa: empresaId, viaje: viajeId, tipo: { $in: documentos }, estado: 'por_aprobar' },
+    { $set: { estado: 'descartado', error: 'Reemplazado por un envío manual' } });
   const creados = [];
   for (const tipo of documentos) {
-    // Un manifiesto ya enviado no se vuelve a mandar en automático
-    if (origen === 'automatico' && tipo === 'manifiesto'
-      && await EnvioCorreo.exists({ empresa: empresaId, viaje: viajeId, tipo, estado: { $in: ['pendiente', 'enviando', 'enviado'] } })) continue;
+    // Un documento ya preparado o enviado no se vuelve a preparar en automático
+    if (origen === 'automatico'
+      && await EnvioCorreo.exists({ empresa: empresaId, viaje: viajeId, tipo, estado: { $in: ['por_aprobar', 'pendiente', 'enviando', 'enviado'] } })) continue;
+    // Los automáticos quedan por aprobar: no sale ningún correo sin la confirmación de una persona
     const envio = await EnvioCorreo.create({ empresa: empresaId, viaje: viajeId, cliente: cliente._id, tipo, documento: v.manifiesto.numero,
-      destinatarios: cfg.destinatarios, cc: cfg.cc || [], origen, usuario });
-    // Los manifiestos automáticos esperan para salir agrupados por cliente; la carta de salida es por vehículo
-    if (origen === 'automatico' && tipo === 'manifiesto') creados.push(envio.toObject());
-    else creados.push(await procesarEnvio(empresaId, envio._id, { automatico: origen === 'automatico' }));
+      destinatarios: cfg.destinatarios, cc: cfg.cc || [], origen, usuario, estado: origen === 'automatico' ? 'por_aprobar' : 'pendiente' });
+    if (origen === 'automatico') creados.push(envio.toObject());
+    else creados.push(await procesarEnvio(empresaId, envio._id));
   }
   return creados;
+}
+
+// Aprobación de los correos preparados de unos viajes: los manifiestos salen en un solo correo
+// por cliente y cada carta de salida en el suyo.
+export async function aprobarEnvios(empresaId, viajes, usuario) {
+  const f = { empresa: empresaId, viaje: { $in: viajes }, estado: 'por_aprobar' };
+  const lista = await EnvioCorreo.find(f).select('_id tipo cliente').lean();
+  if (!lista.length) return { aprobados: 0, resultados: [] };
+  await EnvioCorreo.updateMany({ ...f, _id: { $in: lista.map(x => x._id) } }, { $set: { estado: 'pendiente', aprobadoPor: usuario, aprobadoEn: new Date() } });
+  const resultados = [];
+  for (const cliente of new Set(lista.filter(x => x.tipo === 'manifiesto').map(x => String(x.cliente)))) {
+    const r = await enviarGrupoCliente(empresaId, cliente);
+    if (r) resultados.push({ tipo: 'manifiesto', ...r });
+  }
+  for (const s of lista.filter(x => x.tipo === 'salida')) {
+    const r = await procesarEnvio(empresaId, s._id);
+    if (r) resultados.push({ tipo: 'salida', estado: r.estado, error: r.error });
+  }
+  return { aprobados: lista.length, resultados };
+}
+
+// Descarta los correos preparados de unos viajes (no se envían)
+export async function descartarEnvios(empresaId, viajes, usuario) {
+  const r = await EnvioCorreo.updateMany({ empresa: empresaId, viaje: { $in: viajes }, estado: 'por_aprobar' },
+    { $set: { estado: 'descartado', aprobadoPor: usuario, aprobadoEn: new Date() } });
+  return { descartados: r.modifiedCount };
 }
 
 // ── Manifiestos agrupados: un correo por cliente con todos sus PDF pendientes ──

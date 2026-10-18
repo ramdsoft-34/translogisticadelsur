@@ -103,7 +103,25 @@ import { Confirmar } from './confirmar';
         @if (p.avisos.length) { <div class="mensaje alerta"><strong>Revise:</strong><ul>@for (a of p.avisos; track a) { <li>{{ a }}</li> }</ul></div> }
 
         <!-- Vehículo y personas: deben existir en el RNDC -->
-        <h3>Vehículo y personas en el RNDC</h3>
+        <div class="cab-maestros">
+          <h3>Vehículo y personas en el RNDC</h3>
+          @if (p.verificacionVigente) { <span class="chip ok sin-punto" [title]="'Verificado el ' + (p.verificadoRndc | fechaHora)">Verificado con el RNDC</span> }
+          @else { <span class="chip alerta sin-punto">Se verificará con el RNDC al enviar</span> }
+          <button type="button" class="pequeno" (click)="verificar(true)" [disabled]="trabajando()" title="Trae del RNDC el vehículo, el conductor, el titular y las sedes del remitente y del destinatario">
+            <app-icono nombre="enviar" [tam]="14" />Verificar ahora</button>
+        </div>
+        @if (verificacion(); as ver) {
+          <div class="mensaje verificacion" [class.error]="ver.bloqueantes.length" [class.ok]="!ver.bloqueantes.length && !conCambios(ver)" [class.alerta]="!ver.bloqueantes.length && conCambios(ver)">
+            <strong>{{ ver.bloqueantes.length ? 'No se puede enviar todavía:' : conCambios(ver) ? 'Se actualizaron datos desde el RNDC; revíselos y presione enviar de nuevo:' : 'Todo coincide con el RNDC.' }}</strong>
+            <ul>
+              @for (b of ver.bloqueantes; track b) { <li>{{ b }}</li> }
+              @for (x of ver.resultados; track x.rol + x.referencia) {
+                @if (x.cambios?.length) { <li>{{ x.rol }} {{ x.referencia }}: {{ x.cambios.join('; ') }}</li> }
+                @if (x.estado === 'error') { <li>{{ x.rol }} {{ x.referencia }}: no se pudo consultar ({{ x.mensaje }})</li> }
+              }
+            </ul>
+          </div>
+        }
         <ul class="maestros">
           @for (m of p.maestros; track m.rol) {
             <li>
@@ -254,6 +272,9 @@ import { Confirmar } from './confirmar';
     .nota-num { margin: 8px 0 0; font-size: 12.5px; }
     .que-hacer { margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: var(--gris-0); color: var(--gris-8); font-size: 13.5px; }
     h3 { margin: 6px 0 8px; font-size: 14px; }
+    .cab-maestros { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 6px 0 8px; }
+    .cab-maestros h3 { margin: 0; margin-right: auto; }
+    .verificacion ul { margin: 4px 0 0; padding-left: 18px; }
     .maestros { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 6px; }
     .maestros li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 12px; border: 1px solid var(--gris-2); border-radius: var(--radio); }
     .rol { font-size: 12px; font-weight: 700; color: var(--gris-5); text-transform: uppercase; letter-spacing: .04em; min-width: 76px; }
@@ -297,6 +318,7 @@ export class ExpedirRndc {
   }
 
   private async cargar(id: string) {
+    this.verificacion.set(null);
     this.resultado.set(null); this.detalles.set([]); this.mostrarRemolque.set(false);
     try {
       const [v, p] = await Promise.all([this.api.get<any>(`/viajes/${id}`), this.api.get<any>(`/rndc/viajes/${id}/vista-previa`)]);
@@ -430,11 +452,38 @@ export class ExpedirRndc {
     } finally { this.trabajando.set(false); }
   }
 
+  // Verificación contra el RNDC: trae vehículo, personas y sedes y actualiza la plataforma.
+  // Devuelve true si se puede enviar sin revisar nada más.
+  readonly verificacion = signal<any>(null);
+  conCambios(ver: any) { return ver.resultados.some((x: any) => x.cambios?.length && !/^registrado en la plataforma/.test(x.cambios[0])) ; }
+  async verificar(forzar: boolean, claveDada?: string): Promise<boolean> {
+    const id = this.viajeId();
+    if (!id) return false;
+    const c = claveDada || await this.clave.obtener();
+    if (!c) return false;
+    this.trabajando.set(true);
+    try {
+      const destinoAntes = this.previa()?.destinoManifiesto;
+      const r = await this.api.post<any>(`/rndc/viajes/${id}/verificar`, { clave: c, forzar });
+      this.verificacion.set(r);
+      this.previa.set(r.previa);
+      if (r.bloqueantes.length) return false;
+      // Si cambió algo que va en los documentos, se muestra antes de enviar
+      return !this.conCambios(r) && r.previa.destinoManifiesto === destinoAntes && !this.faltan().length;
+    } catch (e: any) {
+      this.resultado.set({ ok: false, texto: await mensajeError(e) });
+      if (/usuario|contrase|clave/i.test(e?.error?.error || '')) this.clave.olvidar();
+      return false;
+    } finally { this.trabajando.set(false); }
+  }
+
   async enviar() {
     const id = this.viajeId();
     if (!id || !(await this.guardar(true))) return;
     const c = await this.clave.obtener();
     if (!c) return;
+    // Antes de enviar: verificación con el RNDC (si no se hizo en los últimos días)
+    if (!this.previa()?.verificacionVigente && !(await this.verificar(false, c))) return;
     this.trabajando.set(true); this.resultado.set(null);
     try {
       const r = await this.api.post<any>(`/rndc/viajes/${id}/despachar`, { clave: c });

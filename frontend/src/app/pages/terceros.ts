@@ -43,6 +43,10 @@ const vacio = () => ({
       <div class="campo crece"><label for="t-q">Buscar</label><input id="t-q" type="search" placeholder="Nombre o número de documento" [(ngModel)]="q" (input)="buscarDiferido()" /></div>
       <div class="campo"><label for="t-rol">Rol</label><select id="t-rol" [(ngModel)]="rol" (change)="cargar()"><option value="">Todos</option>
         @for (r of roles; track r[0]) { <option [value]="r[0]">{{ r[1] }}</option> }</select></div>
+      <div class="campo"><label for="t-rndc">En el RNDC</label><select id="t-rndc" [(ngModel)]="rndc" (change)="cargar()"><option value="">Todos</option>
+        <option value="enviado">Registrados</option><option value="importado">Importados sin confirmar</option><option value="error">Con error</option><option value="sin_enviar">Sin registrar</option></select></div>
+      <div class="campo"><label for="t-act">Estado</label><select id="t-act" [(ngModel)]="activos" (change)="cargar()"><option value="">Todos</option>
+        <option value="1">Activos</option><option value="0">Inactivos</option></select></div>
     </div>
     <div class="tabla-caja">
       <table>
@@ -179,11 +183,13 @@ export class Terceros {
   private temporizador: ReturnType<typeof setTimeout> | undefined;
   buscarDiferido() { clearTimeout(this.temporizador); this.temporizador = setTimeout(() => this.cargar(), 300); }
 
+  rndc = '';
+  activos = '';
   async cargar() {
     this.cargando.set(true);
     this.pagina = 1;
     try {
-      const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, pagina: 1, limite: 50 });
+      const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, pagina: 1, limite: 50 });
       this.lista.set(r.items); this.total.set(r.total);
     } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
   }
@@ -192,7 +198,7 @@ export class Terceros {
     if (this.cargandoMas() || this.lista().length >= this.total()) return;
     this.cargandoMas.set(true);
     try {
-      const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, pagina: this.pagina + 1, limite: 50 });
+      const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, pagina: this.pagina + 1, limite: 50 });
       this.pagina += 1;
       this.lista.update(l => [...l, ...r.items]);
     } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }

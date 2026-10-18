@@ -95,6 +95,10 @@ r.get('/terceros', ver, async (req, res) => {
   const filtro = deEmpresa(req);
   if (req.query.rol) filtro.roles = req.query.rol;
   if (req.query.activos === '1') filtro.activo = true;
+  if (req.query.activos === '0') filtro.activo = false;
+  if (req.query.rndc === 'importado') filtro['rndc.mensaje'] = /^Importado/i;
+  else if (req.query.rndc === 'enviado') { filtro['rndc.estado'] = 'enviado'; filtro['rndc.mensaje'] = { $not: /^Importado/i }; }
+  else if (['error', 'sin_enviar'].includes(req.query.rndc)) filtro['rndc.estado'] = req.query.rndc;
   if (req.query.q) {
     const re = buscar(req.query.q);
     filtro.$or = [{ nombres: re }, { apellido1: re }, { apellido2: re }, { numId: re }];
@@ -141,6 +145,12 @@ async function validarConductor(req, id) {
 r.get('/vehiculos', ver, async (req, res) => {
   const filtro = deEmpresa(req);
   if (req.query.activos === '1') filtro.activo = true;
+  if (req.query.activos === '0') filtro.activo = false;
+  if (['vehiculo', 'remolque'].includes(req.query.clase)) filtro.clase = req.query.clase;
+  const hoy = new Date(); const pronto = new Date(Date.now() + 30 * 86400000);
+  if (req.query.soat === 'vencido') filtro['soat.vence'] = { $ne: null, $lt: hoy };
+  if (req.query.soat === 'por_vencer') filtro['soat.vence'] = { $gte: hoy, $lte: pronto };
+  if (req.query.soat === 'sin') filtro.$or = [{ 'soat.numero': { $in: ['', null] } }, { 'soat.vence': null }];
   if (req.query.q) filtro.placa = buscar(String(req.query.q).replace(/[\s-]/g, ''));
   await listar(req, res, Vehiculo.find(filtro).sort({ placa: 1 }).populate(pob(req.empresaId, 'conductorHabitual', 'nombres apellido1 apellido2 numId')).lean(),
     Vehiculo.countDocuments(filtro));
@@ -185,6 +195,83 @@ r.get('/alertas', ver, async (req, res) => {
   }
   alertas.sort((a, b) => new Date(a.vence) - new Date(b.vence));
   res.json(alertas);
+});
+
+// ── Revisión de datos: lo que puede causar rechazos del RNDC o un manifiesto incompleto ──
+const nombreT = (t) => [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ');
+r.get('/revision', ver, async (req, res) => {
+  const dias = 15;
+  const pronto = new Date(Date.now() + dias * 86400000);
+  const hoy = new Date();
+  const items = [];
+  // 1. Sedes guardadas con el municipio pero con nombre de un centro poblado de ese municipio
+  const sedes = await Tercero.find(deEmpresa(req, { activo: { $ne: false }, codMunicipio: /000$/, 'sede.nombre': { $nin: ['', null] } }))
+    .select('tipoId numId nombres apellido1 sede codMunicipio').limit(5000).lean();
+  const prefijos = [...new Set(sedes.map(x => x.codMunicipio.slice(0, 5)))];
+  const centros = prefijos.length ? await Municipio.find({ codigo: { $in: prefijos.map(p => new RegExp(`^${p}(?!000)`)) } }).select('codigo nombre departamento').lean() : [];
+  const porPrefijo = new Map();
+  for (const m of centros) {
+    const p = m.codigo.slice(0, 5);
+    if (!porPrefijo.has(p)) porPrefijo.set(p, []);
+    porPrefijo.get(p).push(m);
+  }
+  for (const t of sedes) {
+    const n = normalizar(t.sede.nombre);
+    const cp = (porPrefijo.get(t.codMunicipio.slice(0, 5)) || []).find(m => normalizar(m.nombre).startsWith(`${n} `) || normalizar(m.nombre) === n);
+    if (cp) items.push({ categoria: 'sede', tipo: 'tercero', id: t._id, tipoId: t.tipoId, numId: t.numId,
+      referencia: `${nombreT(t)} · sede ${t.sede.codigo} ${t.sede.nombre}`, problema: `Guardada en el municipio ${t.codMunicipio}; el nombre corresponde al centro poblado ${cp.codigo}`,
+      sugerencia: { codigo: cp.codigo, nombre: `${cp.nombre} (${cp.departamento})` } });
+  }
+  // 2. Terceros importados del Excel sin confirmar con el RNDC (uno por documento)
+  const importados = await Tercero.find(deEmpresa(req, { activo: { $ne: false }, 'rndc.mensaje': /^Importado/i }))
+    .select('tipoId numId nombres apellido1 apellido2 roles').limit(3000).lean();
+  const vistos = new Set();
+  for (const t of importados) {
+    const k = `${t.tipoId}|${t.numId}`;
+    if (vistos.has(k)) continue;
+    vistos.add(k);
+    items.push({ categoria: 'importado', tipo: 'tercero', id: t._id, tipoId: t.tipoId, numId: t.numId,
+      referencia: `${nombreT(t)} (${t.tipoId} ${t.numId})`, problema: `Importado del Excel sin confirmar con el RNDC${t.roles?.length ? ` · ${t.roles.join(', ')}` : ''}` });
+  }
+  // 3. Conductores: licencia faltante, vencida o por vencer
+  const conductores = await Tercero.find(deEmpresa(req, { activo: { $ne: false }, roles: 'conductor' }))
+    .select('tipoId numId nombres apellido1 apellido2 licencia').limit(5000).lean();
+  for (const t of conductores) {
+    const l = t.licencia || {};
+    const problema = !l.numero ? 'Sin número de licencia' : !l.vence ? 'Sin fecha de vencimiento de la licencia'
+      : new Date(l.vence) < hoy ? `Licencia vencida (${new Date(l.vence).toISOString().slice(0, 10)})`
+        : new Date(l.vence) <= pronto ? `Licencia vence el ${new Date(l.vence).toISOString().slice(0, 10)}` : '';
+    if (problema) items.push({ categoria: 'licencia', tipo: 'tercero', id: t._id, tipoId: t.tipoId, numId: t.numId, referencia: `${nombreT(t)} (${t.tipoId} ${t.numId})`, problema });
+  }
+  // 4. Vehículos: SOAT faltante, vencido o por vencer y datos del formato del manifiesto
+  const vehiculos = await Vehiculo.find(deEmpresa(req, { activo: { $ne: false } })).select('placa soat configuracion pesoVacio marca').limit(5000).lean();
+  for (const v of vehiculos) {
+    const s = v.soat || {};
+    const faltan = [!s.numero && 'N° de póliza SOAT', !s.vence && 'vencimiento del SOAT', !s.aseguradoraNit && 'aseguradora del SOAT',
+      !v.configuracion && 'configuración', !(Number(v.pesoVacio) > 0) && 'peso vacío', !v.marca && 'marca'].filter(Boolean);
+    const problema = faltan.length ? `Falta: ${faltan.join(', ')}`
+      : new Date(s.vence) < hoy ? `SOAT vencido (${new Date(s.vence).toISOString().slice(0, 10)})`
+        : new Date(s.vence) <= pronto ? `SOAT vence el ${new Date(s.vence).toISOString().slice(0, 10)}` : '';
+    if (problema) items.push({ categoria: 'vehiculo', tipo: 'vehiculo', id: v._id, placa: v.placa, referencia: v.placa, problema });
+  }
+  res.json({ dias, items });
+});
+
+// Corrige en lote el municipio de sedes (p. ej. al centro poblado sugerido en la revisión)
+r.post('/revision/sedes', editar, async (req, res) => {
+  const cambios = Array.isArray(req.body?.cambios) ? req.body.cambios.slice(0, 500) : [];
+  let corregidas = 0;
+  for (const c of cambios) {
+    if (!/^[a-f0-9]{24}$/i.test(String(c.id)) || !/^\d{8}$/.test(String(c.codMunicipio))) continue;
+    if (!(await Municipio.exists({ codigo: c.codMunicipio }))) continue;
+    const x = await Tercero.findOne(deEmpresa(req, { _id: c.id })).select('codMunicipio sede').lean();
+    if (!x) continue;
+    const antes = x.codMunicipio;
+    await Tercero.updateOne(deEmpresa(req, { _id: x._id }), { $set: { codMunicipio: c.codMunicipio } });
+    corregidas += 1;
+    await auditar(req, 'corregir_sede', { entidad: 'Tercero', entidadId: x._id, detalle: { sede: x.sede?.codigo, de: antes, a: c.codMunicipio } });
+  }
+  res.json({ corregidas });
 });
 
 // Placas usadas en viajes que aún no están en el maestro de vehículos.

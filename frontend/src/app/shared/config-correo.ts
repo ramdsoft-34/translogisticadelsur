@@ -1,9 +1,10 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Avisos } from '../core/avisos.service';
 import { Modal } from './modal';
 import { Confirmar } from './confirmar';
+import { filtrar } from './filtro';
 
 const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/).map(x => x.trim().toLowerCase()).filter(Boolean))];
 
@@ -75,10 +76,11 @@ const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/)
 
       <section class="tarjeta">
         <h2>Envío por cliente</h2>
-        <p class="sutil">Cada cliente tiene sus propios destinatarios y documentos. Solo se envía cuando el RNDC acepta la remesa y el manifiesto.</p>
+        <p class="sutil">Cada cliente tiene sus propios destinatarios y documentos. Los correos se preparan cuando el RNDC acepta el manifiesto y salen solo cuando se aprueban en «Manifestados».</p>
+        <div class="filtro-rapido"><input type="search" placeholder="Buscar cliente o destinatario" aria-label="Buscar cliente o destinatario" [value]="qCli()" (input)="qCli.set($any($event.target).value)" /></div>
         <div class="tabla-caja" style="box-shadow:none"><table>
           <thead><tr><th>Cliente</th><th>Estado</th><th>Destinatarios</th><th>Documentos</th><th></th></tr></thead>
-          <tbody>@for (cl of clientes(); track cl._id) {
+          <tbody>@for (cl of clientesVisibles(); track cl._id) {
             <tr>
               <td><strong>{{ cl.nombre }}</strong></td>
               <td><span class="chip" [class.ok]="cl.envios?.activo">{{ cl.envios?.activo ? 'Activo' : 'Sin envío' }}</span></td>
@@ -206,6 +208,8 @@ export class ConfigCorreo {
   private avisos = inject(Avisos);
   readonly smtp = signal<any>(null);
   readonly clientes = signal<any[]>([]);
+  readonly qCli = signal('');
+  readonly clientesVisibles = computed(() => filtrar(this.clientes(), this.qCli()));
   readonly marcadores = signal<[string, string][]>([]);
   readonly form = signal<any>(null);
   readonly vista = signal<any>(null);

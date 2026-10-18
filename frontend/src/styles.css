@@ -287,6 +287,32 @@ details > summary { cursor: pointer; color: var(--gris-7); font-weight: 500; }
   .segmentos button { flex: 1 0 auto; }
   .pagina-cab .acciones { margin-left: 0; }
 }
+/* Buscador rápido sobre una tabla */
+.filtro-rapido { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 10px; }
+.filtro-rapido input[type="search"] { flex: 1 1 220px; max-width: 380px; padding-left: 34px;
+  background: var(--gris-0) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 11px center; }
+.cab-filtro { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.cab-filtro h2 { margin: 0 auto 0 0; }
+.cab-filtro .filtro-rapido { margin: 0; }
+
+/* Celular: cada fila de las tablas marcadas como tabla-movil se ve como una tarjeta */
+@media (max-width: 700px) {
+  table.tabla-movil thead { display: none; }
+  table.tabla-movil, table.tabla-movil tbody, table.tabla-movil tr, table.tabla-movil td { display: block; width: 100%; }
+  table.tabla-movil tr { padding: 10px 4px; border-bottom: 1px solid var(--gris-2); }
+  table.tabla-movil td { position: relative; padding: 4px 12px 4px 38%; border: 0; text-align: right; min-height: 26px; }
+  table.tabla-movil td[data-etiqueta]::before { content: attr(data-etiqueta); position: absolute; left: 12px; top: 6px; max-width: 34%;
+    font-size: 12px; font-weight: 650; color: var(--gris-6); text-align: left; }
+  table.tabla-movil td.num { text-align: right; }
+  table.tabla-movil td .celda-doble { align-items: flex-end; }
+  table.tabla-movil td .estados { justify-content: flex-end; }
+  table.tabla-movil td.celda-acciones { padding: 8px 12px 4px; }
+  table.tabla-movil td.celda-acciones .acciones { width: 100%; justify-content: flex-start !important; flex-wrap: wrap; }
+  table.tabla-movil td.vacio, table.tabla-movil td[colspan] { display: block; text-align: left; }
+  table.tabla-movil tr.seleccionable { cursor: pointer; }
+  .filtro-rapido input[type="search"] { max-width: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }

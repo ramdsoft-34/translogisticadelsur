@@ -19,6 +19,7 @@ const MENU: Opcion[] = [
   { ruta: '/conductores', texto: 'Conductores y terceros', icono: 'personas', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
   { ruta: '/vehiculos', texto: 'Vehículos', icono: 'camion', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
   { ruta: '/clientes', texto: 'Clientes y tarifas', icono: 'edificio', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
+  { ruta: '/revision', texto: 'Revisión de datos', icono: 'alerta', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
   { ruta: '/consultas-rndc', texto: 'Consultas RNDC', icono: 'buscar', permisos: [P.RNDC_CONSULTAR], grupo: 'Datos' },
   { ruta: '/configuracion', texto: 'Configuración', icono: 'ajustes', permisos: [P.CONFIG_GESTIONAR, P.USUARIOS_GESTIONAR], grupo: 'Empresa' },
   { ruta: '/admin/empresas', texto: 'Empresas', icono: 'edificio', permisos: [P.EMPRESAS_GESTIONAR] },

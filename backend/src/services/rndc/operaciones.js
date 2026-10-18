@@ -235,6 +235,9 @@ export async function vistaPrevia(empresaId, viajeId) {
       return { codigo, nombre: m ? `${m.nombre} (${m.departamento || ''})` : '' };
     })(),
     cliente: v.cliente ? { tipoId: v.cliente.tipoId || 'N', numId: idCliente(v.cliente), nombre: v.cliente.nombre, sedeRemitente: txt(v.cliente.sedeRemitente) } : null,
+    // Verificación de vehículo y personas contra el RNDC (vigente unos días)
+    verificadoRndc: v.verificadoRndc || null,
+    verificacionVigente: !!v.verificadoRndc && Date.now() - new Date(v.verificadoRndc).getTime() < 7 * 86400000,
     destinoSugerido: v.destinoSugerido && v.destinoSugerido.codigo !== ctx.COD_DESTINO ? v.destinoSugerido : null,
     destinoManifiestoFijo: v.codDestinoManifiesto || '',
     destinoManifiesto: await (async () => {
@@ -522,7 +525,7 @@ export async function traerTercero(empresaId, clave, usuarioId, { tipoId, numId,
     const doc = existente || new Tercero({ empresa: empresaId, tipoId, numId, roles: [] });
     doc.set(datos);
     doc.roles = [...new Set([...(doc.roles || []), ...roles, ...(datos.licencia.numero ? ['conductor'] : [])])];
-    doc.rndc = { estado: 'enviado', fecha: new Date(), hash: huella(variablesTercero(empresa, doc.toObject())), radicado: '', mensaje: 'Datos traídos del RNDC' };
+    doc.rndc = { estado: 'enviado', fecha: new Date(), verificadoEn: new Date(), hash: huella(variablesTercero(empresa, doc.toObject())), radicado: '', mensaje: 'Datos traídos del RNDC' };
     await doc.save({ validateBeforeSave: true });
     guardados.push({ id: doc._id, nuevo: !existente, nombre: [datos.nombres, datos.apellido1, datos.apellido2].filter(Boolean).join(' '), sede: datos.sede.codigo });
   }
@@ -560,7 +563,7 @@ function aplicarDatos(doc, datos) {
 }
 
 function marcarSincronizado(empresa, doc) {
-  doc.rndc = { estado: 'enviado', fecha: new Date(), hash: huella(variablesVehiculo(empresa, doc.toObject())), radicado: '', mensaje: 'Datos traídos del RNDC' };
+  doc.rndc = { estado: 'enviado', fecha: new Date(), verificadoEn: new Date(), hash: huella(variablesVehiculo(empresa, doc.toObject())), radicado: '', mensaje: 'Datos traídos del RNDC' };
 }
 
 export async function traerVehiculo(empresaId, clave, usuarioId, { placa }) {

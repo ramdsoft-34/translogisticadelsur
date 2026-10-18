@@ -14,6 +14,7 @@ import { titularDePlaca } from './viajes.js';
 import * as masiva from '../services/rndc/actualizacionVehiculos.js';
 import { programarEnvios, enviarPendientes } from '../services/correo.js';
 import { estadoLimitador } from '../services/rndc/limitador.js';
+import { verificarViaje, verificarConsecutivos, verificacionVigente } from '../services/rndc/verificacion.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -188,6 +189,21 @@ r.put('/viajes/:id/datos', operar, async (req, res) => {
   res.json(await op.vistaPrevia(req.empresaId, v._id));
 });
 
+// Verificación contra el RNDC antes de enviar (vehículo, personas y sedes)
+r.post('/viajes/:id/verificar', operar, async (req, res) => {
+  const d = z.object({ clave, forzar: z.boolean().optional() }).parse(req.body);
+  const r1 = await verificarViaje(req.empresaId, req.params.id, d.clave, req.usuario._id, { forzar: !!d.forzar });
+  await auditar(req, 'rndc_verificar_viaje', { entidad: 'Viaje', entidadId: req.params.id,
+    detalle: { resultados: r1.resultados.map(x => ({ rol: x.rol, estado: x.estado })) } });
+  res.json({ ...r1, previa: await op.vistaPrevia(req.empresaId, req.params.id) });
+});
+
+// Último consecutivo radicado en el RNDC frente al siguiente de la plataforma
+r.post('/consecutivos/verificar', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const d = z.object({ clave, dias: z.coerce.number().int().min(1).max(60).optional() }).parse(req.body);
+  res.json(await verificarConsecutivos(req.empresaId, d.clave, req.usuario._id, { dias: d.dias || 20 }));
+});
+
 r.post('/viajes/:id/despachar', operar, async (req, res) => {
   const { clave: c } = z.object({ clave }).parse(req.body);
   const resultado = await op.despachar(req.empresaId, req.params.id, c, req.usuario._id);
@@ -202,6 +218,12 @@ r.post('/despachar-lote', operar, async (req, res) => {
   const resultados = [];
   for (const id of viajes) {
     try {
+      // Antes de enviar se verifica contra el RNDC lo que no se haya verificado en los últimos días
+      const v0 = await Viaje.findOne(deEmpresa(req, { _id: id })).select('verificadoRndc').lean();
+      if (v0 && !verificacionVigente(v0)) {
+        const ver = await verificarViaje(req.empresaId, id, c, req.usuario._id);
+        if (ver.bloqueantes.length) { resultados.push({ viaje: id, error: 'Verificación con el RNDC', detalles: ver.bloqueantes }); continue; }
+      }
       const r1 = await op.despachar(req.empresaId, id, c, req.usuario._id);
       resultados.push({ viaje: id, ...r1 });
     } catch (e) {
@@ -210,11 +232,10 @@ r.post('/despachar-lote', operar, async (req, res) => {
     }
   }
   await auditar(req, 'rndc_despachar_lote', { detalle: { viajes: viajes.length } });
-  // Correos del lote: un solo correo por cliente con todos los manifiestos aceptados, al terminar
+  // Correos del lote: quedan por aprobar en «Manifestados» (un solo correo por cliente al aprobarlos)
   const aceptados = resultados.filter(x => x.manifiesto?.estado === 'aceptado').map(x => x.viaje);
   (async () => {
     for (const id of aceptados) await programarEnvios(req.empresaId, id, { origen: 'automatico', usuario: req.usuario._id }).catch(() => {});
-    if (aceptados.length) await enviarPendientes(req.empresaId);
   })().catch(e => console.error('Correos del lote:', e.message));
   res.json(resultados);
 });

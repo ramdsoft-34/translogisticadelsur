@@ -13,6 +13,7 @@ export const routes: Routes = [
       { path: 'viajes', ...pagina([P.VIAJES_VER], () => import('./pages/viajes').then(m => m.Viajes)) },
       { path: 'manifiestos', ...pagina([P.RNDC_OPERAR], () => import('./pages/manifiestos').then(m => m.Manifiestos)) },
       { path: 'conductores', ...pagina([P.MAESTROS_VER], () => import('./pages/terceros').then(m => m.Terceros)) },
+      { path: 'revision', ...pagina([P.MAESTROS_VER], () => import('./pages/revision').then(m => m.Revision)) },
       { path: 'vehiculos', ...pagina([P.MAESTROS_VER], () => import('./pages/vehiculos').then(m => m.Vehiculos)) },
       { path: 'clientes', ...pagina([P.MAESTROS_VER], () => import('./pages/clientes').then(m => m.Clientes)) },
       { path: 'liquidaciones', ...pagina([P.LIQUIDACION_VER], () => import('./pages/liquidaciones').then(m => m.Liquidaciones)) },

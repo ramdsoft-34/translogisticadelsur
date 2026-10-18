@@ -5,6 +5,7 @@ import { Auth } from '../core/auth.service';
 import { P } from '../core/modelos';
 import { Icono } from '../shared/icono';
 import { FORMATOS } from '../shared/formato';
+import { filtrar } from '../shared/filtro';
 
 @Component({
   selector: 'app-inicio',
@@ -47,6 +48,7 @@ import { FORMATOS } from '../shared/formato';
     <section class="tarjeta">
       <div class="cab"><h2><app-icono nombre="alerta" [tam]="18" />Documentos por vencer</h2><span class="sutil">Próximos 30 días</span></div>
       @if (alertas().length) {
+        <div class="filtro-rapido"><input type="search" placeholder="Buscar placa, conductor o documento" aria-label="Buscar placa, conductor o documento" [value]="q()" (input)="q.set($any($event.target).value)" /></div>
         <div class="tabla-caja plana"><table><thead><tr><th>Documento</th><th>Referencia</th><th>Vence</th></tr></thead>
           <tbody>@for (a of alertasVisibles(); track $index) {
             <tr><td>{{ a.tipo }}</td><td>{{ a.referencia }}</td><td><span class="chip" [class.error]="vencido(a.vence)" [class.alerta]="!vencido(a.vence)">{{ vencido(a.vence) ? 'Vencido' : 'Vence' }} {{ a.vence | dia }}</span></td></tr>
@@ -88,7 +90,8 @@ export class Inicio {
   readonly r = signal<any>(null);
   readonly alertas = signal<any[]>([]);
   readonly limite = signal(8);
-  readonly alertasVisibles = computed(() => this.alertas().slice(0, this.limite()));
+  readonly q = signal('');
+  readonly alertasVisibles = computed(() => filtrar(this.alertas(), this.q()).slice(0, this.limite()));
   readonly hoy = new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   constructor() {

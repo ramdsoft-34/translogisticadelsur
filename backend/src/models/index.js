@@ -16,6 +16,7 @@ const idTercero = () => ({ tipoId: str({ uppercase: true }), numId: str() });
 // (el manual indica registrar solo cuando hay cambios; si no, responde DUPLICADO).
 const sincronizacion = new Schema({
   hash: str(), radicado: str(), fecha,
+  verificadoEn: fecha,                    // última vez que se trajeron sus datos del RNDC
   estado: { type: String, enum: ['sin_enviar', 'enviado', 'error'], default: 'sin_enviar' },
   mensaje: str(),
 }, { _id: false });
@@ -203,7 +204,8 @@ const viajeSchema = new Schema({
   tarifaRef: { type: Schema.Types.ObjectId, ref: 'Tarifa', default: null },
   destino: str({ required: true }),
   codOrigen: str(), codDestino: str(),
-  codDestinoManifiesto: str(),          // fijado a mano cuando el RNDC tiene la sede del destinatario en otro lugar (MAN354)
+  codDestinoManifiesto: str(),
+  verificadoRndc: fecha,                // última verificación de vehículo y personas contra el RNDC antes de enviar          // fijado a mano cuando el RNDC tiene la sede del destinatario en otro lugar (MAN354)
   placa: str({ required: true, uppercase: true }),
   remolque: str({ uppercase: true }),
   conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },   // obligatorio al registrar (lo exige la API)
@@ -267,8 +269,10 @@ const envioCorreoSchema = new Schema({
   documento: str(),                         // n.° del manifiesto
   destinatarios: { type: [String], default: [] }, cc: { type: [String], default: [] },
   asunto: str(),
-  estado: { type: String, enum: ['pendiente', 'enviando', 'enviado', 'error'], default: 'pendiente' },
+  // por_aprobar: creado al aceptarse el manifiesto; solo sale cuando alguien lo aprueba en «Manifestados»
+  estado: { type: String, enum: ['por_aprobar', 'pendiente', 'enviando', 'enviado', 'error', 'descartado'], default: 'pendiente' },
   intentos: { type: Number, default: 0 },
+  aprobadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null }, aprobadoEn: fecha,
   error: str(), idMensaje: str(), respuesta: str(),
   enviadoEn: fecha,
   origen: { type: String, enum: ['automatico', 'manual'], default: 'automatico' },

@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -7,6 +7,7 @@ import { P } from '../core/modelos';
 import { Icono } from '../shared/icono';
 import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
 import { Confirmar } from '../shared/confirmar';
+import { filtrar } from '../shared/filtro';
 
 @Component({
   selector: 'app-liquidaciones',
@@ -45,10 +46,12 @@ import { Confirmar } from '../shared/confirmar';
     </div>
 
     <div class="tarjeta">
-      <h2>Liquidaciones guardadas</h2>
+      <div class="cab-filtro"><h2>Liquidaciones guardadas</h2><div class="filtro-rapido"><input type="search" placeholder="Buscar N°, cliente o periodo" aria-label="Buscar N°, cliente o periodo" [value]="q()" (input)="q.set($any($event.target).value)" /></div>
+        <select aria-label="Filtrar por estado" [value]="estadoLiq()" (change)="estadoLiq.set($any($event.target).value)">
+          <option value="">Todos los estados</option><option value="borrador">Borrador</option><option value="facturada">Facturada</option><option value="anulada">Anulada</option></select></div>
       <div class="tabla-caja" style="box-shadow:none">
         <table><thead><tr><th>N°</th><th>Cliente</th><th>Periodo</th><th class="num">Viajes</th><th class="num">Total cobrado</th><th class="num">Utilidad</th><th>Estado</th><th></th></tr></thead>
-          <tbody>@for (l of lista(); track l._id) {
+          <tbody>@for (l of listaVisible(); track l._id) {
             <tr><td>{{ l.numero }}</td><td>{{ l.cliente?.nombre }}</td><td>{{ l.titulo }}</td><td class="num">{{ l.totales?.viajes }}</td>
               <td class="num">{{ l.totales?.totalCobrado | pesos }}</td><td class="num">{{ l.totales?.utilidad | pesos }}</td>
               <td><span class="chip" [class.ok]="l.estado === 'facturada'" [class.error]="l.estado === 'anulada'">{{ l.estado }}</span></td>
@@ -68,6 +71,9 @@ export class Liquidaciones {
   readonly puedeGestionar = this.auth.tiene(P.LIQUIDACION_GESTIONAR);
   readonly clientes = signal<any[]>([]);
   readonly lista = signal<any[]>([]);
+  readonly q = signal('');
+  readonly estadoLiq = signal('');
+  readonly listaVisible = computed(() => filtrar(this.lista().filter(l => !this.estadoLiq() || l.estado === this.estadoLiq()), this.q()));
   readonly calculo = signal<any>(null);
   readonly guardando = signal(false);
   p = { cliente: '', desde: inicioMesIso(), hasta: hoyIso() };

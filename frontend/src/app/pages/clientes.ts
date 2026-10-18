@@ -10,6 +10,7 @@ import { SelectorMunicipio } from '../shared/municipio';
 import { FORMATOS } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
 import { Moneda } from '../shared/moneda';
+import { filtrar } from '../shared/filtro';
 
 const clienteVacio = () => ({ nombre: '', tipoId: 'N', nit: '', dv: '', razonSocial: '', sedeRemitente: '', correos: '', whatsapp: '', activo: true });
 const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', tarifaCliente: 0, tarifaAuxiliar: 0, fleteConductor: 0,
@@ -29,8 +30,9 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
     <app-importar-excel tipo="tarifas" titulo="clientes y tarifas" [abierto]="importar()" (cerrar)="importar.set(false)" (importado)="cargar()" />
     <div class="columnas">
       <div class="tabla-caja lista">
+        <div class="filtro-rapido"><input type="search" placeholder="Buscar cliente o NIT" aria-label="Buscar cliente o NIT" [value]="qCli()" (input)="qCli.set($any($event.target).value)" /></div>
         <table><thead><tr><th>Cliente</th><th>NIT</th></tr></thead>
-          <tbody>@for (c of clientes(); track c._id) {
+          <tbody>@for (c of clientesVisibles(); track c._id) {
             <tr class="seleccionable" [class.activo]="c._id === sel()?._id" (click)="sel.set(c)"><td><strong>{{ c.nombre }}</strong>@if (!c.activo) { <span class="chip">inactivo</span> }</td><td>{{ c.nit }}{{ c.dv ? '-' + c.dv : '' }}</td></tr>
           } @empty { <tr><td colspan="2" class="vacio">Sin clientes</td></tr> }</tbody></table>
       </div>
@@ -41,9 +43,10 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
               <span class="sutil">{{ c.razonSocial }} · {{ c.tipoId }} {{ c.nit }}{{ c.dv ? '-' + c.dv : '' }} · Sede remitente RNDC: {{ c.sedeRemitente || '—' }}</span></div>
               <div class="acciones">@if (puedeEditar) { <button class="pequeno" (click)="editarCliente(c)">Editar cliente</button> }
                 @if (puedeTarifas) { <button class="pequeno primario" (click)="nuevaTarifa()"><app-icono nombre="mas" [tam]="15" />Destino</button> }</div></div>
+            <div class="filtro-rapido"><input type="search" placeholder="Buscar destino o municipio" aria-label="Buscar destino o municipio" [value]="qTar()" (input)="qTar.set($any($event.target).value)" /></div>
             <div class="tabla-caja" style="box-shadow:none">
               <table><thead><tr><th>Destino</th><th>Municipio</th><th class="num">Tarifa</th><th class="num">Flete</th><th class="num">Anticipo</th><th class="num">Aux. cobro / pago</th><th></th></tr></thead>
-                <tbody>@for (t of tarifasSel(); track t._id) {
+                <tbody>@for (t of tarifasVisibles(); track t._id) {
                   <tr [class.sutil]="!t.activo"><td><strong>{{ t.destino }}</strong>@if (t.tipoCobro === 'unidad') { <span class="chip info">por unidad</span> }</td>
                     <td>{{ t.codMunicipio }}</td><td class="num">{{ t.tarifaCliente | pesos }}</td><td class="num">{{ t.fleteConductor | pesos }}</td>
                     <td class="num">{{ t.anticipoHabitual | pesos }}</td><td class="num">{{ t.tarifaAuxiliar | pesos }} / {{ t.auxiliarPagado | pesos }}</td>
@@ -110,6 +113,10 @@ export class Clientes {
   readonly clientes = signal<any[]>([]);
   readonly tarifas = signal<any[]>([]);
   readonly sel = signal<any>(null);
+  readonly qCli = signal('');
+  readonly qTar = signal('');
+  readonly clientesVisibles = computed(() => filtrar(this.clientes(), this.qCli()));
+  readonly tarifasVisibles = computed(() => filtrar(this.tarifasSel(), this.qTar()));
   readonly tarifasSel = computed(() => this.tarifas().filter(t => (t.cliente?._id || t.cliente) === this.sel()?._id));
   readonly abiertoCliente = signal(false);
   readonly importar = signal(false);

@@ -86,7 +86,7 @@ function filtroLista(req) {
   if (req.query.anulados === '1') (f.$and ||= []).push({ $or: anulado });
   if (req.query.q) {
     const re = new RegExp(escaparRegex(req.query.q), 'i');
-    f.$or = [{ destino: re }, { placa: re }, { 'manifiesto.numero': re }, { 'remesa.numero': re }, { observaciones: re }];
+    f.$or = [{ destino: re }, { placa: re }, { 'manifiesto.numero': re }, { 'remesa.numero': re }, { observaciones: re }, { conductorNombre: re }];
   }
   return f;
 }

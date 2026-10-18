@@ -479,6 +479,20 @@ test('MAN354: sede «EL PLATEADO» guardada en Argelia → se sugiere el centro 
   await s.manif.del(`/api/viajes/${v.body._id}`);
 });
 
+test('Revisión de datos: sedes en centros poblados, licencias y SOAT, con corrección en lote', async () => {
+  const r1 = await s.manif.get('/api/maestros/revision');
+  assert.equal(r1.status, 200, JSON.stringify(r1.body));
+  const sede = r1.body.items.find(x => x.categoria === 'sede' && x.referencia.includes('EL PLATEADO'));
+  assert.ok(sede, JSON.stringify(r1.body.items.map(x => x.referencia)));
+  assert.equal(sede.sugerencia.codigo, '19050006');
+  assert.ok(r1.body.items.every(x => x.problema && x.referencia));
+  assert.equal((await s.reportero.post('/api/maestros/revision/sedes', { cambios: [{ id: sede.id, codMunicipio: '19050006' }] })).status, 403);
+  const ok = await s.manif.post('/api/maestros/revision/sedes', { cambios: [{ id: sede.id, codMunicipio: '19050006' }, { id: sede.id, codMunicipio: '99999999' }] });
+  assert.deepEqual(ok.body, { corregidas: 1 });
+  const r2 = (await s.manif.get('/api/maestros/revision')).body;
+  assert.ok(!r2.items.some(x => x.categoria === 'sede' && String(x.id) === String(sede.id)), 'ya corregida');
+});
+
 test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazabilidad y reintento', async () => {
   process.env.CORREO_TRANSPORTE = 'memoria';
   const { buzonPruebas } = await import('../src/services/correo.js');
@@ -510,12 +524,16 @@ test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazab
   const v2 = await s.reportero.post('/api/viajes', { fecha: '2026-11-05', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
   const ok2 = await s.manif.post(`/api/rndc/viajes/${v2.body._id}/despachar`, { clave: CLAVE_RNDC });
   assert.equal(ok2.body.manifiesto.estado, 'aceptado', JSON.stringify(ok2.body));
-  for (let i = 0; i < 50 && buzonPruebas.length < 2; i += 1) await new Promise(r => setTimeout(r, 100));
-  assert.equal(buzonPruebas.length, 2, 'dos cartas de salida');
-  assert.ok(buzonPruebas.every(m => !m.attachments));
-  assert.equal((await s.manif.get('/api/correo/envios?estado=pendiente')).body.length, 2, 'manifiestos esperando para agruparse');
-  // Un solo correo con los dos manifiestos del cliente
-  const grupo = (await s.manif.post('/api/correo/pendientes/enviar', {})).body;
+  // Nada sale sin aprobación: quedan «por aprobar» (2 manifiestos y 2 cartas de salida)
+  await new Promise(r => setTimeout(r, 300));
+  assert.equal(buzonPruebas.length, 0, 'sin aprobación no se envía ningún correo');
+  assert.equal((await s.manif.get('/api/correo/envios?estado=por_aprobar')).body.length, 4);
+  assert.equal((await s.manif.post('/api/correo/pendientes/enviar', {})).body.length, 0, 'el envío de pendientes no toma lo que falta aprobar');
+  assert.equal((await s.reportero.post('/api/correo/aprobar', { viajes: [v.body._id] })).status, 403);
+  // Al aprobar: un solo correo con los dos manifiestos del cliente y una carta de salida por vehículo
+  const ap = (await s.manif.post('/api/correo/aprobar', { viajes: [v.body._id, v2.body._id] })).body;
+  assert.equal(ap.aprobados, 4, JSON.stringify(ap));
+  const grupo = ap.resultados.filter(x => x.tipo === 'manifiesto');
   assert.equal(grupo.length, 1);
   assert.equal(grupo[0].cantidad, 2);
   assert.equal(buzonPruebas.length, 3);
@@ -572,6 +590,29 @@ test('RNDC: al bajar el consecutivo no se repiten números ya expedidos', async 
   assert.equal(rb.remesa.estado, 'aceptado', JSON.stringify(rb));
   // Se restablece la numeración que traían las demás pruebas
   await s.adminA.put('/api/rndc/config', { consecutivoRemesa: `R${Math.max(Number(actual.slice(1)), Number(rb.remesa.numero.slice(1)) + 1)}` });
+});
+
+test('RNDC: verificación previa contra el RNDC y consecutivos', async () => {
+  const v = await s.reportero.post('/api/viajes', { fecha: '2026-11-08', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const r1 = await s.manif.post(`/api/rndc/viajes/${v.body._id}/verificar`, { clave: CLAVE_RNDC, forzar: true });
+  assert.equal(r1.status, 200, JSON.stringify(r1.body));
+  const roles = r1.body.resultados.map(x => x.rol);
+  assert.ok(roles.includes('Vehículo') && roles.includes('Conductor') && roles.includes('Remitente'), JSON.stringify(r1.body.resultados));
+  assert.ok(r1.body.resultados.every(x => ['verificado', 'no_existe', 'reciente'].includes(x.estado)), JSON.stringify(r1.body.resultados));
+  assert.equal(r1.body.previa.verificacionVigente, true);
+  // Lo recién verificado no se vuelve a consultar
+  const r2 = (await s.manif.post(`/api/rndc/viajes/${v.body._id}/verificar`, { clave: CLAVE_RNDC })).body;
+  assert.ok(r2.resultados.filter(x => x.estado !== 'no_existe').every(x => x.estado === 'reciente'), JSON.stringify(r2.resultados));
+  assert.equal((await s.manif.post(`/api/rndc/viajes/${v.body._id}/verificar`, { clave: 'clave-incorrecta', forzar: true })).status, 400);
+  // Consecutivos: último radicado en el RNDC frente al siguiente de la plataforma
+  assert.equal((await s.manif.post('/api/rndc/consecutivos/verificar', { clave: CLAVE_RNDC })).status, 403, 'solo el administrador');
+  const c = await s.adminA.post('/api/rndc/consecutivos/verificar', { clave: CLAVE_RNDC });
+  assert.equal(c.status, 200, JSON.stringify(c.body));
+  assert.match(c.body.remesa.siguientePlataforma, /^R\d+$/);
+  assert.match(c.body.remesa.ultimoRndc, /^R\d+$/, JSON.stringify(c.body));
+  assert.ok(Number(c.body.remesa.ultimoRndc.slice(1)) < Number(c.body.remesa.siguientePlataforma.slice(1)), 'la plataforma va adelante');
+  assert.equal(c.body.remesa.sugerido, '');
+  await s.manif.del(`/api/viajes/${v.body._id}`);
 });
 
 test('RNDC: tras un DUPLICADO se escriben a mano los números de remesa y manifiesto', async () => {

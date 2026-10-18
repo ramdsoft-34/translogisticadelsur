@@ -4,6 +4,7 @@ import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
 import { Avisos } from '../core/avisos.service';
 import { RndcClave } from '../core/rndc-clave.service';
+import { filtrar } from '../shared/filtro';
 
 const OPCIONES: Record<string, { texto: string; filtros: [string, string][] ; rango: boolean }> = {
   manifiesto: { texto: 'Manifiestos', filtros: [['NUMMANIFIESTOCARGA', 'N° manifiesto'], ['NUMPLACA', 'Placa'], ['INGRESOID', 'Radicado']], rango: true },
@@ -45,9 +46,10 @@ const OPCIONES: Record<string, { texto: string; filtros: [string, string][] ; ra
         @if (!r.ok) { <div class="mensaje error">{{ r.mensaje }}</div> }
         @else if (!r.documentos.length) { <p class="sutil">El RNDC no devolvió registros.</p> }
         @else {
+          <div class="filtro-rapido"><input type="search" placeholder="Buscar en los resultados" aria-label="Buscar en los resultados" [value]="q()" (input)="q.set($any($event.target).value)" /></div>
           <div class="tabla-caja" style="box-shadow:none"><table>
             <thead><tr>@for (c of columnas(); track c) { <th>{{ c }}</th> }</tr></thead>
-            <tbody>@for (d of r.documentos; track $index) { <tr>@for (c of columnas(); track c) { <td>{{ d[c] }}</td> }</tr> }</tbody>
+            <tbody>@for (d of documentosVisibles(); track $index) { <tr>@for (c of columnas(); track c) { <td>{{ d[c] }}</td> }</tr> }</tbody>
           </table></div>
         }
         <details style="margin-top:12px"><summary class="sutil">Ver solicitud enviada (sin contraseña)</summary><pre>{{ r.solicitud }}</pre></details>
@@ -68,6 +70,8 @@ export class ConsultasRndc {
   private auth = inject(Auth);
   readonly ambiente = computed(() => this.auth.usuario()?.empresa?.ambienteRndc || '');
   readonly cargando = signal(false);
+  readonly q = signal('');
+  readonly documentosVisibles = computed(() => filtrar<any>(this.resultado()?.documentos || [], this.q()));
   readonly columnas = computed(() => Object.keys(this.resultado()?.documentos?.[0] || {}));
   actual() { return OPCIONES[this.que]; }
 

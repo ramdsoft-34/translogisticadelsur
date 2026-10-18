@@ -41,7 +41,13 @@ const vacio = () => ({
     <app-traer-rndc tipo="vehiculos" [abierto]="traer()" (cerrar)="traer.set(false)" (traidos)="cargar()" />
     <app-actualizar-vehiculos [abierto]="actualizar()" (cerrar)="actualizar.set(false); cargar()" (actualizados)="cargar()" />
     <div class="barra"><div class="campo crece"><label for="v-q">Buscar placa</label>
-      <input id="v-q" type="search" placeholder="ABC123" [(ngModel)]="q" (input)="buscarDiferido()" style="text-transform:uppercase" /></div></div>
+      <input id="v-q" type="search" placeholder="ABC123" [(ngModel)]="q" (input)="buscarDiferido()" style="text-transform:uppercase" /></div>
+      <div class="campo"><label for="v-cl">Tipo</label><select id="v-cl" [(ngModel)]="clase" (change)="cargar()"><option value="">Todos</option>
+        <option value="vehiculo">Vehículos</option><option value="remolque">Remolques</option></select></div>
+      <div class="campo"><label for="v-so">SOAT</label><select id="v-so" [(ngModel)]="soat" (change)="cargar()"><option value="">Todos</option>
+        <option value="vencido">Vencido</option><option value="por_vencer">Vence en 30 días</option><option value="sin">Sin datos</option></select></div>
+      <div class="campo"><label for="v-act">Estado</label><select id="v-act" [(ngModel)]="activos" (change)="cargar()"><option value="">Todos</option>
+        <option value="1">Activos</option><option value="0">Inactivos</option></select></div></div>
     <div class="tabla-caja">
       <table>
         <thead><tr><th>Placa</th><th>Clase</th><th>Config.</th><th>Conductor habitual</th><th>SOAT vence</th><th>Tecnomecánica</th><th>RNDC</th><th></th></tr></thead>
@@ -175,11 +181,14 @@ export class Vehiculos {
   private temporizador: ReturnType<typeof setTimeout> | undefined;
   buscarDiferido() { clearTimeout(this.temporizador); this.temporizador = setTimeout(() => this.cargar(), 300); }
 
+  clase = '';
+  soat = '';
+  activos = '';
   async cargar() {
     this.cargando.set(true);
     this.pagina = 1;
     try {
-      const r = await this.api.get<any>('/maestros/vehiculos', { q: this.q, pagina: 1, limite: 50 });
+      const r = await this.api.get<any>('/maestros/vehiculos', { q: this.q, clase: this.clase, soat: this.soat, activos: this.activos, pagina: 1, limite: 50 });
       this.lista.set(r.items); this.total.set(r.total);
     } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
   }
@@ -188,7 +197,7 @@ export class Vehiculos {
     if (this.cargandoMas() || this.lista().length >= this.total()) return;
     this.cargandoMas.set(true);
     try {
-      const r = await this.api.get<any>('/maestros/vehiculos', { q: this.q, pagina: this.pagina + 1, limite: 50 });
+      const r = await this.api.get<any>('/maestros/vehiculos', { q: this.q, clase: this.clase, soat: this.soat, activos: this.activos, pagina: this.pagina + 1, limite: 50 });
       this.pagina += 1;
       this.lista.update(l => [...l, ...r.items]);
     } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }

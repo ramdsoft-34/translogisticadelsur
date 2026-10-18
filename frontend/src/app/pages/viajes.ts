@@ -76,17 +76,17 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     </div>
 
     <div class="tabla-caja">
-      <table>
+      <table class="tabla-movil">
         <thead><tr><th>N°</th><th>Fecha</th><th>Cliente / destino</th><th>Placa</th><th>Conductor</th>
           <th class="num">Flete</th><th class="num">Anticipo</th><th class="num">Saldo</th><th>Estado</th></tr></thead>
         <tbody>
           @for (v of viajes(); track v._id) {
             <tr class="seleccionable" (click)="editar(v)" tabindex="0" (keydown.enter)="editar(v)">
-              <td class="sutil">{{ v.numero }}</td><td>{{ v.fecha | dia }}</td>
-              <td><span class="celda-doble"><span>{{ v.cliente?.nombre }}</span><small>{{ v.destino }}</small></span></td>
-              <td><span class="placa">{{ v.placa }}</span></td><td>{{ v.conductorNombre }}</td>
-              <td class="num">{{ v.flete | pesos }}</td><td class="num">{{ v.anticipo | pesos }}</td><td class="num"><strong>{{ v.saldo | pesos }}</strong></td>
-              <td><span class="estados">
+              <td data-etiqueta="N°" class="sutil">{{ v.numero }}</td><td data-etiqueta="Fecha">{{ v.fecha | dia }}</td>
+              <td data-etiqueta="Cliente"><span class="celda-doble"><span>{{ v.cliente?.nombre }}</span><small>{{ v.destino }}</small></span></td>
+              <td data-etiqueta="Placa"><span class="placa">{{ v.placa }}</span></td><td data-etiqueta="Conductor">{{ v.conductorNombre }}</td>
+              <td data-etiqueta="Flete" class="num">{{ v.flete | pesos }}</td><td data-etiqueta="Anticipo" class="num">{{ v.anticipo | pesos }}</td><td data-etiqueta="Saldo" class="num"><strong>{{ v.saldo | pesos }}</strong></td>
+              <td data-etiqueta="Estado"><span class="estados">
                 <span class="chip" [class]="claseEstado(v.estado)">{{ estadoTexto(v.estado) }}</span>
                 @if (v.manifiesto.estado === 'aceptado') { <small class="sutil">{{ v.manifiesto.numero }}</small> }
                 @if (v.historico) { <span class="chip sin-punto" title="Importado del Excel: sus documentos RNDC se gestionaron fuera de la plataforma">Histórico</span> }

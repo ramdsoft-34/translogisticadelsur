@@ -7,7 +7,7 @@ import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../midd
 import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
 import { cifrar } from '../utils/cifrado.js';
-import { enviarPrueba, programarEnvios, procesarEnvio, enviarPendientes, enviarGrupoCliente, cartaSalida, datosCorreo, SALIDA_BASE, MARCADORES_SALIDA } from '../services/correo.js';
+import { enviarPrueba, programarEnvios, procesarEnvio, enviarPendientes, aprobarEnvios, descartarEnvios, enviarGrupoCliente, cartaSalida, datosCorreo, SALIDA_BASE, MARCADORES_SALIDA } from '../services/correo.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -122,6 +122,21 @@ r.post('/pendientes/enviar', operar, async (req, res) => {
   const resultados = await enviarPendientes(req.empresaId, { cliente: d.cliente && mongoose.isValidObjectId(d.cliente) ? d.cliente : undefined });
   await auditar(req, 'enviar_pendientes_correo', { detalle: { grupos: resultados.length, manifiestos: resultados.reduce((a, x) => a + x.cantidad, 0) } });
   res.json(resultados);
+});
+
+// Aprobación (o descarte) de los correos preparados al aceptarse los manifiestos
+const listaViajes = z.object({ viajes: z.array(z.string().refine(x => mongoose.isValidObjectId(x), 'viaje inválido')).min(1).max(200) });
+r.post('/aprobar', operar, async (req, res) => {
+  const { viajes } = listaViajes.parse(req.body);
+  const r1 = await aprobarEnvios(req.empresaId, viajes, req.usuario._id);
+  await auditar(req, 'aprobar_correos', { detalle: { viajes: viajes.length, aprobados: r1.aprobados } });
+  res.json(r1);
+});
+r.post('/descartar', operar, async (req, res) => {
+  const { viajes } = listaViajes.parse(req.body);
+  const r1 = await descartarEnvios(req.empresaId, viajes, req.usuario._id);
+  await auditar(req, 'descartar_correos', { detalle: { viajes: viajes.length, descartados: r1.descartados } });
+  res.json(r1);
 });
 
 // Envío manual (p. ej. reenviar a un cliente que no lo recibió o recién configurado).
