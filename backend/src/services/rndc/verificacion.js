@@ -88,29 +88,64 @@ export async function verificarViaje(empresaId, viajeId, clave, usuarioId, { for
 
 export const verificacionVigente = (v) => !!v?.verificadoRndc && Date.now() - new Date(v.verificadoRndc).getTime() < DIAS_VIGENCIA * 86400000;
 
-// ── Consecutivos: último número radicado en el RNDC vs. el siguiente de la plataforma ──
+// ── Consecutivos: último número radicado en el RNDC (portal oficial) vs. el siguiente de la plataforma ──
+// 1) Se listan los documentos radicados en los últimos días (incluido hoy completo).
+// 2) Desde el mayor encontrado (o desde el último de la plataforma) se pregunta al RNDC número por número
+//    si el siguiente ya existe, avanzando en saltos y luego por búsqueda binaria, hasta el último real.
 const iso = (d) => d.toISOString().slice(0, 10);
+const sinDatos = (m) => /no (se )?encontr|no exist|no hay|sin registros|no tiene|no se hallaron|0 registros/i.test(m || '');
 export async function verificarConsecutivos(empresaId, clave, usuarioId, { dias = 20 } = {}) {
   const empresa = await empresaConRndc(empresaId);
-  const hasta = hoyColombia();
-  const desde = new Date(hasta.getTime() - dias * 86400000);
+  const hoy = hoyColombia();
+  const desde = new Date(hoy.getTime() - dias * 86400000);
+  const hasta = new Date(hoy.getTime() + 86400000);        // el rango incluye todo el día de hoy
   const resultado = {};
-  for (const [clave2, que, campo, prefijo] of [['remesa', 'remesa', 'consecutivoremesa', empresa.rndc?.prefijoRemesa || ''],
-    ['manifiesto', 'manifiesto', 'nummanifiestocarga', empresa.rndc?.prefijoManifiesto || '']]) {
+  for (const [clave2, que, campo, filtro, prefijo] of [
+    ['remesa', 'remesa', 'consecutivoremesa', 'CONSECUTIVOREMESA', empresa.rndc?.prefijoRemesa || ''],
+    ['manifiesto', 'manifiesto', 'nummanifiestocarga', 'NUMMANIFIESTOCARGA', empresa.rndc?.prefijoManifiesto || '']]) {
+    const patron = new RegExp(`^${prefijo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)$`);
+    const avisos = [];
+    // 1. Listado por fechas
     const r = await consultar(empresaId, clave, usuarioId, { que, desde: iso(desde), hasta: iso(hasta) });
     if (!r.ok && errorClave(r.mensaje)) throw new ErrorHttp(400, `El RNDC no aceptó el usuario o la contraseña: ${r.mensaje}`);
-    // Solo los números de la numeración de la empresa (sin reemplazos «A» o «.»)
-    const patron = new RegExp(`^${prefijo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)$`);
+    if (!r.ok && !sinDatos(r.mensaje)) avisos.push(`Listado del RNDC: ${r.mensaje}`);
     const numeros = (r.documentos || []).map(d => txt(d[campo]).match(patron)?.[1]).filter(Boolean).map(Number);
-    const ultimo = numeros.length ? Math.max(...numeros) : null;
+    let ultimo = numeros.length ? Math.max(...numeros) : null;
+    // 2. Número por número: ¿ya existe en el RNDC?
+    let consultas = 0;
+    const existe = async (n) => {
+      consultas += 1;
+      const q = await consultar(empresaId, clave, usuarioId, { que, filtros: { [filtro]: `${prefijo}${n}` } });
+      if (!q.ok && errorClave(q.mensaje)) throw new ErrorHttp(400, `El RNDC no aceptó el usuario o la contraseña: ${q.mensaje}`);
+      if (!q.ok && !sinDatos(q.mensaje)) throw new Error(q.mensaje || 'El RNDC no respondió');
+      return (q.documentos || []).some(d => txt(d[campo]) === `${prefijo}${n}`) || (q.ok && (q.documentos || []).length > 0);
+    };
     const siguiente = await proximo(empresaId, clave2);
+    try {
+      if (ultimo === null && siguiente > 1 && await existe(siguiente - 1)) ultimo = siguiente - 1;
+      if (ultimo !== null) {
+        // Saltos de 1, 2, 4, 8… mientras existan; luego búsqueda binaria entre el último hallado y el primer faltante
+        let paso = 1; let faltante = null;
+        while (consultas < 25) {
+          const n = ultimo + paso;
+          if (await existe(n)) { ultimo = n; paso *= 2; } else { faltante = n; break; }
+        }
+        while (faltante !== null && faltante - ultimo > 1 && consultas < 40) {
+          const medio = Math.floor((ultimo + faltante) / 2);
+          if (await existe(medio)) ultimo = medio; else faltante = medio;
+        }
+      }
+    } catch (e) {
+      if (e instanceof ErrorHttp) throw e;
+      avisos.push(`Consulta por número: ${e.message}`);
+    }
     resultado[clave2] = {
-      consultados: (r.documentos || []).length, ok: r.ok, mensaje: r.ok ? '' : r.mensaje,
+      consultados: (r.documentos || []).length, consultasPorNumero: consultas, ok: !avisos.length, mensaje: avisos.join(' · '),
       ultimoRndc: ultimo === null ? '' : `${prefijo}${ultimo}`,
       siguientePlataforma: `${prefijo}${siguiente}`,
       // Si la plataforma va por detrás del RNDC, el siguiente debe ser el último radicado + 1
       sugerido: ultimo !== null && ultimo >= siguiente ? `${prefijo}${ultimo + 1}` : '',
     };
   }
-  return { desde: iso(desde), hasta: iso(hasta), ...resultado };
+  return { desde: iso(desde), hasta: iso(hoy), ...resultado };
 }

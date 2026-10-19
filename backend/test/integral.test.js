@@ -627,6 +627,14 @@ test('RNDC: verificación previa contra el RNDC y consecutivos', async () => {
   assert.match(c.body.remesa.ultimoRndc, /^R\d+$/, JSON.stringify(c.body));
   assert.ok(Number(c.body.remesa.ultimoRndc.slice(1)) < Number(c.body.remesa.siguientePlataforma.slice(1)), 'la plataforma va adelante');
   assert.equal(c.body.remesa.sugerido, '');
+  assert.ok(c.body.remesa.consultasPorNumero >= 1, 'pregunta al RNDC por el número siguiente');
+  // Remesas radicadas por fuera de la plataforma (portal del Ministerio): el último real es el del RNDC
+  const sig = Number(c.body.remesa.siguientePlataforma.slice(1));
+  for (const n of [sig, sig + 1, sig + 2]) sim.estado.remesas.set(`9001112221|R${n}`, { NUMNITEMPRESATRANSPORTE: '9001112221', CONSECUTIVOREMESA: `R${n}` });
+  const c2 = (await s.adminA.post('/api/rndc/consecutivos/verificar', { clave: CLAVE_RNDC })).body;
+  assert.equal(c2.remesa.ultimoRndc, `R${sig + 2}`, JSON.stringify(c2.remesa));
+  assert.equal(c2.remesa.sugerido, `R${sig + 3}`);
+  for (const n of [sig, sig + 1, sig + 2]) sim.estado.remesas.delete(`9001112221|R${n}`);
   await s.manif.del(`/api/viajes/${v.body._id}`);
 });
 

@@ -73,15 +73,17 @@ type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
                     <app-icono nombre="enviar" [tam]="15" />{{ verificandoConsec() ? 'Consultando el RNDC…' : 'Verificar consecutivos con el RNDC' }}</button>
                   @if (consec(); as k) {
                     <div class="tabla-caja" style="box-shadow:none;margin-top:10px"><table>
-                      <thead><tr><th>Documento</th><th>Último radicado en el RNDC</th><th>Siguiente en la plataforma</th><th></th></tr></thead>
+                      <thead><tr><th>Documento</th><th>Último radicado en el RNDC (oficial)</th><th>Siguiente en la plataforma</th><th></th></tr></thead>
                       <tbody>@for (d of [['remesa', 'Remesa'], ['manifiesto', 'Manifiesto']]; track d[0]) {
                         @let x = k[d[0]];
-                        <tr><td>{{ d[1] }}</td><td>{{ x.ultimoRndc || (x.ok ? 'Ninguno en el periodo' : x.mensaje) }}</td><td>{{ x.siguientePlataforma }}</td>
+                        <tr><td>{{ d[1] }}</td><td><strong>{{ x.ultimoRndc || 'No encontrado' }}</strong>
+                          @if (x.mensaje) { <div class="sutil" style="color:var(--rojo-texto)">El RNDC respondió: {{ x.mensaje }}</div> }</td><td>{{ x.siguientePlataforma }}</td>
                           <td>@if (x.sugerido) {
                                 <button type="button" class="pequeno primario" confirmar="Clic otra vez para ajustar" (confirmado)="ajustarConsecutivo(d[0], x.sugerido)">Ajustar a {{ x.sugerido }}</button>
                               } @else if (x.ultimoRndc) { <span class="chip ok sin-punto">Correcto</span> }</td></tr>
                       }</tbody></table></div>
-                    <small class="sutil">Consultado del {{ k.desde }} al {{ k.hasta }}.</small>
+                    <small class="sutil">Consultado en el RNDC: documentos radicados del {{ k.desde }} al {{ k.hasta }} y verificación número por número del siguiente
+                      ({{ k.remesa.consultasPorNumero + k.manifiesto.consultasPorNumero }} consultas). Si la plataforma va por detrás, use «Ajustar».</small>
                   }
                 </div>
               </div>
