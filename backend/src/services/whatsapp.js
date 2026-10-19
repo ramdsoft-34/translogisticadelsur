@@ -13,7 +13,8 @@
 //   {observaciones}
 //
 // Reglas de formato:
-// - Los valores se expresan en pesos colombianos: "$ 1.500.000 COP".
+// - Los valores se expresan en pesos: "$ 1.500.000".
+// - El conductor va con un nombre y un apellido, con mayúscula inicial: "Wilson Montero".
 // - Una línea de la plantilla cuyos datos quedan todos vacíos no se escribe
 //   (p. ej. «{observaciones}» o «Remolque {remolque}» sin remolque).
 // - Si el destino escrito es el nombre del conductor, no se repite.
@@ -25,7 +26,21 @@
 // tokens; no se implementa sin esas credenciales.)
 import { enColombia, fmtFecha, normalizar, soloDigitos, txt } from '../utils/texto.js';
 
-export const cop = (n) => `$ ${Math.round(Number(n) || 0).toLocaleString('es-CO')} COP`;
+export const cop = (n) => `$ ${Math.round(Number(n) || 0).toLocaleString('es-CO')}`;
+
+const capital = (p) => (p ? p.charAt(0).toLocaleUpperCase('es') + p.slice(1).toLocaleLowerCase('es') : '');
+// Primer nombre y primer apellido del conductor. Con el tercero registrado se usan sus campos; si solo
+// se tiene el nombre completo: 4 palabras → 1.ª y 3.ª, 3 palabras → 1.ª y 2.ª, 2 → ambas.
+export function nombreCorto(conductor, nombreCompleto = '') {
+  const primera = (s) => txt(s).split(/\s+/)[0] || '';
+  let nombre; let apellido;
+  if (txt(conductor?.nombres) && txt(conductor?.apellido1)) { nombre = primera(conductor.nombres); apellido = primera(conductor.apellido1); }
+  else {
+    const p = txt(nombreCompleto || [conductor?.nombres, conductor?.apellido1].filter(Boolean).join(' ')).split(/\s+/).filter(Boolean);
+    nombre = p[0] || ''; apellido = p.length >= 4 ? p[2] : p[1] || '';
+  }
+  return [nombre, apellido].filter(Boolean).map(capital).join(' ');
+}
 
 export function saludo(fecha = new Date()) {
   const h = enColombia(fecha).getUTCHours();
@@ -69,7 +84,7 @@ const kg = (n) => (Number(n) ? `${Math.round(Number(n)).toLocaleString('es-CO')}
 function datosViaje(v) {
   const flete = Number(v.flete) || 0; const anticipo = Number(v.anticipo) || 0;
   return {
-    numero: txt(v.numero), conductor: txt(v.conductorNombre), cedula: txt(v.conductor?.numId), celular: txt(v.conductor?.celular),
+    numero: txt(v.numero), conductor: nombreCorto(v.conductor, v.conductorNombre), cedula: txt(v.conductor?.numId), celular: txt(v.conductor?.celular),
     destino: destinoRepiteConductor(v.destino, v.conductorNombre) ? '' : txt(v.destino),
     placa: txt(v.placa), remolque: txt(v.remolque), peso: kg(v.pesoKg),
     flete: cop(flete), anticipo: cop(anticipo), saldo: cop(flete - anticipo),

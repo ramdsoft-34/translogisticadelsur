@@ -202,20 +202,39 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
     <app-modal titulo="Reporte de vehículos por WhatsApp" [abierto]="waAbierto()" (cerrar)="waAbierto.set(false)" [ancho]="true">
       <div class="filtros">
-        <div class="campo"><label for="wa-fecha">Fecha</label><input id="wa-fecha" type="date" [(ngModel)]="waFecha" (change)="cargarWhatsapp()" /></div>
+        <div class="campo"><label for="wa-fecha">Fecha</label><input id="wa-fecha" type="date" [(ngModel)]="waFecha" (change)="cargarWhatsapp(true)" /></div>
         <div class="campo"><label for="wa-pl">Plantilla</label>
           <select id="wa-pl" [(ngModel)]="waPlantilla" (change)="cargarWhatsapp()">
             @for (p of waPlantillas(); track p._id) { <option [value]="p._id">{{ p.nombre }}{{ p.predeterminada ? ' (predeterminada)' : '' }}</option> }</select></div>
-        <label class="casilla"><input type="checkbox" [(ngModel)]="waIncluir" (change)="cargarWhatsapp()" />Incluir los ya reportados</label>
+        <label class="casilla"><input type="checkbox" [(ngModel)]="waIncluir" (change)="cargarWhatsapp(true)" />Incluir los ya reportados</label>
         <button type="button" (click)="plantillasAbierto.set(true)" style="margin-left:auto"><app-icono nombre="editar" [tam]="16" />Plantillas</button>
       </div>
-      <p class="sutil">Un mensaje por cliente con los viajes de la fecha, con el formato de la plantilla elegida. «Abrir WhatsApp» abre el chat con el texto escrito:
-        elija el contacto o grupo (si el cliente no tiene número) y presione Enviar. Después marque el mensaje como reportado.
-        Las remesas y los manifiestos se expiden en «Manifiestos RNDC».</p>
+      <p class="sutil">Marque los viajes que va a reportar: se arma un mensaje por cliente solo con esos viajes, con el formato de la plantilla elegida.
+        «Abrir WhatsApp» abre el chat con el texto escrito: elija el contacto o grupo y presione Enviar. Después marque el mensaje como reportado.</p>
+      <div class="wa-lista">
+        <div class="wa-cab">
+          <label class="casilla"><input type="checkbox" [checked]="waTodos()" [disabled]="!waViajes().length" (change)="waAlternarTodos()" />
+            <strong>{{ waSeleccion().size }} de {{ waViajes().length }} viaje(s) seleccionados</strong></label>
+          @if (waSeleccion().size) { <button type="button" class="pequeno texto" (click)="waLimpiar()">Quitar selección</button> }
+        </div>
+        <div class="tabla-caja" style="box-shadow:none"><table class="tabla-movil">
+          <thead><tr><th></th><th>N°</th><th>Cliente</th><th>Placa</th><th>Conductor</th><th>Destino</th><th></th></tr></thead>
+          <tbody>@for (x of waViajes(); track x._id) {
+            <tr class="seleccionable" (click)="waAlternar(x._id)">
+              <td data-etiqueta="Enviar"><input type="checkbox" [checked]="waSeleccion().has(x._id)" (click)="$event.stopPropagation()" (change)="waAlternar(x._id)"
+                [attr.aria-label]="'Reportar viaje ' + x.numero" /></td>
+              <td data-etiqueta="N°">{{ x.numero }}</td><td data-etiqueta="Cliente">{{ x.cliente }}</td><td data-etiqueta="Placa"><strong>{{ x.placa }}</strong></td>
+              <td data-etiqueta="Conductor">{{ x.conductor }}</td><td data-etiqueta="Destino">{{ x.destino }}</td>
+              <td data-etiqueta="">@if (x.reportado) { <span class="chip ok sin-punto">Ya reportado</span> }</td>
+            </tr>
+          } @empty { <tr><td colspan="7" class="vacio">No hay vehículos por reportar en esa fecha.</td></tr> }</tbody>
+        </table></div>
+      </div>
+      @if (waViajes().length && !waSeleccion().size) { <p class="vacio">Seleccione los viajes que va a reportar para armar el mensaje.</p> }
       @for (m of waMensajes(); track m.cliente) {
         <div class="tarjeta" style="margin-top:12px">
           <div class="pagina-cab" style="margin-bottom:8px"><div><h3 style="margin:0">{{ m.cliente }}</h3>
-            <span class="sutil">{{ m.cantidad }} vehículo(s) · Flete {{ m.totalFlete | pesos }} COP · Anticipo {{ m.totalAnticipo | pesos }} COP</span></div>
+            <span class="sutil">{{ m.cantidad }} vehículo(s) · Flete {{ m.totalFlete | pesos }} · Anticipo {{ m.totalAnticipo | pesos }}</span></div>
             <div class="acciones">
               <button class="pequeno" (click)="copiar(m.texto)">Copiar</button>
               <a class="boton pequeno wa" [href]="m.enlace" target="_blank" rel="noopener noreferrer"><app-icono nombre="enviar" [tam]="15" />Abrir WhatsApp</a>
@@ -223,7 +242,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             </div></div>
           <pre class="wa-texto">{{ m.texto }}</pre>
         </div>
-      } @empty { <p class="vacio">No hay vehículos por reportar en esa fecha.</p> }
+      }
       <ng-container pie><button type="button" (click)="waAbierto.set(false)">Cerrar</button></ng-container>
     </app-modal>
     <app-plantillas-whatsapp [abierto]="plantillasAbierto()" [fecha]="waFecha" (cerrar)="plantillasAbierto.set(false)" (cambiadas)="cargarPlantillas()" />`,
@@ -235,6 +254,8 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .resumen strong { font-size: 20px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
     .estados { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .secciones { display: flex; flex-direction: column; gap: 14px; }
+    .wa-lista { margin: 10px 0 4px; }
+    .wa-cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
     /* Formulario del viaje: rejilla fija de 3 columnas, etiquetas en una línea e inputs de igual alto */
     .rejilla { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
     .rejilla .campo > label, .rejilla .campo > .etiqueta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -273,6 +294,17 @@ export class Viajes {
   readonly waMensajes = signal<any[]>([]);
   waFecha = hoyIso();
   waIncluir = false;
+  // Viajes de la fecha para elegir cuáles se reportan (ninguno marcado al abrir)
+  readonly waViajes = signal<any[]>([]);
+  readonly waSeleccion = signal(new Set<string>());
+  readonly waTodos = computed(() => this.waViajes().length > 0 && this.waViajes().every(x => this.waSeleccion().has(x._id)));
+  waAlternar(id: string) {
+    const s = new Set(this.waSeleccion());
+    if (s.has(id)) s.delete(id); else s.add(id);
+    this.waSeleccion.set(s); this.cargarWhatsapp();
+  }
+  waAlternarTodos() { this.waSeleccion.set(this.waTodos() ? new Set() : new Set(this.waViajes().map(x => x._id))); this.cargarWhatsapp(); }
+  waLimpiar() { this.waSeleccion.set(new Set()); this.cargarWhatsapp(); }
   habilitarRndc = false;
   readonly estados = Object.entries(ESTADOS_VIAJE);
   readonly viajes = signal<Viaje[]>([]);
@@ -458,7 +490,7 @@ export class Viajes {
   }
 
   // ── Reporte WhatsApp ──
-  async abrirWhatsapp() { this.waFecha = this.filtro.hasta || hoyIso(); this.waAbierto.set(true); await this.cargarPlantillas(); this.cargarWhatsapp(); }
+  async abrirWhatsapp() { this.waFecha = this.filtro.hasta || hoyIso(); this.waAbierto.set(true); await this.cargarPlantillas(); this.cargarWhatsapp(true); }
 
   async cargarPlantillas() {
     try {
@@ -469,9 +501,16 @@ export class Viajes {
     } catch (e) { this.avisos.error(e); }
   }
 
-  async cargarWhatsapp() {
+  // reiniciar: al cambiar la fecha o el filtro se quita la selección
+  async cargarWhatsapp(reiniciar = false) {
+    if (reiniciar) this.waSeleccion.set(new Set());
     try {
-      const r = await this.api.get<{ mensajes: any[] }>('/viajes/reporte-whatsapp', { fecha: this.waFecha, incluirReportados: this.waIncluir ? 1 : 0, plantilla: this.waPlantilla });
+      const r = await this.api.get<{ mensajes: any[]; viajes: any[] }>('/viajes/reporte-whatsapp', { fecha: this.waFecha, incluirReportados: this.waIncluir ? 1 : 0,
+        plantilla: this.waPlantilla, seleccion: 1, viajes: [...this.waSeleccion()].join(',') });
+      this.waViajes.set(r.viajes);
+      // Lo elegido que ya no está en la lista (p. ej. marcado como reportado) se quita de la selección
+      const ids = new Set(r.viajes.map(x => x._id));
+      if ([...this.waSeleccion()].some(id => !ids.has(id))) this.waSeleccion.set(new Set([...this.waSeleccion()].filter(id => ids.has(id))));
       this.waMensajes.set(r.mensajes);
     } catch (e) { this.avisos.error(e); }
   }

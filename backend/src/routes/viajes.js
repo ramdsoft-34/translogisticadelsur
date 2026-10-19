@@ -158,7 +158,16 @@ r.get('/reporte-whatsapp', permitir(P.VIAJES_VER), async (req, res) => {
   const fecha = parseFecha(req.query.fecha) || hoyColombia();
   const plantilla = await plantillaDe(req, req.query.plantilla);
   const viajes = await viajesDelReporte(req, fecha, req.query.incluirReportados === '1');
-  res.json({ fecha, plantilla: plantilla._id, mensajes: mensajesPorCliente(viajes, fecha, new Date(), plantilla) });
+  // Con seleccion=1 el mensaje lleva solo los viajes elegidos (ninguno si no se eligió nada)
+  const elegidos = req.query.seleccion === '1'
+    ? (() => { const ids = new Set(String(req.query.viajes || '').split(',').filter(Boolean)); return viajes.filter(v => ids.has(String(v._id))); })()
+    : viajes;
+  res.json({
+    fecha, plantilla: plantilla._id,
+    viajes: viajes.map(v => ({ _id: v._id, numero: v.numero, placa: v.placa, conductor: v.conductorNombre, destino: v.destino,
+      cliente: v.cliente?.nombre || '', reportado: !!v.reporteWhatsapp?.fecha })),
+    mensajes: mensajesPorCliente(elegidos, fecha, new Date(), plantilla),
+  });
 });
 
 // Vista previa de una plantilla en edición con los viajes de la fecha (no guarda nada).

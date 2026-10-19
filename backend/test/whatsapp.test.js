@@ -10,14 +10,14 @@ const tarde = new Date('2026-10-16T20:00:00Z'); // 15:00 en Colombia
 test('WhatsApp: la plantilla base reproduce el formato del Excel', () => {
   const [m] = mensajesPorCliente([viaje({ observaciones: 'Llamar al llegar' })], fecha, tarde, PLANTILLA_BASE);
   assert.equal(m.texto, 'Buenas tardes,\n\nReporte de vehículos - 16/10/2026\n\nCorbeta\n\n'
-    + 'WILSON ORLANDO MONTERO RIVERA. Ipiales. Flete $ 550.000 COP. Anticipo $ 350.000 COP\nPlaca TKK224\nLlamar al llegar\n');
+    + 'Wilson Montero. Ipiales. Flete $ 550.000. Anticipo $ 350.000\nPlaca TKK224\nLlamar al llegar\n');
 });
 
 test('WhatsApp: el destino no repite el nombre del conductor y las líneas vacías se omiten', () => {
   assert.equal(destinoRepiteConductor('wilson montero', 'WILSON ORLANDO MONTERO RIVERA'), true);
   assert.equal(destinoRepiteConductor('Ipiales', 'WILSON ORLANDO MONTERO RIVERA'), false);
   const [m] = mensajesPorCliente([viaje({ destino: 'wilson montero' })], fecha, tarde);
-  assert.match(m.texto, /\n\nWILSON ORLANDO MONTERO RIVERA\. Flete \$ 550\.000 COP\. Anticipo \$ 350\.000 COP\nPlaca TKK224\n$/);
+  assert.match(m.texto, /\n\nWilson Montero\. Flete \$ 550\.000\. Anticipo \$ 350\.000\nPlaca TKK224\n$/);
 });
 
 test('WhatsApp: plantilla personalizada con totales, separador y datos del conductor', () => {
@@ -25,12 +25,20 @@ test('WhatsApp: plantilla personalizada con totales, separador y datos del condu
     separador: 'linea', pie: 'Total: {cantidad} vehículos · Flete {total_flete}' };
   const [m] = mensajesPorCliente([viaje(), viaje({ _id: 'v2', numero: 8, placa: 'ABC123', remolque: 'R12345', flete: 100000, anticipo: 0 })], fecha, tarde, plantilla);
   assert.equal(m.texto, '*Corbeta* · 16/10/2026\n\n'
-    + '7) TKK224 - WILSON ORLANDO MONTERO RIVERA CC 1085\nSaldo $ 200.000 COP\n'
-    + '8) ABC123 - WILSON ORLANDO MONTERO RIVERA CC 1085\nRemolque R12345\nSaldo $ 100.000 COP\n\n'
-    + 'Total: 2 vehículos · Flete $ 650.000 COP\n');
+    + '7) TKK224 - Wilson Montero CC 1085\nSaldo $ 200.000\n'
+    + '8) ABC123 - Wilson Montero CC 1085\nRemolque R12345\nSaldo $ 100.000\n\n'
+    + 'Total: 2 vehículos · Flete $ 650.000\n');
   assert.equal(m.totalFlete, 650000);
 });
 
 test('WhatsApp: marcadores desconocidos se conservan tal cual', () => {
   assert.equal(aplicarPlantilla('Hola {nombre} {placa}', { placa: 'X1' }), 'Hola {nombre} X1');
+});
+
+test('WhatsApp: el conductor va con un nombre y un apellido, con mayúscula inicial', async () => {
+  const { nombreCorto } = await import('../src/services/whatsapp.js');
+  assert.equal(nombreCorto({ nombres: 'JOSE PORFIRIO', apellido1: 'CASTELLANO', apellido2: 'RAMOS' }), 'Jose Castellano');
+  assert.equal(nombreCorto(null, 'ÑUSTES ÁLVARO PEÑA LÓPEZ'), 'Ñustes Peña');
+  assert.equal(nombreCorto(null, 'LUIS BENAVIDES'), 'Luis Benavides');
+  assert.equal(nombreCorto(null, 'CARMEN ROSA UNIGARRO'), 'Carmen Rosa');
 });

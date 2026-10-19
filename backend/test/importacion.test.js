@@ -163,14 +163,14 @@ test('Los viajes históricos no se pueden despachar al RNDC', async () => {
   assert.match(r.body.error, /histórico/);
 });
 
-test('Reporte de WhatsApp con la estructura del Excel y valores en COP', async () => {
+test('Reporte de WhatsApp con la estructura del Excel y valores en pesos', async () => {
   const r = await s.a.get('/api/viajes/reporte-whatsapp?fecha=2026-10-11');
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(r.body.mensajes.length, 1);
   const m = r.body.mensajes[0];
   assert.equal(m.cliente, 'Dulces & Dulces');
   assert.match(m.texto, /^(Buenos días|Buenas tardes|Buenas noches),\n\nReporte de vehículos - 11\/10\/2026\n\nDulces & Dulces\n\n/);
-  assert.match(m.texto, /\. Sandona\. Flete \$ 710\.000 COP\. Anticipo \$ 500\.000 COP\nPlaca TKK224\nLlamar al llegar\n$/);
+  assert.match(m.texto, /\. Sandona\. Flete \$ 710\.000\. Anticipo \$ 500\.000\nPlaca TKK224\nLlamar al llegar\n$/);
   assert.ok(m.enlace.startsWith('https://wa.me/?text='));
   assert.equal(decodeURIComponent(m.enlace.split('text=')[1]), m.texto);
   // El 10/10 ya estaba reportado en el Excel: no se repite

@@ -265,17 +265,64 @@ r.post('/viajes/:id/cumplir', operar, async (req, res) => {
   res.json(resultado);
 });
 
-r.post('/viajes/:id/anular', operar, async (req, res) => {
-  const d = z.object({
-    clave, documento: z.enum(['remesa', 'manifiesto', 'ambos', 'cumplidoRemesa', 'cumplidoManifiesto']),
-    motivo: z.string().trim().length(1), motivoRemesa: z.string().trim().max(1).optional().default(''),
-    observaciones: z.string().trim().min(3, 'explique el motivo').max(200),
-    manifiestoNuevo: t(15),
-  }).parse(req.body);
+const anulacionSchema = z.object({
+  clave, documento: z.enum(['remesa', 'manifiesto', 'ambos', 'cumplidoRemesa', 'cumplidoManifiesto']),
+  motivo: z.string().trim().length(1), motivoRemesa: z.string().trim().max(1).optional().default(''),
+  observaciones: z.string().trim().min(3, 'explique el motivo').max(200),
+  manifiestoNuevo: t(15),
+});
+function validarMotivos(d) {
   const validos = { remesa: cat.MOTIVO_ANULACION_REMESA, manifiesto: cat.MOTIVO_ANULACION_MANIFIESTO, ambos: cat.MOTIVO_ANULACION_MANIFIESTO,
     cumplidoRemesa: cat.MOTIVO_ANULACION_CUMPLIDO, cumplidoManifiesto: cat.MOTIVO_ANULACION_CUMPLIDO }[d.documento];
   if (!validos[d.motivo]) throw new ErrorHttp(400, 'Motivo de anulación no válido');
   if (d.documento === 'ambos' && !cat.MOTIVO_ANULACION_REMESA[d.motivoRemesa]) throw new ErrorHttp(400, 'Elija el motivo de anulación de la remesa');
+}
+const claveRechazada = (m) => /usuario|contrase|clave|password/i.test(m || '');
+const listaLote = z.array(z.string().refine(x => mongoose.isValidObjectId(x), 'viaje inválido')).min(1).max(50);
+
+// ── Cumplido y anulación de varios viajes (uno tras otro, al ritmo del limitador del RNDC) ──
+r.post('/cumplir-lote', operar, async (req, res) => {
+  const d = cumplidoSchema.extend({ viajes: listaLote, usarFechaViaje: z.boolean().optional().default(true) }).parse(req.body);
+  const resultados = [];
+  for (const id of d.viajes) {
+    const v = await Viaje.findOne(deEmpresa(req, { _id: id })).select('numero fecha').lean();
+    if (!v) { resultados.push({ viaje: id, ok: false, mensaje: 'Viaje no encontrado' }); continue; }
+    // Cada viaje entrega su propia cantidad cargada; las fechas de descargue, la del viaje (si se pide)
+    const remesa = { ...d.remesa };
+    delete remesa.cantidadEntregada; delete remesa.cantidadCargada;
+    if (d.usarFechaViaje) for (const k of ['llegada', 'entrada', 'salida']) remesa[k] = { ...(remesa[k] || {}), fecha: v.fecha };
+    try {
+      const r1 = await op.cumplir(req.empresaId, id, d.clave, req.usuario._id, { ...d, remesa });
+      const ok = r1.cumplidoManifiesto?.estado === 'aceptado';
+      const mensaje = ok ? '' : (r1.cumplidoManifiesto?.mensaje || r1.cumplidoRemesa?.mensaje || 'El RNDC rechazó el cumplido');
+      resultados.push({ viaje: id, numero: v.numero, ok, mensaje });
+      await auditar(req, 'rndc_cumplir', { entidad: 'Viaje', entidadId: id, detalle: { lote: true, ...resumen(r1) } });
+      if (!ok && claveRechazada(mensaje)) break;
+    } catch (e) { resultados.push({ viaje: id, numero: v.numero, ok: false, mensaje: e.message }); }
+  }
+  res.json(resultados);
+});
+
+r.post('/anular-lote', operar, async (req, res) => {
+  const d = anulacionSchema.extend({ viajes: listaLote }).parse(req.body);
+  validarMotivos(d);
+  const resultados = [];
+  for (const id of d.viajes) {
+    const v = await Viaje.findOne(deEmpresa(req, { _id: id })).select('numero').lean();
+    if (!v) { resultados.push({ viaje: id, ok: false, mensaje: 'Viaje no encontrado' }); continue; }
+    try {
+      const r1 = await op.anular(req.empresaId, id, d.clave, req.usuario._id, d);
+      resultados.push({ viaje: id, numero: v.numero, ok: r1.ok, radicado: r1.radicado, mensaje: r1.mensaje || '' });
+      await auditar(req, 'rndc_anular', { entidad: 'Viaje', entidadId: id, detalle: { lote: true, documento: d.documento, motivo: d.motivo, ok: r1.ok } });
+      if (!r1.ok && claveRechazada(r1.mensaje)) break;
+    } catch (e) { resultados.push({ viaje: id, numero: v.numero, ok: false, mensaje: e.message }); }
+  }
+  res.json(resultados);
+});
+
+r.post('/viajes/:id/anular', operar, async (req, res) => {
+  const d = anulacionSchema.parse(req.body);
+  validarMotivos(d);
   const resultado = await op.anular(req.empresaId, req.params.id, d.clave, req.usuario._id, d);
   await auditar(req, 'rndc_anular', { entidad: 'Viaje', entidadId: req.params.id, detalle: { documento: d.documento, motivo: d.motivo, ok: resultado.ok } });
   res.json(resultado);

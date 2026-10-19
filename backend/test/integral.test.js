@@ -435,12 +435,27 @@ test('Plantillas de WhatsApp: crear, predeterminar, vista previa y eliminar', as
   assert.equal(p.status, 201, JSON.stringify(p.body));
   const rep = (await s.reportero.get('/api/viajes/reporte-whatsapp?fecha=2026-11-02&incluirReportados=1')).body;
   assert.equal(rep.plantilla, p.body._id);
-  assert.match(rep.mensajes[0].texto, /^Distribuidora Sur 02\/11\/2026\n\nABC123 · Pedro Pérez Gómez · \$ 1\.400\.000 COP\n\nTotal \$ 1\.400\.000 COP\n$/);
+  assert.match(rep.mensajes[0].texto, /^Distribuidora Sur 02\/11\/2026\n\nABC123 · Pedro Pérez · \$ 1\.400\.000\n\nTotal \$ 1\.400\.000\n$/);
   const prev = await s.reportero.post('/api/viajes/reporte-whatsapp/vista-previa', { fecha: '2026-11-02', plantilla: { linea: 'Placa {placa}' } });
   assert.match(prev.body.mensajes[0].texto, /Placa ABC123/);
   assert.equal((await s.adminB.put(`/api/viajes/plantillas-whatsapp/${p.body._id}`, { nombre: 'X', linea: 'x' })).status, 404, 'otra empresa no la ve');
   assert.equal((await s.reportero.del(`/api/viajes/plantillas-whatsapp/${p.body._id}`)).status, 200);
   assert.equal((await s.reportero.get('/api/viajes/reporte-whatsapp?fecha=2026-11-02&incluirReportados=1')).body.plantilla, 'base');
+});
+
+test('WhatsApp: el mensaje lleva solo los viajes seleccionados', async () => {
+  const a = await s.reportero.post('/api/viajes', { fecha: '2026-11-09', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const b = await s.reportero.post('/api/viajes', { fecha: '2026-11-09', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'XYZ987', conductor: s.conductor });
+  const url = '/api/viajes/reporte-whatsapp?fecha=2026-11-09&seleccion=1';
+  const nada = (await s.reportero.get(`${url}&viajes=`)).body;
+  assert.equal(nada.viajes.length, 2, 'lista los viajes para elegir');
+  assert.equal(nada.mensajes.length, 0, 'sin selección no se arma ningún mensaje');
+  const uno = (await s.reportero.get(`${url}&viajes=${b.body._id}`)).body;
+  assert.equal(uno.mensajes.length, 1);
+  assert.deepEqual(uno.mensajes[0].viajes.map(String), [String(b.body._id)]);
+  assert.match(uno.mensajes[0].texto, /XYZ987/);
+  assert.doesNotMatch(uno.mensajes[0].texto, /ABC123/);
+  for (const x of [a, b]) await s.manif.del(`/api/viajes/${x.body._id}`);
 });
 
 test('Remesa: destinatario en la sede del municipio de destino y bloqueo de origen = destino', async () => {
@@ -637,6 +652,34 @@ test('RNDC: tras un DUPLICADO se escriben a mano los números de remesa y manifi
   const cfg2 = (await s.adminA.get('/api/rndc/config')).body;
   assert.equal(cfg2.siguienteRemesa, cfg.siguienteRemesa + 41, 'el consecutivo avanza para no repetir el número');
   assert.equal(cfg2.siguienteManifiesto, cfg.siguienteManifiesto + 41);
+});
+
+test('RNDC: cumplir y anular varios viajes a la vez', async () => {
+  const nuevo = async (placa) => {
+    const v = await s.reportero.post('/api/viajes', { fecha: '2026-11-10', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa, conductor: s.conductor });
+    const d = (await s.manif.post(`/api/rndc/viajes/${v.body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+    assert.equal(d.manifiesto?.estado, 'aceptado', JSON.stringify(d));
+    return v.body._id;
+  };
+  const [a, b, c, d] = [await nuevo('ABC123'), await nuevo('ABC123'), await nuevo('ABC123'), await nuevo('ABC123')];
+  // Cumplido en lote: cada viaje con su fecha y su cantidad
+  assert.equal((await s.reportero.post('/api/rndc/cumplir-lote', { clave: CLAVE_RNDC, viajes: [a, b] })).status, 403);
+  const hora = { fecha: '', hora: '08:00' };
+  const cum = await s.manif.post('/api/rndc/cumplir-lote', { clave: CLAVE_RNDC, viajes: [a, b], usarFechaViaje: true,
+    remesa: { tipo: 'C', llegada: hora, entrada: { fecha: '', hora: '08:30' }, salida: { fecha: '', hora: '10:00' } },
+    manifiesto: { tipo: 'C', fechaEntregaDocumentos: '2026-11-11' } });
+  assert.equal(cum.status, 200, JSON.stringify(cum.body));
+  assert.deepEqual(cum.body.map(x => x.ok), [true, true], JSON.stringify(cum.body));
+  for (const id of [a, b]) assert.equal((await s.manif.get(`/api/viajes/${id}`)).body.estado, 'cumplido');
+  // Anulación en lote de manifiesto y remesa
+  const sinMotivo = await s.manif.post('/api/rndc/anular-lote', { clave: CLAVE_RNDC, viajes: [c, d], documento: 'ambos', motivo: 'V', observaciones: 'Cambio de vehiculo' });
+  assert.equal(sinMotivo.status, 400);
+  const an = await s.manif.post('/api/rndc/anular-lote', { clave: CLAVE_RNDC, viajes: [c, d], documento: 'ambos', motivo: 'V', motivoRemesa: 'D', observaciones: 'Cambio de vehiculo' });
+  assert.deepEqual(an.body.map(x => x.ok), [true, true], JSON.stringify(an.body));
+  for (const id of [c, d]) {
+    const x = (await s.manif.get(`/api/viajes/${id}`)).body;
+    assert.deepEqual([x.remesa.estado, x.manifiesto.estado], ['anulado', 'anulado']);
+  }
 });
 
 test('RNDC: anulación de manifiesto por cambio de conductor y reemplazo', async () => {

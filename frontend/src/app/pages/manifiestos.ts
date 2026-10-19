@@ -41,9 +41,13 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
           <button (click)="enviarLote()" [disabled]="trabajando()"><app-icono nombre="enviar" />Enviar {{ seleccion().size }} seleccionado(s)</button>
         }
         @if (pestana() === 'manifestados' && seleccion().size) {
-          <button type="button" confirmar="Clic otra vez para descartar" (confirmado)="descartarCorreos([...seleccion()])" [disabled]="trabajando()">Descartar correos</button>
-          <button type="button" class="primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([...seleccion()])" [disabled]="trabajando()">
-            <app-icono nombre="correo" />Aprobar y enviar correos ({{ seleccion().size }})</button>
+          <button type="button" class="peligro" (click)="abrirAnularLote()" [disabled]="trabajando()">Anular ({{ seleccion().size }})</button>
+          <button type="button" class="primario" (click)="abrirCumplidoLote()" [disabled]="trabajando()">Cumplir ({{ seleccion().size }})</button>
+          @if (conCorreo()) {
+            <button type="button" confirmar="Clic otra vez para descartar" (confirmado)="descartarCorreos([...seleccion()])" [disabled]="trabajando()">Descartar correos</button>
+            <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([...seleccion()])" [disabled]="trabajando()">
+              <app-icono nombre="correo" />Aprobar correos ({{ seleccion().size }})</button>
+          }
         }
         @if (puedeCrear) { <button class="primario" (click)="nuevoManifiesto()"><app-icono nombre="mas" />Nuevo manifiesto</button> }
       </div>
@@ -86,6 +90,13 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       }
     </section>
 
+    @if (resultadoLote(); as rl) {
+      <div class="mensaje resultado-lote" [class.ok]="!rl.fallos.length" [class.error]="rl.fallos.length">
+        <div><strong>{{ rl.titulo }}: {{ rl.aceptados }} de {{ rl.total }} aceptados por el RNDC.</strong>
+          @if (rl.fallos.length) { <ul>@for (f of rl.fallos; track f.viaje) { <li>Viaje N° {{ f.numero }}: {{ f.mensaje }}</li> }</ul> }</div>
+        <button type="button" class="pequeno texto" (click)="resultadoLote.set(null)" aria-label="Cerrar resultado">Cerrar</button>
+      </div>
+    }
     @if (pestana() === 'manifestados' && porAprobar().length) {
       <div class="mensaje alerta pendientes-correo">
         <span><strong>{{ porAprobar().length }} viaje(s) con correos por aprobar.</strong>
@@ -277,25 +288,32 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     <app-expedir-rndc [viajeId]="expedir()" (cerrar)="expedir.set(null)" (actualizado)="cargar()" />
 
     <!-- Cumplido -->
-    <app-modal [titulo]="'Cumplir viaje N° ' + (cumplirViaje()?.numero || '')" [abierto]="!!cumplirViaje()" (cerrar)="cumplirViaje.set(null)" [ancho]="true">
+    <app-modal [titulo]="cumplirLote().length ? 'Cumplir ' + cumplirLote().length + ' viajes' : 'Cumplir viaje N° ' + (cumplirViaje()?.numero || '')" [abierto]="!!cumplirViaje()" (cerrar)="cerrarCumplido()" [ancho]="true">
+      @if (cumplirLote().length) {
+        <div class="mensaje info">Se cumplirán los viajes N° {{ numerosLote(cumplirLote()) }}. Cada remesa se cumple con su propia cantidad cargada.</div>
+      }
       @if (cumplido(); as c) {
       <form id="form-cumplido" (ngSubmit)="cumplir()">
-        <fieldset><legend>Cumplido de la remesa {{ cumplirViaje()?.remesa?.numero }}</legend>
+        <fieldset><legend>{{ cumplirLote().length ? 'Cumplido de las remesas' : 'Cumplido de la remesa ' + (cumplirViaje()?.remesa?.numero || '') }}</legend>
           <div class="formulario">
             <div class="campo"><label for="c-tipo">Tipo</label><select id="c-tipo" name="rtipo" [(ngModel)]="c.remesa.tipo"><option value="C">Cumplido normal</option><option value="S">Suspensión</option></select></div>
             @if (c.remesa.tipo === 'S') {
               <div class="campo"><label for="c-mot">Motivo de suspensión</label><select id="c-mot" name="rmot" [(ngModel)]="c.remesa.motivoSuspension">
                 @for (m of entradas(catalogos()?.motivoSuspensionRemesa); track m[0]) { <option [value]="m[0]">{{ m[1] }}</option> }</select></div>
             }
-            <div class="campo"><label for="c-cant">Cantidad entregada (kg)</label><input id="c-cant" type="number" min="0" name="rcant" [(ngModel)]="c.remesa.cantidadEntregada" /></div>
+            @if (!cumplirLote().length) {
+              <div class="campo"><label for="c-cant">Cantidad entregada (kg)</label><input id="c-cant" type="number" min="0" name="rcant" [(ngModel)]="c.remesa.cantidadEntregada" /></div>
+            } @else {
+              <label class="casilla ancho"><input type="checkbox" name="ufv" [(ngModel)]="c.usarFechaViaje" />Usar la fecha de cada viaje para la llegada, entrada y salida (solo se eligen las horas)</label>
+            }
             @for (m of momentos; track m[0]) {
               <div class="campo"><label [for]="'c-' + m[0]">{{ m[1] }} al descargue</label>
-                <div class="acciones" style="flex-wrap:nowrap"><input [id]="'c-' + m[0]" type="date" [name]="m[0] + 'f'" [(ngModel)]="c.remesa[m[0]].fecha" required />
+                <div class="acciones" style="flex-wrap:nowrap">@if (!(cumplirLote().length && c.usarFechaViaje)) { <input [id]="'c-' + m[0]" type="date" [name]="m[0] + 'f'" [(ngModel)]="c.remesa[m[0]].fecha" required /> }
                 <input type="time" [name]="m[0] + 'h'" [(ngModel)]="c.remesa[m[0]].hora" required [attr.aria-label]="'Hora ' + m[1]" style="max-width:120px" /></div></div>
             }
           </div>
         </fieldset>
-        <fieldset style="margin-top:14px"><legend>Cumplido del manifiesto {{ cumplirViaje()?.manifiesto?.numero }}</legend>
+        <fieldset style="margin-top:14px"><legend>{{ cumplirLote().length ? 'Cumplido de los manifiestos' : 'Cumplido del manifiesto ' + (cumplirViaje()?.manifiesto?.numero || '') }}</legend>
           <div class="formulario">
             <div class="campo"><label for="m-tipo">Tipo</label><select id="m-tipo" name="mtipo" [(ngModel)]="c.manifiesto.tipo"><option value="C">Cumplido normal</option><option value="S">Suspensión</option></select></div>
             <div class="campo"><label for="m-ent">Entrega de documentos</label><input id="m-ent" type="date" name="ment" [(ngModel)]="c.manifiesto.fechaEntregaDocumentos" required /></div>
@@ -308,13 +326,14 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       </form>
       }
       <ng-container pie>
-        <button type="button" (click)="cumplirViaje.set(null)">Cancelar</button>
-        <button class="primario" type="submit" form="form-cumplido" [disabled]="trabajando()">Enviar cumplidos</button>
+        <button type="button" (click)="cerrarCumplido()">Cancelar</button>
+        <button class="primario" type="submit" form="form-cumplido" [disabled]="trabajando()">{{ trabajando() ? 'Enviando…' : cumplirLote().length ? 'Cumplir ' + cumplirLote().length + ' viajes' : 'Enviar cumplidos' }}</button>
       </ng-container>
     </app-modal>
 
     <!-- Anulación -->
-    <app-modal titulo="Anular en el RNDC" [abierto]="!!anularViaje()" (cerrar)="anularViaje.set(null)">
+    <app-modal [titulo]="anularLote().length ? 'Anular ' + anularLote().length + ' viajes en el RNDC' : 'Anular en el RNDC'" [abierto]="!!anularViaje()" (cerrar)="cerrarAnular()">
+      @if (anularLote().length) { <div class="mensaje info">Viajes N° {{ numerosLote(anularLote()) }}. Se usan el mismo motivo y las mismas observaciones para todos.</div> }
       @let a = anulacion();
       <form id="form-anular" class="formulario" style="grid-template-columns:1fr" (ngSubmit)="anular()">
         <div class="campo"><label for="a-doc">Documento</label>
@@ -337,12 +356,14 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         <div class="mensaje alerta">La anulación queda registrada en el RNDC y no se puede deshacer. El RNDC limita las anulaciones de manifiestos al 6 % mensual (sin contar reemplazos).</div>
       </form>
       <ng-container pie>
-        <button type="button" (click)="anularViaje.set(null)">Cancelar</button>
-        <button class="peligro" type="submit" form="form-anular" [disabled]="trabajando() || !a.motivo || !a.observaciones || (a.documento === 'ambos' && !a.motivoRemesa)">{{ a.documento === 'ambos' ? 'Anular ambos' : 'Anular' }}</button>
+        <button type="button" (click)="cerrarAnular()">Cancelar</button>
+        <button class="peligro" type="submit" form="form-anular" [disabled]="trabajando() || !a.motivo || !a.observaciones || (a.documento === 'ambos' && !a.motivoRemesa)">{{ trabajando() ? 'Anulando…' : anularLote().length ? 'Anular ' + anularLote().length + ' viajes' : a.documento === 'ambos' ? 'Anular ambos' : 'Anular' }}</button>
       </ng-container>
     </app-modal>`,
   styles: [`
     label.sub { margin-top: 10px; }
+    .resultado-lote { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+    .resultado-lote ul { margin: 4px 0 0; padding-left: 18px; }
     .secciones { display: flex; flex-direction: column; gap: 14px; }
     .pendientes-correo { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; }
     .destinos { max-width: 240px; font-size: 13px; }
@@ -513,7 +534,7 @@ export class Manifiestos {
   verCorreos(v: Viaje) { this.correosViaje.set(v); }
 
   // ── Aprobación de correos: nada sale al cliente sin confirmación ──
-  readonly conSeleccion = computed(() => this.pestana() === 'pendientes' || (this.pestana() === 'manifestados' && this.conCorreo()));
+  readonly conSeleccion = computed(() => this.pestana() === 'pendientes' || this.pestana() === 'manifestados');
   tienePorAprobar(viajeId: string) { return (this.enviosPorViaje().get(viajeId) || []).some(e => e.estado === 'por_aprobar'); }
   readonly porAprobar = computed(() => this.viajes().filter(v => (this.enviosPorViaje().get(v._id) || []).some(e => e.estado === 'por_aprobar')).map(v => v._id));
   async aprobarCorreos(viajes: string[]) {
@@ -628,11 +649,50 @@ export class Manifiestos {
     this.cumplirViaje.set(v);
   }
 
+  // ── Cumplido y anulación de varios viajes a la vez ──
+  readonly cumplirLote = signal<Viaje[]>([]);
+  readonly anularLote = signal<Viaje[]>([]);
+  readonly resultadoLote = signal<{ titulo: string; total: number; aceptados: number; fallos: any[] } | null>(null);
+  numerosLote(l: Viaje[]) { return l.map(v => v.numero).join(', '); }
+  private seleccionados() { return this.viajes().filter(v => this.seleccion().has(v._id)); }
+  abrirCumplidoLote() {
+    const l = this.seleccionados();
+    if (!l.length) return;
+    this.abrirCumplido(l[0]);
+    this.cumplido.update(c => ({ ...c, usarFechaViaje: true }));
+    this.cumplirLote.set(l);
+  }
+  abrirAnularLote() {
+    const l = this.seleccionados();
+    if (!l.length) return;
+    this.anularLote.set(l);
+    this.abrirAnular(l[0]);
+  }
+  cerrarCumplido() { this.cumplirViaje.set(null); this.cumplirLote.set([]); }
+  cerrarAnular() { this.anularViaje.set(null); this.anularLote.set([]); }
+  private mostrarResultadoLote(titulo: string, r: any[]) {
+    const fallos = r.filter(x => !x.ok);
+    this.resultadoLote.set({ titulo, total: r.length, aceptados: r.length - fallos.length, fallos });
+    if (fallos.some(x => /usuario|contrase|clave/i.test(x.mensaje || ''))) this.clave.olvidar();
+    if (!fallos.length) this.avisos.ok(`${titulo}: ${r.length} aceptados`);
+    this.seleccion.set(new Set());
+  }
+
   async cumplir() {
     const v = this.cumplirViaje();
     if (!v) return;
     const c = this.cumplido();
     const limpio = (o: any) => Object.fromEntries(Object.entries(o).filter(([, x]) => x !== null && x !== ''));
+    if (this.cumplirLote().length) {
+      const ids = this.cumplirLote().map(x => x._id);
+      const r = await this.conClave(cl => this.api.post<any[]>('/rndc/cumplir-lote', { clave: cl, viajes: ids, usarFechaViaje: !!c.usarFechaViaje,
+        remesa: limpio({ ...c.remesa, cantidadEntregada: null }), manifiesto: limpio(c.manifiesto) }));
+      if (!r) return;
+      this.cerrarCumplido();
+      this.mostrarResultadoLote('Cumplidos', r);
+      this.cargar();
+      return;
+    }
     const r = await this.conClave(cl => this.api.post<any>(`/rndc/viajes/${v._id}/cumplir`, { clave: cl, remesa: limpio(c.remesa), manifiesto: limpio(c.manifiesto) }));
     if (!r) return;
     if (r.cumplidoManifiesto?.estado === 'aceptado') { this.avisos.ok(`Viaje ${v.numero} cumplido en el RNDC`); this.cumplirViaje.set(null); }
@@ -643,6 +703,7 @@ export class Manifiestos {
   documentosAnulables(): [string, string][] {
     const v = this.anularViaje();
     if (!v) return [];
+    if (this.anularLote().length) return [['manifiesto', 'Solo los manifiestos'], ['ambos', 'Manifiestos y remesas']];
     if (v.estado === 'cumplido') return [['cumplidoManifiesto', 'Cumplido del manifiesto'], ...(v.cumplidoRemesa?.estado === 'aceptado' ? [['cumplidoRemesa', 'Cumplido de la remesa'] as [string, string]] : [])];
     if (v.estado === 'remesa') return [['remesa', `Remesa ${v.remesa.numero}`]];
     return [['manifiesto', `Solo el manifiesto ${v.manifiesto.numero}`],
@@ -663,6 +724,15 @@ export class Manifiestos {
   async anular() {
     const v = this.anularViaje();
     if (!v) return;
+    if (this.anularLote().length) {
+      const ids = this.anularLote().map(x => x._id);
+      const r = await this.conClave(c => this.api.post<any[]>('/rndc/anular-lote', { clave: c, viajes: ids, ...this.anulacion() }));
+      if (!r) return;
+      this.cerrarAnular();
+      this.mostrarResultadoLote('Anulaciones', r);
+      this.cargar();
+      return;
+    }
     const r = await this.conClave(c => this.api.post<any>(`/rndc/viajes/${v._id}/anular`, { clave: c, ...this.anulacion() }));
     if (!r) return;
     if (r.ok) { this.avisos.ok(`Anulación aceptada (radicado ${r.radicado})`); this.anularViaje.set(null); }
