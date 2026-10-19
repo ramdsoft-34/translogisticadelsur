@@ -1,11 +1,12 @@
 // Maestros de la empresa: clientes y sus destinos/tarifas, terceros
 // (conductores, propietarios, tenedores…), vehículos y el catálogo DIVIPOLA.
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import { Cliente, Tarifa, Tercero, Vehiculo, Municipio, Viaje, Empresa, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { auditar, cambios } from '../services/auditoria.js';
-import { normalizar, escaparRegex } from '../utils/texto.js';
+import { normalizar, escaparRegex, quitarTildes } from '../utils/texto.js';
 import { clienteSchema, tarifaSchema, terceroSchema, vehiculoSchema } from '../validaciones/maestros.js';
 import { variablesTercero, variablesVehiculo, huella } from '../services/rndc/documentos.js';
 
@@ -17,6 +18,10 @@ const editar = permitir(P.MAESTROS_EDITAR);
 const editarTarifas = permitir(P.MAESTROS_EDITAR, P.TARIFAS_EDITAR);
 
 const buscar = (q) => new RegExp(escaparRegex(String(q || '').trim()), 'i');
+// Igual, pero sin importar tildes ni la eñe («gomez» encuentra «Gómez»)
+const VOCALES = { a: '[aáàä]', e: '[eéèë]', i: '[iíìï]', o: '[oóòö]', u: '[uúùü]', n: '[nñ]' };
+const buscarSinTildes = (q) => new RegExp(escaparRegex(quitarTildes(String(q || '').trim()).toLowerCase())
+  .replace(/[aeioun]/g, c => VOCALES[c]), 'i');
 
 // Paginación opcional: con ?pagina=N responde { total, pagina, limite, items };
 // sin ella conserva la respuesta de arreglo (búsquedas y listas cortas).
@@ -99,12 +104,44 @@ r.get('/terceros', ver, async (req, res) => {
   if (req.query.rndc === 'importado') filtro['rndc.mensaje'] = /^Importado/i;
   else if (req.query.rndc === 'enviado') { filtro['rndc.estado'] = 'enviado'; filtro['rndc.mensaje'] = { $not: /^Importado/i }; }
   else if (['error', 'sin_enviar'].includes(req.query.rndc)) filtro['rndc.estado'] = req.query.rndc;
-  if (req.query.q) {
-    const re = buscar(req.query.q);
-    filtro.$or = [{ nombres: re }, { apellido1: re }, { apellido2: re }, { numId: re }];
-  }
+  // Cada palabra escrita debe estar en el nombre, los apellidos o el documento («jose castellano»)
+  const palabras = String(req.query.q || '').trim().split(/\s+/).filter(Boolean).slice(0, 5);
+  if (palabras.length) filtro.$and = palabras.map(w => { const re = buscarSinTildes(w); return { $or: [{ nombres: re }, { apellido1: re }, { apellido2: re }, { numId: re }] }; });
+  if (req.query.conPlacas === '1' && req.query.pagina === undefined) return res.json(await conductoresConPlacas(req, filtro, !palabras.length));
   await listar(req, res, Tercero.find(filtro).sort({ nombres: 1, apellido1: 1 }), Tercero.countDocuments(filtro), x => x.toJSON());
 });
+// Conductores con sus placas: la del vehículo donde es conductor habitual y la de su último viaje.
+// Sin texto de búsqueda, primero los que manejaron más recientemente.
+async function conductoresConPlacas(req, filtro, recientes) {
+  const limite = Math.min(Number(req.query.limite) || 20, 50);
+  let lista;
+  if (recientes) {
+    const ult = await Viaje.aggregate([{ $match: { empresa: new mongoose.Types.ObjectId(String(req.empresaId)), conductor: { $ne: null } } },
+      { $sort: { fecha: -1, numero: -1 } }, { $group: { _id: '$conductor', fecha: { $first: '$fecha' } } }, { $sort: { fecha: -1 } }, { $limit: limite }]);
+    const porId = new Map((await Tercero.find({ ...filtro, _id: { $in: ult.map(x => x._id) } })).map(t => [String(t._id), t]));
+    lista = ult.map(x => porId.get(String(x._id))).filter(Boolean);
+    if (lista.length < limite) {
+      const mas = await Tercero.find({ ...filtro, _id: { $nin: lista.map(t => t._id) } }).sort({ nombres: 1, apellido1: 1 }).limit(limite - lista.length);
+      lista = [...lista, ...mas];
+    }
+  } else {
+    lista = await Tercero.find(filtro).sort({ nombres: 1, apellido1: 1 }).limit(limite);
+  }
+  const ids = lista.map(t => t._id);
+  const [habituales, ultimos] = await Promise.all([
+    Vehiculo.find(deEmpresa(req, { conductorHabitual: { $in: ids }, activo: { $ne: false } })).select('placa conductorHabitual').lean(),
+    Viaje.aggregate([{ $match: { empresa: new mongoose.Types.ObjectId(String(req.empresaId)), conductor: { $in: ids } } },
+      { $sort: { fecha: -1, numero: -1 } }, { $group: { _id: '$conductor', placa: { $first: '$placa' }, remolque: { $first: '$remolque' } } }]),
+  ]);
+  return lista.map(t => {
+    const id = String(t._id);
+    const placas = [...new Set([...habituales.filter(v => String(v.conductorHabitual) === id).map(v => v.placa),
+      ...ultimos.filter(u => String(u._id) === id).map(u => u.placa)].filter(Boolean))];
+    const ultimo = ultimos.find(u => String(u._id) === id);
+    return { ...t.toJSON(), placas, remolque: ultimo?.remolque || '' };
+  });
+}
+
 r.get('/terceros/:id', ver, async (req, res) => {
   const x = await Tercero.findOne(deEmpresa(req, { _id: req.params.id }));
   if (!x) throw new ErrorHttp(404, 'Tercero no encontrado');

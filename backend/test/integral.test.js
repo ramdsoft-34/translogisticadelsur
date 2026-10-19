@@ -435,12 +435,23 @@ test('Plantillas de WhatsApp: crear, predeterminar, vista previa y eliminar', as
   assert.equal(p.status, 201, JSON.stringify(p.body));
   const rep = (await s.reportero.get('/api/viajes/reporte-whatsapp?fecha=2026-11-02&incluirReportados=1')).body;
   assert.equal(rep.plantilla, p.body._id);
-  assert.match(rep.mensajes[0].texto, /^Distribuidora Sur 02\/11\/2026\n\nABC123 · Pedro Pérez · \$ 1\.400\.000\n\nTotal \$ 1\.400\.000\n$/);
+  assert.match(rep.mensajes[0].texto, /^Distribuidora Sur 02\/11\/2026\n\nABC123 · Pedro Pérez Gómez · \$ 1\.400\.000\n\nTotal \$ 1\.400\.000\n$/);
   const prev = await s.reportero.post('/api/viajes/reporte-whatsapp/vista-previa', { fecha: '2026-11-02', plantilla: { linea: 'Placa {placa}' } });
   assert.match(prev.body.mensajes[0].texto, /Placa ABC123/);
   assert.equal((await s.adminB.put(`/api/viajes/plantillas-whatsapp/${p.body._id}`, { nombre: 'X', linea: 'x' })).status, 404, 'otra empresa no la ve');
   assert.equal((await s.reportero.del(`/api/viajes/plantillas-whatsapp/${p.body._id}`)).status, 200);
   assert.equal((await s.reportero.get('/api/viajes/reporte-whatsapp?fecha=2026-11-02&incluirReportados=1')).body.plantilla, 'base');
+});
+
+test('Conductores: búsqueda por varias palabras y placa asociada', async () => {
+  const r = (await s.reportero.get('/api/maestros/terceros?rol=conductor&conPlacas=1&q=pedro%20gomez')).body;
+  const pedro = r.find(t => String(t._id) === String(s.conductor));
+  assert.ok(pedro, JSON.stringify(r.map(t => t.nombres)));
+  assert.ok(pedro.placas.includes('ABC123'), JSON.stringify(pedro.placas));
+  // Sin texto: primero los que manejaron más recientemente, con su placa
+  const recientes = (await s.reportero.get('/api/maestros/terceros?rol=conductor&conPlacas=1')).body;
+  assert.equal(String(recientes[0]._id), String(s.conductor));
+  assert.equal((await s.reportero.get('/api/maestros/terceros?rol=conductor&conPlacas=1&q=pedro%20zzz')).body.length, 0);
 });
 
 test('WhatsApp: el mensaje lleva solo los viajes seleccionados', async () => {

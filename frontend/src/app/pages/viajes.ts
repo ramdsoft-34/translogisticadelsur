@@ -155,16 +155,22 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
         <fieldset><legend>Vehículo y conductor</legend>
           <div class="rejilla">
+            <app-buscar-tercero etiqueta="Conductor" rol="conductor" [conPlacas]="true" [(valor)]="f.conductor" (elegido)="elegirConductor($event)"
+              [deshabilitado]="bloqueado()" placeholder="Nombre, apellido o cédula" />
             <div class="campo"><label for="v-placa">Placa</label>
               <input id="v-placa" name="placa" list="lista-placas" [(ngModel)]="f.placa" (input)="buscarPlacas(f.placa)" (change)="sugerirPorPlaca()"
                 [disabled]="bloqueado()" required autocomplete="off" style="text-transform:uppercase" placeholder="ABC123" />
-              <datalist id="lista-placas">@for (x of placas(); track x._id) { <option [value]="x.placa"></option> }</datalist></div>
-            <app-buscar-tercero etiqueta="Conductor" rol="conductor" [(valor)]="f.conductor" [deshabilitado]="bloqueado()" />
+              <datalist id="lista-placas">@for (x of placas(); track x._id) { <option [value]="x.placa"></option> }</datalist>
+              @if (placasConductor().length > 1 && !bloqueado()) {
+                <div class="placas-conductor" role="group" aria-label="Placas del conductor">
+                  @for (p of placasConductor(); track p) { <button type="button" class="pequeno" [class.primario]="f.placa === p" (click)="usarPlaca(p)">{{ p }}</button> }
+                </div>
+              }</div>
             <div class="campo"><label for="v-rem">Remolque</label><input id="v-rem" name="remolque" [(ngModel)]="f.remolque" [disabled]="bloqueado()" style="text-transform:uppercase" placeholder="Opcional" /></div>
             <div class="campo"><label for="v-peso">Peso (kg)</label><input id="v-peso" type="number" min="0" name="pesoKg" [(ngModel)]="f.pesoKg" [disabled]="bloqueado()" /></div>
             <div class="campo"><label for="v-cant">Cantidad</label><input id="v-cant" type="number" min="0" name="cantidad" [(ngModel)]="f.cantidad" title="Viajes o unidades (tarifa por unidad)" /></div>
           </div>
-          <p class="nota">Al escribir la placa se sugiere su conductor habitual. El titular del manifiesto se toma del vehículo; si no tiene, es el conductor.</p>
+          <p class="nota">Elija primero el conductor: se pone sola la placa de su vehículo habitual o la de su último viaje (si tiene varias, elija una). El titular del manifiesto se toma del vehículo; si no tiene, es el conductor.</p>
         </fieldset>
 
         <fieldset><legend>Valores en pesos colombianos (COP)</legend>
@@ -254,6 +260,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .resumen strong { font-size: 20px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
     .estados { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .secciones { display: flex; flex-direction: column; gap: 14px; }
+    .placas-conductor { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
     .wa-lista { margin: 10px 0 4px; }
     .wa-cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
     /* Formulario del viaje: rejilla fija de 3 columnas, etiquetas en una línea e inputs de igual alto */
@@ -383,7 +390,7 @@ export class Viajes {
   estadoTexto(e: string) { return ESTADOS_VIAJE[e] || e; }
   claseEstado(e: string) { return ({ manifestado: 'marca', cumplido: 'ok', anulado: 'error', remesa: 'alerta' } as Record<string, string>)[e] || ''; }
 
-  nuevo() { this.form.set(vacio()); this.bloqueado.set(false); this.registradosTanda.set([]); this.abierto.set(true); }
+  nuevo() { this.form.set(vacio()); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.abierto.set(true); }
 
   editar(v: Viaje) {
     this.numeroEditado.set(v.numero);
@@ -425,6 +432,17 @@ export class Viajes {
       this.placas.set(await this.api.get<any[]>('/maestros/vehiculos', { q, activos: 1, limite: 15 }).catch(() => []));
     }, 200);
   }
+
+  // Al elegir el conductor se pone su placa (vehículo habitual o último viaje) y su remolque
+  readonly placasConductor = signal<string[]>([]);
+  elegirConductor(t: any) {
+    const placas: string[] = t?.placas || [];
+    this.placasConductor.set(placas);
+    if (!placas.length) return;
+    this.form.update(f => ({ ...f, placa: placas[0], remolque: f.remolque || t.remolque || '' }));
+    setTimeout(() => document.getElementById('v-peso')?.focus(), 30);
+  }
+  usarPlaca(p: string) { this.form.update(f => ({ ...f, placa: p })); }
 
   async sugerirPorPlaca() {
     const placa = this.form().placa.trim().toUpperCase();
@@ -470,6 +488,7 @@ export class Viajes {
           // El destino (y sus valores) cambian en cada viaje: se dejan vacíos
           this.form.set({ ...f, tarifaRef: '', destino: '', codDestino: '', tarifa: null, flete: null, anticipo: null, pesoKg: null, cantidad: 1,
             conAuxiliar: false, placa: '', remolque: '', conductor: '', titular: '', observaciones: '', requiereManifiesto: true });
+          this.placasConductor.set([]);
           setTimeout(() => document.getElementById('v-dest')?.focus(), 50);
           return;
         }

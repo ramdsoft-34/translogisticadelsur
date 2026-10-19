@@ -14,7 +14,7 @@
 //
 // Reglas de formato:
 // - Los valores se expresan en pesos: "$ 1.500.000".
-// - El conductor va con un nombre y un apellido, con mayúscula inicial: "Wilson Montero".
+// - El conductor va con el primer nombre y los dos apellidos, con mayúscula inicial: "Wilson Montero Rivera".
 // - Una línea de la plantilla cuyos datos quedan todos vacíos no se escribe
 //   (p. ej. «{observaciones}» o «Remolque {remolque}» sin remolque).
 // - Si el destino escrito es el nombre del conductor, no se repite.
@@ -29,17 +29,17 @@ import { enColombia, fmtFecha, normalizar, soloDigitos, txt } from '../utils/tex
 export const cop = (n) => `$ ${Math.round(Number(n) || 0).toLocaleString('es-CO')}`;
 
 const capital = (p) => (p ? p.charAt(0).toLocaleUpperCase('es') + p.slice(1).toLocaleLowerCase('es') : '');
-// Primer nombre y primer apellido del conductor. Con el tercero registrado se usan sus campos; si solo
-// se tiene el nombre completo: 4 palabras → 1.ª y 3.ª, 3 palabras → 1.ª y 2.ª, 2 → ambas.
+// Primer nombre y los dos apellidos del conductor. Con el tercero registrado se usan sus campos; si solo
+// se tiene el nombre completo: con 4 o más palabras, la 1.ª y las dos últimas; con menos, todas.
 export function nombreCorto(conductor, nombreCompleto = '') {
   const primera = (s) => txt(s).split(/\s+/)[0] || '';
-  let nombre; let apellido;
-  if (txt(conductor?.nombres) && txt(conductor?.apellido1)) { nombre = primera(conductor.nombres); apellido = primera(conductor.apellido1); }
+  let partes;
+  if (txt(conductor?.nombres) && txt(conductor?.apellido1)) partes = [primera(conductor.nombres), txt(conductor.apellido1), txt(conductor.apellido2)];
   else {
-    const p = txt(nombreCompleto || [conductor?.nombres, conductor?.apellido1].filter(Boolean).join(' ')).split(/\s+/).filter(Boolean);
-    nombre = p[0] || ''; apellido = p.length >= 4 ? p[2] : p[1] || '';
+    const p = txt(nombreCompleto || [conductor?.nombres, conductor?.apellido1, conductor?.apellido2].filter(Boolean).join(' ')).split(/\s+/).filter(Boolean);
+    partes = p.length >= 4 ? [p[0], ...p.slice(-2)] : p;
   }
-  return [nombre, apellido].filter(Boolean).map(capital).join(' ');
+  return partes.join(' ').split(/\s+/).filter(Boolean).map(capital).join(' ');
 }
 
 export function saludo(fecha = new Date()) {

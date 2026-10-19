@@ -1,4 +1,4 @@
-import { Component, ElementRef, HostListener, inject, input, model, signal } from '@angular/core';
+import { Component, ElementRef, HostListener, inject, input, model, output, signal } from '@angular/core';
 import { Api } from '../core/api.service';
 import { nombreTercero } from '../core/modelos';
 
@@ -17,7 +17,8 @@ import { nombreTercero } from '../core/modelos';
         <ul class="lista" [id]="idCampo + '-lista'" role="listbox">
           @for (t of opciones(); track t._id; let i = $index) {
             <li role="option" [class.activa]="i === indice()" [attr.aria-selected]="i === indice()" (mousedown)="elegir(t)">
-              <span>{{ nombre(t) }}</span><small>{{ t.tipoId }} {{ t.numId }}</small></li>
+              <span class="nom">{{ nombre(t) }}<small>{{ t.tipoId }} {{ t.numId }}</small></span>
+              @if (t.placas?.length) { <span class="placas">@for (p of t.placas; track p) { <span class="placa">{{ p }}</span> }</span> }</li>
           } @empty { <li class="nada">{{ buscando() ? 'Buscando…' : 'Sin resultados' }}</li> }
         </ul>
       }
@@ -29,6 +30,9 @@ import { nombreTercero } from '../core/modelos';
       border: 1px solid var(--gris-2); border-radius: 10px; box-shadow: var(--sombra-2); max-height: 260px; overflow: auto; }
     li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 7px; cursor: pointer; }
     li small { color: var(--gris-5); white-space: nowrap; }
+    li .nom { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+    li .placas { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; align-items: center; }
+    li .placa { font-size: 12px; font-weight: 650; padding: 1px 6px; border-radius: 5px; background: var(--primario-claro, #fff3c4); border: 1px solid var(--gris-2); }
     li.activa, li:hover { background: var(--primario-claro); }
     li.nada { color: var(--gris-5); cursor: default; }
   `],
@@ -43,6 +47,9 @@ export class BuscarTercero {
   readonly placeholder = input('Escriba nombre o documento');
   readonly deshabilitado = input(false);
   readonly valor = model<string>('');
+  // Con placas: trae la placa de cada conductor y, sin texto, primero los de viajes recientes
+  readonly conPlacas = input(false);
+  readonly elegido = output<any>();
   readonly opciones = signal<any[]>([]);
   readonly abierto = signal(false);
   readonly buscando = signal(false);
@@ -74,7 +81,7 @@ export class BuscarTercero {
   private async buscar(q: string) {
     this.buscando.set(true);
     try {
-      this.opciones.set(await this.api.get<any[]>('/maestros/terceros', { q, rol: this.rol(), activos: 1, limite: 20 }));
+      this.opciones.set(await this.api.get<any[]>('/maestros/terceros', { q, rol: this.rol(), activos: 1, limite: 20, ...(this.conPlacas() ? { conPlacas: 1 } : {}) }));
       this.indice.set(0);
     } catch { this.opciones.set([]); } finally { this.buscando.set(false); }
   }
@@ -84,6 +91,7 @@ export class BuscarTercero {
     this.valor.set(t._id);
     this.texto.set(`${nombreTercero(t)} · ${t.numId}`);
     this.abierto.set(false);
+    this.elegido.emit(t);
   }
 
   limpiar() { this.cargado = ''; this.valor.set(''); this.texto.set(''); }
