@@ -104,11 +104,11 @@ async function mensaje(empresa, smtp, envio) {
     return { ...base, subject: c.asunto, text: c.texto,
       html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(c.texto)}</div>` };
   }
+  // Solo los números de manifiesto y remesa, y el agradecimiento
   const texto = [`${datos.saludo},`, '',
-    `Adjuntamos el manifiesto de carga N.° ${datos.manifiesto}${datos.radicado ? ` (radicado RNDC ${datos.radicado})` : ''} y la remesa ${datos.remesa}.`, '',
-    `  - Placa:      ${datos.placa}${datos.remolque ? ` / remolque ${datos.remolque}` : ''}`, `  - Conductor:  ${datos.conductor} (C.C. ${datos.cedula})`,
-    `  - Destino:    ${datos.destino}`, `  - Fecha:      ${datos.fecha_larga}`, '', 'Cordialmente,', datos.empresa_mayus].join('\n');
-  return { ...base, subject: `Manifiesto ${datos.manifiesto} - ${datos.placa} - ${datos.cliente}`, text: texto,
+    `Adjuntamos el manifiesto de carga N.° ${datos.manifiesto} y la remesa N.° ${datos.remesa}.`, '',
+    'Muchas gracias.', '', 'Cordialmente,', datos.empresa_mayus].join('\n');
+  return { ...base, subject: `Manifiesto ${datos.manifiesto} - Remesa ${datos.remesa} - ${datos.cliente}`, text: texto,
     html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(texto)}</div>`,
     attachments: [{ filename: nombreArchivo(d), content: await manifiestoPdf(d), contentType: 'application/pdf' }] };
 }
@@ -197,13 +197,14 @@ async function mensajeGrupo(empresa, smtp, envios) {
   const lineas = []; const adjuntos = [];
   for (const e of envios) {
     const d = await datosManifiesto(empresa, e.viaje);
-    lineas.push(`  - ${d.numero} · Placa ${d.placa} · ${d.condNom} · ${d.destino}`);
+    lineas.push(`  - Manifiesto ${d.numero} · Remesa ${d.remesa}`);
     adjuntos.push({ filename: nombreArchivo(d), content: await manifiestoPdf(d), contentType: 'application/pdf' });
   }
   const cliente = await Cliente.findOne({ empresa: empresa._id, _id: envios[0].cliente }).select('nombre').lean();
   const nombre = txt(cliente?.nombre).toUpperCase();
   const texto = [`${saludo()},`, '', `MANIFIESTOS ${nombre}`, '', ...lineas, '',
     `Adjuntamos ${envios.length === 1 ? 'el manifiesto de carga' : `los ${envios.length} manifiestos de carga`} expedidos en el RNDC.`, '',
+    'Muchas gracias.', '',
     'Cordialmente,', txt(empresa.nombre).toUpperCase()].join('\n');
   return { from: { name: smtp.remitenteNombre || empresa.nombre, address: smtp.remitenteCorreo },
     to: envios[0].destinatarios, cc: envios[0].cc?.length ? envios[0].cc : undefined, replyTo: smtp.responderA || undefined,

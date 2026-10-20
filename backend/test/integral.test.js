@@ -568,6 +568,10 @@ test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazab
   assert.deepEqual(man.cc, ['copia@cliente.test']);
   assert.equal(man.attachments.length, 2);
   assert.match(man.subject, /^MANIFIESTOS DISTRIBUIDORA SUR - .+ \(2\)$/);
+  // Solo números de manifiesto y remesa y el agradecimiento: sin placa, conductor, destino ni fecha
+  assert.match(man.text, / {2}- Manifiesto M\d+ · Remesa R\d+\n/);
+  assert.match(man.text, /Muchas gracias\./);
+  assert.doesNotMatch(man.text, /Placa|Conductor|Destino|C\.C\./);
   assert.equal(man.attachments[0].contentType, 'application/pdf');
   assert.equal(man.attachments[0].content.subarray(0, 4).toString(), '%PDF');
   // Lo ya enviado no se repite
