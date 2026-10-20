@@ -38,6 +38,11 @@ export class Api {
     }));
   }
 
+  // Trae un archivo (p. ej. un PDF) para verlo en pantalla sin descargarlo.
+  async archivo(url: string, params?: Params): Promise<Blob> {
+    return firstValueFrom(this.http.get(this.base + url, { params: this.params(params), responseType: 'blob' }));
+  }
+
   // Descarga un archivo (PDF/Excel) respetando el nombre que envía el servidor.
   async descargar(url: string, params?: Params, nombrePorDefecto = 'archivo') {
     const r = await firstValueFrom(this.http.get(this.base + url, { params: this.params(params), observe: 'response', responseType: 'blob' }));

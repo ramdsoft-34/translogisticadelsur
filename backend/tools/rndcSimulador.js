@@ -110,6 +110,8 @@ export function crearSimulador() {
     const usuario = entre(interno, 'username'); const clave = entre(interno, 'password');
     if (!usuario || !clave) return error('Usuario o contraseña vacíos');
     if (clave === 'clave-incorrecta') return error('Usuario o contraseña no válidos');
+    // Para pruebas: consulta normal, pero el registro se rechaza
+    if (clave === 'rechaza-registros' && Number(entre(interno, 'tipo')) === 1) return error('Usuario o contraseña no válidos para registrar');
     const tipo = Number(entre(interno, 'tipo')); const proceso = Number(entre(interno, 'procesoid'));
     estado.log.push({ tipo, proceso, fecha: new Date() });
     if (tipo === 1) return registrar(proceso, interno);

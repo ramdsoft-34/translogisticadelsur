@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Avisos } from '../core/avisos.service';
@@ -184,12 +185,12 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                           <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([v._id])" [disabled]="trabajando()"
                             title="Envía al cliente el manifiesto y la carta de salida de este viaje"><app-icono nombre="correo" [tam]="15" />Aprobar correo</button>
                         }
-                        <button class="pequeno" (click)="pdf(v)"><app-icono nombre="descargar" [tam]="15" />PDF</button>
+                        <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
                         <button class="pequeno primario" (click)="abrirCumplido(v)">Cumplir</button>
                         <button class="pequeno peligro" (click)="abrirAnular(v)">Anular</button>
                       }
                       @case ('cumplidos') {
-                        <button class="pequeno" (click)="pdf(v)"><app-icono nombre="descargar" [tam]="15" />PDF</button>
+                        <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
                         <button class="pequeno peligro" (click)="abrirAnular(v)">Anular cumplido</button>
                       }
                     }
@@ -287,6 +288,12 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     <!-- Expedición: revisar, corregir y enviar -->
     <app-expedir-rndc [viajeId]="expedir()" (cerrar)="expedir.set(null)" (actualizado)="cargar()" />
 
+    <!-- Ver PDF del manifiesto -->
+    <app-modal [titulo]="pdfVisto()?.titulo || ''" [abierto]="!!pdfVisto()" (cerrar)="cerrarPdf()" [ancho]="true">
+      @if (pdfVisto(); as pv) { <iframe class="visor-pdf" [src]="pv.seguro" [title]="pv.titulo"></iframe> }
+      <ng-container pie><button type="button" (click)="cerrarPdf()">Cerrar</button></ng-container>
+    </app-modal>
+
     <!-- Cumplido -->
     <app-modal [titulo]="cumplirLote().length ? 'Cumplir ' + cumplirLote().length + ' viajes' : 'Cumplir viaje N° ' + (cumplirViaje()?.numero || '')" [abierto]="!!cumplirViaje()" (cerrar)="cerrarCumplido()" [ancho]="true">
       @if (cumplirLote().length) {
@@ -362,6 +369,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     </app-modal>`,
   styles: [`
     label.sub { margin-top: 10px; }
+    .visor-pdf { width: 100%; height: 70vh; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-1); }
     .resultado-lote { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
     .resultado-lote ul { margin: 4px 0 0; padding-left: 18px; }
     .secciones { display: flex; flex-direction: column; gap: 14px; }
@@ -377,6 +385,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
   `],
 })
 export class Manifiestos {
+  private sanitizer = inject(DomSanitizer);
   private api = inject(Api);
   private avisos = inject(Avisos);
   private clave = inject(RndcClave);
@@ -635,8 +644,23 @@ export class Manifiestos {
     this.cargar();
   }
 
-  async pdf(v: Viaje) {
-    try { await this.api.descargar(`/reportes/manifiesto/${v._id}`, {}, `Manifiesto_${v.manifiesto.numero}.pdf`); } catch (e) { this.avisos.error(e); }
+  // Ver el PDF del manifiesto en pantalla (sin descargarlo). En el celular se abre en otra pestaña.
+  readonly pdfVisto = signal<{ titulo: string; url: string; seguro: SafeResourceUrl } | null>(null);
+  async verPdf(v: Viaje) {
+    const movil = window.matchMedia('(max-width: 700px)').matches;
+    const ventana = movil ? window.open('', '_blank') : null;      // se abre ya para que el navegador no la bloquee
+    try {
+      const blob = await this.api.archivo(`/reportes/manifiesto/${v._id}`);
+      const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      if (ventana) { ventana.location.href = url; return; }
+      this.cerrarPdf();
+      this.pdfVisto.set({ titulo: `Manifiesto ${v.manifiesto.numero}`, url, seguro: this.sanitizer.bypassSecurityTrustResourceUrl(url) });
+    } catch (e) { ventana?.close(); this.avisos.error(e); }
+  }
+  cerrarPdf() {
+    const p = this.pdfVisto();
+    if (p) URL.revokeObjectURL(p.url);
+    this.pdfVisto.set(null);
   }
 
   abrirCumplido(v: Viaje) {

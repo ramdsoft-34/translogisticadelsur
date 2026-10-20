@@ -278,8 +278,12 @@ test('RNDC: tercero se envía una vez y no se reenvía sin cambios', async () =>
 test('RNDC: contraseña incorrecta queda como rechazo del RNDC', async () => {
   const v = await s.reportero.post('/api/viajes', { fecha: '2026-10-11', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
   s.viaje2 = v.body._id;
-  const r = await s.manif.post(`/api/rndc/viajes/${s.viaje2}/despachar`, { clave: 'clave-incorrecta' });
-  assert.equal(r.body.remesa.estado, 'rechazado');
+  // Con la contraseña mal, la consulta del número al RNDC falla antes de enviar
+  const sinClave = await s.manif.post(`/api/rndc/viajes/${s.viaje2}/despachar`, { clave: 'clave-incorrecta' });
+  assert.equal(sinClave.status, 400);
+  assert.match(sinClave.body.error, /no aceptó el usuario o la contraseña/);
+  const r = await s.manif.post(`/api/rndc/viajes/${s.viaje2}/despachar`, { clave: 'rechaza-registros' });
+  assert.equal(r.body.remesa.estado, 'rechazado', JSON.stringify(r.body));
   assert.match(r.body.remesa.mensaje, /no válidos/);
   // El reintento usa el mismo consecutivo (la remesa rechazada no existe en el RNDC)
   const r2 = await s.manif.post(`/api/rndc/viajes/${s.viaje2}/despachar`, { clave: CLAVE_RNDC });
@@ -292,7 +296,7 @@ test('Manifiestos RNDC: revisar, corregir tras un rechazo y reenviar', async () 
   s.viaje3 = v.body._id;
   // Solo quien opera el RNDC corrige los datos de envío
   assert.equal((await s.reportero.put(`/api/rndc/viajes/${s.viaje3}/datos`, { pesoKg: 1 })).status, 403);
-  const malo = await s.manif.post(`/api/rndc/viajes/${s.viaje3}/despachar`, { clave: 'clave-incorrecta' });
+  const malo = await s.manif.post(`/api/rndc/viajes/${s.viaje3}/despachar`, { clave: 'rechaza-registros' });
   assert.equal(malo.body.remesa.estado, 'rechazado');
   const prev = (await s.manif.get(`/api/rndc/viajes/${s.viaje3}/vista-previa`)).body;
   assert.match(prev.ultimoError.mensaje, /no válidos/, 'se muestra la respuesta real del RNDC');
@@ -603,23 +607,31 @@ test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazab
   delete process.env.CORREO_TRANSPORTE;
 });
 
-test('RNDC: al bajar el consecutivo no se repiten números ya expedidos', async () => {
+test('RNDC: la numeración sale del RNDC y salta los números ya radicados', async () => {
   const usado = (await s.manif.get(`/api/viajes/${s.viaje}`)).body.remesa.numero;     // R500
   const r1 = await s.adminA.put('/api/rndc/config', { consecutivoRemesa: usado });
   assert.equal(r1.status, 400);
   assert.match(r1.body.error, /ya se usó en el viaje/);
   const actual = (await s.adminA.get('/api/rndc/config')).body.consecutivoRemesa;
-  // Un número libre justo antes del usado: el siguiente despacho debe saltar R500
+  // La numeración interna no manda: aunque se baje a R499, el número sale del RNDC
   assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R499' })).status, 200);
-  const a = await s.reportero.post('/api/viajes', { fecha: '2026-11-06', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
-  const b = await s.reportero.post('/api/viajes', { fecha: '2026-11-06', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const nuevo = () => s.reportero.post('/api/viajes', { fecha: '2026-11-06', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const a = await nuevo();
   const ra = (await s.manif.post(`/api/rndc/viajes/${a.body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  const ultimoRndc = Math.max(...[...sim.estado.remesas.values()].filter(x => x.CONSECUTIVOREMESA !== ra.remesa.numero)
+    .map(x => Number(String(x.CONSECUTIVOREMESA).match(/^R(\d+)$/)?.[1] || 0)));
+  assert.equal(ra.remesa.numero, `R${ultimoRndc + 1}`, 'el siguiente al último radicado en el RNDC');
+  assert.equal(ra.remesa.estado, 'aceptado', JSON.stringify(ra));
+  // Números radicados por fuera de la plataforma (portal del Ministerio): se saltan sin preguntar
+  const n = Number(ra.remesa.numero.slice(1));
+  for (const x of [n + 1, n + 2]) sim.estado.remesas.set(`9001112221|R${x}`, { NUMNITEMPRESATRANSPORTE: '9001112221', CONSECUTIVOREMESA: `R${x}` });
+  const b = await nuevo();
   const rb = (await s.manif.post(`/api/rndc/viajes/${b.body._id}/despachar`, { clave: CLAVE_RNDC })).body;
-  assert.equal(ra.remesa.numero, 'R499');
-  assert.notEqual(rb.remesa.numero, usado, 'salta el número ya expedido');
-  assert.equal(rb.remesa.estado, 'aceptado', JSON.stringify(rb));
+  assert.equal(rb.remesa.numero, `R${n + 3}`, JSON.stringify(rb.remesa));
+  assert.notEqual(rb.remesa.numero, usado);
+  assert.equal(rb.manifiesto.estado, 'aceptado', JSON.stringify(rb));
   // Se restablece la numeración que traían las demás pruebas
-  await s.adminA.put('/api/rndc/config', { consecutivoRemesa: `R${Math.max(Number(actual.slice(1)), Number(rb.remesa.numero.slice(1)) + 1)}` });
+  await s.adminA.put('/api/rndc/config', { consecutivoRemesa: `R${Math.max(Number(actual.slice(1)), n + 4)}` });
 });
 
 test('RNDC: verificación previa contra el RNDC y consecutivos', async () => {

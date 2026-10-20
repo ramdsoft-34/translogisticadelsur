@@ -2,7 +2,7 @@
 // cumplir, anular, registrar maestros y consultar. Cada envío queda en
 // TransaccionRndc. La clave del usuario web service se recibe en cada
 // operación y nunca se guarda.
-import { Empresa, Viaje, Vehiculo, Tercero, Municipio, TransaccionRndc, Contador, siguiente, pob } from '../../models/index.js';
+import { Empresa, Viaje, Vehiculo, Tercero, Municipio, TransaccionRndc, Contador, proximo, pob } from '../../models/index.js';
 import { buscadorMunicipios } from '../importacion/excel.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { enviar, registrarTransaccion } from './cliente.js';
@@ -196,8 +196,8 @@ export async function vistaPrevia(empresaId, viajeId) {
   const { v, vehiculo } = await cargarViaje(empresaId, viajeId);
   const ctx = contextoViaje(empresa, v, vehiculo);
   const manual = { remesa: txt(v.numerosManuales?.remesa), manifiesto: txt(v.numerosManuales?.manifiesto) };
-  const numR = manual.remesa || (v.remesa?.estado === 'anulado' ? numeroReemplazo('remesa', v.remesa.numero) : v.remesa?.numero || `${empresa.rndc?.prefijoRemesa || ''}(siguiente)`);
-  const numM = manual.manifiesto || (v.manifiesto?.estado === 'anulado' ? numeroReemplazo('manifiesto', v.manifiesto.numero) : v.manifiesto?.numero || `${empresa.rndc?.prefijoManifiesto || ''}(siguiente)`);
+  const numR = manual.remesa || (v.remesa?.estado === 'anulado' ? numeroReemplazo('remesa', v.remesa.numero) : v.remesa?.numero || 'el siguiente disponible en el RNDC');
+  const numM = manual.manifiesto || (v.manifiesto?.estado === 'anulado' ? numeroReemplazo('manifiesto', v.manifiesto.numero) : v.manifiesto?.numero || 'el siguiente disponible en el RNDC');
   const remesa = variablesRemesa(empresa, v, ctx, numR);
   const manifiesto = variablesManifiesto(empresa, v, ctx, numM);
   const remolque = v.remolque ? await Vehiculo.findOne({ empresa: empresaId, placa: v.remolque }).lean() : null;
@@ -288,13 +288,94 @@ async function avanzarConsecutivo(empresa, clave, numero) {
   await Contador.updateOne({ empresa: empresa._id, clave, valor: { $lt: Number(m[2]) } }, { $set: { valor: Number(m[2]) } });
 }
 
-// Siguiente consecutivo libre: si la numeración se bajó, salta los números ya usados.
-async function numeroDocumento(empresa, clave, prefijo) {
-  for (let i = 0; i < 5000; i += 1) {
-    const numero = `${prefijo || ''}${await siguiente(empresa._id, clave)}`;
-    if (!(await numeroUsado(empresa._id, clave, numero))) return numero;
+// ── Numeración desde el RNDC ────────────────────────────────────────────────
+// El número de cada remesa y manifiesto nuevo sale del RNDC: se consulta el último radicado de la
+// empresa (listado de los últimos días), se toma el siguiente y se confirma en el RNDC que esté libre;
+// si ya existe se pasa al siguiente. La numeración interna solo es el punto de partida si el RNDC
+// no devuelve el listado. Las asignaciones de una misma empresa se hacen en fila (sin choques).
+const NUMERACION = { remesa: { que: 'remesa', campo: 'consecutivoremesa', filtro: 'CONSECUTIVOREMESA' },
+  manifiesto: { que: 'manifiesto', campo: 'nummanifiestocarga', filtro: 'NUMMANIFIESTOCARGA' } };
+const ultimoConocido = new Map();          // `${empresa}|${clave}` → { numero, vence }
+const filas = new Map();
+const VIGENCIA_ULTIMO_MS = 5 * 60 * 1000;
+const sinDatosRndc = (m) => /no (se )?encontr|no exist|no hay|sin registros|no tiene|no se hallaron|0 registros/i.test(m || '');
+const errorDeClave = (m) => /usuario|contrase|clave|password/i.test(m || '');
+const prefijoDe = (empresa, clave) => (clave === 'remesa' ? empresa.rndc?.prefijoRemesa : empresa.rndc?.prefijoManifiesto) || '';
+
+function enFila(k, fn) {
+  const previo = filas.get(k) || Promise.resolve();
+  const p = previo.then(fn, fn);
+  filas.set(k, p.catch(() => {}));
+  return p;
+}
+
+// ¿Ya existe ese número en el RNDC para la empresa?
+export async function existeEnRndc(empresa, claveRndc, usuarioId, clave, numero) {
+  const n = NUMERACION[clave];
+  const q = await consultar(empresa._id, claveRndc, usuarioId, { que: n.que, filtros: { [n.filtro]: numero } });
+  if (!q.ok && errorDeClave(q.mensaje)) throw new ErrorHttp(400, `El RNDC no aceptó el usuario o la contraseña: ${q.mensaje}`);
+  if (!q.ok && !sinDatosRndc(q.mensaje)) throw new ErrorHttp(502, `No se pudo verificar en el RNDC si el número ${numero} está libre: ${q.mensaje}`);
+  return (q.documentos || []).length > 0;
+}
+
+// Último número de la numeración de la empresa radicado en el RNDC (últimos 30 días)
+async function ultimoEnRndc(empresa, claveRndc, usuarioId, clave) {
+  const n = NUMERACION[clave];
+  const prefijo = prefijoDe(empresa, clave);
+  const hoy = hoyColombia();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const r = await consultar(empresa._id, claveRndc, usuarioId, { que: n.que, desde: iso(new Date(hoy.getTime() - 30 * 86400000)), hasta: iso(new Date(hoy.getTime() + 86400000)) });
+  if (!r.ok && errorDeClave(r.mensaje)) throw new ErrorHttp(400, `El RNDC no aceptó el usuario o la contraseña: ${r.mensaje}`);
+  const patron = new RegExp(`^${prefijo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)$`);
+  const numeros = (r.documentos || []).map(d => txt(d[n.campo]).match(patron)?.[1]).filter(Boolean).map(Number);
+  return numeros.length ? Math.max(...numeros) : null;
+}
+
+// Siguiente número disponible en el RNDC (consultado y confirmado libre antes de usarlo)
+export function numeroDesdeRndc(empresa, claveRndc, usuarioId, clave) {
+  const k = `${empresa._id}|${clave}`;
+  return enFila(k, async () => {
+    const prefijo = prefijoDe(empresa, clave);
+    let c = ultimoConocido.get(k);
+    if (!c || c.vence < Date.now()) {
+      c = { numero: await ultimoEnRndc(empresa, claveRndc, usuarioId, clave), vence: Date.now() + VIGENCIA_ULTIMO_MS };
+      ultimoConocido.set(k, c);
+    }
+    let n = c.numero !== null ? c.numero + 1 : await proximo(empresa._id, clave);
+    for (let i = 0; i < 60; i += 1, n += 1) {
+      const numero = `${prefijo}${n}`;
+      if (await numeroUsado(empresa._id, clave, numero)) continue;            // otro viaje de la plataforma ya lo tiene
+      if (await existeEnRndc(empresa, claveRndc, usuarioId, clave, numero)) continue;
+      c.numero = n;                                                             // reservado para los siguientes envíos
+      await Contador.updateOne({ empresa: empresa._id, clave }, { $max: { valor: n } }, { upsert: true });
+      return numero;
+    }
+    throw new ErrorHttp(409, `No se encontró en el RNDC un número de ${clave} libre después de ${prefijo}${n - 60}`);
+  });
+}
+// Para las pruebas: olvidar el último número consultado
+export function olvidarNumeracion() { ultimoConocido.clear(); }
+
+// Número con el que sale un documento, siempre confirmado libre en el RNDC:
+// - escrito a mano: se usa si está libre (si no, se avisa);
+// - reemplazo de uno anulado: el mismo número con «A» o «.» (y otra marca si ya existe);
+// - reintento de uno rechazado: el mismo número si sigue libre; si no (p. ej. DUPLICADO), el siguiente del RNDC;
+// - nuevo: el siguiente disponible en el RNDC.
+async function numeroParaEnviar(empresa, claveRndc, usuarioId, clave, v) {
+  const doc = v[clave] || {};
+  const manual = txt(v.numerosManuales?.[clave]);
+  if (manual) {
+    if (await existeEnRndc(empresa, claveRndc, usuarioId, clave, manual)) throw new ErrorHttp(409, `El número ${manual} ya está radicado en el RNDC: escriba otro o deje el campo vacío para usar el siguiente disponible`);
+    return manual;
   }
-  throw new ErrorHttp(409, `No se encontró un consecutivo de ${clave} libre; revise la numeración en Configuración`);
+  if (doc.estado === 'anulado') {
+    let numero = await numeroDeReemplazo(empresa._id, clave, doc.numero);
+    for (let i = 0; i < 10 && (await existeEnRndc(empresa, claveRndc, usuarioId, clave, numero)); i += 1) numero = numeroReemplazo(clave, numero);
+    return numero;
+  }
+  if (doc.numero && doc.estado === 'rechazado' && !/DUPLICADO|REM030|ya fu[eé] radicad/i.test(doc.mensaje || '')
+    && !(await existeEnRndc(empresa, claveRndc, usuarioId, clave, doc.numero))) return doc.numero;
+  return numeroDesdeRndc(empresa, claveRndc, usuarioId, clave);
 }
 
 // Expide la remesa (proceso 3) y luego el manifiesto (proceso 4) con esa remesa.
@@ -321,9 +402,7 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
       if (destinoIgualOrigen(ctx)) problemas.push(PROBLEMA_DESTINO);
       if (!(Number(v.pesoKg) > 0)) problemas.push(PROBLEMA_CANTIDAD);
       if (problemas.length) throw new ErrorHttp(422, 'Faltan datos para la remesa', problemas);
-      if (txt(v.numerosManuales?.remesa)) numR = txt(v.numerosManuales.remesa);
-      else if (v.remesa?.estado === 'anulado') numR = await numeroDeReemplazo(empresa._id, 'remesa', v.remesa.numero);
-      else if (!numR) numR = await numeroDocumento(empresa, 'remesa', empresa.rndc?.prefijoRemesa);
+      numR = await numeroParaEnviar(empresa, clave, usuarioId, 'remesa', v);
       const vars = variablesRemesa(empresa, v, ctx, numR);
       const res = await registrar(empresa, cred, 3, vars, meta);
       const doc = { numero: numR, radicado: res.radicado, fecha: new Date(), estado: res.ok ? 'aceptado' : 'rechazado', mensaje: res.mensaje, qr: '' };
@@ -341,10 +420,7 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
       v.anticipo = val.anticipo;
       resultado.ajustes = [`Anticipo ajustado de ${val.anticipoRegistrado} a ${val.anticipo} (neto a pagar)`];
     }
-    let numM = v.manifiesto?.numero;
-    if (txt(v.numerosManuales?.manifiesto)) numM = txt(v.numerosManuales.manifiesto);
-    else if (v.manifiesto?.estado === 'anulado') numM = await numeroDeReemplazo(empresa._id, 'manifiesto', v.manifiesto.numero);
-    else if (!numM) numM = await numeroDocumento(empresa, 'manifiesto', empresa.rndc?.prefijoManifiesto);
+    const numM = await numeroParaEnviar(empresa, clave, usuarioId, 'manifiesto', v);
     const vars = variablesManifiesto(empresa, v, ctx, numM);
     const problemas = validarVariables(4, vars);
     if (problemas.length) {

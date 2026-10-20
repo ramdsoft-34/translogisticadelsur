@@ -65,9 +65,9 @@ type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
                   <input id="sm" name="sm" maxlength="15" [ngModel]="c.consecutivoManifiesto" (ngModelChange)="c.consecutivoManifiesto = limpiarConsecutivo($event)"
                     placeholder="M10063903" style="text-transform:uppercase" autocomplete="off" />
                   <small>Solo letras y números; debe terminar en número.</small></div>
-                <div class="ancho mensaje alerta">Los próximos consecutivos deben continuar después del <strong>último número expedido en el RNDC</strong>,
-                  incluidos los que se hicieron con la plantilla de Excel o en el portal del Ministerio. Si se repite un número, el RNDC lo rechaza.
-                  Se puede corregir hacia atrás si el número no se ha usado; al expedir, la plataforma salta los números que ya tengan documento.</div>
+                <div class="ancho mensaje info">Los números de remesa y manifiesto se toman <strong>del RNDC</strong> automáticamente: antes de cada envío se consulta
+                  el último radicado (incluidos los del portal del Ministerio o la plantilla de Excel), se toma el siguiente y se confirma que esté libre.
+                  Estos campos solo indican el prefijo (por ejemplo «R» o «M») y el punto de partida si el RNDC no devuelve el listado.</div>
                 <div class="ancho verificar-consec">
                   <button type="button" (click)="verificarConsecutivos()" [disabled]="verificandoConsec()" title="Consulta en el RNDC las remesas y manifiestos radicados en los últimos 20 días">
                     <app-icono nombre="enviar" [tam]="15" />{{ verificandoConsec() ? 'Consultando el RNDC…' : 'Verificar consecutivos con el RNDC' }}</button>
