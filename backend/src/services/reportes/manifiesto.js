@@ -273,7 +273,8 @@ export async function manifiestoPdf(d) {
   doc.image(LOGO_TRANSPORTE, im.transporte[0], im.transporte[1], { width: im.transporte[2], height: im.transporte[3] });
   doc.image(LOGO_SUPERTRANSPORTE, im.supertransporte[0], im.supertransporte[1], { width: im.supertransporte[2], height: im.supertransporte[3] });
   if (d.seguro && d.radicado) {
-    const png = await QRCode.toBuffer(textoQR(d), { errorCorrectionLevel: 'L', margin: 0, scale: 6 });
+    // El soporte interno lleva su propio texto de QR (código interno), nunca el del RNDC
+    const png = await QRCode.toBuffer(d.qrTexto || textoQR(d), { errorCorrectionLevel: 'L', margin: 0, scale: 6 });
     doc.image(png, im.qr[0], im.qr[1], { width: im.qr[2], height: im.qr[3] });
   } else {
     campo(doc, { x: im.qr[0] + im.qr[2] / 2, y: im.qr[1] + im.qr[3] / 2, tam: 7, alin: 'centro', ancho: im.qr[2] - 6, lineas: 3, paso: 8 },

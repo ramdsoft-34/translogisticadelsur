@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -13,6 +13,7 @@ import { CargarMas } from '../shared/cargar-mas';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { PlantillasWhatsapp } from '../shared/plantillas-whatsapp';
 import { Confirmar } from '../shared/confirmar';
+import { VisorPdf } from '../shared/visor-pdf';
 
 interface Formulario {
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
@@ -35,7 +36,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
@@ -158,7 +159,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             <app-buscar-tercero etiqueta="Conductor" rol="conductor" [conPlacas]="true" [(valor)]="f.conductor" (elegido)="elegirConductor($event)"
               [deshabilitado]="bloqueado()" placeholder="Nombre, apellido o cédula" />
             <div class="campo"><label for="v-placa">Placa</label>
-              <input id="v-placa" name="placa" list="lista-placas" [(ngModel)]="f.placa" (input)="buscarPlacas(f.placa)" (change)="sugerirPorPlaca()"
+              <input id="v-placa" name="placa" list="lista-placas" [(ngModel)]="f.placa" (input)="buscarPlacas(f.placa)" (change)="sugerirPorPlaca(); revisarDocumentos()"
                 [disabled]="bloqueado()" required autocomplete="off" style="text-transform:uppercase" placeholder="ABC123" />
               <datalist id="lista-placas">@for (x of placas(); track x._id) { <option [value]="x.placa"></option> }</datalist>
               @if (placasConductor().length > 1 && !bloqueado()) {
@@ -170,6 +171,10 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             <div class="campo"><label for="v-peso">Peso (kg)</label><input id="v-peso" type="number" min="0" name="pesoKg" [(ngModel)]="f.pesoKg" [disabled]="bloqueado()" /></div>
             <div class="campo"><label for="v-cant">Cantidad</label><input id="v-cant" type="number" min="0" name="cantidad" [(ngModel)]="f.cantidad" title="Viajes o unidades (tarifa por unidad)" /></div>
           </div>
+          @if (documentos(); as dc) {
+            @if (dc.vencidos.length) { <div class="mensaje error"><strong>No se puede registrar el viaje:</strong><ul>@for (x of dc.vencidos; track x) { <li>{{ x }}</li> }</ul></div> }
+            @if (dc.avisos.length) { <div class="mensaje alerta"><strong>Por vencer:</strong><ul>@for (x of dc.avisos; track x) { <li>{{ x }}</li> }</ul></div> }
+          }
           <p class="nota">Elija primero el conductor: se pone sola la placa de su vehículo habitual o la de su último viaje (si tiene varias, elija una). El titular del manifiesto se toma del vehículo; si no tiene, es el conductor.</p>
         </fieldset>
 
@@ -187,6 +192,9 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       </form>
       <ng-container pie>
         @if (form()._id && !bloqueado() && puedeRegistrar) { <button class="peligro" type="button" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()" style="margin-right:auto">Eliminar</button> }
+        @if (form()._id && form().requiereManifiesto === false && puedeRegistrar) {
+          <button type="button" (click)="soporteInterno()" title="Manifiesto y remesa internos (MC/RC) para viajes que no van al RNDC"><app-icono nombre="ojo" [tam]="15" />Soporte interno</button>
+        }
         @if (!form()._id && puedeRegistrar) {
           <label class="casilla seguir" title="Después de guardar, el formulario queda listo para el siguiente viaje del mismo cliente">
             <input type="checkbox" [checked]="seguirRegistrando()" (change)="alternarSeguir()" />Registrar otro del mismo cliente</label>
@@ -251,6 +259,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       }
       <ng-container pie><button type="button" (click)="waAbierto.set(false)">Cerrar</button></ng-container>
     </app-modal>
+    <app-visor-pdf />
     <app-plantillas-whatsapp [abierto]="plantillasAbierto()" [fecha]="waFecha" (cerrar)="plantillasAbierto.set(false)" (cambiadas)="cargarPlantillas()" />`,
   styles: [`
     .resumen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--gris-2); border: 1px solid var(--gris-2);
@@ -441,8 +450,28 @@ export class Viajes {
     if (!placas.length) return;
     this.form.update(f => ({ ...f, placa: placas[0], remolque: f.remolque || t.remolque || '' }));
     setTimeout(() => document.getElementById('v-peso')?.focus(), 30);
+    this.revisarDocumentos();
   }
-  usarPlaca(p: string) { this.form.update(f => ({ ...f, placa: p })); }
+
+  // Licencia del conductor, SOAT y tecnomecánica: vencidos no dejan registrar; por vencer, aviso
+  readonly documentos = signal<{ vencidos: string[]; avisos: string[] } | null>(null);
+  async revisarDocumentos() {
+    const f = this.form();
+    if (!f.conductor && !f.placa) { this.documentos.set(null); return; }
+    try { this.documentos.set(await this.api.get('/gestion/documentos', { conductor: f.conductor, placa: String(f.placa || '').toUpperCase() })); }
+    catch { this.documentos.set(null); }
+  }
+
+  // Soporte interno MC/RC del viaje (se numera la primera vez) y se muestra en pantalla
+  readonly visor = viewChild.required(VisorPdf);
+  async soporteInterno() {
+    const id = this.form()._id;
+    try {
+      const s = await this.api.post<any>(`/gestion/soportes/viajes/${id}`, {});
+      await this.visor().ver(`/gestion/soportes/viajes/${id}/pdf`, `Soporte interno ${s.mc} / ${s.rc}`);
+    } catch (e) { this.avisos.error(e); }
+  }
+  usarPlaca(p: string) { this.form.update(f => ({ ...f, placa: p })); this.revisarDocumentos(); }
 
   async sugerirPorPlaca() {
     const placa = this.form().placa.trim().toUpperCase();
@@ -482,6 +511,9 @@ export class Viajes {
       else {
         const v = await this.api.post<Viaje>('/viajes', cuerpo);
         this.avisos.ok(`Viaje N° ${v.numero} registrado${requiere ? '' : ' (sin manifiesto)'}`);
+        const avisosDoc: string[] = (v as any).avisosDocumentos || [];
+        if (avisosDoc.length) this.avisos.mostrar(`Por vencer: ${avisosDoc.join('; ')}`, 'info');
+        this.documentos.set(null);
         if (this.seguirRegistrando()) {
           // Listo para el siguiente: mismo cliente, destino, fecha y valores; vehículo y conductor nuevos
           this.registradosTanda.update(l => [...l, { numero: v.numero, placa: v.placa, sinManifiesto: !requiere }]);

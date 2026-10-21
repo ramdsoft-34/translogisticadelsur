@@ -819,3 +819,107 @@ test('Auditoría registra acciones globales y de empresa por separado', async ()
   assert.ok(deA.body.some(a => a.accion === 'rndc_despachar'));
   assert.ok(deA.body.every(a => String(a.empresa) === String(s.empresaA)));
 });
+
+// ═══════════ Módulos de gestión de la plantilla ═══════════
+test('Gestión: documentos vencidos no dejan registrar el viaje', async () => {
+  const veh = await s.manif.post('/api/maestros/vehiculos', { placa: 'VEN111', configuracion: '50', configuracionNombre: '2', marca: '1', modelo: 2015, pesoVacio: 4000,
+    soat: { numero: 'S9', vence: '2020-01-01', aseguradoraNit: '8600284155' }, propietario: { tipoId: 'C', numId: '12345678' }, tenedor: { tipoId: 'C', numId: '12345678' } });
+  assert.equal(veh.status, 201, JSON.stringify(veh.body));
+  const doc = (await s.manif.get(`/api/gestion/documentos?placa=VEN111&conductor=${s.conductor}`)).body;
+  assert.ok(doc.vencidos.some(x => /SOAT de VEN111/.test(x)), JSON.stringify(doc));
+  const v = await s.manif.post('/api/viajes', { fecha: '2026-11-12', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'VEN111', conductor: s.conductor });
+  assert.equal(v.status, 422);
+  assert.ok(v.body.detalles.some(x => /SOAT/.test(x)));
+});
+
+test('Gestión: préstamo, liquidación del conductor con descuento y contabilidad', async () => {
+  // Préstamo de la plantilla: 279.980 al 0,1 % mensual en 1 cuota quincenal = 280.120
+  const sim1 = (await s.conta.post('/api/gestion/prestamos/simular', { capital: 279980, tasaMensual: 0.1, nCuotas: 1, primeraCuota: '2026-11-15' })).body;
+  assert.equal(sim1.valorCuota, 280120);
+  const p = await s.conta.post('/api/gestion/prestamos', { conductor: s.conductor, placa: 'ABC123', concepto: 'Faltante de entregas', capital: 279980, tasaMensual: 0.1, nCuotas: 1, primeraCuota: '2026-11-15' });
+  assert.equal(p.status, 201, JSON.stringify(p.body));
+  assert.equal(p.body.numero, 'PR-0001');
+  assert.equal(p.body.cuotas[0].interes, 140);
+  // Plan quincenal: 15 y último día del mes
+  const p3 = (await s.conta.post('/api/gestion/prestamos/simular', { capital: 300000, tasaMensual: 2, nCuotas: 3, primeraCuota: '2026-11-15' })).body;
+  assert.deepEqual(p3.cuotas.map(c => new Date(c.fecha).toISOString().slice(0, 10)), ['2026-11-15', '2026-11-30', '2026-12-15']);
+  assert.equal(p3.cuotas.reduce((a, c) => a + c.capital, 0), 300000);
+  // Viajes del conductor y su liquidación
+  const v1 = await s.manif.post('/api/viajes', { fecha: '2026-11-12', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor, flete: 1000000, anticipo: 300000 });
+  assert.equal(v1.status, 201, JSON.stringify(v1.body));
+  const c = (await s.conta.post('/api/gestion/liq-conductores/calcular', { desde: '2026-11-12', hasta: '2026-11-30', placa: 'ABC123' })).body;
+  const linea = c.lineas.find(l => String(l.viaje) === String(v1.body._id));
+  assert.deepEqual([linea.flete, linea.anticipo, linea.retefuente, linea.fopat, linea.saldo], [1000000, 300000, 10000, 0, 690000]);
+  assert.equal(c.prestamos['12345678'].total, 280120);
+  const lq = await s.conta.post('/api/gestion/liq-conductores', { viajes: [v1.body._id], desde: '2026-11-12', hasta: '2026-11-30' });
+  assert.equal(lq.status, 201, JSON.stringify(lq.body));
+  const L = lq.body.liquidacion;
+  assert.deepEqual([L.descuentoPrestamos, L.interesPrestamos, L.neto], [280120, 140, 690000 - 280120]);
+  assert.equal((await s.conta.get('/api/gestion/prestamos')).body.find(x => x.numero === 'PR-0001').estado, 'PAGADO');
+  // El viaje liquidado ya no se modifica
+  assert.equal((await s.manif.put(`/api/viajes/${v1.body._id}`, { observaciones: 'x' })).status, 409);
+  const pdf = await s.conta.get(`/api/gestion/liq-conductores/${L.numero}/pdf`);
+  assert.equal(pdf.headers['content-type'], 'application/pdf');
+  // Factura al cliente, cobro y pago al conductor
+  const f = await s.conta.post('/api/gestion/contabilidad/facturas', { cliente: s.cliente, desde: '2026-11-12', hasta: '2026-11-12', retefuentePct: 1 });
+  assert.equal(f.status, 201, JSON.stringify(f.body));
+  assert.equal(f.body.neto, f.body.total - f.body.retefuente);
+  assert.equal((await s.conta.post('/api/gestion/contabilidad/cobros', { factura: f.body.numero })).status, 200);
+  assert.equal((await s.conta.post('/api/gestion/contabilidad/pagos', { liquidacion: L.numero })).status, 200);
+  assert.equal((await s.conta.get('/api/gestion/contabilidad/informes/cxp')).body.filas.length, 0, 'liquidación pagada');
+  // Partida doble: activos = pasivos + patrimonio + resultado
+  const b = (await s.conta.get('/api/gestion/contabilidad/informes/balance?hasta=2026-12-31')).body.datos;
+  assert.equal(b.totalActivos, b.totalPasivos + b.totalPatrimonio + b.resultadoEjercicio);
+  const diario = (await s.conta.get('/api/gestion/contabilidad/asientos?desde=2026-01-01&hasta=2026-12-31')).body;
+  for (const a of diario) assert.equal(a.lineas.reduce((x, l) => x + l.debito, 0), a.lineas.reduce((x, l) => x + l.credito, 0), `asiento ${a.numero} cuadra`);
+  // Cuenta inexistente: se rechaza
+  assert.equal((await s.conta.post('/api/gestion/contabilidad/asientos', { fecha: '2026-11-20', debito: '9999', credito: '1110', valor: 10, concepto: 'Prueba' })).status, 400);
+  assert.equal((await s.manif.post('/api/gestion/prestamos', {})).status, 403);
+});
+
+test('Gestión: relaciones, soporte interno MC/RC y remesas Dulces', async () => {
+  const pago = (await s.conta.get('/api/gestion/relaciones/pago-conductores?desde=2026-11-01&hasta=2026-11-30')).body;
+  assert.ok(pago.filas.some(x => x.cedula === '12345678'));
+  assert.equal(pago.totales.total, pago.totales.flete + pago.totales.auxiliar);
+  const ve = (await s.conta.get(`/api/gestion/relaciones/viajes-empresa?cliente=${s.cliente}&desde=2026-10-01&hasta=2026-11-30`)).body;
+  const orden = ve.filas.map(x => `${x.placa}|${new Date(x.fecha).toISOString()}`);
+  assert.deepEqual(orden, [...orden].sort(), 'por placa y fecha');
+  assert.equal((await s.conta.get('/api/gestion/relaciones/pago-conductores?formato=xlsx')).status, 200);
+  // Soporte interno de un viaje que no va al RNDC
+  const v = await s.manif.post('/api/viajes', { fecha: '2026-11-13', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Pasto urbano', placa: 'ABC123', conductor: s.conductor, requiereManifiesto: false });
+  const si = await s.manif.post(`/api/gestion/soportes/viajes/${v.body._id}`);
+  assert.equal(si.status, 200, JSON.stringify(si.body));
+  assert.match(si.body.mc, /^MC1\d{5}$/);
+  assert.equal(si.body.rc, si.body.mc.replace('MC', 'RC'));
+  assert.match(si.body.codigo, /^[0-9A-F]{16}$/);
+  const otra = (await s.manif.post(`/api/gestion/soportes/viajes/${v.body._id}`)).body;
+  assert.equal(otra.mc, si.body.mc, 'el número no cambia');
+  const pdf = await s.manif.get(`/api/gestion/soportes/viajes/${v.body._id}/pdf`);
+  assert.equal(pdf.headers['content-type'], 'application/pdf');
+  // Remesas Dulces: importar la base y generar las remesas
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('BASE');
+  ws.addRow(['VPL', 'FECHA', 'ZONA', 'PESO', 'MANIFIESTO', 'CONDUCTOR', 'PLACA', 'REMESA', 'COSTO']);
+  ws.addRow([5501, new Date('2026-11-10'), 'Ipiales', 1200, 'M1', 'PEDRO PEREZ', 'ABC123', 'RD-1', 450000]);
+  ws.addRow([5502, new Date('2026-11-10'), 'Tuquerres', 900, 'M2', 'PEDRO PEREZ GOMEZ', 'ABC123', 'RD-2', 380000]);
+  const token = await login('manif@a.test');
+  const imp = await api().post('/api/gestion/remesas-dulces/importar').set('Authorization', `Bearer ${token}`).set('Content-Type', 'application/octet-stream').send(Buffer.from(await wb.xlsx.writeBuffer()));
+  assert.equal(imp.status, 200, JSON.stringify(imp.body));
+  assert.equal(imp.body.nuevos, 2);
+  const rp = await s.manif.post('/api/gestion/remesas-dulces/pdf', { vpls: ['5501', '5502'] });
+  assert.equal(rp.headers['content-type'], 'application/pdf');
+  assert.equal((await s.manif.get('/api/gestion/remesas-dulces?pendientes=1')).body.length, 0, 'quedan marcadas como impresas');
+});
+
+test('Gestión: cierre de mes bloquea registrar y modificar ese mes', async () => {
+  assert.equal((await s.conta.post('/api/gestion/cierres', { mes: '2026-09' })).status, 403, 'solo el administrador cierra');
+  const r1 = await s.adminA.post('/api/gestion/cierres', { mes: '2026-09' });
+  assert.equal(r1.status, 201, JSON.stringify(r1.body));
+  const v = await s.manif.post('/api/viajes', { fecha: '2026-09-15', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  assert.equal(v.status, 409);
+  assert.match(v.body.error, /cerrado/);
+  assert.equal((await s.conta.post('/api/gestion/contabilidad/asientos', { fecha: '2026-09-20', debito: '5195', credito: '1110', valor: 1000, concepto: 'Prueba' })).status, 409);
+  assert.equal((await s.adminA.post('/api/gestion/cierres', { mes: '2099-01' })).status, 409, 'no se cierra un mes futuro');
+  assert.equal((await s.adminA.post('/api/gestion/cierres/2026-09/reabrir')).status, 200);
+  assert.equal((await s.manif.post('/api/viajes', { fecha: '2026-09-15', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor })).status, 201);
+});

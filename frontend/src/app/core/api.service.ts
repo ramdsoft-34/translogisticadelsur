@@ -43,6 +43,10 @@ export class Api {
     return firstValueFrom(this.http.get(this.base + url, { params: this.params(params), responseType: 'blob' }));
   }
 
+  async archivoPost(url: string, cuerpo: unknown): Promise<Blob> {
+    return firstValueFrom(this.http.post(this.base + url, cuerpo, { responseType: 'blob' }));
+  }
+
   // Descarga un archivo (PDF/Excel) respetando el nombre que envía el servidor.
   async descargar(url: string, params?: Params, nombrePorDefecto = 'archivo') {
     const r = await firstValueFrom(this.http.get(this.base + url, { params: this.params(params), observe: 'response', responseType: 'blob' }));

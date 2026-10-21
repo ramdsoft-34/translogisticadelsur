@@ -12,6 +12,7 @@ import maestros from './routes/maestros.js';
 import viajes from './routes/viajes.js';
 import rndc from './routes/rndc.js';
 import liquidaciones from './routes/liquidaciones.js';
+import gestion from './routes/gestion.js';
 import reportes from './routes/reportes.js';
 import importaciones from './routes/importaciones.js';
 
@@ -38,6 +39,7 @@ export function crearApp() {
   app.use('/api/rndc', rndc);
   app.use('/api/correo', correo);
   app.use('/api/liquidaciones', liquidaciones);
+  app.use('/api/gestion', gestion);
   app.use('/api/reportes', reportes);
   app.use('/api/importaciones', importaciones);
 

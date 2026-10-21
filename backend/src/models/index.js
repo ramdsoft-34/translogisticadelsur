@@ -54,6 +54,8 @@ const empresaSchema = new Schema({
     extras: { type: [{ proceso: Number, variable: String, valor: String, _id: false }], default: [] },
   },
   // Cuenta de correo para enviar documentos (la contraseña se guarda cifrada con AES-256-GCM)
+  // Meses cerrados (aaaa-mm): no se registran ni modifican viajes, liquidaciones ni asientos de esos meses
+  cierres: { type: [{ mes: String, fecha: Date, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario' }, resumen: Object, _id: false }], default: [] },
   smtp: {
     activo: { type: Boolean, default: false },
     host: str(), puerto: { type: Number, default: 587 },
@@ -227,6 +229,9 @@ const viajeSchema = new Schema({
   cumplidoManifiesto: { type: documentoRndc, default: nuevoDoc },
   liquidacion: { type: Schema.Types.ObjectId, ref: 'Liquidacion', default: null },
   manifiestoReemplazado: str(),
+  // Pago al conductor (liquidación del conductor) y soporte interno MC/RC para viajes sin RNDC
+  liquidacionConductor: { type: Schema.Types.ObjectId, ref: 'LiquidacionConductor', default: null },
+  soporteInterno: { mc: str(), rc: str(), codigo: str(), fecha },
   // Números escritos a mano para el próximo envío (p. ej. tras un DUPLICADO del RNDC)
   numerosManuales: { remesa: str({ uppercase: true }), manifiesto: str({ uppercase: true }) },
   // No todos los viajes generan remesa y manifiesto (p. ej. carga propia o urbana).
@@ -344,6 +349,91 @@ for (const op of ['updateOne', 'updateMany', 'findOneAndUpdate', 'replaceOne', '
 }
 auditoriaSchema.pre('save', function () { if (!this.isNew) throw new Error('La auditoría no se puede modificar'); });
 
+// ── Préstamos y descuentos a conductores (averías, faltantes…) ─────────────
+// Plan de cuotas quincenales (día 15 y último día del mes) con interés mensual y cuota fija.
+const cuotaSchema = new Schema({
+  n: Number, fecha: Date, valor: Number, capital: Number, interes: Number, saldoCapital: Number,
+  abonado: { type: Number, default: 0 }, fechaAbono: fecha, liquidacion: str(),
+}, { _id: false });
+const prestamoSchema = new Schema({
+  numero: { type: String, required: true },            // PR-0001
+  fecha: { type: Date, required: true },
+  conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },
+  cedula: str(), conductorNombre: str(), placa: str({ uppercase: true }),
+  concepto: str(), capital: { type: Number, required: true, min: 0 },
+  tasaMensual: { type: Number, default: 0, min: 0 },  // % mensual
+  nCuotas: { type: Number, required: true, min: 1 }, valorCuota: Number, primeraCuota: Date,
+  estado: { type: String, enum: ['VIGENTE', 'PAGADO', 'ANULADO'], default: 'VIGENTE' },
+  observacion: str(),
+  cuotas: { type: [cuotaSchema], default: [] },
+  abonos: { type: [{ fecha: Date, valor: Number, interes: Number, origen: String, liquidacion: String, nota: String, _id: false }], default: [] },
+  creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+prestamoSchema.plugin(tenantPlugin);
+prestamoSchema.index({ empresa: 1, numero: 1 }, { unique: true });
+
+// ── Liquidación del conductor (pago por placa y periodo) ────────────────────
+const liquidacionConductorSchema = new Schema({
+  numero: { type: String, required: true },             // LC-0001
+  fecha: { type: Date, required: true },
+  placa: str({ uppercase: true }), conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },
+  conductorNombre: str(), cedula: str(),
+  desde: Date, hasta: Date,
+  viajes: [{ type: Schema.Types.ObjectId, ref: 'Viaje' }],
+  lineas: { type: Array, default: [] },
+  flete: Number, anticipo: Number, retefuente: Number, fopat: Number, descuentoPrestamos: Number, interesPrestamos: Number, neto: Number,
+  empresas: str(),
+  pagado: { type: Number, default: 0 },
+  estado: { type: String, enum: ['VIGENTE', 'ANULADA'], default: 'VIGENTE' },
+  creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+liquidacionConductorSchema.plugin(tenantPlugin);
+liquidacionConductorSchema.index({ empresa: 1, numero: 1 }, { unique: true });
+
+// ── Contabilidad simplificada (apoyo administrativo; un contador debe revisarla) ──
+const cuentaSchema = new Schema({
+  codigo: str({ required: true }), nombre: str({ required: true }),
+  tipo: { type: String, enum: ['ACTIVO', 'PASIVO', 'PATRIMONIO', 'INGRESO', 'GASTO', 'COSTO'], required: true },
+  naturaleza: { type: String, enum: ['D', 'C'], required: true },
+}, { timestamps: true });
+cuentaSchema.plugin(tenantPlugin);
+cuentaSchema.index({ empresa: 1, codigo: 1 }, { unique: true });
+
+const asientoSchema = new Schema({
+  numero: { type: String, required: true },             // A-00001
+  fecha: { type: Date, required: true },
+  documento: str(), concepto: str(), origen: str(),     // FAC, COB, PAG, GAS, MAN, LIQ, PRE, ABO
+  terceroDoc: str(), tercero: str(), centroCosto: str(),
+  lineas: { type: [{ cuenta: String, nombre: String, debito: Number, credito: Number, _id: false }], default: [] },
+  estado: { type: String, enum: ['ACTIVO', 'ANULADO'], default: 'ACTIVO' },
+  usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+asientoSchema.plugin(tenantPlugin);
+asientoSchema.index({ empresa: 1, numero: 1 }, { unique: true });
+asientoSchema.index({ empresa: 1, fecha: 1 });
+
+const facturaContSchema = new Schema({
+  numero: { type: String, required: true },             // FV-0001
+  fecha: { type: Date, required: true },
+  cliente: { type: Schema.Types.ObjectId, ref: 'Cliente', required: true },
+  desde: Date, hasta: Date, viajes: { type: Number, default: 0 },
+  total: Number, retefuentePct: Number, retefuente: Number, icaPct: Number, ica: Number, neto: Number,
+  cobrado: { type: Number, default: 0 },
+  estado: { type: String, enum: ['PENDIENTE', 'COBRADA', 'ANULADA'], default: 'PENDIENTE' },
+  asiento: str(),
+}, { timestamps: true });
+facturaContSchema.plugin(tenantPlugin);
+facturaContSchema.index({ empresa: 1, numero: 1 }, { unique: true });
+
+// ── Remesas de Dulces & Dulces (base de viajes VPL y su remesa impresa) ────
+const remesaDulcesSchema = new Schema({
+  vpl: str({ required: true }), fecha, zona: str(), peso: Number, manifiesto: str(),
+  conductor: str(), cedula: str(), placa: str({ uppercase: true }), remesa: str(), costo: Number,
+  impreso: fecha,
+}, { timestamps: true });
+remesaDulcesSchema.plugin(tenantPlugin);
+remesaDulcesSchema.index({ empresa: 1, vpl: 1 }, { unique: true });
+
 export const Empresa = modelo('Empresa', empresaSchema);
 export const Usuario = modelo('Usuario', usuarioSchema);
 export const Municipio = modelo('Municipio', municipioSchema);
@@ -358,6 +448,12 @@ export const Contador = modelo('Contador', contadorSchema);
 export const Auditoria = modelo('Auditoria', auditoriaSchema);
 export const PlantillaWhatsapp = modelo('PlantillaWhatsapp', plantillaWhatsappSchema);
 export const EnvioCorreo = modelo('EnvioCorreo', envioCorreoSchema);
+export const Prestamo = modelo('Prestamo', prestamoSchema);
+export const LiquidacionConductor = modelo('LiquidacionConductor', liquidacionConductorSchema);
+export const CuentaContable = modelo('CuentaContable', cuentaSchema);
+export const Asiento = modelo('Asiento', asientoSchema);
+export const FacturaCont = modelo('FacturaCont', facturaContSchema);
+export const RemesaDulces = modelo('RemesaDulces', remesaDulcesSchema);
 
 // Siguiente valor de un contador de la empresa (atómico). `minimo` permite
 // continuar una numeración existente (ej. último manifiesto expedido).

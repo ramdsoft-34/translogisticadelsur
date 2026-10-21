@@ -8,6 +8,8 @@ import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../midd
 import { P, tienePermiso } from '../config/permisos.js';
 import { auditar, cambios } from '../services/auditoria.js';
 import { mensajesPorCliente, PLANTILLA_BASE, MARCADORES } from '../services/whatsapp.js';
+import { asegurarMesAbierto } from '../services/gestion/cierre.js';
+import { exigirDocumentosVigentes } from '../services/gestion/documentos.js';
 import { parseFecha, hoyColombia, escaparRegex } from '../utils/texto.js';
 import { saldoViaje, utilidadViaje, valoresDesdeTarifa } from '../services/calculos.js';
 
@@ -223,6 +225,9 @@ r.get('/:id', permitir(P.VIAJES_VER), async (req, res) => {
 r.post('/', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const d = viajeSchema.parse(req.body);
   await validarReferencias(req, d);
+  // Mes cerrado y documentos del viaje (licencia, SOAT y tecnomecánica vencidos no dejan registrar)
+  await asegurarMesAbierto(req.empresaId, d.fecha);
+  const avisosDocumentos = await exigirDocumentosVigentes(req.empresaId, { conductor: d.conductor, placa: d.placa });
   // Valores sugeridos por la tarifa del destino cuando no se escriben
   if (d.tarifaRef) {
     const t = await Tarifa.findOne(deEmpresa(req, { _id: d.tarifaRef })).lean();
@@ -238,7 +243,7 @@ r.post('/', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const v = await Viaje.create({ ...d, numero, conductorNombre: nombreTercero(cond), empresa: req.empresaId,
     creadoPor: req.usuario._id, actualizadoPor: req.usuario._id });
   await auditar(req, 'crear_viaje', { entidad: 'Viaje', entidadId: v._id, detalle: { numero, placa: v.placa, destino: v.destino } });
-  res.status(201).json(presentar((await Viaje.findOne(deEmpresa(req, { _id: v._id })).populate(POBLAR(req)).lean())));
+  res.status(201).json({ ...presentar((await Viaje.findOne(deEmpresa(req, { _id: v._id })).populate(POBLAR(req)).lean())), avisosDocumentos });
 });
 
 async function viajeEditable(req) {
@@ -247,12 +252,15 @@ async function viajeEditable(req) {
   const propio = String(v.creadoPor) === String(req.usuario._id);
   if (!tienePermiso(req.usuario.rol, P.VIAJES_EDITAR_TODOS) && !propio) throw new ErrorHttp(403, 'Solo puede modificar los viajes que usted registró');
   if (v.liquidacion) throw new ErrorHttp(409, 'El viaje ya está en una liquidación de fletes');
+  if (v.liquidacionConductor) throw new ErrorHttp(409, 'El viaje ya está liquidado al conductor: anule esa liquidación para modificarlo');
+  await asegurarMesAbierto(req.empresaId, v.fecha);
   return v;
 }
 
 r.put('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const v = await viajeEditable(req);
   let d = viajeSchema.partial().parse(req.body);
+  if (d.fecha) await asegurarMesAbierto(req.empresaId, d.fecha);
   if (v.estado !== 'registrado') {
     const bloqueados = Object.keys(d).filter(k => !CAMPOS_INTERNOS.includes(k));
     if (bloqueados.length) {
