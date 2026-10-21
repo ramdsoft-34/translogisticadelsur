@@ -43,10 +43,12 @@ export function lineaLiquidacion(viaje, tarifa) {
   const auxPago = aux && tarifa ? num(tarifa.auxiliarPagado) : 0;
 
   const totalTarifa = porUnidad ? tarifaUnit * cantidad : tarifaUnit;
-  const totalAuxiliar = auxCobro * cantidad;
+  // Auxiliar: por los días (o auxiliares) indicados; si no se indican, uno por unidad
+  const unidadesAux = num(viaje.diasAuxiliar) > 0 ? num(viaje.diasAuxiliar) : cantidad;
+  const totalAuxiliar = auxCobro * unidadesAux;
   const totalCobrado = totalTarifa + totalAuxiliar;
   const totalFlete = porUnidad ? fleteUnit * cantidad : fleteUnit;
-  const totalAuxiliarPagado = auxPago * cantidad;
+  const totalAuxiliarPagado = auxPago * unidadesAux;
   const utilidad = totalCobrado - (totalFlete + totalAuxiliarPagado);
   return {
     viaje: viaje._id, numero: viaje.numero, fecha: viaje.fecha, placa: viaje.placa,

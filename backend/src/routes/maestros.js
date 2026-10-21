@@ -142,6 +142,15 @@ async function conductoresConPlacas(req, filtro, recientes) {
   });
 }
 
+// Nuevo en el RNDC: sedes que ya tiene una empresa (por NIT/cédula) y el código de la próxima sede
+r.get('/terceros/sedes', ver, async (req, res) => {
+  const numId = String(req.query.numId || '').replace(/\D/g, '');
+  if (!numId) throw new ErrorHttp(400, 'Escriba el NIT o la cédula');
+  const lista = await Tercero.find(deEmpresa(req, { numId })).select('tipoId numId nombres apellido1 apellido2 sede codMunicipio direccion telefono celular rndc.estado').sort({ 'sede.codigo': 1 }).lean();
+  const codigos = lista.filter(t => t.sede?.codigo).map(t => Number(t.sede.codigo)).filter(n => Number.isFinite(n));
+  res.json({ sedes: lista, siguiente: String(codigos.length ? Math.max(...codigos) + 1 : 1) });
+});
+// «Solo mostrar lo que se enviaría»: variables del RNDC sin guardar ni enviar nada
 r.get('/terceros/:id', ver, async (req, res) => {
   const x = await Tercero.findOne(deEmpresa(req, { _id: req.params.id }));
   if (!x) throw new ErrorHttp(404, 'Tercero no encontrado');
@@ -154,6 +163,15 @@ async function estadoSincronizacion(req, doc, armar) {
   const h = huella(armar(empresa, doc));
   if (doc.rndc?.hash && doc.rndc.hash !== h && doc.rndc.estado === 'enviado') doc.rndc.estado = 'sin_enviar';
 }
+
+r.post('/terceros/vista-rndc', ver, async (req, res) => {
+  const d = terceroSchema.parse(req.body);
+  res.json({ proceso: 11, variables: variablesTercero(await Empresa.findById(req.empresaId).lean(), d) });
+});
+r.post('/vehiculos/vista-rndc', ver, async (req, res) => {
+  const d = vehiculoSchema.parse(req.body);
+  res.json({ proceso: 12, variables: variablesVehiculo(await Empresa.findById(req.empresaId).lean(), d) });
+});
 
 r.post('/terceros', editar, async (req, res) => {
   const x = await Tercero.create({ ...terceroSchema.parse(req.body), empresa: req.empresaId });

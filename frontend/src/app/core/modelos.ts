@@ -29,7 +29,7 @@ export interface Viaje {
   cliente: { _id: string; nombre: string } | null; conductor: any; titular: any; tarifaRef: any;
   conductorNombre: string; titularNombre: string;
   codOrigen: string; codDestino: string; destinatario: { tipoId: string; numId: string; sede: string };
-  pesoKg: number; cantidad: number; conAuxiliar: boolean; tarifa: number; flete: number; anticipo: number;
+  pesoKg: number; cantidad: number; conAuxiliar: boolean; diasAuxiliar?: number; planilla?: string; tarifa: number; flete: number; anticipo: number;
   saldo: number; utilidad: number; observaciones: string;
   estado: 'registrado' | 'remesa' | 'manifestado' | 'cumplido' | 'anulado';
   remesa: DocRndc; manifiesto: DocRndc; cumplidoRemesa: DocRndc; cumplidoManifiesto: DocRndc;

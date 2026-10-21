@@ -447,6 +447,18 @@ test('Plantillas de WhatsApp: crear, predeterminar, vista previa y eliminar', as
   assert.equal((await s.reportero.get('/api/viajes/reporte-whatsapp?fecha=2026-11-02&incluirReportados=1')).body.plantilla, 'base');
 });
 
+test('Nuevo en el RNDC: próxima sede de una empresa y vista previa sin enviar', async () => {
+  const nit = '9007770001';
+  assert.equal((await s.adminA.get(`/api/maestros/terceros/sedes?numId=${nit}`)).body.siguiente, '1');
+  for (const c of ['1', '3']) assert.equal((await s.adminA.post('/api/maestros/terceros', { tipoId: 'N', numId: nit, nombres: 'Sedes SAS', sede: { codigo: c, nombre: `S${c}` }, roles: ['destinatario'] })).status, 201);
+  const r = (await s.adminA.get(`/api/maestros/terceros/sedes?numId=${nit}`)).body;
+  assert.equal(r.sedes.length, 2); assert.equal(r.siguiente, '4');
+  const v = await s.adminA.post('/api/maestros/terceros/vista-rndc', { tipoId: 'N', numId: nit, nombres: 'Sedes SAS', sede: { codigo: '4', nombre: 'NUEVA' }, roles: ['destinatario'] });
+  assert.equal(v.status, 200);
+  assert.ok(v.body.variables.some(([n, x]) => n === 'CODSEDETERCERO' && x === '4'));
+  assert.equal((await s.adminA.get(`/api/maestros/terceros/sedes?numId=${nit}`)).body.sedes.length, 2, 'la vista previa no guarda');
+});
+
 test('Conductores: búsqueda por varias palabras y placa asociada', async () => {
   const r = (await s.reportero.get('/api/maestros/terceros?rol=conductor&conPlacas=1&q=pedro%20gomez')).body;
   const pedro = r.find(t => String(t._id) === String(s.conductor));
@@ -881,9 +893,22 @@ test('Gestión: relaciones, soporte interno MC/RC y remesas Dulces', async () =>
   const pago = (await s.conta.get('/api/gestion/relaciones/pago-conductores?desde=2026-11-01&hasta=2026-11-30')).body;
   assert.ok(pago.filas.some(x => x.cedula === '12345678'));
   assert.equal(pago.totales.total, pago.totales.flete + pago.totales.auxiliar);
-  const ve = (await s.conta.get(`/api/gestion/relaciones/viajes-empresa?cliente=${s.cliente}&desde=2026-10-01&hasta=2026-11-30`)).body;
+  const ve = (await s.conta.get(`/api/gestion/relaciones/viajes?agrupar=placa&cliente=${s.cliente}&desde=2026-10-01&hasta=2026-11-30`)).body;
   const orden = ve.filas.map(x => `${x.placa}|${new Date(x.fecha).toISOString()}`);
   assert.deepEqual(orden, [...orden].sort(), 'por placa y fecha');
+  assert.equal(ve.grupos.reduce((a, g) => a + g.totales.viajes, 0), ve.filas.length);
+  for (const ag of ['general', 'empresa']) assert.equal((await s.conta.get(`/api/gestion/relaciones/viajes?agrupar=${ag}&formato=pdf`)).status, 200);
+  assert.equal((await s.conta.get('/api/gestion/relaciones/viajes?agrupar=empresa&formato=xlsx')).status, 200);
+  const inf = (await s.conta.get('/api/gestion/relaciones/informe?desde=2026-10-01&hasta=2026-11-30')).body;
+  assert.equal(inf.totales.utilidad, inf.filas.reduce((a, x) => a + x.utilidad, 0));
+  // Registro masivo: salta domingos y festivos (lunes 16-nov-2026 es festivo)
+  const base = { cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Pasto urbano', placa: 'ABC123', conductor: s.conductor, desde: '2026-11-14', hasta: '2026-11-18', incluirSabados: false };
+  const pv = (await s.manif.post('/api/gestion/relaciones/masivo/previa', base)).body;
+  assert.deepEqual(pv.dias.map(x => x.motivo.split(':')[0]), ['sábado excluido', 'domingo', 'festivo', '', '']);
+  const ms = await s.manif.post('/api/gestion/relaciones/masivo', base);
+  assert.equal(ms.status, 201, JSON.stringify(ms.body));
+  assert.equal(ms.body.creados.length, 2);
+  assert.equal((await s.manif.post('/api/gestion/relaciones/masivo/previa', base)).body.dias.filter(x => x.registrar).length, 0, 'ya tienen viaje');
   assert.equal((await s.conta.get('/api/gestion/relaciones/pago-conductores?formato=xlsx')).status, 200);
   // Soporte interno de un viaje que no va al RNDC
   const v = await s.manif.post('/api/viajes', { fecha: '2026-11-13', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Pasto urbano', placa: 'ABC123', conductor: s.conductor, requiereManifiesto: false });

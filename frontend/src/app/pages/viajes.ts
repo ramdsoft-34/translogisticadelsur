@@ -14,18 +14,19 @@ import { BuscarTercero } from '../shared/buscar-tercero';
 import { PlantillasWhatsapp } from '../shared/plantillas-whatsapp';
 import { Confirmar } from '../shared/confirmar';
 import { VisorPdf } from '../shared/visor-pdf';
+import { ExportarViajes } from '../shared/exportar-viajes';
 
 interface Formulario {
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
   placa: string; remolque: string; conductor: string; titular: string;
-  pesoKg: number | null; cantidad: number | null; conAuxiliar: boolean;
+  pesoKg: number | null; cantidad: number | null; conAuxiliar: boolean; diasAuxiliar: number | null; planilla: string;
   tarifa: number | null; flete: number | null; anticipo: number | null; observaciones: string; estado?: string; historico?: boolean;
   requiereManifiesto: boolean;
 }
 
 const vacio = (): Formulario => ({
   fecha: hoyIso(), cliente: '', tarifaRef: '', destino: '', codDestino: '', placa: '', remolque: '', conductor: '', titular: '',
-  pesoKg: null, cantidad: 1, conAuxiliar: false, tarifa: null, flete: null, anticipo: null, observaciones: '', requiereManifiesto: true,
+  pesoKg: null, cantidad: 1, conAuxiliar: false, diasAuxiliar: null, planilla: '', tarifa: null, flete: null, anticipo: null, observaciones: '', requiereManifiesto: true,
 });
 
 type Periodo = 'hoy' | 'ayer' | 'semana' | 'mes' | 'rango';
@@ -36,14 +37,13 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
       <div class="acciones">
         <button (click)="abrirWhatsapp()"><app-icono nombre="enviar" [tam]="16" />WhatsApp</button>
-        <button (click)="descargar('xlsx')" title="Descargar en Excel"><app-icono nombre="descargar" [tam]="16" />Excel</button>
-        <button (click)="descargar('pdf')" title="Descargar en PDF"><app-icono nombre="descargar" [tam]="16" />PDF</button>
+        <button (click)="descargar()" title="Exportar a Excel o PDF: general, por empresa o por placa"><app-icono nombre="descargar" [tam]="16" />Exportar Excel / PDF</button>
         @if (puedeRegistrar) { <button class="primario" (click)="nuevo()"><app-icono nombre="mas" [tam]="16" />Registrar viaje</button> }
       </div>
     </div>
@@ -76,33 +76,6 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       <div><span>Saldo por pagar</span><strong>{{ sumas().saldo | pesos }}</strong></div>
     </div>
 
-    <div class="vista" role="group" aria-label="Vista">
-      <div class="segmentos">
-        <button type="button" [class.activo]="vista() === 'lista'" (click)="cambiarVista('lista')">Lista</button>
-        <button type="button" [class.activo]="vista() === 'empresa'" (click)="cambiarVista('empresa')" title="Agrupados por empresa y placa, ordenados por fecha, con totales">Por empresa</button>
-      </div>
-      @if (vista() === 'empresa') { <span class="sutil">Agrupados por empresa y placa, del más antiguo al más reciente. Excel y PDF descargan este listado.</span> }
-    </div>
-
-    @if (vista() === 'empresa') {
-      <div class="tabla-caja">
-        <table class="tabla-movil">
-          <thead><tr><th>N°</th><th>Fecha</th><th>Conductor</th><th>Destino</th><th>Manifiesto</th><th class="num">Tarifa</th><th class="num">Flete</th><th class="num">Anticipo</th></tr></thead>
-          <tbody>
-            @for (g of gruposEmpresa(); track g.clave) {
-              <tr class="cab-grupo"><td colspan="8">{{ g.cliente }} · <span class="placa">{{ g.placa }}</span> <span class="sutil">· {{ g.filas.length }} viaje(s)</span></td></tr>
-              @for (x of g.filas; track x.numero) {
-                <tr><td data-etiqueta="N°" class="sutil">{{ x.numero }}</td><td data-etiqueta="Fecha">{{ x.fecha | dia }}</td><td data-etiqueta="Conductor">{{ x.conductor }}</td>
-                  <td data-etiqueta="Destino">{{ x.destino }}</td><td data-etiqueta="Manifiesto">{{ x.manifiesto }}</td>
-                  <td data-etiqueta="Tarifa" class="num">{{ x.tarifa | pesos }}</td><td data-etiqueta="Flete" class="num">{{ x.flete | pesos }}</td><td data-etiqueta="Anticipo" class="num">{{ x.anticipo | pesos }}</td></tr>
-              }
-              <tr class="subtotal"><td colspan="5">Subtotal {{ g.placa }}</td><td class="num">{{ g.tarifa | pesos }}</td><td class="num">{{ g.flete | pesos }}</td><td class="num">{{ g.anticipo | pesos }}</td></tr>
-            } @empty { <tr><td colspan="8" class="vacio">No hay viajes con estos filtros</td></tr> }
-          </tbody>
-          @if (porEmpresa()?.totales; as t) { <tfoot><tr><td colspan="5">TOTAL · {{ porEmpresa()?.filas?.length }} viaje(s)</td><td class="num">{{ t.tarifa | pesos }}</td><td class="num">{{ t.flete | pesos }}</td><td class="num">{{ t.anticipo | pesos }}</td></tr></tfoot> }
-        </table>
-      </div>
-    } @else {
     <div class="tabla-caja">
       <table class="tabla-movil">
         <thead><tr><th>N°</th><th>Fecha</th><th>Cliente / destino</th><th>Placa</th><th>Conductor</th>
@@ -137,7 +110,6 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       </table>
       @if (viajes().length) { <app-cargar-mas [mostrados]="viajes().length" [total]="total()" [cargando]="cargandoMas()" unidad="viajes" (mas)="cargarMas()" /> }
     </div>
-    }
 
     <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : (registradosTanda().length ? 'Registrar otro viaje' : 'Registrar viaje')" [abierto]="abierto()" (cerrar)="cerrarFormulario()" [ancho]="true">
       @let f = form();
@@ -213,6 +185,8 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             <div class="campo"><label for="v-ant">Anticipo</label><div class="moneda"><input id="v-ant" moneda name="anticipo" [(ngModel)]="f.anticipo" [disabled]="bloqueado()" /></div></div>
             <div class="campo"><span class="etiqueta">Saldo al conductor</span><div class="lectura">{{ ((f.flete || 0) - (f.anticipo || 0)) | pesos }} <small>COP</small></div></div>
             <div class="campo"><span class="etiqueta">Auxiliar</span><label class="casilla caja"><input type="checkbox" name="aux" [(ngModel)]="f.conAuxiliar" />El viaje lleva auxiliar</label></div>
+            @if (f.conAuxiliar) { <div class="campo"><label for="v-diasaux">Días / auxiliares</label><input id="v-diasaux" type="number" min="0" name="diasAux" placeholder="Igual a la cantidad" [(ngModel)]="f.diasAuxiliar" /></div> }
+            <div class="campo"><label for="v-planilla">N° de planilla</label><input id="v-planilla" name="planilla" maxlength="30" placeholder="Opcional" [(ngModel)]="f.planilla" /></div>
           </div>
         </fieldset>
 
@@ -288,6 +262,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       <ng-container pie><button type="button" (click)="waAbierto.set(false)">Cerrar</button></ng-container>
     </app-modal>
     <app-visor-pdf />
+    <app-exportar-viajes [clientes]="clientes()" />
     <app-plantillas-whatsapp [abierto]="plantillasAbierto()" [fecha]="waFecha" (cerrar)="plantillasAbierto.set(false)" (cambiadas)="cargarPlantillas()" />`,
   styles: [`
     .resumen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--gris-2); border: 1px solid var(--gris-2);
@@ -297,9 +272,6 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .resumen strong { font-size: 20px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
     .estados { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .secciones { display: flex; flex-direction: column; gap: 14px; }
-    .vista { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 10px; }
-    tr.cab-grupo td { background: var(--gris-1); font-weight: 650; }
-    tr.subtotal td { font-weight: 650; border-bottom: 2px solid var(--gris-2); }
     .placas-conductor { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
     .wa-lista { margin: 10px 0 4px; }
     .wa-cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
@@ -407,7 +379,6 @@ export class Viajes {
 
   // Primera página (reinicia la lista)
   async cargar() {
-    if (this.vista() === 'empresa') this.cargarPorEmpresa();
     this.cargando.set(true);
     this.pagina = 1;
     try {
@@ -438,7 +409,7 @@ export class Viajes {
     this.form.set({
       _id: v._id, fecha: isoDia(v.fecha), cliente: v.cliente?._id || '', tarifaRef: v.tarifaRef?._id || v.tarifaRef || '',
       destino: v.destino, codDestino: v.codDestino, placa: v.placa, remolque: v.remolque, conductor: v.conductor?._id || '',
-      titular: v.titular?._id || '', pesoKg: v.pesoKg, cantidad: v.cantidad, conAuxiliar: v.conAuxiliar, tarifa: v.tarifa,
+      titular: v.titular?._id || '', pesoKg: v.pesoKg, cantidad: v.cantidad, conAuxiliar: v.conAuxiliar, diasAuxiliar: v.diasAuxiliar || null, planilla: v.planilla || '', tarifa: v.tarifa,
       flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones, estado: v.estado, historico: !!v.historico,
       requiereManifiesto: v.requiereManifiesto !== false,
     });
@@ -531,10 +502,10 @@ export class Viajes {
     if (!f.conductor && !this.bloqueado()) { this.avisos.mostrar('Seleccione el conductor', 'error'); return; }
     const cuerpo: any = { ...f, placa: f.placa.toUpperCase(), remolque: (f.remolque || '').toUpperCase(), tarifaRef: f.tarifaRef || null };
     delete cuerpo._id; delete cuerpo.estado; delete cuerpo.titular;
-    for (const k of ['pesoKg', 'cantidad', 'tarifa', 'flete', 'anticipo']) if (cuerpo[k] === null || cuerpo[k] === '') delete cuerpo[k];
+    for (const k of ['pesoKg', 'cantidad', 'diasAuxiliar', 'tarifa', 'flete', 'anticipo']) if (cuerpo[k] === null || cuerpo[k] === '') delete cuerpo[k];
     delete cuerpo.historico;
     if (this.bloqueado()) {
-      for (const k of Object.keys(cuerpo)) if (!['observaciones', 'cantidad', 'conAuxiliar', 'tarifa'].includes(k)) delete cuerpo[k];
+      for (const k of Object.keys(cuerpo)) if (!['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa'].includes(k)) delete cuerpo[k];
     }
     if (f.historico && this.habilitarRndc) cuerpo.historico = false;
     this.guardando.set(true);
@@ -551,7 +522,7 @@ export class Viajes {
           this.registradosTanda.update(l => [...l, { numero: v.numero, placa: v.placa, sinManifiesto: !requiere }]);
           // El destino (y sus valores) cambian en cada viaje: se dejan vacíos
           this.form.set({ ...f, tarifaRef: '', destino: '', codDestino: '', tarifa: null, flete: null, anticipo: null, pesoKg: null, cantidad: 1,
-            conAuxiliar: false, placa: '', remolque: '', conductor: '', titular: '', observaciones: '', requiereManifiesto: true });
+            conAuxiliar: false, diasAuxiliar: null, planilla: '', placa: '', remolque: '', conductor: '', titular: '', observaciones: '', requiereManifiesto: true });
           this.placasConductor.set([]);
           setTimeout(() => document.getElementById('v-dest')?.focus(), 50);
           return;
@@ -610,38 +581,8 @@ export class Viajes {
     } catch (e) { this.avisos.error(e); }
   }
 
-  // ── Vista «Por empresa» (antes «Viajes por empresa» de la plantilla) ──
-  readonly vista = signal<'lista' | 'empresa'>((() => { try { return localStorage.getItem('tls_vista_viajes') === 'empresa' ? 'empresa' : 'lista'; } catch { return 'lista'; } })());
-  readonly porEmpresa = signal<any>(null);
-  readonly gruposEmpresa = computed(() => {
-    const q = String(this.filtro.q || '').toLowerCase();
-    const m = new Map<string, any>();
-    for (const x of this.porEmpresa()?.filas || []) {
-      if (q && !`${x.placa} ${x.destino} ${x.manifiesto} ${x.conductor}`.toLowerCase().includes(q)) continue;
-      const k = `${x.cliente}|${x.placa}`;
-      const g = m.get(k) || { clave: k, cliente: x.cliente, placa: x.placa, filas: [], tarifa: 0, flete: 0, anticipo: 0 };
-      g.filas.push(x); g.tarifa += x.tarifa; g.flete += x.flete; g.anticipo += x.anticipo; m.set(k, g);
-    }
-    return [...m.values()];
-  });
-  cambiarVista(v: 'lista' | 'empresa') {
-    this.vista.set(v);
-    try { localStorage.setItem('tls_vista_viajes', v); } catch { /* sin almacenamiento */ }
-    if (v === 'empresa') this.cargarPorEmpresa();
-  }
-  async cargarPorEmpresa() {
-    try { this.porEmpresa.set(await this.api.get('/gestion/relaciones/viajes-empresa', { desde: this.filtro.desde, hasta: this.filtro.hasta, cliente: this.filtro.cliente })); }
-    catch (e) { this.avisos.error(e); }
-  }
+  // Excel y PDF: general, por empresa o por placa, con el periodo a elegir
+  readonly exportador = viewChild.required(ExportarViajes);
+  descargar() { this.exportador().abrir({ cliente: this.filtro.cliente }); }
 
-  async descargar(tipo: 'xlsx' | 'pdf') {
-    if (this.vista() === 'empresa') {
-      try { await this.api.descargar('/gestion/relaciones/viajes-empresa', { desde: this.filtro.desde, hasta: this.filtro.hasta, cliente: this.filtro.cliente, formato: tipo }, `viajes_por_empresa.${tipo}`); }
-      catch (e) { this.avisos.error(e); }
-      return;
-    }
-    try {
-      await this.api.descargar(`/reportes/bitacora.${tipo}`, { desde: this.filtro.desde, hasta: this.filtro.hasta, cliente: this.filtro.cliente }, `bitacora.${tipo}`);
-    } catch (e) { this.avisos.error(e); }
-  }
 }

@@ -4,7 +4,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import express from 'express';
-import { Empresa, Viaje, Tarifa, Cliente, LiquidacionConductor, Prestamo, CuentaContable, Asiento, FacturaCont, RemesaDulces, Tercero, pob } from '../models/index.js';
+import { Empresa, Viaje, Tarifa, Cliente, LiquidacionConductor, Prestamo, CuentaContable, Asiento, FacturaCont, RemesaDulces, Tercero, Vehiculo, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
@@ -325,27 +325,146 @@ r.get('/relaciones/pago-conductores', verRep, async (req, res) => {
   res.json({ filas, totales: t });
 });
 
-// Viajes por empresa: ordenados por placa y, dentro de cada placa, del más antiguo al más reciente, con totales
-r.get('/relaciones/viajes-empresa', verRep, async (req, res) => {
-  const { desde, hasta, viajes, tarifas } = await viajesPeriodo(req);
-  viajes.sort((a, b) => String(a.cliente?.nombre || '').localeCompare(String(b.cliente?.nombre || '')) || a.placa.localeCompare(b.placa) || new Date(a.fecha) - new Date(b.fecha) || a.numero - b.numero);
+// Listado de viajes para exportar: general, agrupado por empresa o por placa (ordenado por fecha), con subtotales
+const AGRUPAR = { general: null, empresa: (x) => x.cliente, placa: (x) => x.placa };
+r.get('/relaciones/viajes', verRep, async (req, res) => {
+  const agrupar = Object.hasOwn(AGRUPAR, req.query.agrupar) ? req.query.agrupar : 'general';
+  const extra = {};
+  if (req.query.placa) extra.placa = txt(req.query.placa).toUpperCase().replace(/[\s-]/g, '');
+  const { desde, hasta, viajes, tarifas } = await viajesPeriodo(req, extra);
   const filas = viajes.map(v => { const l = lineaLiquidacion(v, tarifas.get(String(v.tarifaRef)));
-    return { numero: v.numero, fecha: v.fecha, cliente: v.cliente?.nombre || '', placa: v.placa, conductor: nombreT(v.conductor) || v.conductorNombre, destino: v.destino,
-      manifiesto: v.manifiesto?.numero || v.soporteInterno?.mc || '', tarifa: l.totalCobrado, flete: Number(v.flete) || 0, anticipo: Number(v.anticipo) || 0 }; });
-  const t = filas.reduce((a, x) => ({ tarifa: a.tarifa + x.tarifa, flete: a.flete + x.flete, anticipo: a.anticipo + x.anticipo }), { tarifa: 0, flete: 0, anticipo: 0 });
+    return { _id: v._id, estado: v.estado, numero: v.numero, fecha: v.fecha, cliente: v.cliente?.nombre || '', utilidad: l.utilidad, placa: v.placa, conductor: nombreT(v.conductor) || v.conductorNombre, destino: v.destino,
+      planilla: v.planilla || '', manifiesto: v.manifiesto?.numero || v.soporteInterno?.mc || '', cantidad: l.cantidad,
+      auxiliar: v.conAuxiliar ? (v.diasAuxiliar || l.cantidad) : 0, tarifa: l.totalCobrado, flete: Number(v.flete) || 0, anticipo: Number(v.anticipo) || 0,
+      facturado: !!v.liquidacion }; });
+  const clave = AGRUPAR[agrupar];
+  filas.sort((a, b) => (clave ? String(clave(a)).localeCompare(String(clave(b))) : 0) || (agrupar === 'empresa' ? a.placa.localeCompare(b.placa) : 0)
+    || new Date(a.fecha) - new Date(b.fecha) || a.numero - b.numero);
+  const suma = (l) => l.reduce((a, x) => ({ viajes: a.viajes + 1, tarifa: a.tarifa + x.tarifa, flete: a.flete + x.flete, anticipo: a.anticipo + x.anticipo }), { viajes: 0, tarifa: 0, flete: 0, anticipo: 0 });
+  const grupos = clave ? [...filas.reduce((m, x) => m.set(clave(x), [...(m.get(clave(x)) || []), x]), new Map())].map(([nombre, l]) => ({ nombre, filas: l, totales: suma(l) })) : [];
+  const totales = suma(filas);
   const cli = req.query.cliente ? await Cliente.findOne(deEmpresa(req, { _id: req.query.cliente })).select('nombre').lean() : null;
-  const titulo = `Viajes por empresa${cli ? ` - ${cli.nombre}` : ''}`; const sub = `Del ${fmtFecha(desde)} al ${fmtFecha(hasta)} · ${filas.length} viaje(s)`;
+  const titulo = `Viajes${agrupar === 'empresa' ? ' por empresa' : agrupar === 'placa' ? ' por placa' : ''}${cli ? ` - ${cli.nombre}` : ''}${extra.placa ? ` - ${extra.placa}` : ''}`;
+  const sub = `Del ${fmtFecha(desde)} al ${fmtFecha(hasta)} · ${filas.length} viaje(s)`;
   const columnas = [{ titulo: 'N°', peso: 0.5 }, { titulo: 'Fecha', peso: 0.9 }, { titulo: 'Empresa', peso: 1.3 }, { titulo: 'Placa', peso: 0.8 },
-    { titulo: 'Conductor', peso: 1.8 }, { titulo: 'Destino', peso: 1.6 }, { titulo: 'Manifiesto', peso: 1 }, { titulo: 'Tarifa', peso: 1, alin: 'right' },
+    { titulo: 'Conductor', peso: 1.7 }, { titulo: 'Destino', peso: 1.6 }, { titulo: 'Planilla', peso: 0.8 }, { titulo: 'Manifiesto', peso: 1 },
+    { titulo: 'Cant.', peso: 0.5, alin: 'right' }, { titulo: 'Aux.', peso: 0.5, alin: 'right' }, { titulo: 'Tarifa', peso: 1, alin: 'right' },
     { titulo: 'Flete', peso: 1, alin: 'right' }, { titulo: 'Anticipo', peso: 1, alin: 'right' }];
-  const fila = (x, fm) => [x.numero, fmtFecha(x.fecha), x.cliente, x.placa, x.conductor, x.destino, x.manifiesto, fm(x.tarifa), fm(x.flete), fm(x.anticipo)];
   const m = (v) => `$ ${$(v).toLocaleString('es-CO')}`;
+  const fila = (x, fm) => [x.numero, fmtFecha(x.fecha), x.cliente, x.placa, x.conductor, x.destino, x.planilla, x.manifiesto, x.cantidad, x.auxiliar || '', fm(x.tarifa), fm(x.flete), fm(x.anticipo)];
+  const filaTotal = (nombre, t, fm) => ['', '', '', '', nombre, '', '', '', '', '', fm(t.tarifa), fm(t.flete), fm(t.anticipo)];
+  // Con grupos: título del grupo, sus viajes y el subtotal
+  const armar = (fm) => (clave ? grupos.flatMap(g => [['', '', '', '', g.nombre, '', '', '', '', '', '', '', ''], ...g.filas.map(x => fila(x, fm)), filaTotal(`Subtotal (${g.totales.viajes} viajes)`, g.totales, fm)])
+    : filas.map(x => fila(x, fm)));
   if (req.query.formato === 'xlsx') return archivo(res, await libroExcel({ empresa: await empresaDe(req), titulo, subtitulo: sub,
-    columnas: columnas.map((c, i) => ({ ...c, ancho: [6, 12, 20, 10, 30, 26, 14, 14, 14, 14][i], formato: i > 6 ? PESOS : undefined })),
-    filas: filas.map(x => fila(x, v => v)), total: ['', 'TOTAL', '', '', '', '', '', t.tarifa, t.flete, t.anticipo] }), 'viajes_empresa.xlsx', XLSX);
-  if (req.query.formato === 'pdf') return archivo(res, await pdfTabla(req, { titulo, subtitulo: sub, columnas, filas: filas.map(x => fila(x, m)),
-    total: ['', 'TOTAL', '', '', '', '', '', m(t.tarifa), m(t.flete), m(t.anticipo)] }), 'viajes_empresa.pdf', 'application/pdf', req.query.ver === '1');
+    columnas: columnas.map((c, i) => ({ ...c, ancho: [6, 12, 20, 10, 28, 26, 12, 14, 7, 7, 14, 14, 14][i], formato: i > 9 ? PESOS : undefined })),
+    filas: armar(v => v), total: filaTotal('TOTAL', totales, v => v) }), 'viajes.xlsx', XLSX);
+  if (req.query.formato === 'pdf') return archivo(res, await pdfTabla(req, { titulo, subtitulo: sub, columnas, filas: armar(m), total: filaTotal('TOTAL', totales, m) }),
+    'viajes.pdf', 'application/pdf', req.query.ver === '1');
+  res.json({ agrupar, filas, grupos: grupos.map(g => ({ nombre: g.nombre, totales: g.totales })), totales });
+});
+
+// Informe de utilidad por empresa (como el de la plantilla): cobrado, pagado y utilidad; retefuente y FOPAT
+// del conductor se muestran aparte (informativo, no se restan de la utilidad de la empresa)
+r.get('/relaciones/informe', verRep, async (req, res) => {
+  const { desde, hasta, viajes, tarifas } = await viajesPeriodo(req);
+  const pbv = new Map((await Vehiculo.find(deEmpresa(req, { placa: { $in: [...new Set(viajes.map(v => v.placa))] } })).select('placa pbv').lean()).map(v => [v.placa, v.pbv]));
+  const g = new Map();
+  for (const v of viajes) {
+    const l = lineaLiquidacion(v, tarifas.get(String(v.tarifaRef)));
+    const k = v.cliente?.nombre || '(sin empresa)';
+    const x = g.get(k) || { empresa: k, viajes: 0, cobrado: 0, flete: 0, auxiliarPagado: 0, utilidad: 0, retefuente: 0, fopat: 0 };
+    x.viajes += 1; x.cobrado += l.totalCobrado; x.flete += l.totalFlete; x.auxiliarPagado += l.totalAuxiliarPagado; x.utilidad += l.utilidad;
+    x.retefuente += liq.retefuente(l.totalFlete); x.fopat += liq.fopat(l.totalFlete, pbv.get(v.placa), v.destino);
+    g.set(k, x);
+  }
+  const filas = [...g.values()].sort((a, b) => b.utilidad - a.utilidad).map(x => ({ ...x, margen: x.cobrado ? x.utilidad / x.cobrado : 0 }));
+  const t = filas.reduce((a, x) => { for (const k of ['viajes', 'cobrado', 'flete', 'auxiliarPagado', 'utilidad', 'retefuente', 'fopat']) a[k] += x[k]; return a; },
+    { viajes: 0, cobrado: 0, flete: 0, auxiliarPagado: 0, utilidad: 0, retefuente: 0, fopat: 0 });
+  t.margen = t.cobrado ? t.utilidad / t.cobrado : 0;
+  const titulo = 'Informe de utilidad por empresa'; const sub = `Del ${fmtFecha(desde)} al ${fmtFecha(hasta)} · retefuente y FOPAT del conductor son informativos`;
+  const columnas = [{ titulo: 'Empresa', peso: 1.8 }, { titulo: 'Viajes', peso: 0.6, alin: 'right' }, { titulo: 'Cobrado', peso: 1, alin: 'right' },
+    { titulo: 'Flete', peso: 1, alin: 'right' }, { titulo: 'Aux. pagado', peso: 1, alin: 'right' }, { titulo: 'Utilidad', peso: 1, alin: 'right' },
+    { titulo: 'Margen', peso: 0.7, alin: 'right' }, { titulo: 'Retefuente cond.', peso: 1, alin: 'right' }, { titulo: 'FOPAT cond.', peso: 0.9, alin: 'right' }];
+  const m = (v) => `$ ${$(v).toLocaleString('es-CO')}`; const pct = (v) => `${(v * 100).toFixed(1)} %`;
+  const fila = (x, fm, fp) => [x.empresa, x.viajes, fm(x.cobrado), fm(x.flete), fm(x.auxiliarPagado), fm(x.utilidad), fp(x.margen), fm(x.retefuente), fm(x.fopat)];
+  if (req.query.formato === 'xlsx') return archivo(res, await libroExcel({ empresa: await empresaDe(req), titulo, subtitulo: sub,
+    columnas: columnas.map((c, i) => ({ ...c, ancho: i ? 15 : 26, formato: i === 6 ? '0.0%' : i > 1 ? PESOS : undefined })),
+    filas: filas.map(x => fila(x, v => v, v => v)), total: fila({ ...t, empresa: 'TOTAL' }, v => v, v => v) }), 'informe_utilidad.xlsx', XLSX);
+  if (req.query.formato === 'pdf') return archivo(res, await pdfTabla(req, { titulo, subtitulo: sub, columnas, filas: filas.map(x => fila(x, m, pct)), total: fila({ ...t, empresa: 'TOTAL' }, m, pct) }),
+    'informe_utilidad.pdf', 'application/pdf', req.query.ver === '1');
   res.json({ filas, totales: t });
+});
+
+// ═════════════ Registro masivo (un vehículo para varios días, como en la plantilla) ═════════════
+// Días laborales del rango: salta domingos, festivos de Colombia, sábados (si se pide) y los días en que la placa ya tiene viaje.
+const masivoSchema = z.object({ cliente: id, tarifaRef: id.optional(), destino: z.string().trim().min(1).max(120), placa: z.string().trim().min(5).max(7),
+  conductor: id, desde: z.string(), hasta: z.string(), incluirSabados: z.boolean().optional().default(true), cantidad: z.coerce.number().min(0).default(1),
+  conAuxiliar: z.boolean().optional().default(false), diasAuxiliar: z.coerce.number().min(0).max(366).optional().default(0), planilla: z.string().max(30).optional().default(''),
+  requiereManifiesto: z.boolean().optional().default(false), dias: z.array(z.string()).optional() });
+async function diasMasivo(req, d) {
+  const desde = parseFecha(d.desde); const hasta = parseFecha(d.hasta);
+  if (!desde || !hasta || hasta < desde) throw new ErrorHttp(400, 'Rango de fechas inválido');
+  if ((hasta - desde) / 86400000 > 92) throw new ErrorHttp(400, 'El rango máximo es de 93 días');
+  const placa = d.placa.toUpperCase().replace(/[\s-]/g, '');
+  const existentes = new Set((await Viaje.find(deEmpresa(req, { placa, fecha: { $gte: desde, $lte: finDia(hasta) }, estado: { $ne: 'anulado' } })).select('fecha').lean())
+    .map(v => new Date(v.fecha).toISOString().slice(0, 10)));
+  const { festivo } = await import('../utils/festivos.js');
+  const dias = [];
+  for (let f = new Date(desde); f <= hasta; f = new Date(f.getTime() + 86400000)) {
+    const iso = f.toISOString().slice(0, 10); const w = f.getUTCDay(); const fe = festivo(f);
+    const motivo = w === 0 ? 'domingo' : fe ? `festivo: ${fe}` : (w === 6 && !d.incluirSabados) ? 'sábado excluido' : existentes.has(iso) ? 'ya tiene viaje' : '';
+    dias.push({ fecha: iso, dia: ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'][w], motivo, registrar: !motivo });
+  }
+  return { placa, dias };
+}
+r.post('/relaciones/masivo/previa', permitir(P.VIAJES_REGISTRAR), async (req, res) => res.json(await diasMasivo(req, masivoSchema.parse(req.body))));
+r.post('/relaciones/masivo', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
+  const d = masivoSchema.parse(req.body);
+  const { placa, dias } = await diasMasivo(req, d);
+  const elegidos = new Set(d.dias || dias.filter(x => x.registrar).map(x => x.fecha));
+  const aRegistrar = dias.filter(x => elegidos.has(x.fecha) && x.motivo !== 'ya tiene viaje');
+  if (!aRegistrar.length) throw new ErrorHttp(400, 'No hay días para registrar');
+  const { exigirDocumentosVigentes } = await import('../services/gestion/documentos.js');
+  const { asegurarMesAbierto } = await import('../services/gestion/cierre.js');
+  await exigirDocumentosVigentes(req.empresaId, { conductor: d.conductor, placa });
+  await asegurarMesAbierto(req.empresaId, ...aRegistrar.map(x => parseFecha(x.fecha)));
+  const t = d.tarifaRef ? await Tarifa.findOne(deEmpresa(req, { _id: d.tarifaRef })).lean() : null;
+  const cond = await Tercero.findOne(deEmpresa(req, { _id: d.conductor })).select('nombres apellido1 apellido2').lean();
+  if (!cond) throw new ErrorHttp(400, 'Conductor no encontrado');
+  const { siguiente: sig } = await import('../models/index.js');
+  const { valoresDesdeTarifa } = await import('../services/calculos.js');
+  const { titularDePlaca } = await import('./viajes.js');
+  const sug = t ? valoresDesdeTarifa(t) : {};
+  const titular = await titularDePlaca(req.empresaId, placa);
+  const creados = [];
+  for (const x of aRegistrar) {
+    const numero = await sig(req.empresaId, 'viaje');
+    const v = await Viaje.create({ empresa: req.empresaId, numero, fecha: parseFecha(x.fecha), cliente: d.cliente, tarifaRef: t?._id || null, destino: d.destino,
+      codDestino: sug.codDestino || '', destinatario: sug.destinatario, titular, placa, conductor: d.conductor, conductorNombre: nombreT(cond), cantidad: d.cantidad, conAuxiliar: d.conAuxiliar,
+      diasAuxiliar: d.diasAuxiliar, planilla: d.planilla, tarifa: sug.tarifa || 0, flete: sug.flete || 0, anticipo: sug.anticipo || 0, pesoKg: sug.pesoKg || 0,
+      requiereManifiesto: d.requiereManifiesto, creadoPor: req.usuario._id, actualizadoPor: req.usuario._id });
+    creados.push(v.numero);
+  }
+  await auditar(req, 'registro_masivo', { detalle: { placa, viajes: creados } });
+  res.status(201).json({ creados, omitidos: dias.length - creados.length });
+});
+
+// Copiar un viaje a otra fecha (mismos datos, sin documentos del RNDC)
+r.post('/relaciones/copiar/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
+  const { fecha } = z.object({ fecha: z.string() }).parse(req.body);
+  const f = parseFecha(fecha); if (!f) throw new ErrorHttp(400, 'Fecha inválida');
+  const v = await Viaje.findOne(deEmpresa(req, { _id: req.params.id })).lean();
+  if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
+  const { asegurarMesAbierto } = await import('../services/gestion/cierre.js');
+  await asegurarMesAbierto(req.empresaId, f);
+  const { siguiente: sig } = await import('../models/index.js');
+  const campos = ['cliente', 'tarifaRef', 'destino', 'codOrigen', 'codDestino', 'placa', 'remolque', 'conductor', 'conductorNombre', 'titular', 'destinatario',
+    'pesoKg', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa', 'flete', 'anticipo', 'observaciones', 'requiereManifiesto'];
+  const nuevo = await Viaje.create({ ...Object.fromEntries(campos.map(k => [k, v[k]])), empresa: req.empresaId, numero: await sig(req.empresaId, 'viaje'), fecha: f,
+    creadoPor: req.usuario._id, actualizadoPor: req.usuario._id });
+  await auditar(req, 'copiar_viaje', { entidad: 'Viaje', entidadId: nuevo._id, detalle: { de: v.numero, a: nuevo.numero } });
+  res.status(201).json({ numero: nuevo.numero, _id: nuevo._id });
 });
 
 // ═════════════ Soporte interno MC / RC ═════════════

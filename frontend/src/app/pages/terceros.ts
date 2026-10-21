@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -13,6 +14,9 @@ import { ImportarExcel } from '../shared/importar-excel';
 import { TraerRndc } from '../shared/traer-rndc';
 import { CargarMas } from '../shared/cargar-mas';
 import { mensajeError } from '../core/api.service';
+import { VistaRndc } from '../shared/vista-rndc';
+
+type TipoNuevo = 'conductor' | 'persona' | 'empresa' | 'sede' | 'vehiculo' | 'remolque';
 
 const ROLES: [string, string][] = [['conductor', 'Conductor'], ['titular', 'Titular de manifiesto'], ['propietario', 'Propietario'],
   ['tenedor', 'Tenedor'], ['remitente', 'Remitente'], ['destinatario', 'Destinatario']];
@@ -25,7 +29,7 @@ const vacio = () => ({
 
 @Component({
   selector: 'app-terceros',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, TraerRndc, CargarMas, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, TraerRndc, CargarMas, VistaRndc, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Conductores y terceros</h1><p class="sutil">Conductores, titulares, propietarios, tenedores y destinatarios que se registran en el RNDC.</p></div>
@@ -33,7 +37,7 @@ const vacio = () => ({
         @if (puedeEditar) {
           <button (click)="importar.set(true)"><app-icono nombre="descargar" />Importar Excel</button>
           @if (puedeRndc) { <button (click)="traer.set(true)"><app-icono nombre="buscar" />Traer del RNDC</button> }
-          <button class="primario" (click)="nuevo()"><app-icono nombre="mas" />Nuevo tercero</button>
+          <button class="primario" (click)="nuevo()"><app-icono nombre="mas" />Nuevo en el RNDC</button>
         }
       </div>
     </div>
@@ -73,14 +77,29 @@ const vacio = () => ({
     </div>
 
     <!-- Paso 1: verificar el documento en la empresa y en el RNDC -->
-    <app-modal titulo="Nuevo conductor o tercero" [abierto]="verificando()" (cerrar)="verificando.set(false)">
+    <app-modal titulo="Nuevo en el RNDC" [abierto]="verificando()" (cerrar)="verificando.set(false)">
+      <fieldset class="que">
+        <legend>¿Qué va a crear?</legend>
+        <div class="opciones-nuevo">
+          @for (o of TIPOS_NUEVO; track o.v) {
+            <button type="button" class="opcion" [class.activo]="tipoNuevo() === o.v" [attr.aria-pressed]="tipoNuevo() === o.v" (click)="elegirTipo(o.v)">
+              <app-icono [nombre]="o.icono" [tam]="18" /><strong>{{ o.t }}</strong><span>{{ o.d }}</span></button>
+          }
+        </div>
+      </fieldset>
       <form id="form-verificar-t" class="formulario" (ngSubmit)="verificar()">
-        <p class="sutil ancho" style="margin:0">Primero se busca el documento en su empresa{{ puedeConsultar ? ' y en el RNDC' : '' }}, para no duplicarlo y traer los datos que ya existan.</p>
-        <div class="campo"><label for="vt-tipo">Tipo de documento</label><select id="vt-tipo" name="tipo" [(ngModel)]="buscar.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
-        <div class="campo"><label for="vt-num">Número</label><input id="vt-num" name="num" [(ngModel)]="buscar.numId" required inputmode="numeric" autofocus />
-          @if (buscar.tipoId === 'N') { <small>NIT con dígito de verificación, sin guion.</small> }</div>
-        <div class="campo"><label for="vt-rol">Rol</label><select id="vt-rol" name="rol" [(ngModel)]="buscar.rol">@for (r of roles; track r[0]) { <option [value]="r[0]">{{ r[1] }}</option> }</select></div>
-        @if (puedeConsultar) { <label class="casilla ancho"><input type="checkbox" name="rndc" [(ngModel)]="consultarRndc" />Consultar en el RNDC (pide la contraseña del web service)</label> }
+        @if (tipoNuevo() === 'sede') {
+          <p class="sutil ancho" style="margin:0">Escriba el NIT de la empresa: se muestran sus sedes y se asigna el código de la próxima. La sede queda lista como destinatario de las remesas.</p>
+          <div class="campo"><label for="vt-num">NIT</label><input id="vt-num" name="num" [(ngModel)]="buscar.numId" required inputmode="numeric" autofocus />
+            <small>Con dígito de verificación, sin guion.</small></div>
+        } @else {
+          <p class="sutil ancho" style="margin:0">Primero se busca el documento en su empresa{{ puedeConsultar ? ' y en el RNDC' : '' }}, para no duplicarlo y traer los datos que ya existan.</p>
+          <div class="campo"><label for="vt-tipo">Tipo de documento</label><select id="vt-tipo" name="tipo" [(ngModel)]="buscar.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
+          <div class="campo"><label for="vt-num">Número</label><input id="vt-num" name="num" [(ngModel)]="buscar.numId" required inputmode="numeric" autofocus />
+            @if (buscar.tipoId === 'N') { <small>NIT con dígito de verificación, sin guion.</small> }</div>
+          <div class="campo"><label for="vt-rol">Rol</label><select id="vt-rol" name="rol" [(ngModel)]="buscar.rol">@for (r of roles; track r[0]) { <option [value]="r[0]">{{ r[1] }}</option> }</select></div>
+        }
+        @if (puedeConsultar && tipoNuevo() !== 'sede') { <label class="casilla ancho"><input type="checkbox" name="rndc" [(ngModel)]="consultarRndc" />Consultar en el RNDC (pide la contraseña del web service)</label> }
       </form>
       <ng-container pie>
         <button type="button" (click)="verificando.set(false)">Cancelar</button>
@@ -88,8 +107,12 @@ const vacio = () => ({
       </ng-container>
     </app-modal>
 
-    <app-modal [titulo]="editando() ? 'Editar tercero' : 'Nuevo tercero'" [abierto]="abierto()" (cerrar)="abierto.set(false)" [ancho]="true">
+    <app-modal [titulo]="editando() ? 'Editar tercero' : sedesEmpresa().length ? 'Nueva sede' : 'Nuevo tercero'" [abierto]="abierto()" (cerrar)="abierto.set(false)" [ancho]="true">
       @let f = form();
+      @if (sedesEmpresa().length) {
+        <div class="mensaje info" style="margin-bottom:12px"><strong>Sedes que ya tiene:</strong>
+          @for (s of sedesEmpresa(); track s._id) { <span class="chip sin-punto" style="margin:2px 4px">{{ s.sede?.codigo || '0' }} · {{ s.sede?.nombre || s.nombres }}</span> }</div>
+      }
       @if (origen(); as o) { <div class="mensaje" [class.ok]="o.tipo === 'ok'" [class.info]="o.tipo === 'info'" [class.alerta]="o.tipo === 'alerta'" style="margin-bottom:12px">{{ o.texto }}</div> }
       @if (faltantes().length) {
         <div class="mensaje alerta" style="margin-bottom:12px">
@@ -135,15 +158,39 @@ const vacio = () => ({
           }
         }
         @if (editando() && !soloFaltantes()) { <label class="casilla" style="margin-top:14px"><input type="checkbox" name="activo" [(ngModel)]="f.activo" />Activo</label> }
-        @if (puedeRndc && puedeEditar) { <label class="casilla" style="margin-top:14px"><input type="checkbox" name="sinc" [(ngModel)]="sincronizar" />Registrar o actualizar en el RNDC al guardar</label> }
+        @if (puedeRndc && puedeEditar) { <label class="casilla" style="margin-top:14px"><input type="checkbox" name="sinc" [(ngModel)]="sincronizar" />Crear o actualizar también en el RNDC al guardar</label> }
       </form>
+      <app-vista-rndc [variables]="vistaRndc()" (cerrar)="vistaRndc.set(null)" />
       <ng-container pie>
+        <button type="button" class="texto" style="margin-right:auto" (click)="verVista()" title="Solo muestra las variables del RNDC; no guarda ni envía nada">Solo mostrar lo que se enviaría</button>
         <button type="button" (click)="abierto.set(false)">Cancelar</button>
         @if (puedeEditar) { <button class="primario" type="submit" form="form-tercero" [disabled]="trabajando()">{{ sincronizar && puedeRndc ? 'Guardar y registrar en el RNDC' : 'Guardar' }}</button> }
       </ng-container>
     </app-modal>`,
+  styles: [`
+    .que { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+    .que legend { font-weight: 650; font-size: 13px; color: var(--gris-6); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .04em; }
+    .opciones-nuevo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .opcion { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 10px 12px; height: auto; white-space: normal; text-align: left;
+      border: 1.5px solid var(--gris-2); border-radius: 12px; background: var(--gris-0); }
+    .opcion span { font-size: 12px; color: var(--gris-6); font-weight: 400; line-height: 1.3; }
+    .opcion.activo { border-color: var(--primario-borde); background: var(--primario-claro); box-shadow: 0 0 0 1px var(--primario-borde); }
+    @media (max-width: 560px) { .opciones-nuevo { grid-template-columns: 1fr 1fr; } }
+  `],
 })
 export class Terceros {
+  private router = inject(Router);
+  readonly TIPOS_NUEVO: { v: TipoNuevo; t: string; d: string; icono: string }[] = [
+    { v: 'conductor', t: 'Conductor', d: 'Persona con licencia', icono: 'usuario' },
+    { v: 'persona', t: 'Titular o tenedor', d: 'Propietario, tenedor o titular', icono: 'personas' },
+    { v: 'empresa', t: 'Empresa nueva', d: 'Con su primera sede', icono: 'edificio' },
+    { v: 'sede', t: 'Sede de empresa', d: 'Otra sede de una empresa existente', icono: 'edificio' },
+    { v: 'vehiculo', t: 'Vehículo', d: 'Camión o tractocamión', icono: 'camion' },
+    { v: 'remolque', t: 'Remolque', d: 'Remolque o semirremolque', icono: 'camion' },
+  ];
+  readonly tipoNuevo = signal<TipoNuevo>('conductor');
+  readonly sedesEmpresa = signal<any[]>([]);
+  readonly vistaRndc = signal<[string, string][] | null>(null);
   private api = inject(Api);
   private auth = inject(Auth);
   private avisos = inject(Avisos);
@@ -213,10 +260,46 @@ export class Terceros {
   ver(campo: string) { return !this.soloFaltantes() || this.falta(campo); }
   verAlguno(campos: string[]) { return campos.some(c => this.ver(c)); }
 
-  nuevo() { this.buscar = { tipoId: 'C', numId: '', rol: this.rol || 'conductor' }; this.consultarRndc = this.puedeConsultar; this.verificando.set(true); }
+  nuevo() {
+    this.buscar = { tipoId: 'C', numId: '', rol: this.rol || 'conductor' }; this.consultarRndc = this.puedeConsultar;
+    this.tipoNuevo.set(this.rol && this.rol !== 'conductor' ? 'persona' : 'conductor');
+    this.verificando.set(true);
+  }
+  elegirTipo(t: TipoNuevo) {
+    if (t === 'vehiculo' || t === 'remolque') { this.verificando.set(false); this.router.navigate(['/vehiculos'], { queryParams: { nuevo: t } }); return; }
+    this.tipoNuevo.set(t);
+    const conf = ({ conductor: ['C', 'conductor'], persona: ['C', 'titular'], empresa: ['N', 'destinatario'], sede: ['N', 'destinatario'] } as Record<string, string[]>)[t];
+    this.buscar = { ...this.buscar, tipoId: conf[0], rol: conf[1] };
+  }
+
+  // Sede de una empresa existente: toma sus datos y el código de la próxima sede
+  async nuevaSede() {
+    const numId = this.digitos(this.buscar.numId);
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.get<any>('/maestros/terceros/sedes', { numId });
+      if (!r.sedes.length) { this.avisos.mostrar('Esa empresa no está registrada: elija «Empresa nueva».', 'error'); return; }
+      const base = r.sedes[0];
+      this.verificando.set(false);
+      this.editar({ tipoId: base.tipoId, numId: base.numId, nombres: base.nombres, apellido1: base.apellido1 || '', apellido2: base.apellido2 || '',
+        sede: { codigo: r.siguiente, nombre: '' }, roles: ['destinatario'] }, []);
+      this.sedesEmpresa.set(r.sedes);
+      this.sincronizar = this.puedeRndc;
+      this.origen.set({ tipo: 'info', texto: `Nueva sede N° ${r.siguiente} de ${base.nombres}. Escriba el nombre de la sede, la dirección y el municipio.` });
+      setTimeout(() => document.getElementById('tsn')?.focus(), 50);
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+
+  // «Solo mostrar lo que se enviaría»: variables del RNDC sin guardar ni enviar
+  async verVista() {
+    try { this.vistaRndc.set((await this.api.post<any>('/maestros/terceros/vista-rndc', this.cuerpo())).variables); }
+    catch (e) { this.avisos.mostrar(await mensajeError(e), 'error'); }
+  }
 
   // Busca el documento en la empresa y (si se pide) en el RNDC antes de crear el registro.
   async verificar() {
+    if (this.tipoNuevo() === 'sede') return this.nuevaSede();
+    this.sedesEmpresa.set([]);
     const numId = this.digitos(this.buscar.numId);
     const { tipoId, rol } = this.buscar;
     let clave: string | null = null;
@@ -233,7 +316,8 @@ export class Terceros {
         this.origen.set({ tipo: 'ok', texto: `Datos recuperados del RNDC y guardados en su empresa${r.sedes > 1 ? ` (${r.sedes} sedes)` : ''}.${r.faltantes.length ? ' Complete solo lo que falta.' : ' Está completo.'}` });
         this.cargar();
       } else {
-        this.form.set({ ...vacio(), tipoId, numId, roles: [rol] });
+        this.form.set({ ...vacio(), tipoId, numId, roles: [rol], ...(this.tipoNuevo() === 'empresa' ? { sede: { codigo: '1', nombre: 'PRINCIPAL' } } : {}) });
+        this.vistaRndc.set(null);
         this.faltantes.set([]); this.soloFaltantes.set(false); this.sincronizar = this.puedeRndc;
         this.origen.set(r.consultado
           ? { tipo: 'alerta', texto: `No está en el RNDC (respuesta: ${r.mensaje}). Es un registro nuevo: complete sus datos.` }
@@ -245,7 +329,7 @@ export class Terceros {
   }
 
   editar(t: any, faltantes?: any[]) {
-    this.origen.set(null);
+    this.origen.set(null); this.vistaRndc.set(null); this.sedesEmpresa.set([]);
     this.faltantes.set(faltantes || []);
     this.soloFaltantes.set(!!faltantes?.length);
     this.sincronizar = false;
@@ -261,12 +345,17 @@ export class Terceros {
     this.form.update(f => ({ ...f, roles: f.roles.includes(r) ? f.roles.filter((x: string) => x !== r) : [...f.roles, r] }));
   }
 
-  async guardar() {
+  private cuerpo() {
     const f = this.form();
-    const cuerpo = { tipoId: f.tipoId, numId: f.numId, nombres: f.nombres, apellido1: f.apellido1, apellido2: f.apellido2, sede: f.sede,
+    return { tipoId: f.tipoId, numId: f.numId, nombres: f.nombres, apellido1: f.apellido1, apellido2: f.apellido2, sede: f.sede,
       telefono: f.telefono, celular: f.celular, direccion: f.direccion, codMunicipio: f.codMunicipio, correo: f.correo,
       licencia: { ...f.licencia, vence: f.licencia.vence || null }, fechaNacimiento: f.fechaNacimiento || null, banco: f.banco,
       roles: f.roles, activo: f.activo };
+  }
+
+  async guardar() {
+    const f = this.form();
+    const cuerpo = this.cuerpo();
     this.trabajando.set(true);
     try {
       const guardado = f._id ? await this.api.put<any>(`/maestros/terceros/${f._id}`, cuerpo) : await this.api.post<any>('/maestros/terceros', cuerpo);

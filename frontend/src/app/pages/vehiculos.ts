@@ -14,6 +14,8 @@ import { ActualizarVehiculos } from '../shared/actualizar-vehiculos';
 import { CargarMas } from '../shared/cargar-mas';
 import { mensajeError } from '../core/api.service';
 import { BuscarTercero } from '../shared/buscar-tercero';
+import { VistaRndc } from '../shared/vista-rndc';
+import { ActivatedRoute } from '@angular/router';
 
 const vacio = () => ({
   placa: '', clase: 'vehiculo', configuracion: '', configuracionNombre: '', marca: '', marcaNombre: '', linea: '', ejes: null, modelo: null,
@@ -24,7 +26,7 @@ const vacio = () => ({
 
 @Component({
   selector: 'app-vehiculos',
-  imports: [FormsModule, Modal, Icono, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, BuscarTercero, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, BuscarTercero, VistaRndc, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Vehículos</h1><p class="sutil">Vehículos y remolques con sus documentos. Los códigos (configuración, marca, línea…) son los de las tablas del RNDC.</p></div>
@@ -131,9 +133,11 @@ const vacio = () => ({
           <div class="campo" [hidden]="!verAlguno(['tenedor.tipoId', 'tenedor.numId'])" [class.falta]="falta('tenedor.numId')"><label for="tn">Documento tenedor</label><input id="tn" name="tn" [(ngModel)]="f.tenedor.numId" /></div>
         </div></fieldset>
         @if (editando() && !soloFaltantes()) { <label class="casilla" style="margin-top:14px"><input type="checkbox" name="activo" [(ngModel)]="f.activo" />Activo</label> }
-        @if (puedeRndc && puedeEditar) { <label class="casilla" style="margin-top:14px"><input type="checkbox" name="sinc" [(ngModel)]="sincronizar" />Registrar o actualizar en el RNDC al guardar</label> }
+        @if (puedeRndc && puedeEditar) { <label class="casilla" style="margin-top:14px"><input type="checkbox" name="sinc" [(ngModel)]="sincronizar" />Crear o actualizar también en el RNDC al guardar</label> }
       </form>
+      <app-vista-rndc [variables]="vistaRndc()" (cerrar)="vistaRndc.set(null)" />
       <ng-container pie>
+        <button type="button" class="texto" style="margin-right:auto" (click)="verVista()" title="Solo muestra las variables del RNDC; no guarda ni envía nada">Solo mostrar lo que se enviaría</button>
         <button type="button" (click)="abierto.set(false)">Cancelar</button>
         @if (puedeEditar) { <button class="primario" type="submit" form="form-veh" [disabled]="trabajando()">{{ sincronizar && puedeRndc ? 'Guardar y registrar en el RNDC' : 'Guardar' }}</button> }
       </ng-container>
@@ -169,8 +173,18 @@ export class Vehiculos {
   q = '';
   nombre = nombreTercero;
 
+  private claseNueva = 'vehiculo';
+  readonly vistaRndc = signal<[string, string][] | null>(null);
   constructor() {
     this.cargar();
+    const n = inject(ActivatedRoute).snapshot.queryParamMap.get('nuevo');
+    if (n === 'vehiculo' || n === 'remolque') { this.claseNueva = n; setTimeout(() => this.nuevo(), 0); }
+  }
+
+  // «Solo mostrar lo que se enviaría»: variables del RNDC sin guardar ni enviar
+  async verVista() {
+    try { this.vistaRndc.set((await this.api.post<any>('/maestros/vehiculos/vista-rndc', this.cuerpo())).variables); }
+    catch (e) { this.avisos.mostrar(await mensajeError(e), 'error'); }
   }
 
 
@@ -230,7 +244,8 @@ export class Vehiculos {
         this.origen.set({ tipo: 'ok', texto: `Datos recuperados del RNDC y guardados en su empresa.${r.faltantes.length ? ' Complete solo lo que falta.' : ' Está completo.'}` });
         this.cargar();
       } else {
-        this.form.set({ ...vacio(), placa });
+        this.form.set({ ...vacio(), placa, clase: this.claseNueva });
+        this.vistaRndc.set(null);
         this.faltantes.set([]); this.soloFaltantes.set(false); this.sincronizar = this.puedeRndc;
         this.origen.set(r.consultado
           ? { tipo: 'alerta', texto: `No está en el RNDC (respuesta: ${r.mensaje}). Es un vehículo nuevo: complete sus datos.` }
@@ -242,7 +257,7 @@ export class Vehiculos {
   }
 
   editar(v: any, faltantes?: any[]) {
-    this.origen.set(null);
+    this.origen.set(null); this.vistaRndc.set(null);
     this.faltantes.set(faltantes || []);
     this.soloFaltantes.set(!!faltantes?.length);
     this.sincronizar = false;
@@ -255,7 +270,7 @@ export class Vehiculos {
     this.abierto.set(true);
   }
 
-  async guardar() {
+  private cuerpo() {
     const f = this.form();
     const campos = ['placa', 'clase', 'configuracion', 'configuracionNombre', 'marca', 'marcaNombre', 'linea', 'ejes', 'modelo', 'color',
       'carroceria', 'combustible', 'pesoVacio', 'capacidad', 'pbv', 'unidadMedida', 'aseguradoraSoat', 'propietario', 'tenedor', 'activo'];
@@ -265,6 +280,12 @@ export class Vehiculos {
     cuerpo.venceTecnomecanica = f.venceTecnomecanica || null;
     cuerpo.conductorHabitual = f.conductorHabitual || null;
     cuerpo.titularHabitual = f.titularHabitual || null;
+    return cuerpo;
+  }
+
+  async guardar() {
+    const f = this.form();
+    const cuerpo = this.cuerpo();
     this.trabajando.set(true);
     try {
       const guardado = f._id ? await this.api.put<any>(`/maestros/vehiculos/${f._id}`, cuerpo) : await this.api.post<any>('/maestros/vehiculos', cuerpo);

@@ -32,6 +32,7 @@ const viajeSchema = z.object({
   destinatario: z.object({ tipoId: z.string().trim().max(1).optional().default(''), numId: z.string().trim().max(15).optional().default(''),
     sede: z.string().trim().max(6).optional().default('') }).optional(),
   pesoKg: dinero.optional(), cantidad: dinero.optional(), conAuxiliar: z.boolean().optional(),
+  diasAuxiliar: z.coerce.number().min(0).max(366).optional(), planilla: z.string().trim().max(30).optional(),
   tarifa: dinero.optional(), flete: dinero.optional(), anticipo: dinero.optional(),
   observaciones: z.string().trim().max(500).optional(),
   historico: z.boolean().optional(),
@@ -45,7 +46,7 @@ export async function titularDePlaca(empresaId, placa) {
   return v?.titularHabitual || null;
 }
 // Después de expedir documentos en el RNDC solo se pueden cambiar datos internos.
-const CAMPOS_INTERNOS = ['observaciones', 'cantidad', 'conAuxiliar', 'tarifa', 'historico'];
+const CAMPOS_INTERNOS = ['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa', 'historico'];
 
 const POBLAR = (req) => [
   pob(req.empresaId, 'cliente', 'nombre nit dv tipoId'),
@@ -88,7 +89,7 @@ function filtroLista(req) {
   if (req.query.anulados === '1') (f.$and ||= []).push({ $or: anulado });
   if (req.query.q) {
     const re = new RegExp(escaparRegex(req.query.q), 'i');
-    f.$or = [{ destino: re }, { placa: re }, { 'manifiesto.numero': re }, { 'remesa.numero': re }, { observaciones: re }, { conductorNombre: re }];
+    f.$or = [{ destino: re }, { placa: re }, { 'manifiesto.numero': re }, { 'remesa.numero': re }, { observaciones: re }, { conductorNombre: re }, { planilla: re }];
   }
   return f;
 }

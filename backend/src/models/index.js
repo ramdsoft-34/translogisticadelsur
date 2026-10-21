@@ -217,6 +217,8 @@ const viajeSchema = new Schema({
   pesoKg: { type: Number, default: 0, min: 0 },
   cantidad: { type: Number, default: 1, min: 0 },     // viajes o unidades (tarifa por unidad)
   conAuxiliar: { type: Boolean, default: false },
+  diasAuxiliar: { type: Number, default: 0, min: 0 },   // cantidad de auxiliares o días de auxiliar (0 = uno por unidad)
+  planilla: str(),                                      // N° de planilla del cliente (si aplica)
   tarifa: { type: Number, default: 0, min: 0 },
   flete: { type: Number, default: 0, min: 0 },
   anticipo: { type: Number, default: 0, min: 0 },
