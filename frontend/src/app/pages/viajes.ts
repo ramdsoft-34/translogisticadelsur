@@ -76,6 +76,33 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       <div><span>Saldo por pagar</span><strong>{{ sumas().saldo | pesos }}</strong></div>
     </div>
 
+    <div class="vista" role="group" aria-label="Vista">
+      <div class="segmentos">
+        <button type="button" [class.activo]="vista() === 'lista'" (click)="cambiarVista('lista')">Lista</button>
+        <button type="button" [class.activo]="vista() === 'empresa'" (click)="cambiarVista('empresa')" title="Agrupados por empresa y placa, ordenados por fecha, con totales">Por empresa</button>
+      </div>
+      @if (vista() === 'empresa') { <span class="sutil">Agrupados por empresa y placa, del más antiguo al más reciente. Excel y PDF descargan este listado.</span> }
+    </div>
+
+    @if (vista() === 'empresa') {
+      <div class="tabla-caja">
+        <table class="tabla-movil">
+          <thead><tr><th>N°</th><th>Fecha</th><th>Conductor</th><th>Destino</th><th>Manifiesto</th><th class="num">Tarifa</th><th class="num">Flete</th><th class="num">Anticipo</th></tr></thead>
+          <tbody>
+            @for (g of gruposEmpresa(); track g.clave) {
+              <tr class="cab-grupo"><td colspan="8">{{ g.cliente }} · <span class="placa">{{ g.placa }}</span> <span class="sutil">· {{ g.filas.length }} viaje(s)</span></td></tr>
+              @for (x of g.filas; track x.numero) {
+                <tr><td data-etiqueta="N°" class="sutil">{{ x.numero }}</td><td data-etiqueta="Fecha">{{ x.fecha | dia }}</td><td data-etiqueta="Conductor">{{ x.conductor }}</td>
+                  <td data-etiqueta="Destino">{{ x.destino }}</td><td data-etiqueta="Manifiesto">{{ x.manifiesto }}</td>
+                  <td data-etiqueta="Tarifa" class="num">{{ x.tarifa | pesos }}</td><td data-etiqueta="Flete" class="num">{{ x.flete | pesos }}</td><td data-etiqueta="Anticipo" class="num">{{ x.anticipo | pesos }}</td></tr>
+              }
+              <tr class="subtotal"><td colspan="5">Subtotal {{ g.placa }}</td><td class="num">{{ g.tarifa | pesos }}</td><td class="num">{{ g.flete | pesos }}</td><td class="num">{{ g.anticipo | pesos }}</td></tr>
+            } @empty { <tr><td colspan="8" class="vacio">No hay viajes con estos filtros</td></tr> }
+          </tbody>
+          @if (porEmpresa()?.totales; as t) { <tfoot><tr><td colspan="5">TOTAL · {{ porEmpresa()?.filas?.length }} viaje(s)</td><td class="num">{{ t.tarifa | pesos }}</td><td class="num">{{ t.flete | pesos }}</td><td class="num">{{ t.anticipo | pesos }}</td></tr></tfoot> }
+        </table>
+      </div>
+    } @else {
     <div class="tabla-caja">
       <table class="tabla-movil">
         <thead><tr><th>N°</th><th>Fecha</th><th>Cliente / destino</th><th>Placa</th><th>Conductor</th>
@@ -110,6 +137,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       </table>
       @if (viajes().length) { <app-cargar-mas [mostrados]="viajes().length" [total]="total()" [cargando]="cargandoMas()" unidad="viajes" (mas)="cargarMas()" /> }
     </div>
+    }
 
     <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : (registradosTanda().length ? 'Registrar otro viaje' : 'Registrar viaje')" [abierto]="abierto()" (cerrar)="cerrarFormulario()" [ancho]="true">
       @let f = form();
@@ -269,6 +297,9 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .resumen strong { font-size: 20px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
     .estados { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .secciones { display: flex; flex-direction: column; gap: 14px; }
+    .vista { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 10px; }
+    tr.cab-grupo td { background: var(--gris-1); font-weight: 650; }
+    tr.subtotal td { font-weight: 650; border-bottom: 2px solid var(--gris-2); }
     .placas-conductor { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
     .wa-lista { margin: 10px 0 4px; }
     .wa-cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
@@ -376,6 +407,7 @@ export class Viajes {
 
   // Primera página (reinicia la lista)
   async cargar() {
+    if (this.vista() === 'empresa') this.cargarPorEmpresa();
     this.cargando.set(true);
     this.pagina = 1;
     try {
@@ -578,7 +610,36 @@ export class Viajes {
     } catch (e) { this.avisos.error(e); }
   }
 
+  // ── Vista «Por empresa» (antes «Viajes por empresa» de la plantilla) ──
+  readonly vista = signal<'lista' | 'empresa'>((() => { try { return localStorage.getItem('tls_vista_viajes') === 'empresa' ? 'empresa' : 'lista'; } catch { return 'lista'; } })());
+  readonly porEmpresa = signal<any>(null);
+  readonly gruposEmpresa = computed(() => {
+    const q = String(this.filtro.q || '').toLowerCase();
+    const m = new Map<string, any>();
+    for (const x of this.porEmpresa()?.filas || []) {
+      if (q && !`${x.placa} ${x.destino} ${x.manifiesto} ${x.conductor}`.toLowerCase().includes(q)) continue;
+      const k = `${x.cliente}|${x.placa}`;
+      const g = m.get(k) || { clave: k, cliente: x.cliente, placa: x.placa, filas: [], tarifa: 0, flete: 0, anticipo: 0 };
+      g.filas.push(x); g.tarifa += x.tarifa; g.flete += x.flete; g.anticipo += x.anticipo; m.set(k, g);
+    }
+    return [...m.values()];
+  });
+  cambiarVista(v: 'lista' | 'empresa') {
+    this.vista.set(v);
+    try { localStorage.setItem('tls_vista_viajes', v); } catch { /* sin almacenamiento */ }
+    if (v === 'empresa') this.cargarPorEmpresa();
+  }
+  async cargarPorEmpresa() {
+    try { this.porEmpresa.set(await this.api.get('/gestion/relaciones/viajes-empresa', { desde: this.filtro.desde, hasta: this.filtro.hasta, cliente: this.filtro.cliente })); }
+    catch (e) { this.avisos.error(e); }
+  }
+
   async descargar(tipo: 'xlsx' | 'pdf') {
+    if (this.vista() === 'empresa') {
+      try { await this.api.descargar('/gestion/relaciones/viajes-empresa', { desde: this.filtro.desde, hasta: this.filtro.hasta, cliente: this.filtro.cliente, formato: tipo }, `viajes_por_empresa.${tipo}`); }
+      catch (e) { this.avisos.error(e); }
+      return;
+    }
     try {
       await this.api.descargar(`/reportes/bitacora.${tipo}`, { desde: this.filtro.desde, hasta: this.filtro.hasta, cliente: this.filtro.cliente }, `bitacora.${tipo}`);
     } catch (e) { this.avisos.error(e); }

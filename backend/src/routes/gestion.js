@@ -328,7 +328,7 @@ r.get('/relaciones/pago-conductores', verRep, async (req, res) => {
 // Viajes por empresa: ordenados por placa y, dentro de cada placa, del más antiguo al más reciente, con totales
 r.get('/relaciones/viajes-empresa', verRep, async (req, res) => {
   const { desde, hasta, viajes, tarifas } = await viajesPeriodo(req);
-  viajes.sort((a, b) => a.placa.localeCompare(b.placa) || new Date(a.fecha) - new Date(b.fecha) || a.numero - b.numero);
+  viajes.sort((a, b) => String(a.cliente?.nombre || '').localeCompare(String(b.cliente?.nombre || '')) || a.placa.localeCompare(b.placa) || new Date(a.fecha) - new Date(b.fecha) || a.numero - b.numero);
   const filas = viajes.map(v => { const l = lineaLiquidacion(v, tarifas.get(String(v.tarifaRef)));
     return { numero: v.numero, fecha: v.fecha, cliente: v.cliente?.nombre || '', placa: v.placa, conductor: nombreT(v.conductor) || v.conductorNombre, destino: v.destino,
       manifiesto: v.manifiesto?.numero || v.soporteInterno?.mc || '', tarifa: l.totalCobrado, flete: Number(v.flete) || 0, anticipo: Number(v.anticipo) || 0 }; });

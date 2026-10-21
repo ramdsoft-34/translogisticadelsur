@@ -17,7 +17,6 @@ const MENU: Opcion[] = [
   { ruta: '/viajes', texto: 'Viajes', icono: 'camion', permisos: [P.VIAJES_VER], grupo: 'Operación' },
   { ruta: '/manifiestos', texto: 'Manifiestos RNDC', icono: 'documento', permisos: [P.RNDC_OPERAR], grupo: 'Operación' },
   { ruta: '/remesas-dulces', texto: 'Remesas Dulces', icono: 'documento', permisos: [P.VIAJES_REGISTRAR], grupo: 'Operación' },
-  { ruta: '/viajes-empresa', texto: 'Viajes por empresa', icono: 'lista', permisos: [P.REPORTES_VER], grupo: 'Operación' },
   { ruta: '/consultas-rndc', texto: 'Consultas RNDC', icono: 'buscar', permisos: [P.RNDC_CONSULTAR], grupo: 'Operación' },
   // Dinero
   { ruta: '/liquidaciones', texto: 'Liquidación de fletes', icono: 'dinero', permisos: [P.LIQUIDACION_VER], grupo: 'Pagos y facturación' },

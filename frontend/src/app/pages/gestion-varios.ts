@@ -10,46 +10,6 @@ import { Confirmar } from '../shared/confirmar';
 import { VisorPdf } from '../shared/visor-pdf';
 import { filtrar } from '../shared/filtro';
 
-// ── Viajes por empresa: consulta e impresión ordenada por placa y fecha ──
-@Component({
-  selector: 'app-viajes-empresa',
-  imports: [FormsModule, Icono, VisorPdf, ...FORMATOS],
-  template: `
-    <div class="pagina-cab"><div><h1>Viajes por empresa</h1>
-      <p class="sutil">Los viajes de cada empresa (cliente) ordenados por placa y fecha, con totales, para revisar, imprimir o enviar.</p></div></div>
-    <app-visor-pdf #visor />
-    <section class="barra" aria-label="Filtros">
-      <div class="campo"><label for="ve-c">Empresa</label><select id="ve-c" [(ngModel)]="f.cliente" (change)="cargar()"><option value="">Todas</option>
-        @for (c of clientes(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }</select></div>
-      <div class="campo"><label for="ve-d">Desde</label><input id="ve-d" type="date" [(ngModel)]="f.desde" (change)="cargar()" /></div>
-      <div class="campo"><label for="ve-h">Hasta</label><input id="ve-h" type="date" [(ngModel)]="f.hasta" (change)="cargar()" /></div>
-      <div class="campo crece"><label for="ve-q">Buscar</label><input id="ve-q" type="search" placeholder="Placa, conductor, destino o manifiesto" [ngModel]="q()" (ngModelChange)="q.set($event)" /></div>
-      <button (click)="visor.ver('/gestion/relaciones/viajes-empresa', 'Viajes por empresa', { ...f, formato: 'pdf', ver: 1 })"><app-icono nombre="ojo" />Ver PDF</button>
-      <button (click)="excel()">Excel</button>
-    </section>
-    <div class="tabla-caja"><table class="tabla-movil">
-      <thead><tr><th>N°</th><th>Fecha</th><th>Empresa</th><th>Placa</th><th>Conductor</th><th>Destino</th><th>Manifiesto</th><th class="num">Tarifa</th><th class="num">Flete</th><th class="num">Anticipo</th></tr></thead>
-      <tbody>@for (x of visibles(); track x.numero) {
-        <tr><td data-etiqueta="N°">{{ x.numero }}</td><td data-etiqueta="Fecha">{{ x.fecha | dia }}</td><td data-etiqueta="Empresa">{{ x.cliente }}</td><td data-etiqueta="Placa"><strong>{{ x.placa }}</strong></td>
-          <td data-etiqueta="Conductor">{{ x.conductor }}</td><td data-etiqueta="Destino">{{ x.destino }}</td><td data-etiqueta="Manifiesto">{{ x.manifiesto }}</td>
-          <td data-etiqueta="Tarifa" class="num">{{ x.tarifa | pesos }}</td><td data-etiqueta="Flete" class="num">{{ x.flete | pesos }}</td><td data-etiqueta="Anticipo" class="num">{{ x.anticipo | pesos }}</td></tr>
-      } @empty { <tr><td colspan="10" class="vacio">Sin viajes en el periodo</td></tr> }</tbody>
-      @if (datos()?.totales; as t) { <tfoot><tr><td colspan="7">{{ visibles().length }} viaje(s)</td><td class="num">{{ t.tarifa | pesos }}</td><td class="num">{{ t.flete | pesos }}</td><td class="num">{{ t.anticipo | pesos }}</td></tr></tfoot> }
-    </table></div>`,
-})
-export class ViajesEmpresa {
-  private api = inject(Api);
-  private avisos = inject(Avisos);
-  f = { cliente: '', desde: inicioMesIso(), hasta: hoyIso() };
-  readonly clientes = signal<any[]>([]);
-  readonly datos = signal<any>(null);
-  readonly q = signal('');
-  readonly visibles = computed(() => filtrar<any>(this.datos()?.filas || [], this.q()));
-  constructor() { this.api.get<any[]>('/maestros/clientes').then(c => this.clientes.set(c)).catch(() => {}); this.cargar(); }
-  async cargar() { try { this.datos.set(await this.api.get('/gestion/relaciones/viajes-empresa', this.f)); } catch (e) { this.avisos.error(e); } }
-  async excel() { try { await this.api.descargar('/gestion/relaciones/viajes-empresa', { ...this.f, formato: 'xlsx' }, 'viajes_empresa.xlsx'); } catch (e) { this.avisos.error(e); } }
-}
-
 // ── Cierre de mes ──
 @Component({
   selector: 'app-cierre-mes',
