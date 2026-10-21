@@ -323,3 +323,12 @@ test('Mi cuenta: perfil, empresa, seguridad, actividad propia y cambio de nombre
   const otro = (await s.b.get('/api/auth/mi-cuenta')).body;
   assert.equal(otro.empresa.nombre, 'Otra Empresa');
 });
+
+test('Importación: un identificador se completa como valor, no se recorre como objeto', async () => {
+  const { camposFaltantes } = await import('../src/services/importacion/excel.js');
+  const { Types } = await import('mongoose');
+  const id = new Types.ObjectId();
+  const set = camposFaltantes({ conductorHabitual: null, soat: { numero: '' } }, { conductorHabitual: id, soat: { numero: '1' } });
+  assert.deepEqual(Object.keys(set).sort(), ['conductorHabitual', 'soat.numero']);
+  assert.equal(String(set.conductorHabitual), String(id));
+});

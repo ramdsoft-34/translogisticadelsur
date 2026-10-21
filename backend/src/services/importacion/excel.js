@@ -149,7 +149,8 @@ export function camposFaltantes(existente, nuevo, prefijo = '') {
   for (const [k, v] of Object.entries(nuevo)) {
     const ruta = prefijo ? `${prefijo}.${k}` : k;
     const actual = existente?.[k];
-    if (v && typeof v === 'object' && !(v instanceof Date) && !Array.isArray(v)) {
+    // Los identificadores (ObjectId) son valores, no objetos para recorrer
+    if (v && typeof v === 'object' && !(v instanceof Date) && !Array.isArray(v) && !v._bsontype) {
       Object.assign(set, camposFaltantes(actual || {}, v, ruta));
     } else if (Array.isArray(v)) {
       const faltan = v.filter(x => !(actual || []).includes(x));
