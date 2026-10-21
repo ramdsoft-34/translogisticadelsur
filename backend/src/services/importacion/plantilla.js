@@ -98,7 +98,7 @@ async function fijarMinimo(empresa, clave, valor) {
     .catch(e => { if (e.code !== 11000) throw e; });
 }
 
-export async function importarPlantillaViajes(empresaId, buffer, { usuario = null } = {}) {
+export async function importarPlantillaViajes(empresaId, buffer, { usuario = null, soloMaestros = false } = {}) {
   const wb = await leerLibro(buffer);
   const H = (n) => filas(wb.getWorksheet(n));
   if (!wb.getWorksheet('BITACORA') || !wb.getWorksheet('Empresas')) {
@@ -342,6 +342,9 @@ export async function importarPlantillaViajes(empresaId, buffer, { usuario = nul
   }
   res.tarifas = { nuevas: fN, completadas: fA, sinMunicipio: fSinMuni };
   if (fSinMuni) res.avisos.push(`${fSinMuni} destino(s) sin municipio DIVIPOLA identificado: complételo en Clientes y tarifas.`);
+
+  // La sincronización de maestros no toca los viajes
+  if (soloMaestros) return res;
 
   // ── 7. Viajes (BITACORA + RNDC_VIAJES + RELACION) ────────────────────────
   const rndcViajes = new Map();
