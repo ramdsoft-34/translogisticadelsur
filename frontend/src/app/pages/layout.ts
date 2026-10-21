@@ -13,22 +13,26 @@ interface Opcion { ruta: string; texto: string; icono: string; permisos: string[
 
 const MENU: Opcion[] = [
   { ruta: '/inicio', texto: 'Inicio', icono: 'inicio', permisos: [P.VIAJES_VER] },
-  { ruta: '/viajes', texto: 'Viajes', icono: 'camion', permisos: [P.VIAJES_VER] },
-  { ruta: '/manifiestos', texto: 'Manifiestos RNDC', icono: 'documento', permisos: [P.RNDC_OPERAR] },
-  { ruta: '/liquidaciones', texto: 'Liquidación de fletes', icono: 'dinero', permisos: [P.LIQUIDACION_VER] },
-  { ruta: '/pago-conductores', texto: 'Pago a conductores', icono: 'dinero', permisos: [P.LIQUIDACION_VER] },
-  { ruta: '/viajes-empresa', texto: 'Viajes por empresa', icono: 'lista', permisos: [P.REPORTES_VER] },
-  { ruta: '/remesas-dulces', texto: 'Remesas Dulces', icono: 'documento', permisos: [P.VIAJES_REGISTRAR] },
-  { ruta: '/contabilidad', texto: 'Contabilidad', icono: 'lista', permisos: [P.LIQUIDACION_VER], grupo: 'Empresa' },
-  { ruta: '/cierre-mes', texto: 'Cierre de mes', icono: 'candado', permisos: [P.CONFIG_GESTIONAR, P.LIQUIDACION_VER], grupo: 'Empresa' },
+  // Operación diaria
+  { ruta: '/viajes', texto: 'Viajes', icono: 'camion', permisos: [P.VIAJES_VER], grupo: 'Operación' },
+  { ruta: '/manifiestos', texto: 'Manifiestos RNDC', icono: 'documento', permisos: [P.RNDC_OPERAR], grupo: 'Operación' },
+  { ruta: '/remesas-dulces', texto: 'Remesas Dulces', icono: 'documento', permisos: [P.VIAJES_REGISTRAR], grupo: 'Operación' },
+  { ruta: '/viajes-empresa', texto: 'Viajes por empresa', icono: 'lista', permisos: [P.REPORTES_VER], grupo: 'Operación' },
+  { ruta: '/consultas-rndc', texto: 'Consultas RNDC', icono: 'buscar', permisos: [P.RNDC_CONSULTAR], grupo: 'Operación' },
+  // Dinero
+  { ruta: '/liquidaciones', texto: 'Liquidación de fletes', icono: 'dinero', permisos: [P.LIQUIDACION_VER], grupo: 'Pagos y facturación' },
+  { ruta: '/pago-conductores', texto: 'Pago a conductores', icono: 'dinero', permisos: [P.LIQUIDACION_VER], grupo: 'Pagos y facturación' },
+  { ruta: '/contabilidad', texto: 'Contabilidad', icono: 'lista', permisos: [P.LIQUIDACION_VER], grupo: 'Pagos y facturación' },
+  { ruta: '/cierre-mes', texto: 'Cierre de mes', icono: 'candado', permisos: [P.CONFIG_GESTIONAR, P.LIQUIDACION_VER], grupo: 'Pagos y facturación' },
+  // Datos maestros
   { ruta: '/conductores', texto: 'Conductores y terceros', icono: 'personas', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
   { ruta: '/vehiculos', texto: 'Vehículos', icono: 'camion', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
   { ruta: '/clientes', texto: 'Clientes y tarifas', icono: 'edificio', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
   { ruta: '/revision', texto: 'Revisión de datos', icono: 'alerta', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
-  { ruta: '/consultas-rndc', texto: 'Consultas RNDC', icono: 'buscar', permisos: [P.RNDC_CONSULTAR], grupo: 'Datos' },
+  // Administración
   { ruta: '/configuracion', texto: 'Configuración', icono: 'ajustes', permisos: [P.CONFIG_GESTIONAR, P.USUARIOS_GESTIONAR], grupo: 'Empresa' },
-  { ruta: '/admin/empresas', texto: 'Empresas', icono: 'edificio', permisos: [P.EMPRESAS_GESTIONAR] },
-  { ruta: '/admin/auditoria', texto: 'Auditoría', icono: 'escudo', permisos: [P.EMPRESAS_GESTIONAR] },
+  { ruta: '/admin/empresas', texto: 'Empresas', icono: 'edificio', permisos: [P.EMPRESAS_GESTIONAR], grupo: 'Plataforma' },
+  { ruta: '/admin/auditoria', texto: 'Auditoría', icono: 'escudo', permisos: [P.EMPRESAS_GESTIONAR], grupo: 'Plataforma' },
 ];
 
 function leerFijo() {
@@ -134,7 +138,10 @@ function leerFijo() {
     .fijar:hover:not(:disabled) { background: var(--lateral-hover); color: #fff; border-color: transparent; }
     .fijo .fijar { color: var(--primario); }
 
-    nav { display: flex; flex-direction: column; padding: 4px 12px 16px; gap: 2px; }
+    /* El menú se desplaza cuando no cabe en la pantalla (la marca queda fija arriba) */
+    nav { display: flex; flex-direction: column; padding: 4px 12px 16px; gap: 2px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+      overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--lateral-linea) transparent; }
+    nav::-webkit-scrollbar { width: 6px; } nav::-webkit-scrollbar-thumb { background: var(--lateral-linea); border-radius: 3px; }
     .grupo { height: 26px; margin-top: 10px; padding: 0 9px; display: flex; align-items: center; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
       color: var(--lateral-tenue); border-top: 1px solid var(--lateral-linea); }
     aside:hover .grupo, aside.desplegado .grupo { border-top-color: transparent; }
