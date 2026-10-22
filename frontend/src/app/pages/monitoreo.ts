@@ -76,7 +76,7 @@ const hace = (h: string | Date | null | undefined) => {
             <p class="sutil nota">Están en Sur Track pero aún no se enlazan a un viaje de Translogística.</p>
             @for (x of datos()!.externos; track x.externoId) {
               <div class="item externo">
-                <span class="fila1"><span class="placa">{{ x.placa || '—' }}</span><small class="sutil">{{ x.codigo }}</small>
+                <span class="fila1">@if (x.placa) { <span class="placa">{{ x.placa }}</span> } @else { <span class="chip sin-punto">Sin placa</span> }<small class="sutil">{{ x.codigo }}</small>
                   <small class="sutil derecha">{{ hace(x.ultima?.hora) }}</small></span>
                 <span class="fila2">{{ x.conductor }}</span>
                 @if (puedeRegistrar) { <button type="button" class="pequeno" (click)="abrirEnlace(x)">Enlazar a un viaje</button> }
@@ -144,13 +144,14 @@ const hace = (h: string | Date | null | undefined) => {
     .cifra.activo { border-color: var(--primario-borde); background: var(--primario-claro); }
     .cifra.alertas.hay { border-color: var(--rojo); color: var(--rojo); }
     .punto { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
-    .monitor { display: grid; grid-template-columns: 340px 1fr; gap: 12px; min-height: calc(100dvh - 260px); }
-    .lista { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; max-height: calc(100dvh - 260px); padding-right: 2px; }
-    .item { display: flex; flex-direction: column; align-items: stretch; gap: 3px; text-align: left; padding: 10px 12px; border: 1px solid var(--gris-2);
+    .monitor { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 12px; min-height: calc(100dvh - 260px); }
+    .lista { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; max-height: calc(100dvh - 260px); padding-right: 4px; min-width: 0; }
+    .lista > * { flex-shrink: 0; }
+    .item { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-height: max-content; overflow: hidden; text-align: left; padding: 10px 12px; border: 1px solid var(--gris-2);
       border-radius: 12px; background: var(--gris-0); height: auto; white-space: normal; font-weight: 400; }
     .item.elegido { border-color: var(--primario-borde); box-shadow: 0 0 0 1px var(--primario-borde); }
     .item.externo { cursor: default; background: var(--gris-1); }
-    .fila1 { display: flex; align-items: center; gap: 8px; } .derecha { margin-left: auto; }
+    .fila1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; } .derecha { margin-left: auto; }
     .fila2 { font-weight: 600; } .fila3 { font-size: 12.5px; }
     .alerta-item { align-self: flex-start; }
     .sub { font-size: 13px; margin: 14px 0 0; text-transform: uppercase; letter-spacing: .04em; color: var(--gris-6); }
@@ -165,7 +166,7 @@ const hace = (h: string | Date | null | undefined) => {
     .datos div { display: flex; flex-direction: column; } .datos span { font-size: 12px; color: var(--gris-5); }
     .opcion-viaje { padding: 8px 0; border-bottom: 1px solid var(--gris-15); }
     .rejilla { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    @media (max-width: 860px) {
+    @media (max-width: 1100px) {
       .monitor { grid-template-columns: 1fr; }
       .mapa-caja { order: -1; min-height: 55dvh; }
       .lista { max-height: none; }
