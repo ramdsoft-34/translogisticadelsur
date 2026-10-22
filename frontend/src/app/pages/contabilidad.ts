@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -187,6 +188,9 @@ export class Contabilidad {
   readonly cuentasVisibles = computed(() => filtrar<any>(this.cuentas(), this.q()));
   readonly cuentasGasto = computed(() => this.cuentas().filter(c => /^5/.test(c.codigo)));
   readonly filasInforme = computed(() => filtrar<any>(this.informe()?.filas || [], this.q()));
+
+  // Cambios de otros usuarios: la pantalla se actualiza sola
+  private enVivo = inject(EnVivo).al(['gestion', 'liquidaciones'], () => this.cargar());
 
   constructor() {
     this.cargar();

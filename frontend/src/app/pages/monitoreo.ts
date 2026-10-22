@@ -1,4 +1,5 @@
 import { AfterViewInit, Component, ElementRef, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import * as L from 'leaflet';
@@ -308,6 +309,9 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
   private temporizador: ReturnType<typeof setInterval> | undefined;
   private primeraVez = true;
   private viajeInicial = inject(ActivatedRoute).snapshot.queryParamMap.get('viaje');
+
+  // Cambios de otros usuarios: la pantalla se actualiza sola
+  private enVivo = inject(EnVivo).al(['rastreo', 'viajes', 'rndc'], () => (this.pestana() === 'historial' ? this.cargarHistorial() : this.estado()?.habilitado && this.cargar()));
 
   async ngAfterViewInit() {
     await this.rastreo.cargar(true);

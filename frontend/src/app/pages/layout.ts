@@ -1,4 +1,5 @@
 import { Component, DestroyRef, HostListener, computed, inject, signal } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { environment } from '../../environments/environment';
 import { Avisos } from '../core/avisos.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -247,7 +248,10 @@ export class Layout {
     return nombres.map(nombre => ({ nombre, opciones: visibles.filter(o => (o.grupo || '') === nombre) }));
   });
 
+  private enVivoSrv = inject(EnVivo);
   constructor() {
+    this.enVivoSrv.iniciar();
+    inject(DestroyRef).onDestroy(() => this.enVivoSrv.detener());
     // Si debe cambiar la contraseña, no puede usar otras secciones
     const router = inject(Router);
     router.events.pipe(takeUntilDestroyed()).subscribe(ev => {

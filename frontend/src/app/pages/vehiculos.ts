@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -217,6 +218,9 @@ export class Vehiculos {
 
   private claseNueva = 'vehiculo';
   readonly vistaRndc = signal<[string, string][] | null>(null);
+  // Cambios de otros usuarios: la pantalla se actualiza sola
+  private enVivo = inject(EnVivo).al(['maestros', 'rndc', 'rastreo'], () => this.cargar());
+
   constructor() {
     this.cargar();
     this.rastreoSrv.cargar();

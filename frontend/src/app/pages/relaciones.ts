@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal, viewChild } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Api } from '../core/api.service';
@@ -180,6 +181,9 @@ export class Relaciones {
   readonly utilidad = computed(() => (this.datos()?.filas || []).reduce((a: number, x: any) => a + (x.utilidad || 0), 0));
   readonly copiando = signal('');
   fechaCopia = hoy();
+
+  // Cambios de otros usuarios: la pantalla se actualiza sola
+  private enVivo = inject(EnVivo).al(['viajes', 'gestion', 'maestros', 'rndc'], () => this.cargar());
 
   constructor() { this.iniciar(); }
 

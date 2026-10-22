@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal, viewChild } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -59,6 +60,7 @@ export class CierreMes {
   readonly resumen = signal<any>(null);
   readonly cerrados = signal<any[]>([]);
   readonly trabajando = signal(false);
+  private enVivo = inject(EnVivo).al(['gestion', 'viajes', 'liquidaciones'], () => this.revisar());
   constructor() { this.revisar(); }
   async revisar() {
     try { const r = await this.api.get<any>('/gestion/cierres', { mes: this.mes }); this.cerrados.set(r.cerrados); this.resumen.set(r.resumen); }
@@ -113,6 +115,7 @@ export class RemesasDulces {
   readonly sel = signal(new Set<string>());
   readonly visibles = computed(() => filtrar<any>(this.lista(), this.q()));
   readonly todas = computed(() => this.visibles().length > 0 && this.visibles().every(x => this.sel().has(x.vpl)));
+  private enVivo = inject(EnVivo).al(['gestion'], () => this.cargar());
   constructor() { this.cargar(); }
   async cargar() { try { this.lista.set(await this.api.get('/gestion/remesas-dulces', this.soloPendientes ? { pendientes: 1 } : {})); this.sel.set(new Set()); } catch (e) { this.avisos.error(e); } }
   alternar(v: string) { const s = new Set(this.sel()); if (s.has(v)) s.delete(v); else s.add(v); this.sel.set(s); }

@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -433,6 +434,9 @@ export class Manifiestos {
   readonly anularViaje = signal<Viaje | null>(null);
   readonly anulacion = signal<any>({ documento: 'manifiesto', motivo: '', observaciones: '' });
   readonly momentos: [string, string][] = [['llegada', 'Llegada'], ['entrada', 'Entrada'], ['salida', 'Salida']];
+
+  // Cambios de otros usuarios: la pantalla se actualiza sola
+  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'correo'], () => this.cargar());
 
   constructor() {
     this.cargar();

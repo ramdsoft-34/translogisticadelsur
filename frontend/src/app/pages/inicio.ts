@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { RouterLink } from '@angular/router';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -94,10 +95,13 @@ export class Inicio {
   readonly alertasVisibles = computed(() => filtrar(this.alertas(), this.q()).slice(0, this.limite()));
   readonly hoy = new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
-  constructor() {
+  constructor() { this.cargar(); }
+  cargar() {
     this.api.get('/viajes/resumen').then(x => this.r.set(x)).catch(() => {});
     this.api.get<any[]>('/maestros/alertas').then(x => this.alertas.set(x)).catch(() => {});
   }
+  // Cambios de otros usuarios: la pantalla se actualiza sola
+  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'maestros'], () => this.cargar());
   primerNombre() { return (this.auth.usuario()?.nombre || '').split(' ')[0]; }
   saludo() { const h = new Date().getHours(); return h < 12 ? 'Buenos días' : h < 18 ? 'Buenas tardes' : 'Buenas noches'; }
   pendientes() { const e = this.r()?.estados || {}; return (e.registrado || 0) + (e.remesa || 0); }

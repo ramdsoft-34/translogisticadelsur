@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -77,6 +78,9 @@ export class Liquidaciones {
   readonly calculo = signal<any>(null);
   readonly guardando = signal(false);
   p = { cliente: '', desde: inicioMesIso(), hasta: hoyIso() };
+
+  // Cambios de otros usuarios: la pantalla se actualiza sola
+  private enVivo = inject(EnVivo).al(['liquidaciones', 'viajes'], () => this.cargar());
 
   constructor() {
     this.api.get<any[]>('/maestros/clientes').then(c => this.clientes.set(c)).catch(e => this.avisos.error(e));

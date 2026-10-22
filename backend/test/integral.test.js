@@ -1129,3 +1129,36 @@ test('Rastreo: modalidad solo destino (ruta sugerida) y con clientes (Excel, ent
   assert.ok(((await s.adminB.get('/api/rastreo/historial')).body.items || []).every(x => x._id !== v2._id), 'otra empresa no ve el historial');
   await adm.post(`/api/rastreo/viajes/${v1._id}/finalizar`);
 });
+
+test('Cambios en vivo: un cambio de una empresa llega por el canal SSE solo a esa empresa', async () => {
+  const srv = app.listen(0, '127.0.0.1');
+  await new Promise(r => srv.once('listening', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const escuchar = async (token) => {
+    const ctrl = new AbortController();
+    const r = await fetch(`${base}/api/eventos`, { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal });
+    const lector = r.body.getReader(); const dec = new TextDecoder(); const recibidos = [];
+    (async () => { try { for (;;) { const { value, done } = await lector.read(); if (done) break; recibidos.push(dec.decode(value)); } } catch { /* cerrado */ } })();
+    return { r, recibidos, cerrar: () => ctrl.abort() };
+  };
+  const tokA = await login('admina@prueba.test');
+  const a = await escuchar(tokA);
+  assert.equal(a.r.status, 200); assert.match(a.r.headers.get('content-type'), /text\/event-stream/);
+  assert.equal((await fetch(`${base}/api/eventos`)).status, 401, 'sin sesión no hay canal');
+  await new Promise(r => setTimeout(r, 100));
+  await api().post('/api/maestros/terceros').set('Authorization', `Bearer ${tokA}`).set('X-Cliente-Id', 'pestana-1')
+    .send({ tipoId: 'C', numId: '70707070', nombres: 'EN VIVO', apellido1: 'PRUEBA', roles: ['titular'] });
+  await new Promise(r => setTimeout(r, 200));
+  const texto = a.recibidos.join('');
+  assert.match(texto, /event: cambio/);
+  const evento = JSON.parse(texto.split('data: ').pop().split('\n')[0]);
+  assert.equal(evento.recurso, 'maestros'); assert.equal(evento.metodo, 'POST'); assert.equal(evento.origen, 'pestana-1');
+  // Una consulta (GET) o un error no generan aviso
+  const antes = a.recibidos.length;
+  await api().get('/api/maestros/terceros').set('Authorization', `Bearer ${tokA}`);
+  await api().post('/api/maestros/terceros').set('Authorization', `Bearer ${tokA}`).send({});
+  await new Promise(r => setTimeout(r, 200));
+  assert.equal(a.recibidos.slice(antes).join('').includes('event: cambio'), false);
+  a.cerrar();
+  srv.close();
+});

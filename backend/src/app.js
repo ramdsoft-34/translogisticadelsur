@@ -16,6 +16,8 @@ import gestion from './routes/gestion.js';
 import reportes from './routes/reportes.js';
 import importaciones from './routes/importaciones.js';
 import rastreo from './routes/rastreo.js';
+import eventos from './routes/eventos.js';
+import { avisarCambios } from './services/eventos.js';
 
 export function crearApp() {
   const app = express();
@@ -32,6 +34,9 @@ export function crearApp() {
   app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false }));
 
   app.get('/api/salud', (_req, res) => res.json({ ok: true }));
+  // Cambios en vivo: canal SSE y aviso de cada modificación a los usuarios de la empresa
+  app.use('/api/eventos', eventos);
+  app.use('/api', avisarCambios);
   app.use('/api/auth', auth);
   app.use('/api/admin', superadmin);
   app.use('/api/usuarios', usuarios);

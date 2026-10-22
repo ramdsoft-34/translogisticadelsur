@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -90,6 +91,9 @@ export class Revision {
   readonly seleccionados = computed(() => this.items().filter(x => this.seleccion().has(this.clave(x))));
   readonly seleccionSedes = computed(() => this.seleccionados().filter(x => x.categoria === 'sede' && x.sugerencia));
   readonly todos = computed(() => this.visibles().length > 0 && this.visibles().every(x => this.seleccion().has(this.clave(x))));
+
+  // Cambios de otros usuarios: la pantalla se actualiza sola
+  private enVivo = inject(EnVivo).al(['maestros', 'rndc'], () => this.cargar());
 
   constructor() { this.cargar(); }
 

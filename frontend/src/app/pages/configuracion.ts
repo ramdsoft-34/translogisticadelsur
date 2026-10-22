@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -240,10 +241,15 @@ export class Configuracion {
   readonly usuarioForm = signal<any>({});
   readonly responsables: [string, string][] = [['E', 'Empresa de transporte'], ['R', 'Remitente'], ['D', 'Destinatario']];
 
+  // Cambios de otros usuarios: la pantalla se actualiza sola
+  private enVivo = inject(EnVivo).al(['usuarios', 'rndc', 'correo'], () => this.refrescarConfig());
+
   constructor() {
     this.ir(this.pestana());
     this.api.get<any>('/rndc/catalogos').then(c => this.naturaleza.set(Object.entries(c.naturaleza))).catch(() => {});
   }
+
+  refrescarConfig() { if (this.pestana() === 'usuarios') this.ir('usuarios'); }
 
   async ir(p: Pestana) {
     this.pestana.set(p);

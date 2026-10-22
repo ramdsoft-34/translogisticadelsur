@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -219,6 +220,9 @@ export class Terceros {
   readonly editando = computed(() => !!this.form()._id);
   q = ''; rol = '';
   nombre = nombreTercero;
+
+  // Cambios de otros usuarios: la pantalla se actualiza sola
+  private enVivo = inject(EnVivo).al(['maestros', 'rndc', 'rastreo'], () => this.cargar());
 
   constructor() { this.cargar(); }
 

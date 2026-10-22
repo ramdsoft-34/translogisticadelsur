@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -215,6 +216,9 @@ export class PagoConductores {
     for (const g of m.values()) g.placas = [...new Set(g.lineas.map((l: any) => l.placa))].join(', ');
     return [...m.values()].sort((a, b) => a.conductor.localeCompare(b.conductor));
   });
+
+  // Cambios de otros usuarios: la pantalla se actualiza sola
+  private enVivo = inject(EnVivo).al(['gestion', 'viajes'], () => this.ir(this.pestana()));
 
   constructor() { this.calcular(); }
 

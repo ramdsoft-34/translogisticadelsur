@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal, viewChild } from '@angular/core';
+import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -375,6 +376,9 @@ export class Viajes {
   // Por defecto solo los viajes de HOY (no todo el histórico)
   filtro = { desde: hoyIso(), hasta: hoyIso(), cliente: '', estado: '', q: '' };
   private temporizadorPlacas: ReturnType<typeof setTimeout> | undefined;
+
+  // Cambios de otros usuarios: la pantalla se actualiza sola
+  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'rastreo', 'liquidaciones', 'gestion', 'maestros'], () => this.cargar());
 
   constructor() {
     this.cargar();
