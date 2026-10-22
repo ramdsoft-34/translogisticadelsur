@@ -19,6 +19,11 @@ export const env = {
     clave: process.env.COOESPATRANS_INTEGRACION_CLAVE || '',
     timeoutMs: Number(process.env.COOESPATRANS_INTEGRACION_TIMEOUT_MS) || 10000,
   },
+  // Rutas sugeridas (OSRM del servidor) y búsqueda de direcciones (Nominatim de OpenStreetMap)
+  mapas: {
+    osrmUrl: process.env.OSRM_URL || 'http://127.0.0.1:5050',
+    nominatimUrl: process.env.NOMINATIM_URL || 'https://nominatim.openstreetmap.org',
+  },
   rndc: {
     simuladorUrl: process.env.RNDC_SIMULADOR_URL || 'http://127.0.0.1:4010/soap/IBPMServices',
     permitirProduccion: bool(process.env.RNDC_PERMITIR_PRODUCCION, false),

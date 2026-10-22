@@ -23,6 +23,9 @@ surTrack.servidor = http.createServer((req, res) => {
   req.on('data', c => { cuerpo += c; });
   req.on('end', () => {
     const json = (st, b) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
+    if (req.url.startsWith('/search')) return json(200, [{ display_name: 'Ipiales, Nariño, Colombia', lat: '0.8300', lon: '-77.6400' }]);
+    if (req.url.startsWith('/route/v1/driving/')) return json(200, { code: 'Ok', routes: [{ distance: 82318, duration: 4467,
+      geometry: { coordinates: [[-77.28, 1.21], [-77.4, 1.08], [-77.64, 0.83]] } }] });
     if (req.headers['x-integracion-clave'] !== surTrack.clave) return json(401, { mensaje: 'clave' });
     const ruta = new URL(req.url, 'http://x').pathname.replace('/api/integracion', '');
     const choferes = [{ choferId: 'c1', nombre: 'Pedro Pablo Perez Gomez', cedula: '12345678', placa: 'ABC123' },
@@ -37,16 +40,26 @@ surTrack.servidor = http.createServer((req, res) => {
       const ch = choferes.find(c => c.placa === String(b.placa).toUpperCase());
       if (!ch) return json(404, { mensaje: 'El conductor o la placa no están registrados en Sur Track' });
       const viajeId = crypto.randomBytes(12).toString('hex');
-      const v = { viajeId, codigo: b.codigo, estado: 'pendiente', chofer: ch, referenciaExterna: b.referencia };
+      const clientes = (b.clientes || []).map((c, i) => ({ ...c, clienteId: crypto.randomBytes(12).toString('hex'), estadoEntrega: 'pendiente' }));
+      const v = { viajeId, codigo: b.codigo, estado: 'pendiente', chofer: ch, referenciaExterna: b.referencia, clientesSt: clientes, rutaSugerida: b.rutaSugerida };
       surTrack.viajes.set(viajeId, v);
-      return json(201, v);
+      return json(201, { ...v, clientes: clientes.map(c => ({ clienteId: c.clienteId, referencia: c.referencia })) });
     }
-    let m = ruta.match(/^\/viajes\/([a-f0-9]{24})\/finalizar$/);
+    let m = ruta.match(/^\/viajes\/([a-f0-9]{24})\/clientes$/);
+    if (m && req.method === 'PUT') {
+      const v = surTrack.viajes.get(m[1]); if (!v) return json(404, {});
+      if (v.estado !== 'pendiente') return json(409, { mensaje: 'El conductor ya aceptó el viaje en Sur Track: los clientes no se pueden cambiar' });
+      v.clientesSt = (JSON.parse(cuerpo).clientes || []).map(c => ({ ...c, clienteId: crypto.randomBytes(12).toString('hex'), estadoEntrega: 'pendiente' }));
+      return json(200, { clientes: v.clientesSt.map(c => ({ clienteId: c.clienteId, referencia: c.referencia })) });
+    }
+    m = ruta.match(/^\/viajes\/([a-f0-9]{24})\/finalizar$/);
     if (m) { const v = surTrack.viajes.get(m[1]); if (!v) return json(404, {}); v.estado = 'completado'; return json(200, { estado: v.estado }); }
     m = ruta.match(/^\/rastreo\/([a-f0-9]{24})$/);
     if (m) {
       const v = surTrack.viajes.get(m[1]); if (!v) return json(404, { mensaje: 'no' });
-      return json(200, { viaje: v, ultima: null, puntos: [{ lat: 1.2136, lng: -77.2811, velocidad: 10, hora: '2026-11-20T10:00:00Z' },
+      return json(200, { viaje: v, ultima: null, clientes: (v.clientesSt || []).map(c => ({ clienteId: c.clienteId, nombre: c.nombre, direccion: c.direccion,
+        estadoEntrega: c.estadoEntrega, valorRecibido: c.valorRecibido || 0, fechaEntrega: c.fechaEntrega || null })),
+        ruta: v.clientesSt?.length ? { coordenadas: [{ lat: 1.21, lng: -77.28 }, { lat: 1.22, lng: -77.29 }] } : null, puntos: [{ lat: 1.2136, lng: -77.2811, velocidad: 10, hora: '2026-11-20T10:00:00Z' },
         { lat: 1.2236, lng: -77.2811, velocidad: 25, hora: '2026-11-20T10:05:00Z' }] });
     }
     json(404, { mensaje: 'ruta' });
@@ -55,6 +68,8 @@ surTrack.servidor = http.createServer((req, res) => {
 await new Promise(r => surTrack.servidor.listen(0, '127.0.0.1', r));
 process.env.COOESPATRANS_INTEGRACION_URL = `http://127.0.0.1:${surTrack.servidor.address().port}/api/integracion`;
 process.env.COOESPATRANS_INTEGRACION_CLAVE = surTrack.clave;
+process.env.OSRM_URL = `http://127.0.0.1:${surTrack.servidor.address().port}`;
+process.env.NOMINATIM_URL = `http://127.0.0.1:${surTrack.servidor.address().port}`;
 
 const { default: request } = await import('supertest');
 const mongoose = (await import('mongoose')).default;
@@ -1048,4 +1063,68 @@ test('Rastreo Sur Track: habilitar, traer vehículos sin duplicar, activar, ver 
   const v3 = await nuevo('QWE111', true);
   assert.equal(v3.status, 201); assert.match(v3.body.errorRastreo, /no están registrados en Sur Track/);
   assert.equal(v3.body.rastreo?.activo || false, false);
+});
+
+test('Rastreo: modalidad solo destino (ruta sugerida) y con clientes (Excel, entregas), historial y recorrido guardado', async () => {
+  const adm = s.adminA;
+  const nuevo = (placa) => adm.post('/api/viajes', { fecha: '2026-11-21', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Ipiales', placa,
+    conductor: s.conductor, requiereManifiesto: false });
+  // Solo destino: sin coordenadas se buscan por el nombre; la ruta sugerida sale de la posición actual al destino
+  const v1 = (await nuevo('ABC123')).body;
+  const a1 = await adm.post(`/api/rastreo/viajes/${v1._id}/activar`, { modalidad: 'destino', destino: { nombre: 'Ipiales' } });
+  assert.equal(a1.status, 200, JSON.stringify(a1.body));
+  assert.equal(a1.body.modalidad, 'destino'); assert.equal(a1.body.destino.lat, 0.83);
+  assert.equal(a1.body.eventos[0].tipo, 'activado');
+  const ext1 = a1.body.externoId;
+  surTrack.viajes.get(ext1).estado = 'aceptado';
+  surTrack.activos = [{ viajeId: ext1, lat: 1.21, lng: -77.28, velocidad: 10, rumbo: 0, hora: new Date().toISOString() }];
+  const { limpiarCache } = await import('../src/services/rastreo/surtrack.js');
+  limpiarCache();
+  const vivo = (await adm.get('/api/rastreo/en-vivo')).body.viajes.find(x => x._id === v1._id);
+  assert.equal(vivo.modalidad, 'destino'); assert.equal(vivo.puntoDestino.nombre, 'Ipiales'); assert.equal(vivo.destino, 'Ipiales');
+  const r1 = (await adm.get(`/api/rastreo/viajes/${v1._id}/recorrido`)).body;
+  assert.equal(r1.ruta.length, 3, 'ruta sugerida al destino'); assert.ok(r1.eventos.some(e => e.tipo === 'inicio'));
+  // Con clientes: plantilla, importar Excel, activar y ver las entregas del conductor
+  const pl = await adm.get('/api/rastreo/clientes/plantilla').buffer(true).parse((res, cb) => { const d = []; res.on('data', c => d.push(c)); res.on('end', () => cb(null, Buffer.concat(d))); });
+  assert.equal(pl.status, 200);
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('C');
+  ws.addRow(['Cliente', 'Dirección', 'Ciudad', 'Teléfono', 'Factura', 'Valor']);
+  ws.addRow(['Tienda Uno', 'Calle 1 # 2-3', 'Pasto', '3001112233', 'F-1', '150.000']);
+  ws.addRow(['Tienda Dos', 'Cra 4 # 5-6', 'Pasto', '', 'F-2', 80000]);
+  ws.addRow(['', '', '', '', '', '']);
+  const imp = await adm.post('/api/rastreo/clientes/importar').set('Content-Type', 'application/octet-stream').send(Buffer.from(await wb.xlsx.writeBuffer()));
+  assert.equal(imp.status, 200, JSON.stringify(imp.body));
+  assert.equal(imp.body.clientes.length, 2); assert.equal(imp.body.clientes[0].valor, 150000); assert.equal(imp.body.clientes[0].factura, 'F-1');
+  const v2 = (await nuevo('XYZ987')).body;
+  assert.equal((await adm.post(`/api/rastreo/viajes/${v2._id}/activar`, { modalidad: 'clientes', clientes: [] })).status, 400, 'sin clientes no');
+  const a2 = await adm.post(`/api/rastreo/viajes/${v2._id}/activar`, { modalidad: 'clientes', clientes: imp.body.clientes });
+  assert.equal(a2.status, 200, JSON.stringify(a2.body));
+  assert.equal(a2.body.clientes.length, 2); assert.ok(a2.body.clientes.every(c => c.externoId), 'vinculados con Sur Track');
+  const st2 = surTrack.viajes.get(a2.body.externoId);
+  assert.equal(st2.clientesSt.length, 2, 'los clientes llegan a Sur Track');
+  // Agregar un cliente antes de que el conductor acepte (reemplaza, no duplica)
+  const p2 = await adm.put(`/api/rastreo/viajes/${v2._id}/paradas`, { modalidad: 'clientes', clientes: [...imp.body.clientes, { nombre: 'Tienda Tres', direccion: 'Cl 9' }] });
+  assert.equal(p2.status, 200); assert.equal(st2.clientesSt.length, 3); assert.equal(p2.body.clientes.length, 3);
+  // El conductor acepta y entrega a la Tienda Uno
+  st2.estado = 'aceptado';
+  st2.clientesSt[0].estadoEntrega = 'completa'; st2.clientesSt[0].valorRecibido = 150000;
+  limpiarCache();
+  const r2 = (await adm.get(`/api/rastreo/viajes/${v2._id}/recorrido`)).body;
+  assert.equal(r2.clientes.find(c => c.nombre === 'Tienda Uno').estadoEntrega, 'completa');
+  assert.ok(r2.eventos.some(e => e.tipo === 'entrega' && e.detalle.startsWith('Tienda Uno')));
+  assert.equal((await adm.put(`/api/rastreo/viajes/${v2._id}/paradas`, { modalidad: 'clientes', clientes: [{ nombre: 'X' }] })).status, 409, 'aceptado: ya no se cambian');
+  // Terminar: el recorrido queda guardado en Translogística y el historial lo muestra con su resumen
+  await adm.post(`/api/rastreo/viajes/${v2._id}/finalizar`);
+  const h = (await adm.get('/api/rastreo/historial?desde=2020-01-01')).body;
+  const fila = h.items.find(x => x._id === v2._id);
+  assert.equal(fila.activo, false); assert.equal(fila.modalidad, 'clientes'); assert.equal(fila.clientes, 3); assert.equal(fila.entregados, 1);
+  assert.ok(fila.km > 1);
+  surTrack.viajes.clear();   // aunque Sur Track ya no tenga el viaje, el historial conserva el recorrido
+  const g = (await adm.get(`/api/rastreo/viajes/${v2._id}/recorrido`)).body;
+  assert.equal(g.puntos.length, 2); assert.ok(g.eventos.some(e => e.tipo === 'finalizado'));
+  assert.equal((await adm.get('/api/rastreo/historial?estado=activo')).body.items.some(x => x._id === v2._id), false);
+  assert.equal((await adm.get('/api/rastreo/historial?placa=xyz-987')).body.items.every(x => x.placa === 'XYZ987'), true);
+  assert.ok(((await s.adminB.get('/api/rastreo/historial')).body.items || []).every(x => x._id !== v2._id), 'otra empresa no ve el historial');
+  await adm.post(`/api/rastreo/viajes/${v1._id}/finalizar`);
 });

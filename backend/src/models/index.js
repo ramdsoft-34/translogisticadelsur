@@ -244,12 +244,21 @@ const viajeSchema = new Schema({
   // Rastreo GPS con Sur Track: el viaje es la única fuente; el GPS lo envía la app del conductor
   rastreo: {
     activo: { type: Boolean, default: false },
-    estado: { type: String, enum: ['', 'esperando', 'en_ruta', 'finalizado', 'error'], default: '' },
+    estado: { type: String, enum: ['', 'esperando', 'en_ruta', 'detenido', 'sin_senal', 'finalizado', 'error'], default: '' },
     origen: str(),                  // 'translogistica' (activado aquí) o 'cooespatrans' (enlazado desde allá)
     externoId: str(), codigoExterno: str(),
     activado: fecha, activadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
     finalizado: fecha, error: str(),
     ultima: { lat: Number, lng: Number, velocidad: Number, rumbo: Number, hora: Date },
+    // Modalidad: solo destino (punto final y ruta sugerida) o con clientes (paradas que el conductor ve en Sur Track)
+    modalidad: { type: String, enum: ['', 'destino', 'clientes'], default: '' },
+    destino: { nombre: str(), lat: Number, lng: Number },
+    clientes: { type: [{ _id: false, nombre: str(), direccion: str(), ciudad: str(), telefono: str(), documento: str(), factura: str(),
+      valor: { type: Number, default: 0 }, lat: Number, lng: Number, externoId: str(),
+      estadoEntrega: str({ default: 'pendiente' }), valorRecibido: { type: Number, default: 0 }, fechaEntrega: fecha }], default: [] },
+    // Registro de seguimiento (historial de monitoreo) y resumen al terminar
+    eventos: { type: [{ _id: false, fecha: Date, tipo: String, detalle: String }], default: [] },
+    resumen: { km: Number, velocidadMaxima: Number, puntos: Number, inicio: Date, fin: Date },
   },
   // Números escritos a mano para el próximo envío (p. ej. tras un DUPLICADO del RNDC)
   numerosManuales: { remesa: str({ uppercase: true }), manifiesto: str({ uppercase: true }) },
@@ -271,6 +280,16 @@ viajeSchema.index({ empresa: 1, fecha: -1 });
 viajeSchema.index({ empresa: 1, estado: 1 });
 viajeSchema.index({ empresa: 1, 'manifiesto.numero': 1 });
 viajeSchema.index({ empresa: 1, 'rastreo.activo': 1 });
+viajeSchema.index({ empresa: 1, 'rastreo.activado': -1 });
+
+// ── Recorrido GPS guardado al terminar el rastreo (el historial no depende de Sur Track) ──
+const recorridoRastreoSchema = new Schema({
+  viaje: { type: Schema.Types.ObjectId, ref: 'Viaje', required: true },
+  puntos: { type: [[Number]], default: [] },          // [lat, lng, velocidad km/h, hora (ms)]
+  ruta: { type: [[Number]], default: [] },            // ruta sugerida [lat, lng]
+}, { timestamps: true });
+recorridoRastreoSchema.plugin(tenantPlugin);
+recorridoRastreoSchema.index({ empresa: 1, viaje: 1 }, { unique: true });
 
 // ── Plantillas del reporte de WhatsApp ──────────────────────────────────────
 // Texto con marcadores {conductor}, {placa}, {flete}… (ver services/whatsapp.js).
@@ -474,6 +493,7 @@ export const CuentaContable = modelo('CuentaContable', cuentaSchema);
 export const Asiento = modelo('Asiento', asientoSchema);
 export const FacturaCont = modelo('FacturaCont', facturaContSchema);
 export const RemesaDulces = modelo('RemesaDulces', remesaDulcesSchema);
+export const RecorridoRastreo = modelo('RecorridoRastreo', recorridoRastreoSchema);
 
 // Siguiente valor de un contador de la empresa (atómico). `minimo` permite
 // continuar una numeración existente (ej. último manifiesto expedido).

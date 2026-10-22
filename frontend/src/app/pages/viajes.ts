@@ -16,6 +16,7 @@ import { Confirmar } from '../shared/confirmar';
 import { VisorPdf } from '../shared/visor-pdf';
 import { ExportarViajes } from '../shared/exportar-viajes';
 import { ESTADOS_RASTREO, Rastreo } from '../core/rastreo.service';
+import { ActivarRastreo } from '../shared/activar-rastreo';
 import { RouterLink } from '@angular/router';
 
 interface Formulario {
@@ -39,7 +40,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, RouterLink, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, RouterLink, ActivarRastreo, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
@@ -198,14 +199,16 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
           @if (!f._id) {
             <label class="casilla requiere">
               <input type="checkbox" name="rastrear" [checked]="rastrear()" (change)="rastrear.set(!rastrear())" />
-              <span><strong>Rastrear este viaje con Sur Track</strong><small>El viaje le aparece al conductor en la app Sur Track para iniciarlo y se ve en Monitoreo.</small></span>
+              <span><strong>Rastrear este viaje con Sur Track</strong><small>Al guardar elige la modalidad (solo destino o con clientes); el conductor lo ve en Sur Track y se sigue en Monitoreo.</small></span>
             </label>
           } @else {
             <div class="rastreo-viaje">
               <app-icono nombre="ubicacion" [tam]="18" />
               @if (rastreoForm()?.activo) {
-                <span><strong>Rastreo activo</strong> · {{ textoRastreo(rastreoForm().estado) }} · Sur Track {{ rastreoForm().codigoExterno }}</span>
+                <span><strong>Rastreo activo</strong> · {{ textoRastreo(rastreoForm().estado) }} · {{ rastreoForm().modalidad === 'clientes' ? (rastreoForm().clientes?.length || 0) + ' cliente(s)' : 'Destino: ' + (rastreoForm().destino?.nombre || f.destino) }} · Sur Track {{ rastreoForm().codigoExterno }}</span>
                 <a class="boton pequeno" [routerLink]="['/monitoreo']" [queryParams]="{ viaje: f._id }">Ver en el mapa</a>
+                @if (puedeRegistrar && rastreoForm().estado === 'esperando' && rastreoForm().origen === 'translogistica') {
+                  <button type="button" class="pequeno" (click)="abrirActivar(true)">Cambiar destino o clientes</button> }
                 @if (puedeRegistrar) { <button type="button" class="pequeno peligro" confirmar="Clic otra vez para terminar" (confirmado)="terminarRastreo()">Terminar rastreo</button> }
               } @else {
                 <span>Este viaje no se está rastreando.</span>
@@ -286,6 +289,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       <ng-container pie><button type="button" (click)="waAbierto.set(false)">Cerrar</button></ng-container>
     </app-modal>
     <app-visor-pdf />
+    <app-activar-rastreo (listo)="rastreoListo($event)" />
     <app-exportar-viajes [clientes]="clientes()" />
     <app-plantillas-whatsapp [abierto]="plantillasAbierto()" [fecha]="waFecha" (cerrar)="plantillasAbierto.set(false)" (cambiadas)="cargarPlantillas()" />`,
   styles: [`
@@ -429,7 +433,7 @@ export class Viajes {
   estadoTexto(e: string) { return ESTADOS_VIAJE[e] || e; }
   claseEstado(e: string) { return ({ manifestado: 'marca', cumplido: 'ok', anulado: 'error', remesa: 'alerta' } as Record<string, string>)[e] || ''; }
 
-  nuevo() { this.rastreoSrv.cargar(); this.rastreoForm.set(null); this.form.set(vacio()); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.abierto.set(true); }
+  nuevo() { this.rastreoSrv.cargar(); this.rastreoForm.set(null); this.viajeRastreo = null; this.rastrear.set(false); this.form.set(vacio()); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.abierto.set(true); }
 
   editar(v: Viaje) {
     this.numeroEditado.set(v.numero);
@@ -442,6 +446,7 @@ export class Viajes {
     });
     this.habilitarRndc = false;
     this.rastreoForm.set((v as any).rastreo || null);
+    this.viajeRastreo = v;
     this.bloqueado.set(v.estado !== 'registrado' || !!v.liquidacion);
     this.abierto.set(true);
   }
@@ -536,7 +541,6 @@ export class Viajes {
       for (const k of Object.keys(cuerpo)) if (!['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa'].includes(k)) delete cuerpo[k];
     }
     if (f.historico && this.habilitarRndc) cuerpo.historico = false;
-    if (!f._id && this.rastreoHabilitado() && this.rastrear()) cuerpo.rastrear = true;
     this.guardando.set(true);
     try {
       if (f._id) await this.api.put(`/viajes/${f._id}`, cuerpo);
@@ -545,8 +549,8 @@ export class Viajes {
         this.avisos.ok(`Viaje N° ${v.numero} registrado${requiere ? '' : ' (sin manifiesto)'}`);
         const avisosDoc: string[] = (v as any).avisosDocumentos || [];
         if (avisosDoc.length) this.avisos.mostrar(`Por vencer: ${avisosDoc.join('; ')}`, 'info');
-        if ((v as any).errorRastreo) this.avisos.mostrar(`El viaje quedó registrado, pero no se pudo activar el rastreo: ${(v as any).errorRastreo}`, 'error');
-        else if ((v as any).rastreo?.activo) this.avisos.mostrar('Rastreo activado: el conductor ya lo ve en Sur Track', 'info');
+        // «Rastrear este viaje»: se abre el asistente para elegir destino o clientes
+        if (this.rastreoHabilitado() && this.rastrear()) { this.viajeRastreo = v; setTimeout(() => this.activador().abrir(v), 0); }
         this.documentos.set(null);
         if (this.seguirRegistrando()) {
           // Listo para el siguiente: mismo cliente, destino, fecha y valores; vehículo y conductor nuevos
@@ -619,13 +623,15 @@ export class Viajes {
   readonly rastreoForm = signal<any>(null);
   textoRastreo(e: string) { return ESTADOS_RASTREO[e]?.texto || 'Activo'; }
   claseRastreo(e: string) { return 'chip sin-punto gps ' + (ESTADOS_RASTREO[e]?.clase || ''); }
-  async activarRastreo() {
-    const id = this.form()._id;
-    this.guardando.set(true);
-    try { this.rastreoForm.set(await this.rastreoSrv.activar(id!)); this.avisos.ok('Rastreo activado: el conductor ya lo ve en Sur Track'); this.cargar(); }
-    catch (e) { this.avisos.error(e); }
-    finally { this.guardando.set(false); }
+  // Asistente de rastreo: modalidad solo destino o con clientes
+  private activador = viewChild.required(ActivarRastreo);
+  private viajeRastreo: any = null;
+  activarRastreo() { this.abrirActivar(false); }
+  abrirActivar(cambiar: boolean) {
+    const v = this.viajeRastreo || { ...this.form(), conductorNombre: '', cliente: this.clientes().find(c => c._id === this.form().cliente) };
+    this.activador().abrir(v, cambiar ? this.rastreoForm() : undefined);
   }
+  rastreoListo(r: any) { this.rastreoForm.set(r); this.cargar(); }
   async terminarRastreo() {
     try { this.rastreoForm.set(await this.rastreoSrv.finalizar(this.form()._id!)); this.avisos.ok('Rastreo terminado'); this.cargar(); }
     catch (e) { this.avisos.error(e); }

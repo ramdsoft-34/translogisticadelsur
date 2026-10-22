@@ -2,7 +2,7 @@
 // y Translogística lo consulta por su puerta de integración (/api/integracion, clave compartida).
 // El viaje de Translogística es la única fuente: el rastreo es una sección del mismo viaje.
 import { env } from '../../config/env.js';
-import { Empresa, Viaje, Vehiculo, Tercero, Cliente } from '../../models/index.js';
+import { Empresa, Viaje, Vehiculo, Tercero, Cliente, RecorridoRastreo } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 
 export const configurado = () => !!(env.surTrack.url && env.surTrack.clave);
@@ -96,12 +96,44 @@ export async function sincronizarVehiculos(empresaId) {
 }
 
 // ── Activar / finalizar el rastreo de un viaje ──
-export async function activar(empresaId, viajeId, usuarioId) {
+// Registro de seguimiento del viaje (historial de monitoreo)
+const evento = (tipo, detalle = '') => ({ fecha: new Date(), tipo, detalle });
+
+// Paradas del viaje: «destino» (un punto final) o «clientes» (lista que el conductor ve en Sur Track)
+export function normalizarParadas(opciones = {}, viaje) {
+  const modalidad = opciones.modalidad === 'clientes' ? 'clientes' : 'destino';
+  const num = (v) => (v === '' || v === null || v === undefined || !Number.isFinite(Number(v)) ? undefined : Number(v));
+  const t = (v, max = 200) => String(v ?? '').trim().slice(0, max);
+  const destino = opciones.destino || {};
+  const clientes = modalidad === 'clientes' ? (opciones.clientes || []).slice(0, 200).map(c => ({
+    nombre: t(c.nombre, 120), direccion: t(c.direccion), ciudad: t(c.ciudad, 80), telefono: t(c.telefono, 30), documento: t(c.documento, 20),
+    factura: t(c.factura, 40), valor: Math.max(0, Number(c.valor) || 0), lat: num(c.lat), lng: num(c.lng),
+    estadoEntrega: 'pendiente', valorRecibido: 0 })).filter(c => c.nombre) : [];
+  if (modalidad === 'clientes' && !clientes.length) throw new ErrorHttp(400, 'Agregue al menos un cliente');
+  return { modalidad, clientes,
+    destino: { nombre: t(destino.nombre || viaje?.destino, 120), lat: num(destino.lat), lng: num(destino.lng) } };
+}
+
+// Cuerpo para Sur Track: clientes (la ruta la arma Cooespatrans) o la ruta sugerida hasta el destino
+async function paradasParaSurTrack(paradas) {
+  if (paradas.modalidad === 'clientes') {
+    return { clientes: paradas.clientes.map((c, i) => ({ nombre: c.nombre, direccion: [c.direccion, c.ciudad].filter(Boolean).join(', '), ciudad: c.ciudad,
+      telefono: c.telefono, documento: c.documento, factura: c.factura, valor: c.valor, referencia: String(i) })) };
+  }
+  return { clientes: [], rutaSugerida: null };
+}
+
+export async function activar(empresaId, viajeId, usuarioId, opciones = {}) {
   await exigirHabilitado(empresaId);
   const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId });
   if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
   if (v.estado === 'anulado') throw new ErrorHttp(400, 'Un viaje anulado no se puede rastrear');
   if (v.rastreo?.activo) return v.rastreo;
+  const paradas = normalizarParadas(opciones, v);
+  if (paradas.modalidad === 'destino' && (paradas.destino.lat === undefined || paradas.destino.lng === undefined)) {
+    const g = await geocodificar(paradas.destino.nombre).catch(() => []);
+    if (g[0]) Object.assign(paradas.destino, { lat: g[0].lat, lng: g[0].lng });
+  }
   const [cond, cli] = await Promise.all([
     v.conductor ? Tercero.findOne({ empresa: empresaId, _id: v.conductor }).select('numId').lean() : null,
     Cliente.findOne({ empresa: empresaId, _id: v.cliente }).select('nombre').lean(),
@@ -109,9 +141,30 @@ export async function activar(empresaId, viajeId, usuarioId) {
   const r = await llamar('/viajes', { metodo: 'POST', cuerpo: {
     referencia: `tls:${empresaId}:${v._id}`, codigo: `TLS-${v.numero}`, placa: v.placa, cedula: cond?.numId || '',
     valorFlete: Math.max(1, Number(v.flete) || 0), anticipo: Number(v.anticipo) || 0, empresa: cli?.nombre || '',
+    ...(await paradasParaSurTrack(paradas)),
   } });
+  (r.clientes || []).forEach(x => { const c = paradas.clientes[Number(x.referencia)]; if (c) c.externoId = x.clienteId; });
   v.rastreo = { activo: true, estado: 'esperando', origen: 'translogistica', externoId: r.viajeId, codigoExterno: r.codigo,
-    activado: new Date(), activadoPor: usuarioId, finalizado: null, error: '' };
+    activado: new Date(), activadoPor: usuarioId, finalizado: null, error: '', ...paradas,
+    eventos: [evento('activado', paradas.modalidad === 'clientes' ? `Con ${paradas.clientes.length} cliente(s)` : `Destino: ${paradas.destino.nombre || v.destino}`)] };
+  await v.save();
+  limpiarCache();
+  return v.rastreo;
+}
+
+export async function actualizarParadas(empresaId, viajeId, opciones) {
+  await exigirHabilitado(empresaId);
+  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId });
+  if (!v?.rastreo?.activo) throw new ErrorHttp(404, 'Este viaje no tiene rastreo activo');
+  const paradas = normalizarParadas(opciones, v);
+  if (v.rastreo.origen === 'translogistica') {
+    const r = await llamar(`/viajes/${v.rastreo.externoId}/clientes`, { metodo: 'PUT', cuerpo: await paradasParaSurTrack(paradas) });
+    (r.clientes || []).forEach(x => { const c = paradas.clientes[Number(x.referencia)]; if (c) c.externoId = x.clienteId; });
+  } else if (paradas.modalidad === 'clientes') {
+    throw new ErrorHttp(409, 'Este rastreo viene de Cooespatrans: sus clientes se manejan allá');
+  }
+  Object.assign(v.rastreo, paradas);
+  v.rastreo.eventos.push(evento('paradas', paradas.modalidad === 'clientes' ? `Clientes actualizados (${paradas.clientes.length})` : `Destino: ${paradas.destino.nombre}`));
   await v.save();
   limpiarCache();
   return v.rastreo;
@@ -126,7 +179,9 @@ export async function finalizar(empresaId, viajeId) {
     try { await llamar(`/viajes/${v.rastreo.externoId}/finalizar`, { metodo: 'POST' }); }
     catch (e) { if (e.status !== 404) throw e; }
   }
+  await guardarRecorrido(empresaId, v).catch(() => { /* si Sur Track no responde, el historial queda con lo último conocido */ });
   v.rastreo.activo = false; v.rastreo.estado = 'finalizado'; v.rastreo.finalizado = new Date();
+  v.rastreo.eventos.push(evento('finalizado'));
   await v.save();
   limpiarCache();
   return v.rastreo;
@@ -143,7 +198,11 @@ export async function enlazar(empresaId, viajeId, externoId) {
   }
   const r = await llamar(`/rastreo/${encodeURIComponent(externoId)}`);
   v.rastreo = { activo: true, estado: r.viaje.estado === 'completado' ? 'finalizado' : 'en_ruta', origen: 'cooespatrans',
-    externoId: String(externoId), codigoExterno: r.viaje.codigo, activado: new Date(), finalizado: null, error: '' };
+    externoId: String(externoId), codigoExterno: r.viaje.codigo, activado: new Date(), finalizado: null, error: '',
+    modalidad: r.clientes?.length ? 'clientes' : 'destino', destino: { nombre: v.destino },
+    clientes: (r.clientes || []).map(c => ({ nombre: c.nombre, direccion: c.direccion, ciudad: c.ciudad, telefono: c.telefono, factura: c.factura,
+      valor: c.valor, externoId: c.clienteId, estadoEntrega: c.estadoEntrega, valorRecibido: c.valorRecibido, fechaEntrega: c.fechaEntrega })),
+    eventos: [evento('enlazado', `Rastreo ${r.viaje.codigo} de Cooespatrans`)] };
   await v.save();
   limpiarCache();
   return v.rastreo;
@@ -178,16 +237,27 @@ export async function enVivo(empresaId) {
     else if (ext?.estado === 'aceptado') estado = 'sin_senal';
     else estado = 'esperando';
     const ultima = p ? { lat: p.lat, lng: p.lng, velocidad: kmh(p.velocidad), rumbo: p.rumbo, hora: p.hora } : v.rastreo.ultima?.lat ? v.rastreo.ultima : null;
+    const entregados = (v.rastreo.clientes || []).filter(c => c.estadoEntrega && c.estadoEntrega !== 'pendiente').length;
     // Se guarda la última posición y el estado en el viaje (sirve de respaldo si Sur Track no responde)
-    if (p || estado !== v.rastreo.estado) {
-      await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: { 'rastreo.estado': estado === 'llego' ? 'finalizado' : estado === 'esperando' ? 'esperando' : 'en_ruta', ...(p ? { 'rastreo.ultima': ultima } : {}) } });
+    const guardado = estado === 'llego' ? 'finalizado' : estado;
+    if (p || guardado !== v.rastreo.estado) {
+      const nuevos = [];
+      if (guardado !== v.rastreo.estado) {
+        if (v.rastreo.estado === 'esperando' && guardado !== 'esperando') nuevos.push(evento('inicio', 'El conductor inició el viaje en Sur Track'));
+        if (['sin_senal', 'detenido', 'finalizado'].includes(guardado)) nuevos.push(evento(guardado, guardado === 'finalizado' ? 'Viaje completado en Sur Track' : ''));
+        else if (guardado === 'en_ruta' && ['sin_senal', 'detenido'].includes(v.rastreo.estado)) nuevos.push(evento('en_ruta', 'Recuperó señal / reanudó la marcha'));
+      }
+      await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: { 'rastreo.estado': guardado, ...(p ? { 'rastreo.ultima': ultima } : {}) },
+        ...(nuevos.length ? { $push: { 'rastreo.eventos': { $each: nuevos } } } : {}) });
     }
     const alertas = [];
     if (estado === 'sin_senal') alertas.push('Sin señal');
     if (ultima && ultima.velocidad > (conf.velocidadMaxima || 80) && estado === 'en_ruta') alertas.push(`Exceso de velocidad: ${ultima.velocidad} km/h`);
     salida.push({ _id: v._id, numero: v.numero, fecha: v.fecha, placa: v.placa, conductor: v.conductorNombre, destino: v.destino,
       cliente: v.cliente?.nombre || '', estadoViaje: v.estado, estado, origen: v.rastreo.origen, codigoExterno: v.rastreo.codigoExterno,
-      activado: v.rastreo.activado, ultima, alertas, aceptado: ext?.fechaAceptacion || null });
+      activado: v.rastreo.activado, ultima, alertas, aceptado: ext?.fechaAceptacion || null,
+      modalidad: v.rastreo.modalidad || 'destino', puntoDestino: v.rastreo.destino?.lat ? v.rastreo.destino : null,
+      clientes: (v.rastreo.clientes || []).length, entregados });
   }
   // Rastreos de Cooespatrans con señal reciente que aún no están enlazados a un viaje de esta empresa
   const enlazados = new Set(viajes.map(v => v.rastreo.externoId));
@@ -202,18 +272,128 @@ export async function enVivo(empresaId) {
 }
 
 export async function recorrido(empresaId, viajeId) {
-  await exigirHabilitado(empresaId);
-  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('numero placa conductorNombre destino rastreo').lean();
+  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('numero fecha placa conductorNombre destino estado rastreo').lean();
   if (!v?.rastreo?.externoId) throw new ErrorHttp(404, 'Este viaje no tiene rastreo');
+  // Rastreo terminado: se lee lo guardado en Translogística (no depende de Sur Track)
+  if (!v.rastreo.activo) {
+    const g = await RecorridoRastreo.findOne({ empresa: empresaId, viaje: v._id }).lean();
+    const puntos = (g?.puntos || []).map(([lat, lng, velocidad, t]) => ({ lat, lng, velocidad, hora: new Date(t) }));
+    return { viaje: datosViaje(v), estadoExterno: 'completado', ultima: null, puntos, clientes: v.rastreo.clientes || [],
+      ruta: (g?.ruta || []).map(([lat, lng]) => ({ lat, lng })), destino: v.rastreo.destino?.lat ? v.rastreo.destino : null,
+      resumen: v.rastreo.resumen?.puntos !== undefined ? v.rastreo.resumen : resumenDe(puntos), eventos: v.rastreo.eventos || [], modalidad: v.rastreo.modalidad || 'destino' };
+  }
+  await exigirHabilitado(empresaId);
   const r = await enCache(`rec:${v.rastreo.externoId}`, 10000, () => llamar(`/rastreo/${encodeURIComponent(v.rastreo.externoId)}`));
   const puntos = r.puntos.map(p => ({ ...p, velocidad: kmh(p.velocidad) }));
-  // Kilómetros recorridos (Haversine) y velocidad máxima
+  const clientes = await sincronizarEntregas(empresaId, v, r.clientes || []);
+  const ultima = r.ultima ? { ...r.ultima, velocidad: kmh(r.ultima.velocidad) } : null;
+  // Ruta: la de Sur Track (con clientes la arma Cooespatrans); solo destino → ruta sugerida desde la posición actual
+  let ruta = r.ruta?.coordenadas || [];
+  const destino = v.rastreo.destino?.lat ? v.rastreo.destino : null;
+  if ((v.rastreo.modalidad || 'destino') === 'destino' && destino) {
+    const desde = ultima || puntos[puntos.length - 1] || null;
+    if (desde) ruta = (await rutaSugerida([desde, destino]).catch(() => null))?.coordenadas || ruta;
+  }
+  return { viaje: datosViaje(v), estadoExterno: r.viaje.estado, ultima, puntos, clientes, ruta, destino,
+    resumen: resumenDe(puntos), eventos: v.rastreo.eventos || [], modalidad: v.rastreo.modalidad || 'destino' };
+}
+
+const datosViaje = (v) => ({ numero: v.numero, fecha: v.fecha, placa: v.placa, conductor: v.conductorNombre, destino: v.destino,
+  codigoExterno: v.rastreo.codigoExterno, estado: v.estado, rastreo: v.rastreo.estado, activado: v.rastreo.activado, finalizado: v.rastreo.finalizado });
+
+// Kilómetros recorridos (Haversine) y velocidad máxima
+function resumenDe(puntos) {
   let km = 0;
   for (let i = 1; i < puntos.length; i++) if (!puntos[i].nuevoSegmento) km += distanciaKm(puntos[i - 1], puntos[i]);
-  return { viaje: { numero: v.numero, placa: v.placa, conductor: v.conductorNombre, destino: v.destino, codigoExterno: v.rastreo.codigoExterno },
-    estadoExterno: r.viaje.estado, ultima: r.ultima ? { ...r.ultima, velocidad: kmh(r.ultima.velocidad) } : null, puntos,
-    resumen: { km: Math.round(km * 10) / 10, velocidadMaxima: Math.max(0, ...puntos.map(p => p.velocidad)), puntos: puntos.length,
-      inicio: puntos[0]?.hora || null, fin: puntos[puntos.length - 1]?.hora || null } };
+  return { km: Math.round(km * 10) / 10, velocidadMaxima: Math.max(0, ...puntos.map(p => p.velocidad || 0)), puntos: puntos.length,
+    inicio: puntos[0]?.hora || null, fin: puntos[puntos.length - 1]?.hora || null };
+}
+
+// Estado de entrega que marca el conductor en Sur Track → clientes del viaje (y su registro de seguimiento)
+async function sincronizarEntregas(empresaId, v, externos) {
+  const actuales = v.rastreo.clientes || [];
+  if (!externos.length) return actuales;
+  const nuevos = []; let cambio = false;
+  const lista = actuales.length ? actuales.map(c => ({ ...c })) : externos.map(e => ({ nombre: e.nombre, direccion: e.direccion, ciudad: e.ciudad,
+    telefono: e.telefono, factura: e.factura, valor: e.valor, externoId: e.clienteId, estadoEntrega: 'pendiente', valorRecibido: 0 }));
+  if (!actuales.length) cambio = true;
+  for (const c of lista) {
+    const e = externos.find(x => x.clienteId === c.externoId) || externos.find(x => x.nombre === c.nombre);
+    if (!e || e.estadoEntrega === c.estadoEntrega) continue;
+    Object.assign(c, { estadoEntrega: e.estadoEntrega, valorRecibido: e.valorRecibido || 0, fechaEntrega: e.fechaEntrega || new Date() });
+    nuevos.push(evento('entrega', `${c.nombre}: ${e.estadoEntrega}`)); cambio = true;
+  }
+  if (cambio) await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: { 'rastreo.clientes': lista }, ...(nuevos.length ? { $push: { 'rastreo.eventos': { $each: nuevos } } } : {}) });
+  if (nuevos.length && !v.save) v.rastreo.eventos = [...(v.rastreo.eventos || []), ...nuevos];   // objeto plano: se refleja en la respuesta
+  return lista;
+}
+
+// Guarda el recorrido y el resumen en Translogística al terminar el rastreo
+async function guardarRecorrido(empresaId, v) {
+  if (!v.rastreo?.externoId || !configurado()) return;
+  const r = await llamar(`/rastreo/${encodeURIComponent(v.rastreo.externoId)}`);
+  const puntos = r.puntos.map(p => ({ ...p, velocidad: kmh(p.velocidad) }));
+  await sincronizarEntregas(empresaId, v.toObject ? v.toObject() : v, r.clientes || []);
+  const fresco = await Viaje.findOne({ empresa: empresaId, _id: v._id }).select('rastreo.clientes').lean();
+  if (fresco?.rastreo?.clientes) v.rastreo.clientes = fresco.rastreo.clientes;
+  await RecorridoRastreo.updateOne({ empresa: empresaId, viaje: v._id }, { $set: {
+    puntos: puntos.map(p => [p.lat, p.lng, p.velocidad, new Date(p.hora).getTime()]),
+    ruta: (r.ruta?.coordenadas || []).map(c => [c.lat, c.lng]) } }, { upsert: true });
+  v.rastreo.resumen = resumenDe(puntos);
+}
+
+// ── Mapas: ruta sugerida (OSRM del servidor) y búsqueda de direcciones (Nominatim de OpenStreetMap) ──
+export async function rutaSugerida(puntos) {
+  const validos = puntos.filter(p => Number.isFinite(Number(p?.lat)) && Number.isFinite(Number(p?.lng)));
+  if (validos.length < 2) return null;
+  const coords = validos.slice(0, 25).map(p => `${Number(p.lng)},${Number(p.lat)}`).join(';');
+  return enCache(`ruta:${coords.replace(/(\.\d{3})\d+/g, '$1')}`, 120000, async () => {
+    const r = await fetch(`${env.mapas.osrmUrl}/route/v1/driving/${coords}?overview=simplified&geometries=geojson`, { signal: AbortSignal.timeout(8000) });
+    const d = await r.json();
+    if (d.code !== 'Ok' || !d.routes?.[0]) return null;
+    return { coordenadas: d.routes[0].geometry.coordinates.map(([lng, lat]) => ({ lat, lng })),
+      distancia: Math.round(d.routes[0].distance), duracion: Math.round(d.routes[0].duration) };
+  });
+}
+
+let ultimaBusqueda = 0;
+export async function geocodificar(texto) {
+  const q = String(texto || '').trim().slice(0, 200);
+  if (q.length < 3) return [];
+  return enCache(`geo:${q.toLowerCase()}`, 24 * 3600000, async () => {
+    // Política de uso de Nominatim: máximo una consulta por segundo e identificación de la aplicación
+    const espera = 1100 - (Date.now() - ultimaBusqueda);
+    if (espera > 0) await new Promise(r => setTimeout(r, espera));
+    ultimaBusqueda = Date.now();
+    const url = `${env.mapas.nominatimUrl}/search?format=jsonv2&limit=5&countrycodes=co&accept-language=es&q=${encodeURIComponent(q)}`;
+    const r = await fetch(url, { headers: { 'user-agent': 'Translogistica del Sur (translogisticadelsur.com)' }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return [];
+    return (await r.json()).map(x => ({ nombre: x.display_name, lat: Number(x.lat), lng: Number(x.lon) }));
+  });
+}
+
+// ── Historial de monitoreo: viajes rastreados con sus datos y registro de seguimiento ──
+export async function historial(empresaId, f = {}) {
+  const filtro = { empresa: empresaId, 'rastreo.activado': { $ne: null } };
+  if (f.desde || f.hasta) filtro['rastreo.activado'] = { ...(f.desde ? { $gte: f.desde } : {}), ...(f.hasta ? { $lte: f.hasta } : {}) };
+  if (f.placa) filtro.placa = String(f.placa).toUpperCase().replace(/[\s-]/g, '');
+  if (f.conductor) filtro.conductor = f.conductor;
+  if (f.estado === 'activo') filtro['rastreo.activo'] = true;
+  else if (f.estado === 'finalizado') filtro['rastreo.activo'] = false;
+  if (f.modalidad) filtro['rastreo.modalidad'] = f.modalidad;
+  const limite = Math.min(Math.max(Number(f.limite) || 50, 1), 200);
+  const pagina = Math.max(Number(f.pagina) || 1, 1);
+  const [total, viajes] = await Promise.all([
+    Viaje.countDocuments(filtro),
+    Viaje.find(filtro).sort({ 'rastreo.activado': -1 }).skip((pagina - 1) * limite).limit(limite)
+      .select('numero fecha placa conductor conductorNombre destino estado cliente rastreo.activo rastreo.estado rastreo.origen rastreo.modalidad rastreo.activado rastreo.finalizado rastreo.codigoExterno rastreo.resumen rastreo.clientes rastreo.destino')
+      .populate({ path: 'cliente', select: 'nombre', match: { empresa: empresaId } }).lean(),
+  ]);
+  return { total, pagina, limite, items: viajes.map(v => ({ _id: v._id, numero: v.numero, fecha: v.fecha, placa: v.placa, conductor: v.conductorNombre,
+    cliente: v.cliente?.nombre || '', destino: v.rastreo.destino?.nombre || v.destino, estadoViaje: v.estado, activo: v.rastreo.activo,
+    estado: v.rastreo.estado, origen: v.rastreo.origen, modalidad: v.rastreo.modalidad || 'destino', activado: v.rastreo.activado,
+    finalizado: v.rastreo.finalizado, codigoExterno: v.rastreo.codigoExterno, km: v.rastreo.resumen?.km ?? null,
+    clientes: (v.rastreo.clientes || []).length, entregados: (v.rastreo.clientes || []).filter(c => c.estadoEntrega && c.estadoEntrega !== 'pendiente').length })) };
 }
 
 function distanciaKm(a, b) {
