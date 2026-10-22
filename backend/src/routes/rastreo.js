@@ -88,12 +88,12 @@ r.get('/clientes/plantilla', permitir(P.VIAJES_VER), async (req, res) => {
   res.send(buf);
 });
 
-// Historial de monitoreo: viajes rastreados (activos y terminados) con filtros
+// Historial de monitoreo: viajes con el rastreo terminado, con filtros
 r.get('/historial', permitir(P.VIAJES_VER), async (req, res) => {
   const q = req.query;
   const hasta = parseFecha(q.hasta);
   res.json(await st.historial(req.empresaId, { desde: parseFecha(q.desde), hasta: hasta ? new Date(hasta.getTime() + 86399999) : null,
-    placa: q.placa, conductor: mongoose.isValidObjectId(q.conductor) ? q.conductor : null, estado: q.estado, modalidad: ['destino', 'clientes'].includes(q.modalidad) ? q.modalidad : '',
+    placa: q.placa, conductor: mongoose.isValidObjectId(q.conductor) ? q.conductor : null, modalidad: ['destino', 'clientes'].includes(q.modalidad) ? q.modalidad : '',
     pagina: q.pagina, limite: q.limite }));
 });
 

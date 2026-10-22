@@ -22,7 +22,7 @@ const PASTO: L.LatLngTuple = [1.2136, -77.2811];
   template: `
     <app-modal [titulo]="editando() ? 'Cambiar destino o clientes' : 'Rastrear viaje N° ' + (viaje()?.numero || '')" [abierto]="abierto()" (cerrar)="cerrar()" [ancho]="true">
       @if (viaje(); as v) {
-        <p class="sutil" style="margin-top:0"><span class="placa">{{ v.placa }}</span> · {{ v.conductorNombre }} · {{ v.cliente?.nombre }} → {{ v.destino }}</p>
+        <p class="sutil" style="margin-top:0"><span class="placa">{{ v.placa }}</span> · {{ v.conductorNombre }} · {{ v.cliente?.nombre }}{{ modalidad() === 'destino' ? ' → ' + v.destino : '' }}</p>
         <fieldset class="bloque">
           <legend>Modalidad</legend>
           <div class="tarjetas">
@@ -218,7 +218,7 @@ export class ActivarRastreo {
 
   async guardar() {
     const v = this.viaje();
-    const cuerpo = { modalidad: this.modalidad(), destino: this.destino(), clientes: this.modalidad() === 'clientes' ? this.clientes() : [] };
+    const cuerpo = this.modalidad() === 'clientes' ? { modalidad: 'clientes', clientes: this.clientes() } : { modalidad: 'destino', destino: this.destino(), clientes: [] };
     this.guardando.set(true);
     try {
       const r = this.editando() ? await this.api.put<any>(`/rastreo/viajes/${v._id}/paradas`, cuerpo) : await this.api.post<any>(`/rastreo/viajes/${v._id}/activar`, cuerpo);

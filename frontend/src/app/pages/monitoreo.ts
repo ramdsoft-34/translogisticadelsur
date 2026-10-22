@@ -44,18 +44,17 @@ const hace = (h: string | Date | null | undefined) => {
     </div>
 
     @if (pestana() === 'historial') {
+      <p class="sutil" style="margin:0 0 10px">Viajes con el rastreo terminado. Los que están en curso se ven en «En vivo».</p>
       <section class="barra" aria-label="Filtros del historial">
         <div class="campo"><label for="hi-d">Desde</label><input id="hi-d" type="date" [(ngModel)]="h.desde" (change)="cargarHistorial()" /></div>
         <div class="campo"><label for="hi-h">Hasta</label><input id="hi-h" type="date" [(ngModel)]="h.hasta" (change)="cargarHistorial()" /></div>
         <div class="campo"><label for="hi-p">Placa</label><input id="hi-p" maxlength="7" placeholder="Todas" [(ngModel)]="h.placa" (keyup.enter)="cargarHistorial()" (change)="cargarHistorial()" /></div>
-        <div class="campo"><label for="hi-e">Rastreo</label><select id="hi-e" [(ngModel)]="h.estado" (change)="cargarHistorial()">
-          <option value="">Todos</option><option value="activo">Activos</option><option value="finalizado">Terminados</option></select></div>
         <div class="campo"><label for="hi-m">Modalidad</label><select id="hi-m" [(ngModel)]="h.modalidad" (change)="cargarHistorial()">
           <option value="">Todas</option><option value="destino">Solo destino</option><option value="clientes">Con clientes</option></select></div>
       </section>
       <div class="tabla-caja">
         <table class="tabla-movil">
-          <thead><tr><th>Viaje</th><th>Inicio rastreo</th><th>Vehículo</th><th>Conductor</th><th>Cliente / destino</th><th>Modalidad</th><th class="num">Km</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Viaje</th><th>Rastreo</th><th>Vehículo</th><th>Conductor</th><th>Cliente</th><th>Destino / clientes</th><th class="num">Km</th><th>Estado</th><th></th></tr></thead>
           <tbody>
             @for (x of historialItems(); track x._id) {
               <tr>
@@ -63,14 +62,14 @@ const hace = (h: string | Date | null | undefined) => {
                 <td data-etiqueta="Inicio">{{ x.activado | fechaHora }}@if (x.finalizado) { <small class="sutil d-bloque">Fin {{ x.finalizado | fechaHora }}</small> }</td>
                 <td data-etiqueta="Vehículo"><span class="placa">{{ x.placa }}</span></td>
                 <td data-etiqueta="Conductor">{{ x.conductor }}</td>
-                <td data-etiqueta="Cliente / destino"><span class="celda-doble"><span>{{ x.cliente }}</span><small>{{ x.destino }}</small></span></td>
-                <td data-etiqueta="Modalidad">{{ x.modalidad === 'clientes' ? 'Clientes ' + x.entregados + '/' + x.clientes : 'Solo destino' }}</td>
+                <td data-etiqueta="Cliente">{{ x.cliente }}</td>
+                <td data-etiqueta="Destino / clientes">{{ x.modalidad === 'clientes' ? x.clientes + ' cliente(s) · ' + x.entregados + ' entregado(s)' : x.destino }}</td>
                 <td data-etiqueta="Km" class="num">{{ x.km ?? '—' }}</td>
-                <td data-etiqueta="Estado">@if (x.activo) { <span class="chip sin-punto" [class]="claseEstado(x.estado)">{{ textoEstado(x.estado) }}</span> } @else { <span class="chip sin-punto">Terminado</span> }
+                <td data-etiqueta="Estado"><span class="chip sin-punto" [class.ok]="x.estadoViaje === 'cumplido'">{{ x.estadoViaje === 'cumplido' ? 'Cumplido' : x.estadoViaje === 'anulado' ? 'Anulado' : 'Terminado' }}</span>
                   @if (x.origen === 'cooespatrans') { <small class="sutil d-bloque">Desde Cooespatrans</small> }</td>
                 <td><button type="button" class="pequeno" (click)="verDetalle(x)">Ver seguimiento</button></td>
               </tr>
-            } @empty { <tr><td colspan="9" class="vacio">{{ cargandoHistorial() ? 'Cargando…' : 'No hay viajes rastreados con estos filtros' }}</td></tr> }
+            } @empty { <tr><td colspan="9" class="vacio">{{ cargandoHistorial() ? 'Cargando…' : 'No hay viajes terminados con estos filtros' }}</td></tr> }
           </tbody>
         </table>
         @if (historialItems().length < historialTotal()) {
@@ -104,7 +103,7 @@ const hace = (h: string | Date | null | undefined) => {
                 <span class="placa">{{ v.placa }}</span><span class="chip sin-punto" [class]="claseEstado(v.estado)">{{ textoEstado(v.estado) }}</span>
                 <small class="sutil derecha">N° {{ v.numero }}</small></span>
               <span class="fila2">{{ v.conductor }}</span>
-              <span class="fila3 sutil">{{ v.cliente }} · {{ v.destino }}{{ v.modalidad === 'clientes' ? ' · Entregas ' + v.entregados + '/' + v.clientes : '' }}</span>
+              <span class="fila3 sutil">{{ v.cliente }} · {{ v.modalidad === 'clientes' ? v.clientes + ' cliente(s) · Entregas ' + v.entregados + '/' + v.clientes : v.destino }}</span>
               <span class="fila3 sutil">@if (v.ultima) { {{ v.ultima.velocidad }} km/h · {{ hace(v.ultima.hora) }} } @else { Sin posición todavía }</span>
               @for (a of v.alertas; track a) { <span class="chip error sin-punto alerta-item">{{ a }}</span> }
             </button>
@@ -136,7 +135,7 @@ const hace = (h: string | Date | null | undefined) => {
                 <div><span>Inicio</span><strong>{{ r.resumen.inicio ? (r.resumen.inicio | fechaHora) : '—' }}</strong></div>
                 <div><span>Último punto</span><strong>{{ r.resumen.fin ? hace(r.resumen.fin) : '—' }}</strong></div>
               </div>
-              <p class="sutil nota">{{ r.viaje.conductor }} → {{ r.destino?.nombre || r.viaje.destino }} · Sur Track {{ r.viaje.codigoExterno }}</p>
+              <p class="sutil nota">{{ r.viaje.conductor }}{{ r.modalidad === 'clientes' ? ' · ' + r.clientes.length + ' cliente(s)' : ' → ' + (r.destino?.nombre || r.viaje.destino) }} · Sur Track {{ r.viaje.codigoExterno }}</p>
               @if (r.clientes?.length) {
                 <ul class="lista-clientes">
                   @for (c of r.clientes; track $index) {
@@ -159,14 +158,15 @@ const hace = (h: string | Date | null | undefined) => {
         <div class="detalle">
           <div>
             <div #mapaDetalle class="mapa-detalle" role="application" aria-label="Recorrido del viaje"></div>
-            <p class="sutil nota">Línea amarilla: recorrido real · Línea punteada: ruta sugerida · Marcador rojo: destino · Puntos: clientes por estado de entrega.</p>
+            <p class="sutil nota">Línea amarilla: recorrido real · Línea punteada: ruta {{ d.modalidad === 'clientes' ? 'de entrega · Puntos: clientes por estado de entrega' : 'sugerida · Marcador rojo: destino' }}.</p>
           </div>
           <div>
             <div class="datos-detalle">
               <div><span>Vehículo</span><strong class="placa">{{ d.viaje.placa }}</strong></div>
               <div><span>Conductor</span>{{ d.viaje.conductor }}</div>
               <div><span>Fecha del viaje</span>{{ d.viaje.fecha | dia }}</div>
-              <div><span>Destino</span>{{ d.destino?.nombre || d.viaje.destino }}</div>
+              @if (d.modalidad === 'clientes') { <div><span>Clientes</span>{{ d.clientes.length }} ({{ entregadosDe(d) }} entregados)</div> }
+              @else { <div><span>Destino</span>{{ d.destino?.nombre || d.viaje.destino }}</div> }
               <div><span>Rastreo</span>{{ d.viaje.activado | fechaHora }}{{ d.viaje.finalizado ? ' → ' : '' }}{{ d.viaje.finalizado ? (d.viaje.finalizado | fechaHora) : '' }}</div>
               <div><span>Sur Track</span>{{ d.viaje.codigoExterno }}</div>
               <div><span>Recorrido</span><strong>{{ d.resumen.km }} km</strong></div>
@@ -408,7 +408,7 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
   private capas: L.Layer[] = [];
   private pintarParadas(m: L.Map, r: any, capas: L.Layer[]) {
     if (r.ruta?.length > 1) capas.push(L.polyline(r.ruta.map((c: any) => [c.lat, c.lng]), { color: '#3b82f6', weight: 4, opacity: .7, dashArray: '8 8' }).addTo(m));
-    if (r.destino?.lat !== undefined && r.destino?.lat !== null) capas.push(L.marker([r.destino.lat, r.destino.lng], { icon: L.divIcon({ className: '', iconSize: [24, 24], iconAnchor: [12, 24],
+    if (r.modalidad !== 'clientes' && r.destino?.lat !== undefined && r.destino?.lat !== null) capas.push(L.marker([r.destino.lat, r.destino.lng], { icon: L.divIcon({ className: '', iconSize: [24, 24], iconAnchor: [12, 24],
       html: '<div style="width:24px;height:24px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#d63939;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>' }), title: 'Destino' })
       .bindPopup(`<strong>Destino</strong><br>${r.destino.nombre || ''}`).addTo(m));
     for (const c of r.clientes || []) {
@@ -432,7 +432,7 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
     if (p === 'historial') { this.mapa?.remove(); this.mapa = null; this.marcadores.clear(); this.linea = null; this.capas = []; this.cargarHistorial(); }
     else if (this.estado()?.habilitado) { this.primeraVez = true; setTimeout(() => this.iniciarMapa(), 0); }
   }
-  h = { desde: '', hasta: '', placa: '', estado: '', modalidad: '' };
+  h = { desde: '', hasta: '', placa: '', modalidad: '' };
   readonly historialItems = signal<any[]>([]);
   readonly historialTotal = signal(0);
   readonly cargandoHistorial = signal(false);

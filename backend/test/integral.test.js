@@ -1101,6 +1101,7 @@ test('Rastreo: modalidad solo destino (ruta sugerida) y con clientes (Excel, ent
   const a2 = await adm.post(`/api/rastreo/viajes/${v2._id}/activar`, { modalidad: 'clientes', clientes: imp.body.clientes });
   assert.equal(a2.status, 200, JSON.stringify(a2.body));
   assert.equal(a2.body.clientes.length, 2); assert.ok(a2.body.clientes.every(c => c.externoId), 'vinculados con Sur Track');
+  assert.equal(a2.body.destino?.nombre || '', '', 'con clientes no se guarda destino');
   const st2 = surTrack.viajes.get(a2.body.externoId);
   assert.equal(st2.clientesSt.length, 2, 'los clientes llegan a Sur Track');
   // Agregar un cliente antes de que el conductor acepte (reemplaza, no duplica)
@@ -1123,7 +1124,7 @@ test('Rastreo: modalidad solo destino (ruta sugerida) y con clientes (Excel, ent
   surTrack.viajes.clear();   // aunque Sur Track ya no tenga el viaje, el historial conserva el recorrido
   const g = (await adm.get(`/api/rastreo/viajes/${v2._id}/recorrido`)).body;
   assert.equal(g.puntos.length, 2); assert.ok(g.eventos.some(e => e.tipo === 'finalizado'));
-  assert.equal((await adm.get('/api/rastreo/historial?estado=activo')).body.items.some(x => x._id === v2._id), false);
+  assert.equal((await adm.get('/api/rastreo/historial')).body.items.some(x => x._id === v1._id), false, 'el historial no muestra rastreos en curso');
   assert.equal((await adm.get('/api/rastreo/historial?placa=xyz-987')).body.items.every(x => x.placa === 'XYZ987'), true);
   assert.ok(((await s.adminB.get('/api/rastreo/historial')).body.items || []).every(x => x._id !== v2._id), 'otra empresa no ve el historial');
   await adm.post(`/api/rastreo/viajes/${v1._id}/finalizar`);

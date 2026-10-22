@@ -205,7 +205,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             <div class="rastreo-viaje">
               <app-icono nombre="ubicacion" [tam]="18" />
               @if (rastreoForm()?.activo) {
-                <span><strong>Rastreo activo</strong> · {{ textoRastreo(rastreoForm().estado) }} · {{ rastreoForm().modalidad === 'clientes' ? (rastreoForm().clientes?.length || 0) + ' cliente(s)' : 'Destino: ' + (rastreoForm().destino?.nombre || f.destino) }} · Sur Track {{ rastreoForm().codigoExterno }}</span>
+                <span><strong>Rastreo activo</strong> · {{ textoRastreo(rastreoForm().estado) }} · {{ rastreoForm().modalidad === 'clientes' ? 'Con ' + (rastreoForm().clientes?.length || 0) + ' cliente(s)' : 'Destino: ' + (rastreoForm().destino?.nombre || f.destino) }} · Sur Track {{ rastreoForm().codigoExterno }}</span>
                 <a class="boton pequeno" [routerLink]="['/monitoreo']" [queryParams]="{ viaje: f._id }">Ver en el mapa</a>
                 @if (puedeRegistrar && rastreoForm().estado === 'esperando' && rastreoForm().origen === 'translogistica') {
                   <button type="button" class="pequeno" (click)="abrirActivar(true)">Cambiar destino o clientes</button> }
