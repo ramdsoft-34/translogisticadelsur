@@ -15,6 +15,7 @@ import { CargarMas } from '../shared/cargar-mas';
 import { mensajeError } from '../core/api.service';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { VistaRndc } from '../shared/vista-rndc';
+import { Rastreo } from '../core/rastreo.service';
 import { ActivatedRoute } from '@angular/router';
 
 const vacio = () => ({
@@ -35,6 +36,7 @@ const vacio = () => ({
           <button (click)="importar.set(true)"><app-icono nombre="descargar" />Importar Excel</button>
           @if (puedeRndc) { <button (click)="traer.set(true)"><app-icono nombre="buscar" />Traer del RNDC</button> }
           @if (puedeConsultar) { <button (click)="actualizar.set(true)"><app-icono nombre="reloj" />Actualizar desde el RNDC</button> }
+          @if (rastreoHabilitado()) { <button (click)="abrirSurTrack()"><app-icono nombre="ubicacion" />Traer de Sur Track</button> }
           <button class="primario" (click)="nuevo()"><app-icono nombre="mas" />Nuevo vehículo</button>
         }
       </div>
@@ -74,6 +76,27 @@ const vacio = () => ({
       </table>
       @if (lista().length) { <app-cargar-mas [mostrados]="lista().length" [total]="total()" [cargando]="cargandoMas()" unidad="vehículos" (mas)="cargarMas()" /> }
     </div>
+
+    <app-modal titulo="Vehículos de Sur Track" [abierto]="!!planSt()" (cerrar)="planSt.set(null)" [ancho]="true">
+      @if (planSt(); as pl) {
+        <p class="sutil" style="margin-top:0">Se unen por <strong>placa</strong> y los conductores por <strong>cédula</strong>: lo que ya existe solo se vincula y no se duplica ni se modifica.</p>
+        <div class="tabla-caja"><table class="tabla-movil">
+          <thead><tr><th>Placa</th><th>Conductor en Sur Track</th><th>Cédula</th><th>Vehículo</th><th>Conductor</th></tr></thead>
+          <tbody>
+            @for (x of pl.items; track x.choferId) {
+              <tr><td data-etiqueta="Placa"><span class="placa">{{ x.placa }}</span></td><td data-etiqueta="Conductor">{{ x.nombre }}</td><td data-etiqueta="Cédula">{{ x.cedula || '—' }}</td>
+                <td data-etiqueta="Vehículo"><span class="chip sin-punto" [class.ok]="x.vehiculo === 'vinculado'" [class.info]="x.vehiculo === 'vincular'" [class.alerta]="x.vehiculo === 'crear'">{{ ESTADO_ST[x.vehiculo] }}</span></td>
+                <td data-etiqueta="Conductor"><span class="chip sin-punto" [class.ok]="x.conductor === 'existe'" [class.alerta]="x.conductor === 'crear'">{{ ESTADO_ST[x.conductor] }}</span></td></tr>
+            }
+          </tbody>
+        </table></div>
+        @if (pl.sinPlaca.length) { <p class="sutil">Sin placa en Sur Track (se omiten): {{ pl.sinPlaca.join(', ') }}</p> }
+      }
+      <ng-container pie>
+        <button type="button" (click)="planSt.set(null)">Cancelar</button>
+        <button type="button" class="primario" (click)="aplicarSurTrack()" [disabled]="trabajando() || !pendientesSt()">{{ pendientesSt() ? 'Aplicar ' + pendientesSt() + ' cambio(s)' : 'Todo está al día' }}</button>
+      </ng-container>
+    </app-modal>
 
     <!-- Paso 1: verificar la placa en la empresa y en el RNDC -->
     <app-modal titulo="Nuevo vehículo" [abierto]="verificando()" (cerrar)="verificando.set(false)">
@@ -167,6 +190,25 @@ export class Vehiculos {
   readonly abierto = signal(false);
   readonly importar = signal(false);
   readonly traer = signal(false);
+  // ── Vehículos de Sur Track (rastreo GPS) ──
+  private rastreoSrv = inject(Rastreo);
+  readonly rastreoHabilitado = computed(() => !!this.rastreoSrv.estado()?.habilitado);
+  readonly planSt = signal<any>(null);
+  readonly ESTADO_ST: Record<string, string> = { crear: 'Se crea', vincular: 'Se vincula', vinculado: 'Ya vinculado', existe: 'Ya existe', sin_cedula: 'Sin cédula' };
+  readonly pendientesSt = computed(() => (this.planSt()?.items || []).filter((x: any) => x.vehiculo !== 'vinculado' || x.conductor === 'crear').length);
+  async abrirSurTrack() {
+    this.trabajando.set(true);
+    try { this.planSt.set(await this.api.get('/rastreo/vehiculos/plan')); }
+    catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+  async aplicarSurTrack() {
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.post<any>('/rastreo/vehiculos/sincronizar', {});
+      this.avisos.ok(`Sur Track: ${r.vehiculosCreados} vehículo(s) creados, ${r.vehiculosVinculados} vinculados, ${r.conductoresCreados} conductor(es) creados`);
+      this.planSt.set(null); this.cargar();
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
   readonly actualizar = signal(false);
   readonly form = signal<any>(vacio());
   readonly editando = computed(() => !!this.form()._id);
@@ -177,6 +219,7 @@ export class Vehiculos {
   readonly vistaRndc = signal<[string, string][] | null>(null);
   constructor() {
     this.cargar();
+    this.rastreoSrv.cargar();
     const n = inject(ActivatedRoute).snapshot.queryParamMap.get('nuevo');
     if (n === 'vehiculo' || n === 'remolque') { this.claseNueva = n; setTimeout(() => this.nuevo(), 0); }
   }

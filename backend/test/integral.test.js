@@ -15,6 +15,47 @@ const sim = crearSimulador();
 await new Promise(r => sim.servidor.listen(0, '127.0.0.1', r));
 process.env.RNDC_SIMULADOR_URL = `http://127.0.0.1:${sim.servidor.address().port}/soap/IBPMServices`;
 
+// Sur Track simulado (puerta de integración de Cooespatrans) para las pruebas de rastreo
+const http = await import('node:http');
+const surTrack = { viajes: new Map(), activos: [], clave: crypto.randomBytes(24).toString('hex') };
+surTrack.servidor = http.createServer((req, res) => {
+  let cuerpo = '';
+  req.on('data', c => { cuerpo += c; });
+  req.on('end', () => {
+    const json = (st, b) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
+    if (req.headers['x-integracion-clave'] !== surTrack.clave) return json(401, { mensaje: 'clave' });
+    const ruta = new URL(req.url, 'http://x').pathname.replace('/api/integracion', '');
+    const choferes = [{ choferId: 'c1', nombre: 'Pedro Pablo Perez Gomez', cedula: '12345678', placa: 'ABC123' },
+      { choferId: 'c2', nombre: 'Ana Ruiz', cedula: '55667788', placa: 'XYZ987' }, { choferId: 'c3', nombre: 'Sin Placa', cedula: '1', placa: '' }];
+    if (ruta === '/vehiculos') return json(200, choferes);
+    if (ruta === '/rastreo/activos') return json(200, surTrack.activos);
+    if (ruta === '/viajes' && req.method === 'GET') return json(200, [...surTrack.viajes.values()]);
+    if (ruta === '/viajes' && req.method === 'POST') {
+      const b = JSON.parse(cuerpo);
+      const previo = [...surTrack.viajes.values()].find(v => v.referenciaExterna === b.referencia);
+      if (previo) return json(200, { ...previo, existente: true });
+      const ch = choferes.find(c => c.placa === String(b.placa).toUpperCase());
+      if (!ch) return json(404, { mensaje: 'El conductor o la placa no están registrados en Sur Track' });
+      const viajeId = crypto.randomBytes(12).toString('hex');
+      const v = { viajeId, codigo: b.codigo, estado: 'pendiente', chofer: ch, referenciaExterna: b.referencia };
+      surTrack.viajes.set(viajeId, v);
+      return json(201, v);
+    }
+    let m = ruta.match(/^\/viajes\/([a-f0-9]{24})\/finalizar$/);
+    if (m) { const v = surTrack.viajes.get(m[1]); if (!v) return json(404, {}); v.estado = 'completado'; return json(200, { estado: v.estado }); }
+    m = ruta.match(/^\/rastreo\/([a-f0-9]{24})$/);
+    if (m) {
+      const v = surTrack.viajes.get(m[1]); if (!v) return json(404, { mensaje: 'no' });
+      return json(200, { viaje: v, ultima: null, puntos: [{ lat: 1.2136, lng: -77.2811, velocidad: 10, hora: '2026-11-20T10:00:00Z' },
+        { lat: 1.2236, lng: -77.2811, velocidad: 25, hora: '2026-11-20T10:05:00Z' }] });
+    }
+    json(404, { mensaje: 'ruta' });
+  });
+});
+await new Promise(r => surTrack.servidor.listen(0, '127.0.0.1', r));
+process.env.COOESPATRANS_INTEGRACION_URL = `http://127.0.0.1:${surTrack.servidor.address().port}/api/integracion`;
+process.env.COOESPATRANS_INTEGRACION_CLAVE = surTrack.clave;
+
 const { default: request } = await import('supertest');
 const mongoose = (await import('mongoose')).default;
 const bcrypt = (await import('bcryptjs')).default;
@@ -53,6 +94,7 @@ after(async () => {
   await mongoose.connection.dropDatabase();
   await mongoose.disconnect();
   sim.servidor.close();
+  surTrack.servidor.close();
 });
 
 test('SuperAdmin crea dos empresas con su administrador', async () => {
@@ -947,4 +989,63 @@ test('Gestión: cierre de mes bloquea registrar y modificar ese mes', async () =
   assert.equal((await s.adminA.post('/api/gestion/cierres', { mes: '2099-01' })).status, 409, 'no se cierra un mes futuro');
   assert.equal((await s.adminA.post('/api/gestion/cierres/2026-09/reabrir')).status, 200);
   assert.equal((await s.manif.post('/api/viajes', { fecha: '2026-09-15', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor })).status, 201);
+});
+
+test('Rastreo Sur Track: habilitar, traer vehículos sin duplicar, activar, ver en vivo, recorrido y finalizar', async () => {
+  const adm = s.adminA;
+  assert.equal((await adm.get('/api/rastreo/estado')).body.habilitado, false);
+  assert.equal((await adm.post('/api/rastreo/viajes/' + '0'.repeat(24) + '/activar')).status, 403, 'sin habilitar no se activa');
+  assert.equal((await adm.put('/api/rastreo/configuracion', { surTrack: true, velocidadMaxima: 80, minutosSinSenal: 10 })).status, 200);
+  assert.equal((await adm.get('/api/rastreo/estado')).body.habilitado, true);
+  // Vehículos: ABC123 ya existe (se vincula), XYZ987 se crea; el de sin placa se omite
+  const plan = (await adm.get('/api/rastreo/vehiculos/plan')).body;
+  assert.deepEqual(plan.items.map(x => `${x.placa}:${x.vehiculo}`).sort(), ['ABC123:vincular', 'XYZ987:crear']);
+  assert.equal(plan.sinPlaca.length, 1);
+  const sinc = (await adm.post('/api/rastreo/vehiculos/sincronizar')).body;
+  assert.equal(sinc.vehiculosCreados, 1); assert.equal(sinc.vehiculosVinculados, 1);
+  const otra = (await adm.post('/api/rastreo/vehiculos/sincronizar')).body;
+  assert.deepEqual(otra, { vehiculosCreados: 0, vehiculosVinculados: 0, conductoresCreados: 0 }, 'la segunda vez no duplica');
+  const ana = await M.Tercero.findOne({ empresa: (await M.Empresa.findOne({ nit: '900111222' }))._id, numId: '55667788' }).lean();
+  assert.equal(ana.nombres, 'ANA'); assert.equal(ana.apellido1, 'RUIZ');
+  // Registrar un viaje con «Rastrear este viaje»
+  const nuevo = (placa, rastrear) => adm.post('/api/viajes', { fecha: '2026-11-20', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Pasto urbano',
+    placa, conductor: s.conductor, requiereManifiesto: false, rastrear });
+  const v = await nuevo('ABC123', true);
+  assert.equal(v.status, 201, JSON.stringify(v.body));
+  assert.equal(v.body.errorRastreo, '');
+  assert.equal(v.body.rastreo.activo, true); assert.equal(v.body.rastreo.estado, 'esperando');
+  assert.match(v.body.rastreo.codigoExterno, /^TLS-\d+$/);
+  await adm.post(`/api/rastreo/viajes/${v.body._id}/activar`);
+  assert.equal(surTrack.viajes.size, 1, 'activar dos veces no duplica');
+  let vivo = (await adm.get('/api/rastreo/en-vivo')).body;
+  assert.equal(vivo.viajes[0].estado, 'esperando');
+  const ext = v.body.rastreo.externoId;
+  surTrack.viajes.get(ext).estado = 'aceptado';
+  surTrack.activos = [{ viajeId: ext, lat: 1.21, lng: -77.28, velocidad: 25, rumbo: 90, hora: new Date().toISOString() },
+    { viajeId: 'f'.repeat(24), codigo: 'N-1', chofer: 'Otro', lat: 1, lng: -77, velocidad: 0, hora: new Date().toISOString() }];
+  const { limpiarCache } = await import('../src/services/rastreo/surtrack.js');
+  limpiarCache();
+  vivo = (await adm.get('/api/rastreo/en-vivo')).body;
+  assert.equal(vivo.viajes[0].estado, 'en_ruta');
+  assert.equal(vivo.viajes[0].ultima.velocidad, 90, 'm/s → km/h');
+  assert.ok(vivo.viajes[0].alertas.some(a => a.startsWith('Exceso de velocidad')));
+  assert.equal(vivo.externos.length, 1, 'rastreo de Cooespatrans sin enlazar');
+  assert.equal((await s.adminB.get('/api/rastreo/en-vivo')).status, 403, 'otra empresa no lo ve');
+  const rec = (await adm.get(`/api/rastreo/viajes/${v.body._id}/recorrido`)).body;
+  assert.equal(rec.puntos.length, 2); assert.ok(rec.resumen.km > 1 && rec.resumen.km < 1.2, String(rec.resumen.km));
+  // Enlazar un viaje propio con un rastreo que viene de Cooespatrans
+  const v2 = await nuevo('XYZ987', false);
+  surTrack.viajes.set('f'.repeat(24), { viajeId: 'f'.repeat(24), codigo: 'N-1', estado: 'aceptado' });
+  const enl = await adm.post(`/api/rastreo/viajes/${v2.body._id}/enlazar`, { externoId: 'f'.repeat(24) });
+  assert.equal(enl.status, 200, JSON.stringify(enl.body)); assert.equal(enl.body.origen, 'cooespatrans');
+  assert.equal((await adm.post(`/api/rastreo/viajes/${v.body._id}/enlazar`, { externoId: 'f'.repeat(24) })).status, 409);
+  // Finalizar: lo creado aquí se cierra en Sur Track; lo enlazado no se toca allá
+  assert.equal((await adm.post(`/api/rastreo/viajes/${v.body._id}/finalizar`)).body.estado, 'finalizado');
+  assert.equal(surTrack.viajes.get(ext).estado, 'completado');
+  await adm.post(`/api/rastreo/viajes/${v2.body._id}/finalizar`);
+  assert.equal(surTrack.viajes.get('f'.repeat(24)).estado, 'aceptado');
+  // Placa que no está en Sur Track: el viaje se registra igual y se avisa
+  const v3 = await nuevo('QWE111', true);
+  assert.equal(v3.status, 201); assert.match(v3.body.errorRastreo, /no están registrados en Sur Track/);
+  assert.equal(v3.body.rastreo?.activo || false, false);
 });

@@ -12,6 +12,7 @@ import { asegurarMesAbierto } from '../services/gestion/cierre.js';
 import { exigirDocumentosVigentes } from '../services/gestion/documentos.js';
 import { parseFecha, hoyColombia, escaparRegex } from '../utils/texto.js';
 import { saldoViaje, utilidadViaje, valoresDesdeTarifa } from '../services/calculos.js';
+import * as rastreo from '../services/rastreo/surtrack.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -224,6 +225,7 @@ r.get('/:id', permitir(P.VIAJES_VER), async (req, res) => {
 });
 
 r.post('/', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
+  const rastrear = req.body?.rastrear === true;
   const d = viajeSchema.parse(req.body);
   await validarReferencias(req, d);
   // Mes cerrado y documentos del viaje (licencia, SOAT y tecnomecánica vencidos no dejan registrar)
@@ -244,7 +246,15 @@ r.post('/', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const v = await Viaje.create({ ...d, numero, conductorNombre: nombreTercero(cond), empresa: req.empresaId,
     creadoPor: req.usuario._id, actualizadoPor: req.usuario._id });
   await auditar(req, 'crear_viaje', { entidad: 'Viaje', entidadId: v._id, detalle: { numero, placa: v.placa, destino: v.destino } });
-  res.status(201).json({ ...presentar((await Viaje.findOne(deEmpresa(req, { _id: v._id })).populate(POBLAR(req)).lean())), avisosDocumentos });
+  // «Rastrear este viaje con Sur Track»: si falla, el viaje queda registrado igual y se avisa
+  let errorRastreo = '';
+  if (rastrear) {
+    try {
+      await rastreo.activar(req.empresaId, v._id, req.usuario._id);
+      await auditar(req, 'activar_rastreo', { entidad: 'Viaje', entidadId: v._id });
+    } catch (e) { errorRastreo = e.message; }
+  }
+  res.status(201).json({ ...presentar((await Viaje.findOne(deEmpresa(req, { _id: v._id })).populate(POBLAR(req)).lean())), avisosDocumentos, errorRastreo });
 });
 
 async function viajeEditable(req) {
@@ -291,6 +301,7 @@ r.delete('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   if (v.estado !== 'registrado' || v.remesa?.radicado || v.manifiesto?.radicado) {
     throw new ErrorHttp(409, 'El viaje tiene documentos en el RNDC; debe anularlos en lugar de eliminar el viaje');
   }
+  if (v.rastreo?.activo) await rastreo.finalizar(req.empresaId, v._id);
   await Viaje.deleteOne(deEmpresa(req, { _id: v._id }));
   await auditar(req, 'eliminar_viaje', { entidad: 'Viaje', entidadId: v._id, detalle: { numero: v.numero, placa: v.placa, destino: v.destino } });
   res.json({ ok: true });

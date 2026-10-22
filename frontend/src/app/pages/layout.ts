@@ -15,6 +15,7 @@ const MENU: Opcion[] = [
   { ruta: '/inicio', texto: 'Inicio', icono: 'inicio', permisos: [P.VIAJES_VER] },
   // Operación diaria
   { ruta: '/viajes', texto: 'Viajes', icono: 'camion', permisos: [P.VIAJES_VER], grupo: 'Operación' },
+  { ruta: '/monitoreo', texto: 'Monitoreo', icono: 'ubicacion', permisos: [P.VIAJES_VER], grupo: 'Operación' },
   { ruta: '/manifiestos', texto: 'Manifiestos RNDC', icono: 'documento', permisos: [P.RNDC_OPERAR], grupo: 'Operación' },
   { ruta: '/remesas-dulces', texto: 'Remesas Dulces', icono: 'documento', permisos: [P.VIAJES_REGISTRAR], grupo: 'Operación' },
   { ruta: '/consultas-rndc', texto: 'Consultas RNDC', icono: 'buscar', permisos: [P.RNDC_CONSULTAR], grupo: 'Operación' },

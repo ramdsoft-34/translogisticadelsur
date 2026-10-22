@@ -15,6 +15,8 @@ import { PlantillasWhatsapp } from '../shared/plantillas-whatsapp';
 import { Confirmar } from '../shared/confirmar';
 import { VisorPdf } from '../shared/visor-pdf';
 import { ExportarViajes } from '../shared/exportar-viajes';
+import { ESTADOS_RASTREO, Rastreo } from '../core/rastreo.service';
+import { RouterLink } from '@angular/router';
 
 interface Formulario {
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
@@ -37,7 +39,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, RouterLink, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
@@ -93,6 +95,8 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
                 @if (v.historico) { <span class="chip sin-punto" title="Importado del Excel: sus documentos RNDC se gestionaron fuera de la plataforma">Histórico</span> }
                 @if (v.origen === 'manifiesto') { <span class="chip sin-punto" title="Creado directamente en Manifiestos RNDC">Desde Manifiestos</span> }
                 @if (v.requiereManifiesto === false) { <span class="chip sin-punto" title="No genera remesa ni manifiesto en el RNDC">Sin manifiesto</span> }
+                @if (v.rastreo?.activo) { <a class="chip sin-punto gps" [class]="claseRastreo(v.rastreo!.estado)" [routerLink]="['/monitoreo']" [queryParams]="{ viaje: v._id }"
+                  (click)="$event.stopPropagation()" title="Ver en el mapa de Monitoreo">GPS · {{ textoRastreo(v.rastreo!.estado) }}</a> }
                 @if (v.reporteWhatsapp?.fecha) { <span class="chip ok sin-punto" title="Reportado por WhatsApp">WA</span> }
               </span></td>
             </tr>
@@ -190,6 +194,26 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
           </div>
         </fieldset>
 
+        @if (rastreoHabilitado()) {
+          @if (!f._id) {
+            <label class="casilla requiere">
+              <input type="checkbox" name="rastrear" [checked]="rastrear()" (change)="rastrear.set(!rastrear())" />
+              <span><strong>Rastrear este viaje con Sur Track</strong><small>El viaje le aparece al conductor en la app Sur Track para iniciarlo y se ve en Monitoreo.</small></span>
+            </label>
+          } @else {
+            <div class="rastreo-viaje">
+              <app-icono nombre="ubicacion" [tam]="18" />
+              @if (rastreoForm()?.activo) {
+                <span><strong>Rastreo activo</strong> · {{ textoRastreo(rastreoForm().estado) }} · Sur Track {{ rastreoForm().codigoExterno }}</span>
+                <a class="boton pequeno" [routerLink]="['/monitoreo']" [queryParams]="{ viaje: f._id }">Ver en el mapa</a>
+                @if (puedeRegistrar) { <button type="button" class="pequeno peligro" confirmar="Clic otra vez para terminar" (confirmado)="terminarRastreo()">Terminar rastreo</button> }
+              } @else {
+                <span>Este viaje no se está rastreando.</span>
+                @if (puedeRegistrar && f.estado !== 'anulado') { <button type="button" class="pequeno" (click)="activarRastreo()" [disabled]="guardando()">Activar rastreo</button> }
+              }
+            </div>
+          }
+        }
         <div class="campo"><label for="v-obs">Observaciones (van en el manifiesto)</label><textarea id="v-obs" name="obs" maxlength="200" rows="3" [(ngModel)]="f.observaciones"></textarea></div>
       </form>
       <ng-container pie>
@@ -272,6 +296,8 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .resumen strong { font-size: 20px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
     .estados { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .secciones { display: flex; flex-direction: column; gap: 14px; }
+    .rastreo-viaje { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-1); }
+    a.chip.gps { text-decoration: none; }
     .placas-conductor { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
     .wa-lista { margin: 10px 0 4px; }
     .wa-cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
@@ -349,6 +375,7 @@ export class Viajes {
   constructor() {
     this.cargar();
     this.cargarMaestros();
+    this.rastreoSrv.cargar();
   }
 
   descripcionPeriodo() {
@@ -402,7 +429,7 @@ export class Viajes {
   estadoTexto(e: string) { return ESTADOS_VIAJE[e] || e; }
   claseEstado(e: string) { return ({ manifestado: 'marca', cumplido: 'ok', anulado: 'error', remesa: 'alerta' } as Record<string, string>)[e] || ''; }
 
-  nuevo() { this.form.set(vacio()); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.abierto.set(true); }
+  nuevo() { this.rastreoSrv.cargar(); this.rastreoForm.set(null); this.form.set(vacio()); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.abierto.set(true); }
 
   editar(v: Viaje) {
     this.numeroEditado.set(v.numero);
@@ -414,6 +441,7 @@ export class Viajes {
       requiereManifiesto: v.requiereManifiesto !== false,
     });
     this.habilitarRndc = false;
+    this.rastreoForm.set((v as any).rastreo || null);
     this.bloqueado.set(v.estado !== 'registrado' || !!v.liquidacion);
     this.abierto.set(true);
   }
@@ -508,6 +536,7 @@ export class Viajes {
       for (const k of Object.keys(cuerpo)) if (!['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa'].includes(k)) delete cuerpo[k];
     }
     if (f.historico && this.habilitarRndc) cuerpo.historico = false;
+    if (!f._id && this.rastreoHabilitado() && this.rastrear()) cuerpo.rastrear = true;
     this.guardando.set(true);
     try {
       if (f._id) await this.api.put(`/viajes/${f._id}`, cuerpo);
@@ -516,6 +545,8 @@ export class Viajes {
         this.avisos.ok(`Viaje N° ${v.numero} registrado${requiere ? '' : ' (sin manifiesto)'}`);
         const avisosDoc: string[] = (v as any).avisosDocumentos || [];
         if (avisosDoc.length) this.avisos.mostrar(`Por vencer: ${avisosDoc.join('; ')}`, 'info');
+        if ((v as any).errorRastreo) this.avisos.mostrar(`El viaje quedó registrado, pero no se pudo activar el rastreo: ${(v as any).errorRastreo}`, 'error');
+        else if ((v as any).rastreo?.activo) this.avisos.mostrar('Rastreo activado: el conductor ya lo ve en Sur Track', 'info');
         this.documentos.set(null);
         if (this.seguirRegistrando()) {
           // Listo para el siguiente: mismo cliente, destino, fecha y valores; vehículo y conductor nuevos
@@ -579,6 +610,25 @@ export class Viajes {
       this.avisos.ok(`${m.cliente}: ${m.cantidad} vehículo(s) marcados como reportados`);
       this.cargarWhatsapp(); this.cargar();
     } catch (e) { this.avisos.error(e); }
+  }
+
+  // ── Rastreo GPS con Sur Track ──
+  private rastreoSrv = inject(Rastreo);
+  readonly rastreoHabilitado = computed(() => !!this.rastreoSrv.estado()?.habilitado);
+  readonly rastrear = signal(false);
+  readonly rastreoForm = signal<any>(null);
+  textoRastreo(e: string) { return ESTADOS_RASTREO[e]?.texto || 'Activo'; }
+  claseRastreo(e: string) { return 'chip sin-punto gps ' + (ESTADOS_RASTREO[e]?.clase || ''); }
+  async activarRastreo() {
+    const id = this.form()._id;
+    this.guardando.set(true);
+    try { this.rastreoForm.set(await this.rastreoSrv.activar(id!)); this.avisos.ok('Rastreo activado: el conductor ya lo ve en Sur Track'); this.cargar(); }
+    catch (e) { this.avisos.error(e); }
+    finally { this.guardando.set(false); }
+  }
+  async terminarRastreo() {
+    try { this.rastreoForm.set(await this.rastreoSrv.finalizar(this.form()._id!)); this.avisos.ok('Rastreo terminado'); this.cargar(); }
+    catch (e) { this.avisos.error(e); }
   }
 
   // Excel y PDF: general, por empresa o por placa, con el periodo a elegir

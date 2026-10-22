@@ -13,6 +13,12 @@ export const env = {
   jwtSecret: process.env.JWT_SECRET || '',
   jwtExpires: process.env.JWT_EXPIRES || '8h',
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:4200').split(',').map(s => s.trim()).filter(Boolean),
+  // Puerta de integración del servidor de Cooespatrans (Sur Track); vacío = sin rastreo
+  surTrack: {
+    url: process.env.COOESPATRANS_INTEGRACION_URL || '',
+    clave: process.env.COOESPATRANS_INTEGRACION_CLAVE || '',
+    timeoutMs: Number(process.env.COOESPATRANS_INTEGRACION_TIMEOUT_MS) || 10000,
+  },
   rndc: {
     simuladorUrl: process.env.RNDC_SIMULADOR_URL || 'http://127.0.0.1:4010/soap/IBPMServices',
     permitirProduccion: bool(process.env.RNDC_PERMITIR_PRODUCCION, false),

@@ -16,6 +16,7 @@ export const routes: Routes = [
       { path: 'pago-conductores', ...pagina([P.LIQUIDACION_VER], () => import('./pages/pago-conductores').then(m => m.PagoConductores)) },
       { path: 'contabilidad', ...pagina([P.LIQUIDACION_VER], () => import('./pages/contabilidad').then(m => m.Contabilidad)) },
       { path: 'viajes-empresa', redirectTo: 'viajes' },
+      { path: 'monitoreo', ...pagina([P.VIAJES_VER], () => import('./pages/monitoreo').then(m => m.Monitoreo)) },
       { path: 'relaciones', ...pagina([P.VIAJES_VER], () => import('./pages/relaciones').then(m => m.Relaciones)) },
       { path: 'cierre-mes', ...pagina([P.CONFIG_GESTIONAR, P.LIQUIDACION_VER], () => import('./pages/gestion-varios').then(m => m.CierreMes)) },
       { path: 'remesas-dulces', ...pagina([P.VIAJES_REGISTRAR], () => import('./pages/gestion-varios').then(m => m.RemesasDulces)) },

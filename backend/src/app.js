@@ -15,6 +15,7 @@ import liquidaciones from './routes/liquidaciones.js';
 import gestion from './routes/gestion.js';
 import reportes from './routes/reportes.js';
 import importaciones from './routes/importaciones.js';
+import rastreo from './routes/rastreo.js';
 
 export function crearApp() {
   const app = express();
@@ -42,6 +43,7 @@ export function crearApp() {
   app.use('/api/gestion', gestion);
   app.use('/api/reportes', reportes);
   app.use('/api/importaciones', importaciones);
+  app.use('/api/rastreo', rastreo);
 
   app.use(noEncontrado);
   app.use(manejarErrores);

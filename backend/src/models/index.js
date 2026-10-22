@@ -55,6 +55,12 @@ const empresaSchema = new Schema({
   },
   // Cuenta de correo para enviar documentos (la contraseña se guarda cifrada con AES-256-GCM)
   // Meses cerrados (aaaa-mm): no se registran ni modifican viajes, liquidaciones ni asientos de esos meses
+  // Rastreo GPS con la app Sur Track (por ahora a través del servidor de Cooespatrans)
+  rastreo: {
+    surTrack: { type: Boolean, default: false },
+    velocidadMaxima: { type: Number, default: 80 },     // km/h: por encima se marca alerta
+    minutosSinSenal: { type: Number, default: 10 },     // sin posición nueva por más tiempo → «Sin señal»
+  },
   cierres: { type: [{ mes: String, fecha: Date, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario' }, resumen: Object, _id: false }], default: [] },
   smtp: {
     activo: { type: Boolean, default: false },
@@ -187,6 +193,7 @@ const vehiculoSchema = new Schema({
   titularHabitual: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },
   activo: { type: Boolean, default: true },
   rndc: { type: sincronizacion, default: () => ({}) },
+  surTrack: { choferId: str(), vinculado: fecha },   // conductor de Sur Track que usa este vehículo
 }, { timestamps: true });
 vehiculoSchema.plugin(tenantPlugin);
 vehiculoSchema.index({ empresa: 1, placa: 1 }, { unique: true });
@@ -234,6 +241,16 @@ const viajeSchema = new Schema({
   // Pago al conductor (liquidación del conductor) y soporte interno MC/RC para viajes sin RNDC
   liquidacionConductor: { type: Schema.Types.ObjectId, ref: 'LiquidacionConductor', default: null },
   soporteInterno: { mc: str(), rc: str(), codigo: str(), fecha },
+  // Rastreo GPS con Sur Track: el viaje es la única fuente; el GPS lo envía la app del conductor
+  rastreo: {
+    activo: { type: Boolean, default: false },
+    estado: { type: String, enum: ['', 'esperando', 'en_ruta', 'finalizado', 'error'], default: '' },
+    origen: str(),                  // 'translogistica' (activado aquí) o 'cooespatrans' (enlazado desde allá)
+    externoId: str(), codigoExterno: str(),
+    activado: fecha, activadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+    finalizado: fecha, error: str(),
+    ultima: { lat: Number, lng: Number, velocidad: Number, rumbo: Number, hora: Date },
+  },
   // Números escritos a mano para el próximo envío (p. ej. tras un DUPLICADO del RNDC)
   numerosManuales: { remesa: str({ uppercase: true }), manifiesto: str({ uppercase: true }) },
   // No todos los viajes generan remesa y manifiesto (p. ej. carga propia o urbana).
@@ -253,6 +270,7 @@ viajeSchema.index({ empresa: 1, numero: 1 }, { unique: true });
 viajeSchema.index({ empresa: 1, fecha: -1 });
 viajeSchema.index({ empresa: 1, estado: 1 });
 viajeSchema.index({ empresa: 1, 'manifiesto.numero': 1 });
+viajeSchema.index({ empresa: 1, 'rastreo.activo': 1 });
 
 // ── Plantillas del reporte de WhatsApp ──────────────────────────────────────
 // Texto con marcadores {conductor}, {placa}, {flete}… (ver services/whatsapp.js).
