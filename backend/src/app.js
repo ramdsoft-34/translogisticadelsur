@@ -4,6 +4,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { env } from './config/env.js';
 import { manejarErrores, noEncontrado } from './middleware/errores.js';
+import publico from './routes/publico.js';
 import auth from './routes/auth.js';
 import superadmin from './routes/superadmin.js';
 import correo from './routes/correo.js';
@@ -37,6 +38,7 @@ export function crearApp() {
   // Cambios en vivo: canal SSE y aviso de cada modificación a los usuarios de la empresa
   app.use('/api/eventos', eventos);
   app.use('/api', avisarCambios);
+  app.use('/api/publico', publico);
   app.use('/api/auth', auth);
   app.use('/api/admin', superadmin);
   app.use('/api/usuarios', usuarios);

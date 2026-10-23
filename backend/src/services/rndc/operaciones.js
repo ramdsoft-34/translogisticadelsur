@@ -191,6 +191,34 @@ function estadoMaestro(empresa, tipo, rol, doc) {
 
 // Vista previa de lo que se enviaría (sin clave y sin consumir consecutivos), con el
 // estado de los documentos, la última respuesta real del RNDC y los maestros del viaje.
+// Variables que no se corrigen a mano: empresa, numeración y enlace remesa-manifiesto
+export const NO_AJUSTABLES = ['NUMNITEMPRESATRANSPORTE', 'CONSECUTIVOREMESA', 'NUMMANIFIESTOCARGA', 'REMESA', 'REMESASMAN'];
+export function conAjustes(variables, ajustes) {
+  if (!ajustes || typeof ajustes !== 'object') return variables;
+  return variables.map(([k, val]) => [k, !NO_AJUSTABLES.includes(k) && typeof ajustes[k] === 'string' ? ajustes[k] : val]);
+}
+const varsRemesa = (empresa, v, ctx, num) => conAjustes(variablesRemesa(empresa, v, ctx, num), v.ajustesRndc?.remesa);
+const varsManifiesto = (empresa, v, ctx, num) => conAjustes(variablesManifiesto(empresa, v, ctx, num), v.ajustesRndc?.manifiesto);
+
+// Nombre legible de los códigos de sede y municipio que van en la remesa y el manifiesto
+async function descripciones(empresaId, vars) {
+  const m = new Map(vars);
+  const out = {};
+  for (const [sede, id] of [['CODSEDEREMITENTE', 'NUMIDREMITENTE'], ['CODSEDEDESTINATARIO', 'NUMIDDESTINATARIO'], ['CODSEDEPROPIETARIO', 'NUMIDPROPIETARIO']]) {
+    if (!m.get(sede) || !m.get(id)) continue;
+    const t = await Tercero.findOne({ empresa: empresaId, numId: m.get(id), 'sede.codigo': m.get(sede) }).select('sede codMunicipio nombres apellido1 razonSocial').lean();
+    if (t) out[sede] = [t.sede?.nombre, t.codMunicipio].filter(Boolean).join(' · ');
+  }
+  for (const [k, val] of vars) {
+    if (/^CODMUNICIPIO/.test(k) && val) { const mu = await Municipio.findOne({ codigo: val }).select('nombre departamento').lean(); if (mu) out[k] = `${mu.nombre} (${mu.departamento || ''})`; }
+    if (/^NUMID(REMITENTE|DESTINATARIO|PROPIETARIO|TITULARMANIFIESTO|CONDUCTOR)$/.test(k) && val) {
+      const t = await Tercero.findOne({ empresa: empresaId, numId: val }).select('nombres apellido1 apellido2 razonSocial').lean();
+      if (t) out[k] = t.razonSocial || [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ');
+    }
+  }
+  return out;
+}
+
 export async function vistaPrevia(empresaId, viajeId) {
   const empresa = await empresaConRndc(empresaId);
   const { v, vehiculo } = await cargarViaje(empresaId, viajeId);
@@ -198,8 +226,10 @@ export async function vistaPrevia(empresaId, viajeId) {
   const manual = { remesa: txt(v.numerosManuales?.remesa), manifiesto: txt(v.numerosManuales?.manifiesto) };
   const numR = manual.remesa || (v.remesa?.estado === 'anulado' ? numeroReemplazo('remesa', v.remesa.numero) : v.remesa?.numero || 'el siguiente disponible en el RNDC');
   const numM = manual.manifiesto || (v.manifiesto?.estado === 'anulado' ? numeroReemplazo('manifiesto', v.manifiesto.numero) : v.manifiesto?.numero || 'el siguiente disponible en el RNDC');
-  const remesa = variablesRemesa(empresa, v, ctx, numR);
-  const manifiesto = variablesManifiesto(empresa, v, ctx, numM);
+  const baseRemesa = variablesRemesa(empresa, v, ctx, numR);
+  const baseManifiesto = variablesManifiesto(empresa, v, ctx, numM);
+  const remesa = conAjustes(baseRemesa, v.ajustesRndc?.remesa);
+  const manifiesto = conAjustes(baseManifiesto, v.ajustesRndc?.manifiesto);
   const remolque = v.remolque ? await Vehiculo.findOne({ empresa: empresaId, placa: v.remolque }).lean() : null;
   const ultimo = await TransaccionRndc.findOne({ empresa: empresaId, viaje: v._id, tipo: 1, ok: false }).sort({ createdAt: -1 }).lean();
   const remesaAceptada = v.remesa?.estado === 'aceptado';
@@ -251,12 +281,14 @@ export async function vistaPrevia(empresaId, viajeId) {
       .select('tipoId numId sede codMunicipio').limit(400).lean())
       .map(x => ({ tipoId: x.tipoId, numId: x.numId, sede: x.sede?.codigo || '', nombre: x.sede?.nombre || '', codMunicipio: x.codMunicipio || '' }))
       .sort((a, b2) => (Number(a.sede) || 0) - (Number(b2.sede) || 0)) : [],
-    remesa: { variables: remesa, problemas: remesaAceptada ? [] : [
+    noAjustables: NO_AJUSTABLES,
+    descripciones: await descripciones(empresaId, [...remesa, ...manifiesto]),
+    remesa: { variables: remesa, base: baseRemesa, ajustes: v.ajustesRndc?.remesa || {}, problemas: remesaAceptada ? [] : [
       ...validarVariables(3, remesa.map(([n, x]) => [n, n === 'CONSECUTIVOREMESA' ? 'X' : x])),
       ...(destinoIgualOrigen(ctx) ? [PROBLEMA_DESTINO] : []),
       ...(!(Number(v.pesoKg) > 0) ? [PROBLEMA_CANTIDAD] : []),
     ] },
-    manifiesto: { variables: manifiesto, problemas: validarVariables(4, manifiesto.map(([n, x]) => [n, n === 'NUMMANIFIESTOCARGA' ? 'X' : x])) },
+    manifiesto: { variables: manifiesto, base: baseManifiesto, ajustes: v.ajustesRndc?.manifiesto || {}, problemas: validarVariables(4, manifiesto.map(([n, x]) => [n, n === 'NUMMANIFIESTOCARGA' ? 'X' : x])) },
   };
 }
 
@@ -398,12 +430,12 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
     let numR = v.remesa?.numero;
     if (v.remesa?.estado !== 'aceptado') {
       // Se valida antes de tomar el consecutivo: un rechazo por datos no deja saltos en la numeración
-      const problemas = validarVariables(3, variablesRemesa(empresa, v, ctx, numR || 'X'));
+      const problemas = validarVariables(3, varsRemesa(empresa, v, ctx, numR || 'X'));
       if (destinoIgualOrigen(ctx)) problemas.push(PROBLEMA_DESTINO);
       if (!(Number(v.pesoKg) > 0)) problemas.push(PROBLEMA_CANTIDAD);
       if (problemas.length) throw new ErrorHttp(422, 'Faltan datos para la remesa', problemas);
       numR = await numeroParaEnviar(empresa, clave, usuarioId, 'remesa', v);
-      const vars = variablesRemesa(empresa, v, ctx, numR);
+      const vars = varsRemesa(empresa, v, ctx, numR);
       const res = await registrar(empresa, cred, 3, vars, meta);
       const doc = { numero: numR, radicado: res.radicado, fecha: new Date(), estado: res.ok ? 'aceptado' : 'rechazado', mensaje: res.mensaje, qr: '' };
       await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: { remesa: doc, ...(res.ok ? { estado: 'remesa', 'numerosManuales.remesa': '' } : {}) } });
@@ -421,7 +453,7 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
       resultado.ajustes = [`Anticipo ajustado de ${val.anticipoRegistrado} a ${val.anticipo} (neto a pagar)`];
     }
     const numM = await numeroParaEnviar(empresa, clave, usuarioId, 'manifiesto', v);
-    const vars = variablesManifiesto(empresa, v, ctx, numM);
+    const vars = varsManifiesto(empresa, v, ctx, numM);
     const problemas = validarVariables(4, vars);
     if (problemas.length) {
       resultado.manifiesto = { numero: numM, estado: 'rechazado', mensaje: `Faltan datos: ${problemas.join('; ')}` };

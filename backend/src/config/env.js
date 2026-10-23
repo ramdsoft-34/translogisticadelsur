@@ -12,6 +12,8 @@ export const env = {
   mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/translogisticadelsur',
   jwtSecret: process.env.JWT_SECRET || '',
   jwtExpires: process.env.JWT_EXPIRES || '8h',
+  // Dirección pública de la plataforma (enlace del QR de los soportes internos)
+  urlPublica: (process.env.URL_PUBLICA || 'https://translogisticadelsur.com').replace(/\/$/, ''),
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:4200').split(',').map(s => s.trim()).filter(Boolean),
   // Puerta de integración del servidor de Cooespatrans (Sur Track); vacío = sin rastreo
   surTrack: {

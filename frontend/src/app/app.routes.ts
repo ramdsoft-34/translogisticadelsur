@@ -5,6 +5,8 @@ import { P } from './core/modelos';
 const pagina = (permisos: string[], cargar: () => Promise<any>) => ({ canActivate: [conPermiso], data: { permisos }, loadComponent: cargar });
 
 export const routes: Routes = [
+  // Pública: el QR del soporte interno lleva aquí
+  { path: 'verificar/:codigo', loadComponent: () => import('./pages/verificar').then(m => m.Verificar) },
   { path: 'ingresar', canActivate: [sinSesion], loadComponent: () => import('./pages/ingresar').then(m => m.Ingresar) },
   {
     path: '', canActivate: [conSesion], loadComponent: () => import('./pages/layout').then(m => m.Layout),

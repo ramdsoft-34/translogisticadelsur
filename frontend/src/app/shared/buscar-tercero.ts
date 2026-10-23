@@ -10,9 +10,9 @@ import { nombreTercero } from '../core/modelos';
     <div class="campo combo">
       @if (etiqueta()) { <label [for]="idCampo">{{ etiqueta() }}</label> }
       <input [id]="idCampo" role="combobox" [attr.aria-expanded]="abierto()" [attr.aria-controls]="idCampo + '-lista'"
-        [value]="texto()" (input)="escribir($any($event.target).value)" (focus)="enfocar()" (keydown)="teclado($event)"
+        [value]="texto()" (input)="escribir($any($event.target).value)" (focus)="enfocar()" (blur)="salir()" (keydown)="teclado($event)" [class.con-valor]="valor() && !deshabilitado()" [title]="texto()"
         [placeholder]="placeholder()" [disabled]="deshabilitado()" autocomplete="off" />
-      @if (valor() && !deshabilitado()) { <button type="button" class="texto limpiar" (click)="limpiar()" aria-label="Quitar selección">×</button> }
+      @if (valor() && !deshabilitado()) { <button type="button" class="texto limpiar" (mousedown)="$event.preventDefault()" (click)="limpiar()" aria-label="Quitar selección" title="Quitar">×</button> }
       @if (abierto()) {
         <ul class="lista" [id]="idCampo + '-lista'" role="listbox">
           @for (t of opciones(); track t._id; let i = $index) {
@@ -25,7 +25,11 @@ import { nombreTercero } from '../core/modelos';
     </div>`,
   styles: [`
     .combo { position: relative; }
-    .limpiar { position: absolute; right: 6px; bottom: 6px; font-size: 18px; line-height: 1; color: var(--gris-5); }
+    /* El texto no pasa por debajo de la X: queda con «…» y la X siempre visible */
+    input.con-valor { padding-right: 36px; text-overflow: ellipsis; }
+    .limpiar { position: absolute; right: 4px; bottom: 0; height: 42px; width: 30px; padding: 0; z-index: 2; display: grid; place-items: center;
+      font-size: 20px; line-height: 1; color: var(--gris-6); background: transparent; }
+    .limpiar:hover { color: var(--rojo-texto, #b42318); }
     .lista { position: absolute; top: 100%; left: 0; right: 0; z-index: 30; margin: 4px 0 0; padding: 4px; list-style: none; background: var(--gris-0);
       border: 1px solid var(--gris-2); border-radius: 10px; box-shadow: var(--sombra-2); max-height: 260px; overflow: auto; }
     li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 7px; cursor: pointer; }
@@ -94,7 +98,16 @@ export class BuscarTercero {
     this.elegido.emit(t);
   }
 
-  limpiar() { this.cargado = ''; this.valor.set(''); this.texto.set(''); }
+  limpiar() { this.cargado = ''; this.valor.set(''); this.texto.set(''); this.abierto.set(false); }
+
+  // Al salir del campo (Tab o clic en otro campo) la lista se cierra; si no se eligió nada, vuelve el nombre elegido
+  salir() {
+    setTimeout(() => {
+      if (this.el.nativeElement.contains(document.activeElement)) return;
+      this.abierto.set(false);
+      if (this.valor() && !this.texto().includes('·')) this.cargarActual();
+    }, 120);
+  }
 
   teclado(e: KeyboardEvent) {
     const n = this.opciones().length;

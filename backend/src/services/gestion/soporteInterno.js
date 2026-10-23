@@ -2,7 +2,8 @@
 // expiden en el RNDC. Numeración propia (MC100000, RC100000…), código de verificación y QR interno.
 // No es un documento del RNDC: no se envía al Ministerio ni por correo.
 import crypto from 'node:crypto';
-import { Viaje, Vehiculo, Tercero, Municipio, siguiente, pob } from '../../models/index.js';
+import { Empresa, Viaje, Vehiculo, Tercero, Municipio, siguiente, pob } from '../../models/index.js';
+import { env } from '../../config/env.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { fmtFecha, txt, soloDigitos } from '../../utils/texto.js';
 import { lugarRndc } from '../../utils/lugares.js';
@@ -52,7 +53,8 @@ export async function soporteInterno(empresa, viajeId, { asignar = true } = {}) 
     empresa: txt(empresa.rndc?.razonSocial) || empresa.nombre.toUpperCase(), empNit: `${empresa.nit}${empresa.dv || ''}`,
     empDir: txt(empresa.direccion), empTel: txt(empresa.telefono), empCiudad: 'PASTO NARINO',
     numero: s.mc, radicado: s.codigo.slice(0, 8), seguro: s.codigo, qrObs: '',
-    qrTexto: `${empresa.nombre.toUpperCase()}|SOPORTE INTERNO|${s.mc}|${s.rc}|${aaaa(v.fecha)}|${v.placa}|${cond?.numId || ''}|${flete}|${s.codigo}`,
+    // El QR abre la página pública de verificación del soporte
+    qrTexto: `${env.urlPublica}/verificar/${s.codigo}`,
     fechaRad: `${aaaa(s.fecha)}`, fechaExp: aaaa(v.fecha), tipo: 'Urbano', origen, destino,
     titular: nombre(tit).toUpperCase(), titDoc: txt(tit?.numId), titDir: txt(tit?.direccion).toUpperCase(), titTel: soloDigitos(tit?.telefono || tit?.celular) || '0',
     titCiudad: await lugar(tit?.codMunicipio),
@@ -69,5 +71,33 @@ export async function soporteInterno(empresa, viajeId, { asignar = true } = {}) 
     flete, rete, ica: 0, fopat: fp, neto, anticipo, saldo: neto - anticipo,
     lugarPago: 'PASTO NARINO', fechaPago: aaaa(fin), carguePor: 'REMITENTE', descarguePor: 'DESTINATARIO', observaciones: nota,
     fechaTexto: fmtFecha(v.fecha),
+  };
+}
+
+// Todo viaje sin manifiesto del RNDC lleva soporte interno: se numera al guardarlo
+export async function asegurarSoporte(empresaId, viajeId) {
+  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('requiereManifiesto soporteInterno manifiesto').lean();
+  if (!v || v.requiereManifiesto !== false || v.soporteInterno?.mc || v.manifiesto?.estado === 'aceptado') return v?.soporteInterno || null;
+  const empresa = await Empresa.findById(empresaId).lean();
+  return (await soporteInterno(empresa, viajeId)).soporte;
+}
+
+// Consulta pública (QR): confirma que el soporte existe y muestra lo mínimo para validarlo
+export async function verificarSoporte(codigo) {
+  const c = String(codigo || '').toUpperCase();
+  if (!/^[0-9A-F]{16}$/.test(c)) return null;
+  const v = await Viaje.findOne({ empresa: { $exists: true }, 'soporteInterno.codigo': c })
+    .select('empresa numero fecha placa remolque destino codDestino codOrigen conductorNombre soporteInterno requiereManifiesto manifiesto pesoKg').lean();
+  if (!v) return null;
+  const empresa = await Empresa.findById(v.empresa).select('nombre nit dv rndc.razonSocial rndc.codOrigen').lean();
+  const vigente = v.requiereManifiesto === false && v.manifiesto?.estado !== 'aceptado';
+  const oculto = (n) => String(n || '').split(' ').filter(Boolean).map((p, i) => (i < 2 ? p : p[0] + '.')).join(' ');
+  return {
+    valido: vigente,
+    motivo: vigente ? '' : 'El viaje se expidió luego con manifiesto del RNDC: este soporte interno ya no es el documento vigente',
+    empresa: txt(empresa?.rndc?.razonSocial) || empresa?.nombre || '', nit: `${empresa?.nit || ''}${empresa?.dv ? '-' + empresa.dv : ''}`,
+    mc: v.soporteInterno.mc, rc: v.soporteInterno.rc, codigo: c, expedido: v.soporteInterno.fecha,
+    viaje: v.numero, fecha: v.fecha, placa: v.placa, remolque: v.remolque || '', conductor: oculto(v.conductorNombre),
+    origen: (await lugar(v.codOrigen || empresa?.rndc?.codOrigen)) || '', destino: (await lugar(v.codDestino)) || txt(v.destino),
   };
 }

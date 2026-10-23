@@ -104,17 +104,16 @@ import { Confirmar } from './confirmar';
 
         <!-- Pestañas: vehículo y personas, remesa y manifiesto por separado; cada una separa lo que se ingresa de lo que va fijo -->
         <div class="pestanas" role="tablist" aria-label="Partes del despacho">
-          <button type="button" role="tab" [class.activa]="pestana() === 'maestros'" [attr.aria-selected]="pestana() === 'maestros'" (click)="pestana.set('maestros')">
-            Vehículo y personas @if (maestrosPendientes()) { <span class="punto-alerta" title="Hay datos por completar o registrar"></span> }</button>
           <button type="button" role="tab" [class.activa]="pestana() === 'remesa'" [attr.aria-selected]="pestana() === 'remesa'" (click)="pestana.set('remesa')">
             Remesa <span class="chip sin-punto mini" [class]="chip(p.documentos.remesa.estado)">{{ p.documentos.remesa.estado || 'sin enviar' }}</span></button>
           <button type="button" role="tab" [class.activa]="pestana() === 'manifiesto'" [attr.aria-selected]="pestana() === 'manifiesto'" (click)="pestana.set('manifiesto')">
             Manifiesto <span class="chip sin-punto mini" [class]="chip(p.documentos.manifiesto.estado)">{{ p.documentos.manifiesto.estado || 'sin enviar' }}</span></button>
-          <button type="button" role="tab" [class.activa]="pestana() === 'envio'" [attr.aria-selected]="pestana() === 'envio'" (click)="pestana.set('envio')">Lo que se envía</button>
+          <button type="button" role="tab" [class.activa]="pestana() === 'maestros'" [attr.aria-selected]="pestana() === 'maestros'" (click)="pestana.set('maestros')">
+            Vehículo y personas @if (maestrosPendientes()) { <span class="punto-alerta" title="Hay datos por completar o registrar"></span> }</button>
         </div>
 
         @if (modoVer()) { <div class="mensaje info">Solo consulta: revise la información por pestañas. Para corregir o enviar, presione «Expedir».</div> }
-        <form id="form-expedir" (ngSubmit)="enviar()"><fieldset class="sin-marco" [disabled]="modoVer()">
+        <form id="form-expedir" (ngSubmit)="enviar()"><fieldset class="sin-marco" [class.solo-ver]="modoVer()" (keydown)="soloLectura($event)" [attr.aria-readonly]="modoVer()">
           <!-- ── Vehículo y personas ── -->
           <section [hidden]="pestana() !== 'maestros'" role="tabpanel">
             <div class="cab-maestros">
@@ -168,9 +167,16 @@ import { Confirmar } from './confirmar';
 
           <!-- ── Remesa ── -->
           <section [hidden]="pestana() !== 'remesa'" role="tabpanel">
-            <div class="dos-col">
-              <div class="col-ingresa">
-                <h3 class="titulo-col">Se ingresa o corrige</h3>
+            <div class="una-col">
+                @if (p.destinatario; as d) {
+                  <div class="destinatario" [class.mal]="d.origen === 'cliente'">
+                    <span class="etiqueta">Quién recibe</span>
+                    <strong>{{ tipoDoc(d.tipoId) }} {{ d.numId }}</strong>
+                    <span><span class="chip sin-punto">Sede {{ d.sede || '—' }}</span> {{ d.nombreSede || p.descripciones?.CODSEDEDESTINATARIO || '(sin nombre registrado)' }}</span>
+                    <small>{{ origenDestinatario(d.origen) }}{{ d.municipio ? ' · municipio ' + d.municipio : '' }}</small>
+                  </div>
+                }
+                <h3 class="titulo-col">Datos principales</h3>
                 <fieldset><legend>Viaje</legend><div class="formulario">
                   <div class="campo"><label for="ex-fecha">Fecha</label><input id="ex-fecha" type="date" name="fecha" [(ngModel)]="f.fecha" [disabled]="p.remesaAceptada" required />
                     @if (p.remesaAceptada) { <small>Fijada por la remesa aceptada.</small> }</div>
@@ -206,30 +212,40 @@ import { Confirmar } from './confirmar';
                 } @else {
                   <p class="mensaje info">La remesa ya fue aceptada por el RNDC: sus datos no se pueden cambiar.</p>
                 }
-              </div>
-              <div class="col-fijo">
-                <h3 class="titulo-col">Va fijo <small>(configuración, cliente y maestros)</small></h3>
-                @if (p.destinatario; as d) {
-                  <div class="destinatario" [class.mal]="d.origen === 'cliente'">
-                    <span class="etiqueta">Destinatario</span>
-                    <strong>{{ d.tipoId === 'N' ? 'NIT' : d.tipoId === 'C' ? 'C.C.' : d.tipoId }} {{ d.numId }}</strong>
-                    <span><span class="chip sin-punto">Sede {{ d.sede || '—' }}</span> {{ d.nombreSede || '(sin nombre registrado)' }}</span>
-                    <small>{{ origenDestinatario(d.origen) }}{{ d.municipio ? ' · municipio ' + d.municipio : '' }}</small>
-                  </div>
-                }
-                @for (sec of secciones(p.remesa.variables, 'remesa'); track sec.titulo) {
-                  <div class="seccion"><h4>{{ sec.titulo }}</h4>
-                    <dl class="fijos">@for (x of sec.items; track x[0]) { <dt>{{ x[0] }}</dt><dd>{{ x[1] || '—' }}</dd> }</dl></div>
-                }
-              </div>
+                <div class="todos-datos">
+                  <h3 class="titulo-col">Formulario del RNDC <small>· todo se puede corregir; lo cambiado se marca y se guarda con «Guardar cambios»</small></h3>
+                  @for (sec of seccionesEdit('remesa'); track sec.titulo) {
+                    <details class="seccion" [open]="sec.abierta">
+                      <summary><span>{{ sec.titulo }}</span>
+                        @if (sec.cambiados) { <span class="chip alerta sin-punto mini">{{ sec.cambiados }} corregido(s)</span> }
+                        <small class="resumen">{{ sec.resumen }}</small></summary>
+                      <div class="formulario">
+                        @for (c of sec.campos; track c.clave) {
+                          <div class="campo" [class.cambiado]="c.cambiado">
+                            <label [for]="'aj-remesa-' + c.clave">{{ c.etiqueta }}</label>
+                            @if (c.opciones) {
+                              <select [id]="'aj-remesa-' + c.clave" [name]="'aj-remesa-' + c.clave" [ngModel]="c.valor" (ngModelChange)="ajustar('remesa', c.clave, $event)" [disabled]="p.remesaAceptada || modoVer()">
+                                @if (!c.conocido) { <option [value]="c.valor">{{ c.valor || '(vacío)' }}</option> }
+                                @for (o of c.opciones; track o[0]) { <option [value]="o[0]">{{ o[1] }}</option> }
+                              </select>
+                            } @else {
+                              <input [id]="'aj-remesa-' + c.clave" [name]="'aj-remesa-' + c.clave" [ngModel]="c.valor" (ngModelChange)="ajustar('remesa', c.clave, $event)" maxlength="250" [disabled]="p.remesaAceptada || modoVer()" />
+                            }
+                            @if (c.ayuda) { <small class="ayuda">{{ c.ayuda }}</small> }
+                            @if (c.cambiado) { <small class="corregido">Antes: {{ c.original || '(vacío)' }} · <button type="button" class="texto" (click)="ajustar('remesa', c.clave, c.original)" [disabled]="p.remesaAceptada || modoVer()">Restaurar</button></small> }
+                          </div>
+                        }
+                      </div>
+                    </details>
+                  }
+                </div>
             </div>
           </section>
 
           <!-- ── Manifiesto ── -->
           <section [hidden]="pestana() !== 'manifiesto'" role="tabpanel">
-            <div class="dos-col">
-              <div class="col-ingresa">
-                <h3 class="titulo-col">Se ingresa o corrige</h3>
+            <div class="una-col">
+                <h3 class="titulo-col">Datos principales</h3>
                 @if (p.documentos.manifiesto.estado !== 'aceptado') {
                   <fieldset [class.resaltar]="duplicado()"><legend>Número de manifiesto</legend><div class="formulario">
                     <div class="campo"><label for="ex-nm">N° de manifiesto</label>
@@ -250,9 +266,7 @@ import { Confirmar } from './confirmar';
                 @if (p.destinoManifiesto && p.destinatario?.municipio && p.destinatario.municipio !== f.codDestino) {
                   <p class="sutil nota-num">El manifiesto irá al municipio <strong>{{ p.destinoManifiesto }}</strong>, el de la sede del destinatario{{ p.destinatario.nombreSede ? ' (' + p.destinatario.nombreSede + ')' : '' }}, como lo exige el RNDC.</p>
                 }
-              </div>
-              <div class="col-fijo">
-                <h3 class="titulo-col">Va fijo <small>(configuración, vehículo y cálculos)</small></h3>
+                <details class="seccion"><summary><span>Valores del viaje</span><small class="resumen">retenciones, neto y saldo como los calcula el RNDC</small></summary>
                 @if (p.valores; as val) {
                   <table class="valores" aria-label="Valores del viaje como los calcula el RNDC">
                     <tbody>
@@ -269,24 +283,37 @@ import { Confirmar } from './confirmar';
                     <p class="nota-valores">El anticipo registrado ({{ val.anticipoRegistrado | pesos }}) supera el neto a pagar: se enviará y guardará como {{ val.anticipo | pesos }}, como lo exige el RNDC.</p>
                   }
                 }
-                @for (sec of secciones(p.manifiesto.variables, 'manifiesto'); track sec.titulo) {
-                  <div class="seccion"><h4>{{ sec.titulo }}</h4>
-                    <dl class="fijos">@for (x of sec.items; track x[0]) { <dt>{{ x[0] }}</dt><dd>{{ x[1] || '—' }}</dd> }</dl></div>
-                }
-              </div>
+                </details>
+                <div class="todos-datos">
+                  <h3 class="titulo-col">Formulario del RNDC <small>· todo se puede corregir; lo cambiado se marca y se guarda con «Guardar cambios»</small></h3>
+                  @for (sec of seccionesEdit('manifiesto'); track sec.titulo) {
+                    <details class="seccion" [open]="sec.abierta">
+                      <summary><span>{{ sec.titulo }}</span>
+                        @if (sec.cambiados) { <span class="chip alerta sin-punto mini">{{ sec.cambiados }} corregido(s)</span> }
+                        <small class="resumen">{{ sec.resumen }}</small></summary>
+                      <div class="formulario">
+                        @for (c of sec.campos; track c.clave) {
+                          <div class="campo" [class.cambiado]="c.cambiado">
+                            <label [for]="'aj-manifiesto-' + c.clave">{{ c.etiqueta }}</label>
+                            @if (c.opciones) {
+                              <select [id]="'aj-manifiesto-' + c.clave" [name]="'aj-manifiesto-' + c.clave" [ngModel]="c.valor" (ngModelChange)="ajustar('manifiesto', c.clave, $event)" [disabled]="p.documentos.manifiesto.estado === 'aceptado' || modoVer()">
+                                @if (!c.conocido) { <option [value]="c.valor">{{ c.valor || '(vacío)' }}</option> }
+                                @for (o of c.opciones; track o[0]) { <option [value]="o[0]">{{ o[1] }}</option> }
+                              </select>
+                            } @else {
+                              <input [id]="'aj-manifiesto-' + c.clave" [name]="'aj-manifiesto-' + c.clave" [ngModel]="c.valor" (ngModelChange)="ajustar('manifiesto', c.clave, $event)" maxlength="250" [disabled]="p.documentos.manifiesto.estado === 'aceptado' || modoVer()" />
+                            }
+                            @if (c.ayuda) { <small class="ayuda">{{ c.ayuda }}</small> }
+                            @if (c.cambiado) { <small class="corregido">Antes: {{ c.original || '(vacío)' }} · <button type="button" class="texto" (click)="ajustar('manifiesto', c.clave, c.original)" [disabled]="p.documentos.manifiesto.estado === 'aceptado' || modoVer()">Restaurar</button></small> }
+                          </div>
+                        }
+                      </div>
+                    </details>
+                  }
+                </div>
             </div>
           </section>
 
-          <!-- ── Lo que se envía (variables exactas) ── -->
-          <section [hidden]="pestana() !== 'envio'" role="tabpanel" class="variables">
-            <p class="sutil nota-num">Así exactamente se enviará al RNDC (se actualiza al presionar «Guardar cambios»).</p>
-            <div class="dos-col">
-              @for (doc of [['Remesa', p.remesa], ['Manifiesto', p.manifiesto]]; track doc[0]) {
-                <div><h4>{{ doc[0] }}</h4>
-                  <table><tbody>@for (x of doc[1].variables; track x[0]) { <tr><td class="sutil">{{ x[0] }}</td><td>{{ x[1] }}</td></tr> }</tbody></table></div>
-              }
-            </div>
-          </section>
         </fieldset></form>
       } @else {
         <span class="esqueleto"></span>
@@ -340,8 +367,25 @@ import { Confirmar } from './confirmar';
     fieldset + fieldset { margin-top: 12px; }
     .dest { margin: 10px 0 0; font-size: 13px; color: var(--gris-7); }
     .dest.mal { color: var(--rojo-texto); }
-    .variables { margin-top: 4px; }
+    .una-col { display: flex; flex-direction: column; gap: 12px; }
+    .todos-datos { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+    .titulo-col small { text-transform: none; letter-spacing: 0; font-weight: 400; }
+    details.seccion { border: 1px solid var(--gris-2); border-radius: 10px; background: var(--gris-0); padding: 0; margin: 0; }
+    details.seccion > summary { cursor: pointer; list-style: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 10px 14px; font-weight: 650; font-size: 14px; }
+    details.seccion > summary::-webkit-details-marker { display: none; }
+    details.seccion > summary::before { content: '▸'; color: var(--gris-5); transition: transform .15s; }
+    details.seccion[open] > summary::before { transform: rotate(90deg); }
+    details.seccion .resumen { font-weight: 400; color: var(--gris-5); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
+    details.seccion > .formulario { padding: 2px 14px 14px; }
+    details.seccion > .valores, details.seccion > .nota-valores { margin: 0 14px 14px; }
+    .campo .ayuda { color: var(--gris-6); }
+    .campo.cambiado input, .campo.cambiado select { border-color: var(--ambar); box-shadow: 0 0 0 1px var(--ambar); }
+    .campo .corregido { color: var(--ambar-texto); }
+    .campo .corregido button { padding: 0; min-height: 0; font-size: inherit; text-decoration: underline; }
     fieldset.sin-marco { border: 0; padding: 0; margin: 0; min-width: 0; }
+    /* Solo consulta: se puede navegar y desplegar secciones, pero no escribir */
+    .solo-ver :is(input, select, textarea, app-municipio, app-buscar-tercero, .maestros button, .cab-maestros button) { pointer-events: none; }
+    .solo-ver :is(input, select, textarea) { background: var(--gris-1); color: var(--gris-7); }
     .pestanas { margin: 4px 0 14px; }
     .pestanas button { display: inline-flex; align-items: center; gap: 6px; }
     .chip.mini { font-size: 10.5px; padding: 1px 6px; }
@@ -377,26 +421,26 @@ export class ExpedirRndc {
   readonly tipos = Object.entries(TIPOS_ID);
   readonly viaje = signal<any>(null);
   readonly previa = signal<any>(null);
-  readonly pestana = signal<'maestros' | 'remesa' | 'manifiesto' | 'envio'>('remesa');
+  readonly pestana = signal<'maestros' | 'remesa' | 'manifiesto'>('remesa');
   // Vehículo o personas sin registrar en el RNDC o con datos por completar
   readonly maestrosPendientes = computed(() => (this.previa()?.maestros || []).some((m: any) => m.faltantes?.length || ['no_existe', 'error', 'sin_enviar'].includes(m.estado)));
 
   // Datos que van fijos (no se editan en esta ventana), con nombres claros
   private static readonly NOMBRES: Record<string, string> = {
-    CONSECUTIVOREMESA: 'N° de remesa', CODOPERACIONTRANSPORTE: 'Tipo de operación', CODNATURALEZACARGA: 'Naturaleza de la carga',
-    CANTIDADCARGADA: 'Cantidad cargada', UNIDADMEDIDACAPACIDAD: 'Unidad de medida', CODTIPOEMPAQUE: 'Tipo de empaque',
+    CONSECUTIVOREMESA: 'N° de remesa', CODOPERACIONTRANSPORTE: 'Tipo de operación', NUMNITEMPRESAMONITOREO: 'NIT empresa de monitoreo', CODNATURALEZACARGA: 'Naturaleza de la carga',
+    CANTIDADCARGADA: 'Cantidad cargada', UNIDADMEDIDACAPACIDAD: 'Unidad de medida', CODTIPOEMPAQUE: 'Código tipo de empaque',
     MERCANCIAREMESA: 'Código de mercancía', DESCRIPCIONCORTAPRODUCTO: 'Producto', CODTIPOIDREMITENTE: 'Tipo doc. remitente',
-    NUMIDREMITENTE: 'Remitente', CODSEDEREMITENTE: 'Sede del remitente (cargue)', CODTIPOIDDESTINATARIO: 'Tipo doc. destinatario',
-    NUMIDDESTINATARIO: 'Destinatario', CODSEDEDESTINATARIO: 'Sede del destinatario (descargue)', CODTIPOIDPROPIETARIO: 'Tipo doc. propietario',
-    NUMIDPROPIETARIO: 'Propietario de la carga', CODSEDEPROPIETARIO: 'Sede del propietario', DUENOPOLIZA: 'Dueño de la póliza',
-    NUMPOLIZATRANSPORTE: 'N° de póliza', FECHAVENCIMIENTOPOLIZACARGA: 'Vence la póliza', COMPANIASEGURO: 'Aseguradora (NIT)',
-    HORASPACTOCARGA: 'Horas pactadas de cargue', MINUTOSPACTOCARGA: 'Minutos pactados de cargue', HORASPACTODESCARGUE: 'Horas pactadas de descargue',
-    MINUTOSPACTODESCARGUE: 'Minutos pactados de descargue', FECHACITAPACTADACARGUE: 'Cita de cargue', HORACITAPACTADACARGUE: 'Hora cita de cargue',
-    FECHACITAPACTADADESCARGUE: 'Cita de descargue', HORACITAPACTADADESCARGUEREMESA: 'Hora cita de descargue',
+    NUMIDREMITENTE: 'Documento del remitente', CODSEDEREMITENTE: 'Sede del remitente (cargue)', CODTIPOIDDESTINATARIO: 'Tipo doc. destinatario',
+    NUMIDDESTINATARIO: 'Documento del destinatario', CODSEDEDESTINATARIO: 'Sede del destinatario (descargue)', CODTIPOIDPROPIETARIO: 'Tipo doc. propietario',
+    NUMIDPROPIETARIO: 'Documento del propietario', CODSEDEPROPIETARIO: 'Sede del propietario', DUENOPOLIZA: 'Tomador de la póliza (E = la empresa)',
+    NUMPOLIZATRANSPORTE: 'N° de póliza', FECHAVENCIMIENTOPOLIZACARGA: 'Vence la póliza', COMPANIASEGURO: 'NIT de la aseguradora',
+    HORASPACTOCARGA: 'Tiempo de cargue (horas)', MINUTOSPACTOCARGA: 'Tiempo de cargue (minutos)', HORASPACTODESCARGUE: 'Tiempo de descargue (horas)',
+    MINUTOSPACTODESCARGUE: 'Tiempo de descargue (minutos)', FECHACITAPACTADACARGUE: 'Fecha cita de cargue', HORACITAPACTADACARGUE: 'Hora cita de cargue',
+    FECHACITAPACTADADESCARGUE: 'Fecha cita de descargue', HORACITAPACTADADESCARGUEREMESA: 'Hora cita de descargue',
     CODRESPONSABLEPAGOCARGUE: 'Paga el cargue', CODRESPONSABLEPAGODESCARGUE: 'Paga el descargue',
     NUMMANIFIESTOCARGA: 'N° de manifiesto', FECHAEXPEDICIONMANIFIESTO: 'Fecha de expedición', CODMUNICIPIOORIGENMANIFIESTO: 'Origen (municipio)',
-    CODMUNICIPIODESTINOMANIFIESTO: 'Destino (municipio)', CODIDTITULARMANIFIESTO: 'Tipo doc. titular', NUMIDTITULARMANIFIESTO: 'Titular',
-    NUMPLACA: 'Placa', NUMPLACAREMOLQUE: 'Remolque', CODIDCONDUCTOR: 'Tipo doc. conductor', NUMIDCONDUCTOR: 'Conductor',
+    CODMUNICIPIODESTINOMANIFIESTO: 'Destino (municipio)', CODIDTITULARMANIFIESTO: 'Tipo doc. titular', NUMIDTITULARMANIFIESTO: 'Documento del titular',
+    NUMPLACA: 'Placa', NUMPLACAREMOLQUE: 'Remolque', CODIDCONDUCTOR: 'Tipo doc. conductor', NUMIDCONDUCTOR: 'Cédula del conductor',
     VALORFLETEPACTADOVIAJE: 'Flete pactado', RETENCIONFUENTEMANIFIESTO: 'Retención en la fuente', RETENCIONICAMANIFIESTOCARGA: 'Retención ICA',
     VALORANTICIPOMANIFIESTO: 'Anticipo', CODMUNICIPIOPAGOSALDO: 'Municipio de pago del saldo', FECHAPAGOSALDOMANIFIESTO: 'Fecha de pago del saldo',
     CODRESPONSABLEPAGOSALDO: 'Paga el saldo', OBSERVACIONES: 'Observaciones', RETENCIONFOPAT: 'Retención FOPAT', ACEPTACIONELECTRONICA: 'Aceptación electrónica',
@@ -450,6 +494,60 @@ export class ExpedirRndc {
     const ocultar = new Set([...(ExpedirRndc.EDITABLES[doc] || []), 'NUMNITEMPRESATRANSPORTE', 'REMESA', 'REMESASMAN']);
     return (variables || []).filter(([k]) => !ocultar.has(k)).map(([k, v]) => [k, ExpedirRndc.NOMBRES[k] || k, v]);
   }
+  // Correcciones a mano del formulario del RNDC (variable → valor), por documento
+  readonly ajustes = signal<{ remesa: Record<string, string>; manifiesto: Record<string, string> }>({ remesa: {}, manifiesto: {} });
+  private static readonly TIPOS_DOC: [string, string][] = [['C', 'Cédula de ciudadanía'], ['N', 'NIT'], ['E', 'Cédula de extranjería'], ['P', 'Pasaporte'], ['T', 'Tarjeta de identidad'], ['U', 'NUIP']];
+  private static readonly RESPONSABLE: [string, string][] = [['E', 'Empresa de transporte'], ['R', 'Remitente'], ['D', 'Destinatario']];
+  // Listas para los códigos del RNDC: se elige por nombre, se envía el código
+  private static readonly OPCIONES: Record<string, [string, string][]> = {
+    CODOPERACIONTRANSPORTE: [['G', 'G · General'], ['P', 'P · Paqueteo'], ['C', 'C · Contenedor cargado'], ['V', 'V · Contenedor vacío']],
+    CODNATURALEZACARGA: [['1', '1 · Carga normal'], ['2', '2 · Carga peligrosa'], ['3', '3 · Extradimensionada'], ['4', '4 · Extrapesada'], ['5', '5 · Desechos peligrosos'], ['6', '6 · Semovientes'], ['7', '7 · Refrigerada']],
+    UNIDADMEDIDACAPACIDAD: [['1', '1 · Kilogramos'], ['2', '2 · Galones']],
+    CODRESPONSABLEPAGOCARGUE: ExpedirRndc.RESPONSABLE, CODRESPONSABLEPAGODESCARGUE: ExpedirRndc.RESPONSABLE, CODRESPONSABLEPAGOSALDO: ExpedirRndc.RESPONSABLE,
+    ACEPTACIONELECTRONICA: [['SI', 'Sí'], ['NO', 'No']],
+  };
+  private opcionesDe(k: string): [string, string][] | null {
+    if (/^COD(TIPO)?ID/.test(k)) return ExpedirRndc.TIPOS_DOC.map(([c, n]) => [c, `${c} · ${n}`] as [string, string]);
+    return ExpedirRndc.OPCIONES[k] || null;
+  }
+  // En «Ver» no se escribe en los campos (sí se navega con Tab)
+  soloLectura(e: KeyboardEvent) {
+    if (this.modoVer() && e.key !== 'Tab' && (e.target as HTMLElement).matches('input, select, textarea')) e.preventDefault();
+  }
+  tipoDoc(t: string) { return ({ N: 'NIT', C: 'C.C.', E: 'C.E.', P: 'Pasaporte', T: 'T.I.', U: 'NUIP' } as Record<string, string>)[t] || t; }
+  ajustar(doc: 'remesa' | 'manifiesto', clave: string, valor: string) {
+    const base = new Map<string, string>(this.previa()?.[doc]?.base || []);
+    this.ajustes.update(a => {
+      const d = { ...a[doc] };
+      if ((valor ?? '') === (base.get(clave) ?? '')) delete d[clave]; else d[clave] = String(valor ?? '');
+      return { ...a, [doc]: d };
+    });
+  }
+  // Secciones editables: cada variable con nombre claro, su valor y qué significa el código
+  seccionesEdit(doc: 'remesa' | 'manifiesto') {
+    const p = this.previa(); if (!p) return [];
+    const base = new Map<string, string>(p[doc].base || p[doc].variables);
+    const aj = this.ajustes()[doc];
+    const desc = p.descripciones || {};
+    const usados = new Set<string>([...(ExpedirRndc.EDITABLES[doc] || []), ...(p.noAjustables || [])]);
+    const campo = (k: string) => {
+      usados.add(k);
+      const original = base.get(k) ?? ''; const valor = k in aj ? aj[k] : original;
+      const opciones = this.opcionesDe(k);
+      const ayuda = desc[k] && valor === original ? desc[k] : '';
+      return { clave: k, etiqueta: ExpedirRndc.NOMBRES[k] || k, valor, original, cambiado: k in aj, opciones, conocido: !!opciones?.some(o => o[0] === valor), ayuda };
+    };
+    const resumir = (cs: any[]) => cs.map(c => (c.opciones?.find((o: string[]) => o[0] === c.valor)?.[1]?.replace(/^\S+ · /, '') || c.ayuda || c.valor)).filter(Boolean).slice(0, 3).join(' · ');
+    const salida = ExpedirRndc.SECCIONES[doc].map(sec => {
+      const campos = sec.campos.flatMap(([, claves]) => claves).filter(k => base.has(k) && !usados.has(k)).map(campo);
+      return { titulo: sec.titulo, campos, cambiados: campos.filter(c => c.cambiado).length, resumen: resumir(campos), abierta: false };
+    }).filter(x => x.campos.length);
+    const otras = [...base.keys()].filter(k => !usados.has(k)).map(campo);
+    if (otras.length) salida.push({ titulo: 'Otros datos', campos: otras, cambiados: otras.filter(c => c.cambiado).length, resumen: resumir(otras), abierta: false });
+    // Se abre la sección con correcciones o con datos vacíos
+    for (const x of salida) x.abierta = x.cambiados > 0 || x.campos.some(c => !c.valor);
+    return salida;
+  }
   readonly form = signal<any>({});
   readonly trabajando = signal(false);
   readonly resultado = signal<{ ok: boolean; texto: string } | null>(null);
@@ -464,6 +562,7 @@ export class ExpedirRndc {
   });
 
   constructor() {
+    effect(() => { const p = this.previa(); if (p) this.ajustes.set({ remesa: { ...(p.remesa.ajustes || {}) }, manifiesto: { ...(p.manifiesto.ajustes || {}) } }); });
     effect(() => { const id = this.viajeId(); this.modoVer.set(!!id && this.soloVer()); if (id) this.cargar(id); else { this.previa.set(null); this.viaje.set(null); } });
   }
 
@@ -588,6 +687,7 @@ export class ExpedirRndc {
     if (f.codDestinoManifiesto !== undefined) c.codDestinoManifiesto = f.codDestinoManifiesto || '';
     if (!p.remesaAceptada) c.numeroRemesa = String(f.numeroRemesa || '').trim().toUpperCase();
     if (p.documentos.manifiesto.estado !== 'aceptado') c.numeroManifiesto = String(f.numeroManifiesto || '').trim().toUpperCase();
+    c.ajustes = { ...(p.remesaAceptada ? {} : { remesa: this.ajustes().remesa }), ...(p.documentos.manifiesto.estado !== 'aceptado' ? { manifiesto: this.ajustes().manifiesto } : {}) };
     return c;
   }
 

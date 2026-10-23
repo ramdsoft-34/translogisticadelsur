@@ -11,6 +11,7 @@ import * as cat from '../services/rndc/catalogos.js';
 import { env } from '../config/env.js';
 import { parseFecha } from '../utils/texto.js';
 import { titularDePlaca } from './viajes.js';
+import { asegurarSoporte } from '../services/gestion/soporteInterno.js';
 import * as masiva from '../services/rndc/actualizacionVehiculos.js';
 import { programarEnvios, enviarPendientes } from '../services/correo.js';
 import { estadoLimitador } from '../services/rndc/limitador.js';
@@ -140,6 +141,8 @@ const datosExpedicion = z.object({
   flete: z.coerce.number().min(0).optional(), anticipo: z.coerce.number().min(0).optional(),
   observaciones: t(500).optional(),
   requiereManifiesto: z.boolean().optional(),
+  // Correcciones a mano del formulario del RNDC (variable → valor)
+  ajustes: z.object({ remesa: z.record(z.string(), z.string().trim().max(250)).optional(), manifiesto: z.record(z.string(), z.string().trim().max(250)).optional() }).optional(),
   // Número escrito a mano (vacío = automático); letras, números, punto o guion
   numeroRemesa: z.string().trim().toUpperCase().regex(/^([A-Z0-9.-]{1,15})?$/, 'número de remesa inválido').optional(),
   numeroManifiesto: z.string().trim().toUpperCase().regex(/^([A-Z0-9.-]{1,15})?$/, 'número de manifiesto inválido').optional(),
@@ -176,6 +179,16 @@ r.put('/viajes/:id/datos', operar, async (req, res) => {
     }
     d[`numerosManuales.${clave}`] = numero;
   }
+  if (d.ajustes) {
+    const limpio = (o) => Object.fromEntries(Object.entries(o || {}).filter(([k]) => /^[A-Z0-9]{2,40}$/.test(k) && !op.NO_AJUSTABLES.includes(k)));
+    if (d.ajustes.remesa) {
+      const nuevo = limpio(d.ajustes.remesa);
+      if (v.remesa?.estado === 'aceptado' && JSON.stringify(nuevo) !== JSON.stringify(v.ajustesRndc?.remesa || {})) throw new ErrorHttp(409, 'La remesa ya fue aceptada: sus datos no se pueden cambiar');
+      d['ajustesRndc.remesa'] = nuevo;
+    }
+    if (d.ajustes.manifiesto) d['ajustesRndc.manifiesto'] = limpio(d.ajustes.manifiesto);
+    delete d.ajustes;
+  }
   const antes = v.toObject();
   if (d.conductor) {
     const c = await Tercero.findOne(deEmpresa(req, { _id: d.conductor })).select('nombres apellido1 apellido2').lean();
@@ -185,6 +198,7 @@ r.put('/viajes/:id/datos', operar, async (req, res) => {
   if (d.placa && d.placa !== v.placa && d.titular === undefined) d.titular = await titularDePlaca(req.empresaId, d.placa);
   v.set({ ...d, actualizadoPor: req.usuario._id });
   await v.save();
+  if (d.requiereManifiesto === false) await asegurarSoporte(req.empresaId, v._id);
   await auditar(req, 'editar_viaje_rndc', { entidad: 'Viaje', entidadId: v._id, detalle: { numero: v.numero, cambios: cambios(antes, v.toObject(), Object.keys(d)) } });
   res.json(await op.vistaPrevia(req.empresaId, v._id));
 });

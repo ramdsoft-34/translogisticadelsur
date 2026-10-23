@@ -241,6 +241,8 @@ const viajeSchema = new Schema({
   // Pago al conductor (liquidación del conductor) y soporte interno MC/RC para viajes sin RNDC
   liquidacionConductor: { type: Schema.Types.ObjectId, ref: 'LiquidacionConductor', default: null },
   soporteInterno: { mc: str(), rc: str(), codigo: str(), fecha },
+  // Valores del formulario del RNDC corregidos a mano en la expedición (variable → valor); se aplican al enviar
+  ajustesRndc: { remesa: { type: Schema.Types.Mixed, default: {} }, manifiesto: { type: Schema.Types.Mixed, default: {} } },
   // Rastreo GPS con Sur Track: el viaje es la única fuente; el GPS lo envía la app del conductor
   rastreo: {
     activo: { type: Boolean, default: false },

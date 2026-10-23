@@ -19,12 +19,13 @@ import { BuscarTercero } from '../shared/buscar-tercero';
 import { Auth } from '../core/auth.service';
 import { P } from '../core/modelos';
 
-type Pestana = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'correos' | 'historial';
-type PestanaViajes = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos';
+type Pestana = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'soporte' | 'correos' | 'historial';
+type PestanaViajes = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'soporte';
 // Filtro de cada pestaña. Con remesa o manifiesto anulados el viaje sale de «Por enviar» y queda en «Anulados».
 const FILTROS: Record<PestanaViajes, Record<string, string | number>> = {
   pendientes: { estado: 'registrado,remesa', anulados: 0 }, anulados: { estado: 'registrado,remesa', anulados: 1 },
   manifestados: { estado: 'manifestado' }, cumplidos: { estado: 'cumplido' },
+  soporte: { soporte: 1 },
 };
 const ESTADO_CORREO: Record<string, [string, string]> = {
   enviado: ['Enviado', 'ok'], error: ['Error', 'error'], pendiente: ['Pendiente', 'alerta'], enviando: ['Enviando', 'alerta'],
@@ -67,6 +68,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       <button [class.activa]="pestana() === 'manifestados'" (click)="ir('manifestados')">Manifestados</button>
       <button [class.activa]="pestana() === 'cumplidos'" (click)="ir('cumplidos')">Cumplidos</button>
       <button [class.activa]="pestana() === 'anulados'" (click)="ir('anulados')" title="Viajes con la remesa o el manifiesto anulados en el RNDC">Anulados</button>
+      <button [class.activa]="pestana() === 'soporte'" (click)="ir('soporte')" title="Viajes sin manifiesto del RNDC: llevan soporte interno MC/RC">Soporte interno</button>
       <button [class.activa]="pestana() === 'correos'" (click)="ir('correos')">Correos</button>
       <button [class.activa]="pestana() === 'historial'" (click)="ir('historial')">Historial RNDC</button>
     </div>
@@ -106,6 +108,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         <button type="button" class="primario pequeno" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos(porAprobar())" [disabled]="trabajando()">
           <app-icono nombre="correo" [tam]="15" />Aprobar todos</button>
       </div>
+    }
+    @if (pestana() === 'soporte') {
+      <p class="sutil" style="margin:-6px 0 12px">Viajes que no van al RNDC. Cada uno lleva su soporte interno (MC/RC) con un código QR que se puede escanear para comprobar que existe y es válido.</p>
     }
     @if (pestana() === 'anulados') {
       <p class="sutil" style="margin:-6px 0 12px">Viajes con la remesa o el manifiesto anulados. Si el manifiesto se anuló para reemplazarlo, expida aquí el nuevo.</p>
@@ -159,9 +164,14 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                 <td data-etiqueta="N°">{{ v.numero }}</td><td data-etiqueta="Fecha">{{ v.fecha | dia }}</td>
                 <td data-etiqueta="Cliente">{{ v.cliente?.nombre }}<br /><span class="sutil">{{ v.destino }}</span></td>
                 <td data-etiqueta="Placa"><strong>{{ v.placa }}</strong></td><td data-etiqueta="Conductor">{{ v.conductorNombre }}</td><td data-etiqueta="Flete" class="num">{{ v.flete | pesos }}</td>
+                @if (pestana() === 'soporte') {
+                <td data-etiqueta="Remesa">@if ($any(v).soporteInterno?.rc) { {{ $any(v).soporteInterno.rc }}<br /><span class="chip ok sin-punto">interna</span> } @else { <span class="chip alerta sin-punto">sin soporte</span> }</td>
+                <td data-etiqueta="Manifiesto">@if ($any(v).soporteInterno?.mc) { {{ $any(v).soporteInterno.mc }}<br /><span class="sutil">Cód. {{ $any(v).soporteInterno.codigo }}</span> }</td>
+                } @else {
                 <td data-etiqueta="Remesa">@if (v.remesa.numero) { {{ v.remesa.numero }}<br /><span class="chip" [class]="chip(v.remesa.estado)">{{ v.remesa.estado || 'sin enviar' }}</span> }</td>
                 <td data-etiqueta="Manifiesto">@if (v.manifiesto.numero) { {{ v.manifiesto.numero }}<br /><span class="chip" [class]="chip(v.manifiesto.estado)">{{ v.manifiesto.estado || 'sin enviar' }}</span> }
                   @if (v.manifiesto.radicado && v.manifiesto.estado === 'aceptado') { <br /><span class="sutil">Rad. {{ v.manifiesto.radicado }}</span> }</td>
+                }
                 @if (conCorreo()) {
                   <td data-etiqueta="Correo">@if (resumenCorreo(v._id); as rc) { <button type="button" class="chip-boton" (click)="verCorreos(v)" [title]="rc.titulo"><span class="chip" [class]="rc.clase">{{ rc.texto }}</span></button> }
                     @else { <button type="button" class="pequeno texto" (click)="verCorreos(v)">Sin envío</button> }</td>
@@ -191,6 +201,10 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                         <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
                         <button class="pequeno primario" (click)="abrirCumplido(v)">Cumplir</button>
                         <button class="pequeno peligro" (click)="abrirAnular(v)">Anular</button>
+                      }
+                      @case ('soporte') {
+                        <button class="pequeno" [class.primario]="!$any(v).soporteInterno?.mc" (click)="verSoporte(v)" [disabled]="trabajando()" title="Manifiesto y remesa internos con QR de verificación">
+                          <app-icono nombre="ojo" [tam]="15" />{{ $any(v).soporteInterno?.mc ? 'Ver soporte' : 'Generar soporte' }}</button>
                       }
                       @case ('cumplidos') {
                         <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
@@ -463,7 +477,7 @@ export class Manifiestos {
       }
       else {
         this.pagina = 1;
-        const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: 1, limite: 50, historico: 0, rndc: 1 });
+        const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: 1, limite: 50, historico: 0, ...(this.pestana() === 'soporte' ? {} : { rndc: 1 }) });
         this.viajes.set(r.viajes); this.total.set(r.total);
         this.cargarCorreos(r.viajes);
       }
@@ -478,7 +492,7 @@ export class Manifiestos {
     if (['historial', 'correos'].includes(this.pestana()) || this.cargandoMas() || this.viajes().length >= this.total()) return;
     this.cargandoMas.set(true);
     try {
-      const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: this.pagina + 1, limite: 50, historico: 0, rndc: 1 });
+      const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: this.pagina + 1, limite: 50, historico: 0, ...(this.pestana() === 'soporte' ? {} : { rndc: 1 }) });
       this.pagina += 1;
       this.viajes.update(l => [...l, ...r.viajes]);
       this.cargarCorreos(this.viajes());
@@ -655,6 +669,19 @@ export class Manifiestos {
 
   // Ver el PDF del manifiesto en pantalla (sin descargarlo). En el celular se abre en otra pestaña.
   readonly pdfVisto = signal<{ titulo: string; url: string; seguro: SafeResourceUrl } | null>(null);
+  // Soporte interno MC/RC: se numera si aún no lo tiene y se muestra en pantalla
+  async verSoporte(v: Viaje) {
+    this.trabajando.set(true);
+    try {
+      const s = await this.api.post<any>(`/gestion/soportes/viajes/${v._id}`, {});
+      const blob = await this.api.archivo(`/gestion/soportes/viajes/${v._id}/pdf`);
+      const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      this.cerrarPdf();
+      this.pdfVisto.set({ titulo: `Soporte interno ${s.mc} / ${s.rc}`, url, seguro: this.sanitizer.bypassSecurityTrustResourceUrl(url) });
+      if (!(v as any).soporteInterno?.mc) this.cargar();
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+
   async verPdf(v: Viaje) {
     const movil = window.matchMedia('(max-width: 700px)').matches;
     const ventana = movil ? window.open('', '_blank') : null;      // se abre ya para que el navegador no la bloquee

@@ -13,6 +13,7 @@ import { exigirDocumentosVigentes } from '../services/gestion/documentos.js';
 import { parseFecha, hoyColombia, escaparRegex } from '../utils/texto.js';
 import { saldoViaje, utilidadViaje, valoresDesdeTarifa } from '../services/calculos.js';
 import * as rastreo from '../services/rastreo/surtrack.js';
+import { asegurarSoporte } from '../services/gestion/soporteInterno.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -84,6 +85,8 @@ function filtroLista(req) {
   if (req.query.historico === '1') f.historico = true;
   // Solo los viajes que deben expedir remesa y manifiesto (módulo Manifiestos RNDC)
   if (req.query.rndc === '1') f.requiereManifiesto = { $ne: false };
+  // Viajes sin manifiesto del RNDC (pestaña «Soporte interno»)
+  if (req.query.soporte === '1') f.requiereManifiesto = false;
   // Con remesa o manifiesto anulados en el RNDC: fuera de «Por enviar» (anulados=0) o solo ellos (anulados=1)
   const anulado = [{ 'remesa.estado': 'anulado' }, { 'manifiesto.estado': 'anulado' }];
   if (req.query.anulados === '0') f.$nor = anulado;
@@ -245,6 +248,8 @@ r.post('/', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const cond = await Tercero.findOne(deEmpresa(req, { _id: d.conductor })).select('nombres apellido1 apellido2').lean();
   const v = await Viaje.create({ ...d, numero, conductorNombre: nombreTercero(cond), empresa: req.empresaId,
     creadoPor: req.usuario._id, actualizadoPor: req.usuario._id });
+  // Sin manifiesto del RNDC: el soporte interno es obligatorio y se numera al registrar
+  await asegurarSoporte(req.empresaId, v._id);
   await auditar(req, 'crear_viaje', { entidad: 'Viaje', entidadId: v._id, detalle: { numero, placa: v.placa, destino: v.destino } });
   // «Rastrear este viaje con Sur Track»: si falla, el viaje queda registrado igual y se avisa
   let errorRastreo = '';
@@ -290,6 +295,7 @@ r.put('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   if (d.placa && d.placa !== v.placa && d.titular === undefined) d.titular = await titularDePlaca(req.empresaId, d.placa);
   v.set({ ...d, actualizadoPor: req.usuario._id });
   await v.save();
+  await asegurarSoporte(req.empresaId, v._id);
   await auditar(req, 'editar_viaje', { entidad: 'Viaje', entidadId: v._id,
     detalle: { numero: v.numero, cambios: cambios(antes, v.toObject(), Object.keys(d)) } });
   res.json(presentar(await Viaje.findOne(deEmpresa(req, { _id: v._id })).populate(POBLAR(req)).lean()));

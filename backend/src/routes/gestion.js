@@ -15,7 +15,7 @@ import * as liq from '../services/gestion/liquidacionConductor.js';
 import * as pre from '../services/gestion/prestamos.js';
 import * as cont from '../services/gestion/contabilidad.js';
 import * as cierre from '../services/gestion/cierre.js';
-import { soporteInterno } from '../services/gestion/soporteInterno.js';
+import { soporteInterno, asegurarSoporte } from '../services/gestion/soporteInterno.js';
 import { manifiestoPdf } from '../services/reportes/manifiesto.js';
 import * as dulces from '../services/gestion/remesasDulces.js';
 
@@ -444,6 +444,7 @@ r.post('/relaciones/masivo', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
       codDestino: sug.codDestino || '', destinatario: sug.destinatario, titular, placa, conductor: d.conductor, conductorNombre: nombreT(cond), cantidad: d.cantidad, conAuxiliar: d.conAuxiliar,
       diasAuxiliar: d.diasAuxiliar, planilla: d.planilla, tarifa: sug.tarifa || 0, flete: sug.flete || 0, anticipo: sug.anticipo || 0, pesoKg: sug.pesoKg || 0,
       requiereManifiesto: d.requiereManifiesto, creadoPor: req.usuario._id, actualizadoPor: req.usuario._id });
+    await asegurarSoporte(req.empresaId, v._id);
     creados.push(v.numero);
   }
   await auditar(req, 'registro_masivo', { detalle: { placa, viajes: creados } });
@@ -463,6 +464,7 @@ r.post('/relaciones/copiar/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) 
     'pesoKg', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa', 'flete', 'anticipo', 'observaciones', 'requiereManifiesto'];
   const nuevo = await Viaje.create({ ...Object.fromEntries(campos.map(k => [k, v[k]])), empresa: req.empresaId, numero: await sig(req.empresaId, 'viaje'), fecha: f,
     creadoPor: req.usuario._id, actualizadoPor: req.usuario._id });
+  await asegurarSoporte(req.empresaId, nuevo._id);
   await auditar(req, 'copiar_viaje', { entidad: 'Viaje', entidadId: nuevo._id, detalle: { de: v.numero, a: nuevo.numero } });
   res.status(201).json({ numero: nuevo.numero, _id: nuevo._id });
 });
