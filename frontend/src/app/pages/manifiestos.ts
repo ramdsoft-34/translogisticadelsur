@@ -170,14 +170,16 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                   <div class="acciones" style="justify-content:flex-end">
                     @switch (pestana()) {
                       @case ('anulados') {
-                        <button class="pequeno primario" (click)="expedir.set(v._id)" [disabled]="trabajando()">
+                        <button class="pequeno" (click)="ver(v._id)" title="Ver la remesa y el manifiesto por pestañas, sin enviar"><app-icono nombre="ojo" [tam]="15" />Ver</button>
+                        <button class="pequeno primario" (click)="abrirExpedir(v._id)" [disabled]="trabajando()">
                           <app-icono nombre="enviar" [tam]="15" />{{ v.manifiesto.estado === 'anulado' ? 'Expedir reemplazo' : 'Expedir de nuevo' }}</button>
                         @if (v.remesa.estado === 'aceptado' && v.manifiesto.estado !== 'aceptado') {
                           <button class="pequeno peligro" (click)="abrirAnular(v)" title="La remesa sigue vigente en el RNDC">Anular remesa</button>
                         }
                       }
                       @case ('pendientes') {
-                        <button class="pequeno primario" (click)="expedir.set(v._id)" [disabled]="trabajando()">
+                        <button class="pequeno" (click)="ver(v._id)" title="Ver la remesa y el manifiesto por pestañas, sin enviar"><app-icono nombre="ojo" [tam]="15" />Ver</button>
+                        <button class="pequeno primario" (click)="abrirExpedir(v._id)" [disabled]="trabajando()">
                           <app-icono nombre="enviar" [tam]="15" />{{ mensajeError(v) ? 'Corregir y reenviar' : 'Expedir' }}</button>
                         @if (v.estado === 'remesa') { <button class="pequeno peligro" (click)="abrirAnular(v)" title="Anular la remesa aceptada">Anular remesa</button> }
                       }
@@ -287,7 +289,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     </app-modal>
 
     <!-- Expedición: revisar, corregir y enviar -->
-    <app-expedir-rndc [viajeId]="expedir()" (cerrar)="expedir.set(null)" (actualizado)="cargar()" />
+    <app-expedir-rndc [viajeId]="expedir()" [soloVer]="soloVer()" (cerrar)="expedir.set(null)" (actualizado)="cargar()" />
 
     <!-- Ver PDF del manifiesto -->
     <app-modal [titulo]="pdfVisto()?.titulo || ''" [abierto]="!!pdfVisto()" (cerrar)="cerrarPdf()" [ancho]="true">
@@ -401,6 +403,9 @@ export class Manifiestos {
   readonly procesos = computed(() => this.catalogos()?.procesos || {});
   readonly ambiente = signal('');
   readonly expedir = signal<string | null>(null);
+  readonly soloVer = signal(false);
+  ver(id: string) { this.soloVer.set(true); this.expedir.set(id); }
+  abrirExpedir(id: string) { this.soloVer.set(false); this.expedir.set(id); }
   // Correos de documentos
   readonly envios = signal<any[]>([]);
   // Filtros: los de las listas de viajes van al servidor; los de Correos e Historial, sobre lo cargado

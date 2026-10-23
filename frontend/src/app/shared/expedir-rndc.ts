@@ -19,7 +19,7 @@ import { Confirmar } from './confirmar';
   selector: 'app-expedir-rndc',
   imports: [FormsModule, Modal, Icono, Moneda, SelectorMunicipio, BuscarTercero, Confirmar, ...FORMATOS],
   template: `
-    <app-modal [titulo]="'Expedir viaje N° ' + (viaje()?.numero || '')" [abierto]="!!viajeId()" (cerrar)="cerrar.emit()" [ancho]="true">
+    <app-modal [titulo]="(modoVer() ? 'Ver viaje N° ' : 'Expedir viaje N° ') + (viaje()?.numero || '')" [abierto]="!!viajeId()" (cerrar)="cerrar.emit()" [ancho]="true">
       @if (previa(); as p) {
         <!-- Estado de los documentos -->
         <div class="estado">
@@ -113,7 +113,8 @@ import { Confirmar } from './confirmar';
           <button type="button" role="tab" [class.activa]="pestana() === 'envio'" [attr.aria-selected]="pestana() === 'envio'" (click)="pestana.set('envio')">Lo que se envía</button>
         </div>
 
-        <form id="form-expedir" (ngSubmit)="enviar()">
+        @if (modoVer()) { <div class="mensaje info">Solo consulta: revise la información por pestañas. Para corregir o enviar, presione «Expedir».</div> }
+        <form id="form-expedir" (ngSubmit)="enviar()"><fieldset class="sin-marco" [disabled]="modoVer()">
           <!-- ── Vehículo y personas ── -->
           <section [hidden]="pestana() !== 'maestros'" role="tabpanel">
             <div class="cab-maestros">
@@ -286,11 +287,15 @@ import { Confirmar } from './confirmar';
               }
             </div>
           </section>
-        </form>
+        </fieldset></form>
       } @else {
         <span class="esqueleto"></span>
       }
       <ng-container pie>
+        @if (modoVer()) {
+          <button type="button" (click)="cerrar.emit()">Cerrar</button>
+          <button type="button" class="primario" (click)="modoVer.set(false)" [disabled]="!previa()"><app-icono nombre="enviar" [tam]="16" />Expedir</button>
+        } @else {
         @if (previa()?.estado === 'registrado') {
           <button type="button" confirmar="Clic otra vez: sin manifiesto" (confirmado)="sinManifiesto()" [disabled]="trabajando()" style="margin-right:auto" title="Quitar este viaje de la lista de manifiestos">No requiere manifiesto</button>
         }
@@ -298,6 +303,7 @@ import { Confirmar } from './confirmar';
         <button type="button" (click)="guardar()" [disabled]="trabajando() || !previa()">Guardar cambios</button>
         <button class="primario" type="submit" form="form-expedir" [disabled]="trabajando() || !previa()">
           <app-icono nombre="enviar" [tam]="16" />{{ trabajando() ? 'Enviando…' : (previa()?.ultimoError || previa()?.documentos?.remesa?.estado === 'rechazado' ? 'Corregir y reenviar' : 'Enviar al RNDC') }}</button>
+        }
       </ng-container>
     </app-modal>`,
   styles: [`
@@ -335,6 +341,7 @@ import { Confirmar } from './confirmar';
     .dest { margin: 10px 0 0; font-size: 13px; color: var(--gris-7); }
     .dest.mal { color: var(--rojo-texto); }
     .variables { margin-top: 4px; }
+    fieldset.sin-marco { border: 0; padding: 0; margin: 0; min-width: 0; }
     .pestanas { margin: 4px 0 14px; }
     .pestanas button { display: inline-flex; align-items: center; gap: 6px; }
     .chip.mini { font-size: 10.5px; padding: 1px 6px; }
@@ -361,6 +368,9 @@ export class ExpedirRndc {
   private clave = inject(RndcClave);
   private auth = inject(Auth);
   readonly viajeId = input<string | null>(null);
+  // «Ver»: abre en solo consulta; con «Expedir» se pasa a corregir y enviar
+  readonly soloVer = input(false);
+  readonly modoVer = signal(false);
   readonly cerrar = output<void>();
   readonly actualizado = output<void>();
   readonly puedeValores = this.auth.tiene(P.VIAJES_EDITAR_TODOS);
@@ -454,7 +464,7 @@ export class ExpedirRndc {
   });
 
   constructor() {
-    effect(() => { const id = this.viajeId(); if (id) this.cargar(id); else { this.previa.set(null); this.viaje.set(null); } });
+    effect(() => { const id = this.viajeId(); this.modoVer.set(!!id && this.soloVer()); if (id) this.cargar(id); else { this.previa.set(null); this.viaje.set(null); } });
   }
 
   private async cargar(id: string) {
