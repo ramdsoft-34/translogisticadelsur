@@ -102,140 +102,191 @@ import { Confirmar } from './confirmar';
         }
         @if (p.avisos.length) { <div class="mensaje alerta"><strong>Revise:</strong><ul>@for (a of p.avisos; track a) { <li>{{ a }}</li> }</ul></div> }
 
-        <!-- Vehículo y personas: deben existir en el RNDC -->
-        <div class="cab-maestros">
-          <h3>Vehículo y personas en el RNDC</h3>
-          @if (p.verificacionVigente) { <span class="chip ok sin-punto" [title]="'Verificado el ' + (p.verificadoRndc | fechaHora)">Verificado con el RNDC</span> }
-          @else { <span class="chip alerta sin-punto">Se verificará con el RNDC al enviar</span> }
-          <button type="button" class="pequeno" (click)="verificar(true)" [disabled]="trabajando()" title="Trae del RNDC el vehículo, el conductor, el titular y las sedes del remitente y del destinatario">
-            <app-icono nombre="enviar" [tam]="14" />Verificar ahora</button>
+        <!-- Pestañas: vehículo y personas, remesa y manifiesto por separado; cada una separa lo que se ingresa de lo que va fijo -->
+        <div class="pestanas" role="tablist" aria-label="Partes del despacho">
+          <button type="button" role="tab" [class.activa]="pestana() === 'maestros'" [attr.aria-selected]="pestana() === 'maestros'" (click)="pestana.set('maestros')">
+            Vehículo y personas @if (maestrosPendientes()) { <span class="punto-alerta" title="Hay datos por completar o registrar"></span> }</button>
+          <button type="button" role="tab" [class.activa]="pestana() === 'remesa'" [attr.aria-selected]="pestana() === 'remesa'" (click)="pestana.set('remesa')">
+            Remesa <span class="chip sin-punto mini" [class]="chip(p.documentos.remesa.estado)">{{ p.documentos.remesa.estado || 'sin enviar' }}</span></button>
+          <button type="button" role="tab" [class.activa]="pestana() === 'manifiesto'" [attr.aria-selected]="pestana() === 'manifiesto'" (click)="pestana.set('manifiesto')">
+            Manifiesto <span class="chip sin-punto mini" [class]="chip(p.documentos.manifiesto.estado)">{{ p.documentos.manifiesto.estado || 'sin enviar' }}</span></button>
+          <button type="button" role="tab" [class.activa]="pestana() === 'envio'" [attr.aria-selected]="pestana() === 'envio'" (click)="pestana.set('envio')">Lo que se envía</button>
         </div>
-        @if (verificacion(); as ver) {
-          <div class="mensaje verificacion" [class.error]="ver.bloqueantes.length" [class.ok]="!ver.bloqueantes.length && !conCambios(ver)" [class.alerta]="!ver.bloqueantes.length && conCambios(ver)">
-            <strong>{{ ver.bloqueantes.length ? 'No se puede enviar todavía:' : conCambios(ver) ? 'Se actualizaron datos desde el RNDC; revíselos y presione enviar de nuevo:' : 'Todo coincide con el RNDC.' }}</strong>
-            <ul>
-              @for (b of ver.bloqueantes; track b) { <li>{{ b }}</li> }
-              @for (x of ver.resultados; track x.rol + x.referencia) {
-                @if (x.cambios?.length) { <li>{{ x.rol }} {{ x.referencia }}: {{ x.cambios.join('; ') }}</li> }
-                @if (x.estado === 'error') { <li>{{ x.rol }} {{ x.referencia }}: no se pudo consultar ({{ x.mensaje }})</li> }
+
+        <form id="form-expedir" (ngSubmit)="enviar()">
+          <!-- ── Vehículo y personas ── -->
+          <section [hidden]="pestana() !== 'maestros'" role="tabpanel">
+            <div class="cab-maestros">
+              <h3>Deben existir en el RNDC</h3>
+              @if (p.verificacionVigente) { <span class="chip ok sin-punto" [title]="'Verificado el ' + (p.verificadoRndc | fechaHora)">Verificado con el RNDC</span> }
+              @else { <span class="chip alerta sin-punto">Se verificará con el RNDC al enviar</span> }
+              <button type="button" class="pequeno" (click)="verificar(true)" [disabled]="trabajando()" title="Trae del RNDC el vehículo, el conductor, el titular y las sedes del remitente y del destinatario">
+                <app-icono nombre="enviar" [tam]="14" />Verificar ahora</button>
+            </div>
+            @if (verificacion(); as ver) {
+              <div class="mensaje verificacion" [class.error]="ver.bloqueantes.length" [class.ok]="!ver.bloqueantes.length && !conCambios(ver)" [class.alerta]="!ver.bloqueantes.length && conCambios(ver)">
+                <strong>{{ ver.bloqueantes.length ? 'No se puede enviar todavía:' : conCambios(ver) ? 'Se actualizaron datos desde el RNDC; revíselos y presione enviar de nuevo:' : 'Todo coincide con el RNDC.' }}</strong>
+                <ul>
+                  @for (b of ver.bloqueantes; track b) { <li>{{ b }}</li> }
+                  @for (x of ver.resultados; track x.rol + x.referencia) {
+                    @if (x.cambios?.length) { <li>{{ x.rol }} {{ x.referencia }}: {{ x.cambios.join('; ') }}</li> }
+                    @if (x.estado === 'error') { <li>{{ x.rol }} {{ x.referencia }}: no se pudo consultar ({{ x.mensaje }})</li> }
+                  }
+                </ul>
+              </div>
+            }
+            <ul class="maestros">
+              @for (m of p.maestros; track m.rol) {
+                <li>
+                  <span class="rol">{{ m.rol }}</span>
+                  <span class="ref">{{ m.referencia }}</span>
+                  <span class="chip" [class]="chipMaestro(m.estado)" [title]="m.mensaje || ''">{{ estadoMaestro(m.estado) }}</span>
+                  @if (m.faltantes?.length) { <small class="falta">Falta: {{ etiquetas(m.faltantes) }}</small> }
+                  @if (m.estado === 'error' && m.mensaje) { <small class="falta">{{ m.mensaje }}</small> }
+                  @if (m.id && !m.faltantes?.length) {
+                    <button type="button" class="pequeno" [class.primario]="m.estado !== 'enviado'" (click)="registrarMaestro(m)" [disabled]="trabajando()"
+                      [title]="m.estado === 'enviado' ? 'Volver a enviarlo al RNDC (si el RNDC dice que no existe)' : 'Registrarlo en el RNDC'">
+                      <app-icono nombre="enviar" [tam]="14" />{{ m.estado === 'enviado' ? 'Registrar de nuevo' : 'Registrar en el RNDC' }}</button>
+                  }
+                  @if (m.estado === 'no_existe' || m.faltantes?.length) { <small>Complételo en {{ m.tipo === 'vehiculo' ? 'Vehículos' : 'Conductores y terceros' }}.</small> }
+                </li>
               }
             </ul>
-          </div>
-        }
-        <ul class="maestros">
-          @for (m of p.maestros; track m.rol) {
-            <li>
-              <span class="rol">{{ m.rol }}</span>
-              <span class="ref">{{ m.referencia }}</span>
-              <span class="chip" [class]="chipMaestro(m.estado)" [title]="m.mensaje || ''">{{ estadoMaestro(m.estado) }}</span>
-              @if (m.faltantes?.length) { <small class="falta">Falta: {{ etiquetas(m.faltantes) }}</small> }
-              @if (m.estado === 'error' && m.mensaje) { <small class="falta">{{ m.mensaje }}</small> }
-              @if (m.id && !m.faltantes?.length) {
-                <button type="button" class="pequeno" [class.primario]="m.estado !== 'enviado'" (click)="registrarMaestro(m)" [disabled]="trabajando()"
-                  [title]="m.estado === 'enviado' ? 'Volver a enviarlo al RNDC (si el RNDC dice que no existe)' : 'Registrarlo en el RNDC'">
-                  <app-icono nombre="enviar" [tam]="14" />{{ m.estado === 'enviado' ? 'Registrar de nuevo' : 'Registrar en el RNDC' }}</button>
+            <fieldset><legend>Se ingresa o corrige</legend><div class="formulario">
+              <div class="campo"><label for="ex-placa">Placa</label><input id="ex-placa" name="placa" [(ngModel)]="f.placa" required maxlength="7" style="text-transform:uppercase" /></div>
+              @if (conRemolque()) {
+                <div class="campo"><label for="ex-rem">Remolque</label><input id="ex-rem" name="remolque" [(ngModel)]="f.remolque" maxlength="7" style="text-transform:uppercase" /></div>
+              } @else {
+                <div class="campo"><span class="etiqueta">Remolque</span><button type="button" class="pequeno" (click)="mostrarRemolque.set(true)">Agregar remolque</button></div>
               }
-              @if (m.estado === 'no_existe' || m.faltantes?.length) { <small>Complételo en {{ m.tipo === 'vehiculo' ? 'Vehículos' : 'Conductores y terceros' }}.</small> }
-            </li>
-          }
-        </ul>
-
-        <!-- Datos del envío: solo los que van en la remesa y el manifiesto -->
-        <form id="form-expedir" (ngSubmit)="enviar()">
-          <fieldset><legend>Viaje</legend><div class="formulario">
-            <div class="campo"><label for="ex-fecha">Fecha</label><input id="ex-fecha" type="date" name="fecha" [(ngModel)]="f.fecha" [disabled]="p.remesaAceptada" required />
-              @if (p.remesaAceptada) { <small>Fijada por la remesa aceptada.</small> }</div>
-            <app-municipio etiqueta="Origen" [(codigo)]="f.codOrigen" />
-            <app-municipio etiqueta="Destino" [(codigo)]="f.codDestino" />
-            <div class="campo"><label for="ex-placa">Placa</label><input id="ex-placa" name="placa" [(ngModel)]="f.placa" required maxlength="7" style="text-transform:uppercase" /></div>
-            @if (conRemolque()) {
-              <div class="campo"><label for="ex-rem">Remolque</label><input id="ex-rem" name="remolque" [(ngModel)]="f.remolque" maxlength="7" style="text-transform:uppercase" /></div>
-            } @else {
-              <div class="campo"><span class="etiqueta">Remolque</span><button type="button" class="pequeno" (click)="mostrarRemolque.set(true)">Agregar remolque</button></div>
-            }
-            <app-buscar-tercero etiqueta="Conductor" rol="conductor" [(valor)]="f.conductor" />
-            <app-buscar-tercero etiqueta="Titular del manifiesto" [(valor)]="f.titular" placeholder="Vacío = el conductor" />
-          </div>
-          <p class="sutil" style="margin:10px 0 0;font-size:12.5px">Por defecto el titular es el del vehículo; si no tiene, el conductor. Puede cambiarlo aquí si el RNDC lo rechaza.
-            @if (p.destinoManifiesto && p.destinatario?.municipio && p.destinatario.municipio !== f.codDestino) {
-              <br />El manifiesto irá al municipio <strong>{{ p.destinoManifiesto }}</strong>, el de la sede del destinatario{{ p.destinatario.nombreSede ? ' (' + p.destinatario.nombreSede + ')' : '' }}, como lo exige el RNDC.
-            }</p></fieldset>
-
-          @if (p.documentos.manifiesto.estado !== 'aceptado') {
-            <fieldset [class.resaltar]="duplicado()"><legend>Números en el RNDC</legend><div class="formulario">
-              <div class="campo"><label for="ex-nr">N° de remesa</label>
-                <input id="ex-nr" name="nr" maxlength="15" [(ngModel)]="f.numeroRemesa" [disabled]="p.remesaAceptada" style="text-transform:uppercase"
-                  [placeholder]="p.remesaAceptada ? p.documentos.remesa.numero : 'Automático: ' + p.numeros?.remesa" />
-                @if (p.remesaAceptada) { <small>Aceptada con este número.</small> }</div>
-              <div class="campo"><label for="ex-nm">N° de manifiesto</label>
-                <input id="ex-nm" name="nm" maxlength="15" [(ngModel)]="f.numeroManifiesto" style="text-transform:uppercase"
-                  [placeholder]="'Automático: ' + p.numeros?.manifiesto" /></div>
+              <app-buscar-tercero etiqueta="Conductor" rol="conductor" [(valor)]="f.conductor" />
+              <app-buscar-tercero etiqueta="Titular del manifiesto" [(valor)]="f.titular" placeholder="Vacío = el conductor" />
             </div>
-            <p class="sutil nota-num">Déjelos vacíos para usar la numeración automática. Escríbalos solo si el RNDC respondió que el número ya fue radicado (DUPLICADO).</p>
-            </fieldset>
-          }
+            <p class="sutil nota-num">Por defecto el titular es el del vehículo; si no tiene, el conductor. Cámbielo aquí si el RNDC lo rechaza.</p></fieldset>
+          </section>
 
-          @if (!p.remesaAceptada) {
-            <fieldset><legend>Carga (remesa)</legend><div class="formulario">
-              <div class="campo"><label for="ex-peso">Cantidad cargada (kg)</label><input id="ex-peso" type="number" min="0" name="peso" [(ngModel)]="f.pesoKg" required /></div>
-              @if (p.sedesCliente?.length) {
-                <div class="campo"><label for="ex-sede">Sede del cliente que recibe</label>
-                  <select id="ex-sede" name="sedeCli" [ngModel]="sedeElegida()" (ngModelChange)="elegirSede($event)">
-                    <option value="">Automático / otro destinatario</option>
-                    @for (x of p.sedesCliente; track x.sede) { <option [value]="x.sede">Sede {{ x.sede }} · {{ x.nombre }} ({{ x.codMunicipio }})</option> }
-                  </select></div>
-              }
-              <div class="campo"><label for="ex-dt">Otro destinatario</label>
-                <select id="ex-dt" name="dtipo" [(ngModel)]="f.destinatario.tipoId"><option value="">Automático (tarifa o sede del cliente en destino)</option>@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
-              @if (f.destinatario.tipoId) {
-                <div class="campo"><label for="ex-dn">Documento del destinatario</label><input id="ex-dn" name="dnum" [(ngModel)]="f.destinatario.numId" maxlength="15" /></div>
-                <div class="campo"><label for="ex-ds">Sede del destinatario</label><input id="ex-ds" name="dsede" [(ngModel)]="f.destinatario.sede" maxlength="6" /></div>
+          <!-- ── Remesa ── -->
+          <section [hidden]="pestana() !== 'remesa'" role="tabpanel">
+            <div class="dos-col">
+              <div class="col-ingresa">
+                <h3 class="titulo-col">Se ingresa o corrige</h3>
+                <fieldset><legend>Viaje</legend><div class="formulario">
+                  <div class="campo"><label for="ex-fecha">Fecha</label><input id="ex-fecha" type="date" name="fecha" [(ngModel)]="f.fecha" [disabled]="p.remesaAceptada" required />
+                    @if (p.remesaAceptada) { <small>Fijada por la remesa aceptada.</small> }</div>
+                  <app-municipio etiqueta="Origen (cargue)" [(codigo)]="f.codOrigen" />
+                  <app-municipio etiqueta="Destino (descargue)" [(codigo)]="f.codDestino" />
+                </div></fieldset>
+                @if (p.documentos.manifiesto.estado !== 'aceptado') {
+                  <fieldset [class.resaltar]="duplicado()"><legend>Número de remesa</legend><div class="formulario">
+                    <div class="campo"><label for="ex-nr">N° de remesa</label>
+                      <input id="ex-nr" name="nr" maxlength="15" [(ngModel)]="f.numeroRemesa" [disabled]="p.remesaAceptada" style="text-transform:uppercase"
+                        [placeholder]="p.remesaAceptada ? p.documentos.remesa.numero : 'Automático: ' + p.numeros?.remesa" />
+                      @if (p.remesaAceptada) { <small>Aceptada con este número.</small> }
+                      @else { <small>Vacío = numeración automática. Escríbalo solo si el RNDC respondió DUPLICADO.</small> }</div>
+                  </div></fieldset>
+                }
+                @if (!p.remesaAceptada) {
+                  <fieldset><legend>Carga y quién recibe</legend><div class="formulario">
+                    <div class="campo"><label for="ex-peso">Cantidad cargada (kg)</label><input id="ex-peso" type="number" min="0" name="peso" [(ngModel)]="f.pesoKg" required /></div>
+                    @if (p.sedesCliente?.length) {
+                      <div class="campo ancho"><label for="ex-sede">Sede del cliente que recibe</label>
+                        <select id="ex-sede" name="sedeCli" [ngModel]="sedeElegida()" (ngModelChange)="elegirSede($event)">
+                          <option value="">Automático / otro destinatario</option>
+                          @for (x of p.sedesCliente; track x.sede) { <option [value]="x.sede">Sede {{ x.sede }} · {{ x.nombre }} ({{ x.codMunicipio }})</option> }
+                        </select></div>
+                    }
+                    <div class="campo"><label for="ex-dt">Otro destinatario</label>
+                      <select id="ex-dt" name="dtipo" [(ngModel)]="f.destinatario.tipoId"><option value="">Automático (destino o sede del cliente)</option>@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
+                    @if (f.destinatario.tipoId) {
+                      <div class="campo"><label for="ex-dn">Documento del destinatario</label><input id="ex-dn" name="dnum" [(ngModel)]="f.destinatario.numId" maxlength="15" /></div>
+                      <div class="campo"><label for="ex-ds">Sede del destinatario</label><input id="ex-ds" name="dsede" [(ngModel)]="f.destinatario.sede" maxlength="6" /></div>
+                    }
+                  </div></fieldset>
+                } @else {
+                  <p class="mensaje info">La remesa ya fue aceptada por el RNDC: sus datos no se pueden cambiar.</p>
+                }
+              </div>
+              <div class="col-fijo">
+                <h3 class="titulo-col">Va fijo <small>(configuración, cliente y maestros)</small></h3>
+                @if (p.destinatario; as d) {
+                  <div class="destinatario" [class.mal]="d.origen === 'cliente'">
+                    <span class="etiqueta">Destinatario</span>
+                    <strong>{{ d.tipoId === 'N' ? 'NIT' : d.tipoId === 'C' ? 'C.C.' : d.tipoId }} {{ d.numId }}</strong>
+                    <span><span class="chip sin-punto">Sede {{ d.sede || '—' }}</span> {{ d.nombreSede || '(sin nombre registrado)' }}</span>
+                    <small>{{ origenDestinatario(d.origen) }}{{ d.municipio ? ' · municipio ' + d.municipio : '' }}</small>
+                  </div>
+                }
+                @for (sec of secciones(p.remesa.variables, 'remesa'); track sec.titulo) {
+                  <div class="seccion"><h4>{{ sec.titulo }}</h4>
+                    <dl class="fijos">@for (x of sec.items; track x[0]) { <dt>{{ x[0] }}</dt><dd>{{ x[1] || '—' }}</dd> }</dl></div>
+                }
+              </div>
+            </div>
+          </section>
+
+          <!-- ── Manifiesto ── -->
+          <section [hidden]="pestana() !== 'manifiesto'" role="tabpanel">
+            <div class="dos-col">
+              <div class="col-ingresa">
+                <h3 class="titulo-col">Se ingresa o corrige</h3>
+                @if (p.documentos.manifiesto.estado !== 'aceptado') {
+                  <fieldset [class.resaltar]="duplicado()"><legend>Número de manifiesto</legend><div class="formulario">
+                    <div class="campo"><label for="ex-nm">N° de manifiesto</label>
+                      <input id="ex-nm" name="nm" maxlength="15" [(ngModel)]="f.numeroManifiesto" style="text-transform:uppercase" [placeholder]="'Automático: ' + p.numeros?.manifiesto" />
+                      <small>Vacío = numeración automática. Escríbalo solo si el RNDC respondió DUPLICADO.</small></div>
+                  </div></fieldset>
+                }
+                <fieldset><legend>Valores</legend><div class="formulario">
+                  @if (puedeValores) {
+                    <div class="campo"><label for="ex-fl">Flete pactado</label><div class="moneda"><input id="ex-fl" moneda name="flete" [(ngModel)]="f.flete" required /></div></div>
+                    <div class="campo"><label for="ex-an">Anticipo</label><div class="moneda"><input id="ex-an" moneda name="anticipo" [(ngModel)]="f.anticipo" /></div></div>
+                  } @else {
+                    <div class="campo"><span class="etiqueta">Flete pactado</span><strong>{{ f.flete | pesos }}</strong></div>
+                    <div class="campo"><span class="etiqueta">Anticipo</span><strong>{{ f.anticipo | pesos }}</strong></div>
+                  }
+                  <div class="campo ancho"><label for="ex-obs">Observaciones</label><input id="ex-obs" name="obs" maxlength="200" [(ngModel)]="f.observaciones" /></div>
+                </div></fieldset>
+                @if (p.destinoManifiesto && p.destinatario?.municipio && p.destinatario.municipio !== f.codDestino) {
+                  <p class="sutil nota-num">El manifiesto irá al municipio <strong>{{ p.destinoManifiesto }}</strong>, el de la sede del destinatario{{ p.destinatario.nombreSede ? ' (' + p.destinatario.nombreSede + ')' : '' }}, como lo exige el RNDC.</p>
+                }
+              </div>
+              <div class="col-fijo">
+                <h3 class="titulo-col">Va fijo <small>(configuración, vehículo y cálculos)</small></h3>
+                @if (p.valores; as val) {
+                  <table class="valores" aria-label="Valores del viaje como los calcula el RNDC">
+                    <tbody>
+                      <tr><td>Valor a pagar por el viaje</td><td class="num">{{ val.flete | pesos }}</td></tr>
+                      <tr><td>Retención en la fuente</td><td class="num">{{ val.retefuente | pesos }}</td></tr>
+                      <tr><td>Retención ICA</td><td class="num">{{ val.ica | pesos }}</td></tr>
+                      <tr><td>Retención FOPAT (0,1 %){{ val.fopatAplica ? '' : ' · no aplica' }}</td><td class="num">{{ val.fopat | pesos }}</td></tr>
+                      <tr class="total"><td>Neto a pagar</td><td class="num">{{ val.neto | pesos }}</td></tr>
+                      <tr><td>Valor anticipo</td><td class="num">{{ val.anticipo | pesos }}</td></tr>
+                      <tr class="total"><td>Saldo por pagar</td><td class="num">{{ val.saldo | pesos }}</td></tr>
+                    </tbody>
+                  </table>
+                  @if (val.anticipoAjustado) {
+                    <p class="nota-valores">El anticipo registrado ({{ val.anticipoRegistrado | pesos }}) supera el neto a pagar: se enviará y guardará como {{ val.anticipo | pesos }}, como lo exige el RNDC.</p>
+                  }
+                }
+                @for (sec of secciones(p.manifiesto.variables, 'manifiesto'); track sec.titulo) {
+                  <div class="seccion"><h4>{{ sec.titulo }}</h4>
+                    <dl class="fijos">@for (x of sec.items; track x[0]) { <dt>{{ x[0] }}</dt><dd>{{ x[1] || '—' }}</dd> }</dl></div>
+                }
+              </div>
+            </div>
+          </section>
+
+          <!-- ── Lo que se envía (variables exactas) ── -->
+          <section [hidden]="pestana() !== 'envio'" role="tabpanel" class="variables">
+            <p class="sutil nota-num">Así exactamente se enviará al RNDC (se actualiza al presionar «Guardar cambios»).</p>
+            <div class="dos-col">
+              @for (doc of [['Remesa', p.remesa], ['Manifiesto', p.manifiesto]]; track doc[0]) {
+                <div><h4>{{ doc[0] }}</h4>
+                  <table><tbody>@for (x of doc[1].variables; track x[0]) { <tr><td class="sutil">{{ x[0] }}</td><td>{{ x[1] }}</td></tr> }</tbody></table></div>
               }
             </div>
-            @if (p.destinatario; as d) {
-              <p class="dest" [class.mal]="d.origen === 'cliente'">
-                Se enviará como destinatario: <strong>{{ d.tipoId }} {{ d.numId }} · sede {{ d.sede || '(sin sede)' }}{{ d.nombreSede ? ' ' + d.nombreSede : '' }}</strong>
-                — {{ origenDestinatario(d.origen) }}
-              </p>
-            }
-            </fieldset>
-          }
-
-          <fieldset><legend>Valores (manifiesto)</legend><div class="formulario">
-            @if (puedeValores) {
-              <div class="campo"><label for="ex-fl">Flete pactado</label><div class="moneda"><input id="ex-fl" moneda name="flete" [(ngModel)]="f.flete" required /></div></div>
-              <div class="campo"><label for="ex-an">Anticipo</label><div class="moneda"><input id="ex-an" moneda name="anticipo" [(ngModel)]="f.anticipo" /></div></div>
-            } @else {
-              <div class="campo"><span class="etiqueta">Flete pactado</span><strong>{{ f.flete | pesos }}</strong></div>
-              <div class="campo"><span class="etiqueta">Anticipo</span><strong>{{ f.anticipo | pesos }}</strong></div>
-            }
-            <div class="campo ancho"><label for="ex-obs">Observaciones</label><input id="ex-obs" name="obs" maxlength="200" [(ngModel)]="f.observaciones" /></div>
-          </div>
-          @if (p.valores; as val) {
-            <table class="valores" aria-label="Valores del viaje como los calcula el RNDC">
-              <tbody>
-                <tr><td>Valor a pagar por el viaje</td><td class="num">{{ val.flete | pesos }}</td></tr>
-                <tr><td>Retención en la fuente</td><td class="num">{{ val.retefuente | pesos }}</td></tr>
-                <tr><td>Retención ICA</td><td class="num">{{ val.ica | pesos }}</td></tr>
-                <tr><td>Retención FOPAT (0,1 %){{ val.fopatAplica ? '' : ' · no aplica' }}</td><td class="num">{{ val.fopat | pesos }}</td></tr>
-                <tr class="total"><td>Neto a pagar</td><td class="num">{{ val.neto | pesos }}</td></tr>
-                <tr><td>Valor anticipo</td><td class="num">{{ val.anticipo | pesos }}</td></tr>
-                <tr class="total"><td>Saldo por pagar</td><td class="num">{{ val.saldo | pesos }}</td></tr>
-              </tbody>
-            </table>
-            @if (val.anticipoAjustado) {
-              <p class="nota-valores">El anticipo registrado ({{ val.anticipoRegistrado | pesos }}) supera el neto a pagar: se enviará y guardará como {{ val.anticipo | pesos }}, como lo exige el RNDC.</p>
-            }
-          }
-          </fieldset>
+          </section>
         </form>
-
-        <details class="variables"><summary>Ver lo que se enviará al RNDC</summary>
-          @for (doc of [['Remesa', p.remesa], ['Manifiesto', p.manifiesto]]; track doc[0]) {
-            <h4>{{ doc[0] }}</h4>
-            <table><tbody>@for (x of doc[1].variables; track x[0]) { <tr><td class="sutil">{{ x[0] }}</td><td>{{ x[1] }}</td></tr> }</tbody></table>
-          }
-        </details>
       } @else {
         <span class="esqueleto"></span>
       }
@@ -283,7 +334,23 @@ import { Confirmar } from './confirmar';
     fieldset + fieldset { margin-top: 12px; }
     .dest { margin: 10px 0 0; font-size: 13px; color: var(--gris-7); }
     .dest.mal { color: var(--rojo-texto); }
-    .variables { margin-top: 14px; }
+    .variables { margin-top: 4px; }
+    .pestanas { margin: 4px 0 14px; }
+    .pestanas button { display: inline-flex; align-items: center; gap: 6px; }
+    .chip.mini { font-size: 10.5px; padding: 1px 6px; }
+    .punto-alerta { width: 8px; height: 8px; border-radius: 50%; background: var(--rojo); display: inline-block; }
+    .dos-col { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+    .titulo-col { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--gris-6); }
+    .titulo-col small { text-transform: none; letter-spacing: 0; font-weight: 400; }
+    .col-fijo { background: var(--gris-1); border: 1px solid var(--gris-2); border-radius: var(--radio); padding: 12px 14px; }
+    .seccion { background: var(--gris-0); border: 1px solid var(--gris-15); border-radius: 10px; padding: 8px 12px; margin-top: 8px; }
+    .seccion h4 { margin: 0 0 4px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--primario-texto); }
+    .fijos { display: grid; grid-template-columns: minmax(110px, auto) 1fr; gap: 3px 12px; margin: 0; font-size: 13px; }
+    .fijos dt { color: var(--gris-6); } .fijos dd { margin: 0; font-weight: 600; word-break: break-word; }
+    .destinatario { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--gris-0); border: 1px solid var(--gris-2); font-size: 13.5px; }
+    .destinatario.mal { border-color: var(--rojo); }
+    .destinatario .etiqueta { font-size: 12px; color: var(--gris-6); }
+    @media (max-width: 820px) { .dos-col { grid-template-columns: 1fr; } }
     .variables table { font-size: 12.5px; }
     .variables td { padding: 4px 8px; }
   `],
@@ -300,6 +367,79 @@ export class ExpedirRndc {
   readonly tipos = Object.entries(TIPOS_ID);
   readonly viaje = signal<any>(null);
   readonly previa = signal<any>(null);
+  readonly pestana = signal<'maestros' | 'remesa' | 'manifiesto' | 'envio'>('remesa');
+  // Vehículo o personas sin registrar en el RNDC o con datos por completar
+  readonly maestrosPendientes = computed(() => (this.previa()?.maestros || []).some((m: any) => m.faltantes?.length || ['no_existe', 'error', 'sin_enviar'].includes(m.estado)));
+
+  // Datos que van fijos (no se editan en esta ventana), con nombres claros
+  private static readonly NOMBRES: Record<string, string> = {
+    CONSECUTIVOREMESA: 'N° de remesa', CODOPERACIONTRANSPORTE: 'Tipo de operación', CODNATURALEZACARGA: 'Naturaleza de la carga',
+    CANTIDADCARGADA: 'Cantidad cargada', UNIDADMEDIDACAPACIDAD: 'Unidad de medida', CODTIPOEMPAQUE: 'Tipo de empaque',
+    MERCANCIAREMESA: 'Código de mercancía', DESCRIPCIONCORTAPRODUCTO: 'Producto', CODTIPOIDREMITENTE: 'Tipo doc. remitente',
+    NUMIDREMITENTE: 'Remitente', CODSEDEREMITENTE: 'Sede del remitente (cargue)', CODTIPOIDDESTINATARIO: 'Tipo doc. destinatario',
+    NUMIDDESTINATARIO: 'Destinatario', CODSEDEDESTINATARIO: 'Sede del destinatario (descargue)', CODTIPOIDPROPIETARIO: 'Tipo doc. propietario',
+    NUMIDPROPIETARIO: 'Propietario de la carga', CODSEDEPROPIETARIO: 'Sede del propietario', DUENOPOLIZA: 'Dueño de la póliza',
+    NUMPOLIZATRANSPORTE: 'N° de póliza', FECHAVENCIMIENTOPOLIZACARGA: 'Vence la póliza', COMPANIASEGURO: 'Aseguradora (NIT)',
+    HORASPACTOCARGA: 'Horas pactadas de cargue', MINUTOSPACTOCARGA: 'Minutos pactados de cargue', HORASPACTODESCARGUE: 'Horas pactadas de descargue',
+    MINUTOSPACTODESCARGUE: 'Minutos pactados de descargue', FECHACITAPACTADACARGUE: 'Cita de cargue', HORACITAPACTADACARGUE: 'Hora cita de cargue',
+    FECHACITAPACTADADESCARGUE: 'Cita de descargue', HORACITAPACTADADESCARGUEREMESA: 'Hora cita de descargue',
+    CODRESPONSABLEPAGOCARGUE: 'Paga el cargue', CODRESPONSABLEPAGODESCARGUE: 'Paga el descargue',
+    NUMMANIFIESTOCARGA: 'N° de manifiesto', FECHAEXPEDICIONMANIFIESTO: 'Fecha de expedición', CODMUNICIPIOORIGENMANIFIESTO: 'Origen (municipio)',
+    CODMUNICIPIODESTINOMANIFIESTO: 'Destino (municipio)', CODIDTITULARMANIFIESTO: 'Tipo doc. titular', NUMIDTITULARMANIFIESTO: 'Titular',
+    NUMPLACA: 'Placa', NUMPLACAREMOLQUE: 'Remolque', CODIDCONDUCTOR: 'Tipo doc. conductor', NUMIDCONDUCTOR: 'Conductor',
+    VALORFLETEPACTADOVIAJE: 'Flete pactado', RETENCIONFUENTEMANIFIESTO: 'Retención en la fuente', RETENCIONICAMANIFIESTOCARGA: 'Retención ICA',
+    VALORANTICIPOMANIFIESTO: 'Anticipo', CODMUNICIPIOPAGOSALDO: 'Municipio de pago del saldo', FECHAPAGOSALDOMANIFIESTO: 'Fecha de pago del saldo',
+    CODRESPONSABLEPAGOSALDO: 'Paga el saldo', OBSERVACIONES: 'Observaciones', RETENCIONFOPAT: 'Retención FOPAT', ACEPTACIONELECTRONICA: 'Aceptación electrónica',
+  };
+  // En cada pestaña no se repite en «fijo» lo que se edita a la izquierda ni el usuario/NIT de la empresa
+  private static readonly EDITABLES: Record<string, string[]> = {
+    remesa: ['CONSECUTIVOREMESA', 'CANTIDADCARGADA', 'CODTIPOIDDESTINATARIO', 'NUMIDDESTINATARIO', 'CODSEDEDESTINATARIO'],
+    manifiesto: ['NUMMANIFIESTOCARGA', 'VALORFLETEPACTADOVIAJE', 'VALORANTICIPOMANIFIESTO', 'OBSERVACIONES', 'RETENCIONFUENTEMANIFIESTO', 'RETENCIONICAMANIFIESTOCARGA', 'RETENCIONFOPAT'],
+  };
+  // Secciones de la remesa y el manifiesto como en el formulario del RNDC; [etiqueta, variables que se unen en una línea]
+  private static readonly SECCIONES: Record<string, { titulo: string; campos: [string, string[]][] }[]> = {
+    remesa: [
+      { titulo: 'Propietario de la carga', campos: [['Propietario', ['CODTIPOIDPROPIETARIO', 'NUMIDPROPIETARIO']], ['Sede', ['CODSEDEPROPIETARIO']]] },
+      { titulo: 'Datos generales', campos: [['Tipo de operación', ['CODOPERACIONTRANSPORTE']], ['Tipo de empaque', ['CODTIPOEMPAQUE']]] },
+      { titulo: 'Sitio de cargue', campos: [['Remitente', ['CODTIPOIDREMITENTE', 'NUMIDREMITENTE']], ['Sede', ['CODSEDEREMITENTE']],
+        ['Cita', ['FECHACITAPACTADACARGUE', 'HORACITAPACTADACARGUE']], ['Tiempo pactado', ['HORASPACTOCARGA', 'MINUTOSPACTOCARGA']]] },
+      { titulo: 'Sitio de descargue', campos: [['Cita', ['FECHACITAPACTADADESCARGUE', 'HORACITAPACTADADESCARGUEREMESA']], ['Tiempo pactado', ['HORASPACTODESCARGUE', 'MINUTOSPACTODESCARGUE']]] },
+      { titulo: 'Producto', campos: [['Naturaleza', ['CODNATURALEZACARGA']], ['Código', ['MERCANCIAREMESA']], ['Descripción', ['DESCRIPCIONCORTAPRODUCTO']]] },
+      { titulo: 'Cantidades', campos: [['Unidad de medida', ['UNIDADMEDIDACAPACIDAD']]] },
+      { titulo: 'Seguro de la mercancía', campos: [['Tomador', ['DUENOPOLIZA']], ['Póliza', ['NUMPOLIZATRANSPORTE']], ['Vence', ['FECHAVENCIMIENTOPOLIZACARGA']], ['Aseguradora (NIT)', ['COMPANIASEGURO']]] },
+      { titulo: 'Pagos', campos: [['Paga el cargue', ['CODRESPONSABLEPAGOCARGUE']], ['Paga el descargue', ['CODRESPONSABLEPAGODESCARGUE']]] },
+    ],
+    manifiesto: [
+      { titulo: 'Características generales', campos: [['Tipo de manifiesto', ['CODOPERACIONTRANSPORTE']], ['Fecha de expedición', ['FECHAEXPEDICIONMANIFIESTO']],
+        ['Origen', ['CODMUNICIPIOORIGENMANIFIESTO']], ['Destino', ['CODMUNICIPIODESTINOMANIFIESTO']]] },
+      { titulo: 'Titular del manifiesto', campos: [['Titular', ['CODIDTITULARMANIFIESTO', 'NUMIDTITULARMANIFIESTO']]] },
+      { titulo: 'Vehículo', campos: [['Placa', ['NUMPLACA']], ['Remolque', ['NUMPLACAREMOLQUE']]] },
+      { titulo: 'Conductor', campos: [['Conductor', ['CODIDCONDUCTOR', 'NUMIDCONDUCTOR']]] },
+      { titulo: 'Pago del saldo', campos: [['Lugar', ['CODMUNICIPIOPAGOSALDO']], ['Fecha', ['FECHAPAGOSALDOMANIFIESTO']], ['Responsable', ['CODRESPONSABLEPAGOSALDO']],
+        ['Paga el cargue', ['CODRESPONSABLEPAGOCARGUE']], ['Paga el descargue', ['CODRESPONSABLEPAGODESCARGUE']]] },
+      { titulo: 'Datos de control', campos: [['Aceptación electrónica', ['ACEPTACIONELECTRONICA']], ['Empresa de monitoreo', ['NUMNITEMPRESAMONITOREO']]] },
+    ],
+  };
+  secciones(variables: string[][] | undefined, doc: 'remesa' | 'manifiesto') {
+    const v = new Map((variables || []).map(([k, val]) => [k, val]));
+    const usados = new Set<string>([...(ExpedirRndc.EDITABLES[doc] || []), 'NUMNITEMPRESATRANSPORTE', 'REMESA', 'REMESASMAN']);
+    const salida = ExpedirRndc.SECCIONES[doc].map(sec => {
+      const items = sec.campos.map(([etq, claves]) => { claves.forEach(k => usados.add(k));
+        const TIPO: Record<string, string> = { N: 'NIT', C: 'C.C.', E: 'C.E.', P: 'Pasaporte', T: 'T.I.', U: 'NUIP' };
+        const partes = claves.map(k => (/^COD(TIPO)?ID/.test(k) ? TIPO[v.get(k) || ''] || v.get(k) : v.get(k))).filter(x => x !== undefined && x !== '');
+        return [etq, partes.join(claves.length > 1 && claves[0].startsWith('FECHA') ? ' ' : claves.length > 1 && claves[0].startsWith('HORAS') ? ' h ' : ' ')] as [string, string];
+      }).filter(([, val], i) => val !== '' || sec.campos[i][1].some(k => v.has(k)));
+      return { titulo: sec.titulo, items };
+    }).filter(sec => sec.items.length);
+    // Variables extra que exija el RNDC a la empresa y no estén en ninguna sección
+    const otras = (variables || []).filter(([k]) => !usados.has(k)).map(([k, val]) => [ExpedirRndc.NOMBRES[k] || k, val] as [string, string]);
+    if (otras.length) salida.push({ titulo: 'Otros datos', items: otras });
+    return salida;
+  }
+  fijos(variables: string[][] | undefined, doc: 'remesa' | 'manifiesto'): string[][] {
+    const ocultar = new Set([...(ExpedirRndc.EDITABLES[doc] || []), 'NUMNITEMPRESATRANSPORTE', 'REMESA', 'REMESASMAN']);
+    return (variables || []).filter(([k]) => !ocultar.has(k)).map(([k, v]) => [k, ExpedirRndc.NOMBRES[k] || k, v]);
+  }
   readonly form = signal<any>({});
   readonly trabajando = signal(false);
   readonly resultado = signal<{ ok: boolean; texto: string } | null>(null);
@@ -334,6 +474,9 @@ export class ExpedirRndc {
       const origen = p.manifiesto.variables.find((x: string[]) => x[0] === 'CODMUNICIPIOORIGENMANIFIESTO')?.[1];
       if (!this.form().codOrigen && origen) this.form.update(f => ({ ...f, codOrigen: origen }));
       this.previa.set(p);
+      // Abre la pestaña donde está el problema: rechazo de la remesa o del manifiesto, o datos de vehículo/personas
+      const proceso = p.ultimoError?.proceso;
+      this.pestana.set(proceso === 4 ? 'manifiesto' : proceso === 3 ? 'remesa' : this.maestrosPendientes() ? 'maestros' : p.remesaAceptada ? 'manifiesto' : 'remesa');
     } catch (e) { this.avisos.error(e); this.cerrar.emit(); }
   }
 

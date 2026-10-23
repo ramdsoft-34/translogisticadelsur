@@ -46,13 +46,16 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
                 @if (puedeTarifas) { <button class="pequeno primario" (click)="nuevaTarifa()"><app-icono nombre="mas" [tam]="15" />Destino</button> }</div></div>
             <div class="filtro-rapido"><input type="search" placeholder="Buscar destino o municipio" aria-label="Buscar destino o municipio" [value]="qTar()" (input)="qTar.set($any($event.target).value)" /></div>
             <div class="tabla-caja" style="box-shadow:none">
-              <table><thead><tr><th>Destino</th><th>Municipio</th><th class="num">Tarifa</th><th class="num">Flete</th><th class="num">Anticipo</th><th class="num">Aux. cobro / pago</th><th></th></tr></thead>
+              <table><thead><tr><th>Destino</th><th>Municipio</th><th>Sede de descargue</th><th class="num">Tarifa</th><th class="num">Flete</th><th class="num">Anticipo</th><th class="num">Aux. cobro / pago</th><th></th></tr></thead>
                 <tbody>@for (t of tarifasVisibles(); track t._id) {
                   <tr [class.sutil]="!t.activo"><td><strong>{{ t.destino }}</strong>@if (t.tipoCobro === 'unidad') { <span class="chip info">por unidad</span> }</td>
-                    <td>{{ t.codMunicipio }}</td><td class="num">{{ t.tarifaCliente | pesos }}</td><td class="num">{{ t.fleteConductor | pesos }}</td>
+                    <td>{{ t.codMunicipio }}</td>
+                    <td>@if (t.destinatario?.sede) { <span class="chip sin-punto">Sede {{ t.destinatario.sede }}</span> {{ t.sedeNombre || '' }}
+                      @if (t.destinatario?.numId && t.destinatario.numId !== c.nit) { <small class="sutil d-bloque">{{ t.destinatario.tipoId }} {{ t.destinatario.numId }}</small> } } @else { <span class="sutil">—</span> }</td>
+                    <td class="num">{{ t.tarifaCliente | pesos }}</td><td class="num">{{ t.fleteConductor | pesos }}</td>
                     <td class="num">{{ t.anticipoHabitual | pesos }}</td><td class="num">{{ t.tarifaAuxiliar | pesos }} / {{ t.auxiliarPagado | pesos }}</td>
                     <td>@if (puedeTarifas) { <button class="pequeno" (click)="editarTarifa(t)">Editar</button> }</td></tr>
-                } @empty { <tr><td colspan="7" class="vacio">Sin destinos. Agregue los destinos habituales con su tarifa.</td></tr> }</tbody></table>
+                } @empty { <tr><td colspan="8" class="vacio">Sin destinos. Agregue los destinos habituales con su tarifa.</td></tr> }</tbody></table>
             </div>
           </div>
         } @else { <div class="tarjeta vacio">Seleccione un cliente para ver sus destinos y tarifas.</div> }
@@ -92,15 +95,23 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
         <div class="campo"><label for="to">Tipo de manifiesto</label><select id="to" name="op" [(ngModel)]="t.operacion"><option value="">El de la empresa</option><option value="G">General</option><option value="U">Municipal o urbano</option></select></div>
         <fieldset class="ancho"><legend>Destinatario en el RNDC (vacío = el mismo cliente)</legend><div class="formulario">
           <div class="campo"><label for="dt">Tipo</label><select id="dt" name="dt" [(ngModel)]="t.destinatario.tipoId"><option value=""></option>@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
-          <div class="campo"><label for="dn">Documento</label><input id="dn" name="dn" [(ngModel)]="t.destinatario.numId" /></div>
-          <div class="campo"><label for="ds">Sede</label><input id="ds" name="ds" maxlength="6" [(ngModel)]="t.destinatario.sede" /></div>
+          <div class="campo"><label for="dn">Documento</label><input id="dn" name="dn" [(ngModel)]="t.destinatario.numId" (change)="cargarSedes()" /></div>
+          <div class="campo"><label for="ds">Sede</label>
+            @if (sedesDestinatario().length) {
+              <select id="ds" name="ds" [(ngModel)]="t.destinatario.sede">
+                <option value="">Sin sede</option>
+                @for (s of sedesDestinatario(); track s.sede.codigo) { <option [value]="s.sede.codigo">{{ s.sede.codigo }} · {{ s.sede.nombre }}{{ s.codMunicipio ? ' (' + s.codMunicipio + ')' : '' }}</option> }
+              </select>
+            } @else { <input id="ds" name="ds" maxlength="6" [(ngModel)]="t.destinatario.sede" /> }
+            <small>Sedes registradas del {{ t.destinatario.numId ? 'destinatario' : 'cliente' }} (código y nombre del RNDC).</small></div>
         </div></fieldset>
         @if (t._id) { <label class="casilla"><input type="checkbox" name="activo" [(ngModel)]="t.activo" />Activo</label> }
       </form>
       <ng-container pie><button type="button" (click)="abiertoTarifa.set(false)">Cancelar</button>
         <button class="primario" type="submit" form="form-tarifa">Guardar</button></ng-container>
     </app-modal>`,
-  styles: [`.columnas { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+  styles: [`.d-bloque { display: block; }
+    .columnas { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
     tr.activo { background: var(--primario-claro); box-shadow: inset 4px 0 0 var(--primario); }
     @media (max-width: 900px) { .columnas { grid-template-columns: 1fr; } }`],
 })
@@ -153,11 +164,20 @@ export class Clientes {
     } catch (e) { this.avisos.error(e); }
   }
 
-  nuevaTarifa() { this.tarifaForm.set(tarifaVacia()); this.abiertoTarifa.set(true); }
+  nuevaTarifa() { this.tarifaForm.set(tarifaVacia()); this.cargarSedes(); this.abiertoTarifa.set(true); }
   editarTarifa(t: any) {
     const b = tarifaVacia();
     this.tarifaForm.set({ ...b, ...t, destinatario: { ...b.destinatario, ...t.destinatario } });
+    this.cargarSedes();
     this.abiertoTarifa.set(true);
+  }
+  // Sedes (código y nombre) del destinatario del destino; sin destinatario, las del cliente
+  readonly sedesDestinatario = signal<any[]>([]);
+  async cargarSedes() {
+    const doc = String(this.tarifaForm().destinatario?.numId || this.sel()?.nit || '').replace(/\D/g, '');
+    if (!doc) { this.sedesDestinatario.set([]); return; }
+    try { this.sedesDestinatario.set((await this.api.get<any>('/maestros/terceros/sedes', { numId: doc })).sedes.filter((x: any) => x.sede?.codigo)); }
+    catch { this.sedesDestinatario.set([]); }
   }
 
   async guardarTarifa() {

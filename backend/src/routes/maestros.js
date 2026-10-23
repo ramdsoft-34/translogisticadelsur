@@ -75,7 +75,14 @@ r.get('/tarifas', ver, async (req, res) => {
   const filtro = deEmpresa(req);
   if (req.query.cliente) filtro.cliente = req.query.cliente;
   if (req.query.activos === '1') filtro.activo = true;
-  res.json(await Tarifa.find(filtro).sort({ destino: 1 }).populate(pob(req.empresaId, 'cliente', 'nombre')).lean());
+  const tarifas = await Tarifa.find(filtro).sort({ destino: 1 }).populate(pob(req.empresaId, 'cliente', 'nombre nit')).lean();
+  // Nombre de la sede del destinatario (código y nombre, como en el RNDC); sin destinatario = el mismo cliente
+  const docDe = (t) => String(t.destinatario?.numId || t.cliente?.nit || '').replace(/\D/g, '');
+  const docs = [...new Set(tarifas.filter(t => t.destinatario?.sede).map(docDe).filter(Boolean))];
+  const sedes = new Map((docs.length ? await Tercero.find(deEmpresa(req, { numId: { $in: docs }, 'sede.codigo': { $ne: '' } })).select('numId sede codMunicipio').lean() : [])
+    .map(s => [`${s.numId}|${s.sede.codigo}`, s]));
+  res.json(tarifas.map(t => { const s = t.destinatario?.sede ? sedes.get(`${docDe(t)}|${t.destinatario.sede}`) : null;
+    return s ? { ...t, sedeNombre: s.sede.nombre, sedeMunicipio: s.codMunicipio } : t; }));
 });
 r.post('/tarifas', editarTarifas, async (req, res) => {
   const d = tarifaSchema.parse(req.body);
