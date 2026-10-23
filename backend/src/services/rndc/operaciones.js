@@ -620,6 +620,14 @@ export async function traerTercero(empresaId, clave, usuarioId, { tipoId, numId,
 }
 
 // Datos del vehículo según la respuesta del RNDC (último registro de su historia).
+// No se reemplaza un SOAT por otro que vence antes (p. ej. una renovación registrada a mano que el RNDC aún no tiene)
+function sinRetrocederSoat(doc, datos) {
+  const actual = doc.soat?.vence ? new Date(doc.soat.vence).getTime() : null;
+  const nuevo = datos.soat?.vence ? datos.soat.vence.getTime() : null;
+  if (actual && nuevo && nuevo < actual) { const { soat, ...resto } = datos; return resto; }
+  return datos;
+}
+
 function datosVehiculoRndc(d) {
   return {
     configuracion: txt(d.codconfiguracionunidadcarga), marca: txt(d.codmarcavehiculocarga), linea: txt(d.codlineavehiculocarga),
@@ -662,7 +670,7 @@ export async function traerVehiculo(empresaId, clave, usuarioId, { placa }) {
   const existente = await Vehiculo.findOne({ empresa: empresaId, placa });
   const doc = existente || new Vehiculo({ empresa: empresaId, placa });
   if (!existente && !txt(d.unidadmedidacapacidad)) doc.unidadMedida = '1';
-  aplicarDatos(doc, datosVehiculoRndc(d));
+  aplicarDatos(doc, sinRetrocederSoat(doc, datosVehiculoRndc(d)));
   marcarSincronizado(empresa, doc);
   await doc.save();
   return { ok: true, nuevo: !existente, id: doc._id, placa };
@@ -681,7 +689,7 @@ export async function actualizarVehiculo(empresaId, clave, usuarioId, placa) {
   const d = registroVigente(r.documentos);
   if (!d) return { placa, estado: 'no_encontrado', mensaje: 'El RNDC no tiene registrado ese vehículo para su empresa' };
   const empresa = await empresaConRndc(empresaId);
-  const campos = aplicarDatos(doc, datosVehiculoRndc(d));
+  const campos = aplicarDatos(doc, sinRetrocederSoat(doc, datosVehiculoRndc(d)));
   marcarSincronizado(empresa, doc);
   await doc.save();
   return { placa, id: doc._id, estado: campos.length ? 'actualizado' : 'sin_cambios', campos,
@@ -697,7 +705,7 @@ export async function reaplicarConsultaVehiculo(empresaId, placa, respuestaXml, 
   const d = r.ok ? registroVigente(r.documentos) : null;
   if (!d) return { placa, estado: 'sin_datos' };
   const antes = { soat: doc.soat?.vence ? doc.soat.vence.toISOString().slice(0, 10) : '', tenedor: doc.tenedor?.numId || '' };
-  const campos = aplicarDatos(doc, datosVehiculoRndc(d));
+  const campos = aplicarDatos(doc, sinRetrocederSoat(doc, datosVehiculoRndc(d)));
   if (campos.length && guardar) { marcarSincronizado(await empresaConRndc(empresaId), doc); await doc.save(); }
   return { placa, estado: campos.length ? 'actualizado' : 'sin_cambios', campos, antes,
     despues: { soat: doc.soat?.vence ? doc.soat.vence.toISOString().slice(0, 10) : '', tenedor: doc.tenedor?.numId || '' } };
