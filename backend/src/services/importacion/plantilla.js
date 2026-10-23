@@ -241,13 +241,16 @@ export async function importarPlantillaViajes(empresaId, buffer, { usuario = nul
   }
   // Guardar terceros: nuevos en bloque, existentes solo completando campos vacíos.
   const existentesT = new Map((await Tercero.find({ empresa: E }).lean()).map(x => [`${x.tipoId}|${x.numId}|${x.sede?.codigo || ''}`, x]));
+  // Una persona (no NIT) es única por documento, sin importar la sede
+  const personas = new Map([...existentesT.values()].filter(x => x.tipoId !== 'N').map(x => [String(x.numId), x]));
   const nuevosT = []; let tA = 0; let tRevisar = 0;
   const ahora = new Date();
   for (const [k, d] of terceros) {
     const { _fuente, ...datos } = d;
     if (!datos.nombres) continue;
-    const ex = existentesT.get(k);
+    const ex = existentesT.get(k) || (datos.tipoId !== 'N' ? personas.get(String(datos.numId)) : null);
     if (ex) {
+      if (!ex._id) continue;
       const set = camposFaltantes(ex, datos);
       if (Object.keys(set).length) { await Tercero.updateOne({ empresa: E, _id: ex._id }, { $set: set }); tA += 1; }
       continue;
@@ -262,6 +265,7 @@ export async function importarPlantillaViajes(empresaId, buffer, { usuario = nul
       tRevisar += 1;
     }
     nuevosT.push(doc);
+    if (doc.tipoId !== 'N') personas.set(String(doc.numId), doc);
   }
   for (let i = 0; i < nuevosT.length; i += 1000) await Tercero.insertMany(nuevosT.slice(i, i + 1000), { ordered: false });
   res.terceros = { nuevos: nuevosT.length, completados: tA, porRevisar: tRevisar, conductoresSinCedula: sinCedula.length };

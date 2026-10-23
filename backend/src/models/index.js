@@ -169,6 +169,12 @@ const terceroSchema = new Schema({
 terceroSchema.plugin(tenantPlugin);
 terceroSchema.index({ empresa: 1, tipoId: 1, numId: 1, 'sede.codigo': 1 }, { unique: true });
 terceroSchema.index({ empresa: 1, nombres: 1, apellido1: 1 });
+// Una persona (cédula, pasaporte…) no se repite en la empresa; con NIT sí, una por sede
+terceroSchema.pre('save', async function () {
+  if (this.tipoId === 'N' || (!this.isNew && !this.isModified('numId') && !this.isModified('tipoId'))) return;
+  const otro = await this.constructor.findOne({ empresa: this.empresa, tipoId: { $ne: 'N' }, numId: this.numId, _id: { $ne: this._id } }).select('_id').lean();
+  if (otro) { const e = new Error(`Ya existe una persona con el documento ${this.numId}`); e.status = 409; throw e; }
+});
 terceroSchema.virtual('nombreCompleto').get(function () {
   return [this.nombres, this.apellido1, this.apellido2].filter(Boolean).join(' ');
 });
