@@ -58,7 +58,7 @@ surTrack.servidor = http.createServer((req, res) => {
     if (m) {
       const v = surTrack.viajes.get(m[1]); if (!v) return json(404, { mensaje: 'no' });
       return json(200, { viaje: v, ultima: null, clientes: (v.clientesSt || []).map(c => ({ clienteId: c.clienteId, nombre: c.nombre, direccion: c.direccion,
-        estadoEntrega: c.estadoEntrega, valorRecibido: c.valorRecibido || 0, fechaEntrega: c.fechaEntrega || null })),
+        estadoEntrega: c.estadoEntrega, valorRecibido: c.valorRecibido || 0, fechaEntrega: c.fechaEntrega || null, entrega: c.entrega || null })),
         ruta: v.clientesSt?.length ? { coordenadas: [{ lat: 1.21, lng: -77.28 }, { lat: 1.22, lng: -77.29 }] } : null, puntos: [{ lat: 1.2136, lng: -77.2811, velocidad: 10, hora: '2026-11-20T10:00:00Z' },
         { lat: 1.2236, lng: -77.2811, velocidad: 25, hora: '2026-11-20T10:05:00Z' }] });
     }
@@ -1029,7 +1029,7 @@ test('Rastreo Sur Track: habilitar, traer vehículos sin duplicar, activar, ver 
   assert.equal(v.status, 201, JSON.stringify(v.body));
   assert.equal(v.body.errorRastreo, '');
   assert.equal(v.body.rastreo.activo, true); assert.equal(v.body.rastreo.estado, 'esperando');
-  assert.match(v.body.rastreo.codigoExterno, /^TLS-\d+$/);
+  assert.match(v.body.rastreo.codigoExterno, /^V-\d+$/, 'el conductor no ve marcas de la plataforma');
   await adm.post(`/api/rastreo/viajes/${v.body._id}/activar`);
   assert.equal(surTrack.viajes.size, 1, 'activar dos veces no duplica');
   let vivo = (await adm.get('/api/rastreo/en-vivo')).body;
@@ -1110,10 +1110,13 @@ test('Rastreo: modalidad solo destino (ruta sugerida) y con clientes (Excel, ent
   // El conductor acepta y entrega a la Tienda Uno
   st2.estado = 'aceptado';
   st2.clientesSt[0].estadoEntrega = 'completa'; st2.clientesSt[0].valorRecibido = 150000;
+  st2.clientesSt[0].entrega = { lugar: { lat: 1.2151, lng: -77.2802, aproximada: false }, observacion: 'Recibió el administrador', fotos: ['https://x/f1.jpg'], conductor: 'Pedro' };
   limpiarCache();
   const r2 = (await adm.get(`/api/rastreo/viajes/${v2._id}/recorrido`)).body;
   assert.equal(r2.clientes.find(c => c.nombre === 'Tienda Uno').estadoEntrega, 'completa');
   assert.ok(r2.eventos.some(e => e.tipo === 'entrega' && e.detalle.startsWith('Tienda Uno')));
+  const ent = r2.clientes.find(c => c.nombre === 'Tienda Uno').entrega;
+  assert.equal(ent.lat, 1.2151); assert.equal(ent.observacion, 'Recibió el administrador'); assert.deepEqual(ent.fotos, ['https://x/f1.jpg']);
   assert.equal((await adm.put(`/api/rastreo/viajes/${v2._id}/paradas`, { modalidad: 'clientes', clientes: [{ nombre: 'X' }] })).status, 409, 'aceptado: ya no se cambian');
   // Terminar: el recorrido queda guardado en Translogística y el historial lo muestra con su resumen
   await adm.post(`/api/rastreo/viajes/${v2._id}/finalizar`);

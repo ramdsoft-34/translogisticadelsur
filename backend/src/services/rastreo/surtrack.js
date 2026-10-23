@@ -140,7 +140,7 @@ export async function activar(empresaId, viajeId, usuarioId, opciones = {}) {
     Cliente.findOne({ empresa: empresaId, _id: v.cliente }).select('nombre').lean(),
   ]);
   const r = await llamar('/viajes', { metodo: 'POST', cuerpo: {
-    referencia: `tls:${empresaId}:${v._id}`, codigo: `TLS-${v.numero}`, placa: v.placa, cedula: cond?.numId || '',
+    referencia: `tls:${empresaId}:${v._id}`, codigo: v.manifiesto?.numero || `V-${v.numero}`, placa: v.placa, cedula: cond?.numId || '',
     valorFlete: Math.max(1, Number(v.flete) || 0), anticipo: Number(v.anticipo) || 0, empresa: cli?.nombre || '',
     ...(await paradasParaSurTrack(paradas)),
   } });
@@ -320,9 +320,14 @@ async function sincronizarEntregas(empresaId, v, externos) {
   if (!actuales.length) cambio = true;
   for (const c of lista) {
     const e = externos.find(x => x.clienteId === c.externoId) || externos.find(x => x.nombre === c.nombre);
-    if (!e || e.estadoEntrega === c.estadoEntrega) continue;
-    Object.assign(c, { estadoEntrega: e.estadoEntrega, valorRecibido: e.valorRecibido || 0, fechaEntrega: e.fechaEntrega || new Date() });
-    nuevos.push(evento('entrega', `${c.nombre}: ${e.estadoEntrega}`)); cambio = true;
+    if (!e) continue;
+    const det = e.entrega ? { lat: e.entrega.lugar?.lat, lng: e.entrega.lugar?.lng, aproximada: !!e.entrega.lugar?.aproximada,
+      observacion: e.entrega.observacion || '', fotos: e.entrega.fotos || [], conductor: e.entrega.conductor || '' } : null;
+    const nuevoEstado = e.estadoEntrega !== c.estadoEntrega;
+    if (!nuevoEstado && JSON.stringify(det || null) === JSON.stringify(c.entrega || null)) continue;
+    Object.assign(c, { estadoEntrega: e.estadoEntrega, valorRecibido: e.valorRecibido || 0, fechaEntrega: e.fechaEntrega || c.fechaEntrega || new Date(), ...(det ? { entrega: det } : {}) });
+    if (nuevoEstado) nuevos.push(evento('entrega', `${c.nombre}: ${e.estadoEntrega}${det?.observacion ? ` — ${det.observacion}` : ''}`));
+    cambio = true;
   }
   if (cambio) await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: { 'rastreo.clientes': lista }, ...(nuevos.length ? { $push: { 'rastreo.eventos': { $each: nuevos } } } : {}) });
   if (nuevos.length && !v.save) v.rastreo.eventos = [...(v.rastreo.eventos || []), ...nuevos];   // objeto plano: se refleja en la respuesta

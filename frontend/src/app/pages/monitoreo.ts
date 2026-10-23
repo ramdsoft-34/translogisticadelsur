@@ -139,9 +139,12 @@ const hace = (h: string | Date | null | undefined) => {
               <p class="sutil nota">{{ r.viaje.conductor }}{{ r.modalidad === 'clientes' ? ' · ' + r.clientes.length + ' cliente(s)' : ' → ' + (r.destino?.nombre || r.viaje.destino) }} · Sur Track {{ r.viaje.codigoExterno }}</p>
               @if (r.clientes?.length) {
                 <ul class="lista-clientes">
-                  @for (c of r.clientes; track $index) {
-                    <li><span class="punto" [style.background]="colorEntrega(c.estadoEntrega)"></span><span class="crece">{{ c.nombre }}<small class="sutil d-bloque">{{ c.direccion }}</small></span>
-                      <span class="chip sin-punto" [class]="claseEntrega(c.estadoEntrega)">{{ textoEntrega(c.estadoEntrega) }}</span></li>
+                  @for (c of r.clientes; track $index; let i = $index) {
+                    <li><span class="num-entrega" [style.background]="colorEntrega(c.estadoEntrega)">{{ i + 1 }}</span>
+                      <span class="crece">{{ c.nombre }}<small class="sutil d-bloque">{{ c.fechaEntrega && c.estadoEntrega !== 'pendiente' ? (c.fechaEntrega | fechaHora) + ' · ' + (c.valorRecibido | pesos) : c.direccion }}</small>
+                        @if (c.entrega?.observacion) { <small class="d-bloque">{{ c.entrega.observacion }}</small> }</span>
+                      <span class="chip sin-punto" [class]="claseEntrega(c.estadoEntrega)">{{ textoEntrega(c.estadoEntrega) }}</span>
+                      @if (c.entrega?.lat !== undefined && c.entrega?.lat !== null) { <button type="button" class="texto pequeno" (click)="verEntrega(c, i)" [attr.aria-label]="'Ver en el mapa la entrega de ' + c.nombre"><app-icono nombre="ubicacion" [tam]="15" /></button> }</li>
                   }
                 </ul>
               }
@@ -159,7 +162,7 @@ const hace = (h: string | Date | null | undefined) => {
         <div class="detalle">
           <div>
             <div #mapaDetalle class="mapa-detalle" role="application" aria-label="Recorrido del viaje"></div>
-            <p class="sutil nota">Línea amarilla: recorrido real · Línea punteada: ruta {{ d.modalidad === 'clientes' ? 'de entrega · Puntos: clientes por estado de entrega' : 'sugerida · Marcador rojo: destino' }}.</p>
+            <p class="sutil nota">Línea amarilla: recorrido real · Línea punteada: ruta {{ d.modalidad === 'clientes' ? 'de entrega · Círculos numerados: lugar donde se hizo cada entrega (toque para ver el detalle)' : 'sugerida · Marcador rojo: destino' }}.</p>
           </div>
           <div>
             <div class="datos-detalle">
@@ -176,8 +179,20 @@ const hace = (h: string | Date | null | undefined) => {
             @if (d.clientes?.length) {
               <h3 class="sub">Clientes ({{ entregadosDe(d) }}/{{ d.clientes.length }} entregados)</h3>
               <ul class="lista-clientes">
-                @for (c of d.clientes; track $index) {
-                  <li><span class="punto" [style.background]="colorEntrega(c.estadoEntrega)"></span><span class="crece">{{ c.nombre }}<small class="sutil d-bloque">{{ c.direccion }}{{ c.fechaEntrega ? ' · ' : '' }}{{ c.fechaEntrega ? (c.fechaEntrega | fechaHora) : '' }}</small></span>
+                @for (c of d.clientes; track $index; let i = $index) {
+                  <li class="entrega-detalle"><span class="num-entrega" [style.background]="colorEntrega(c.estadoEntrega)">{{ i + 1 }}</span>
+                    <span class="crece"><strong>{{ c.nombre }}</strong><small class="sutil d-bloque">{{ c.direccion }}</small>
+                      @if (c.estadoEntrega !== 'pendiente') {
+                        <small class="d-bloque">{{ c.fechaEntrega ? (c.fechaEntrega | fechaHora) + ' · ' : '' }}Recibido {{ c.valorRecibido | pesos }}{{ c.valor ? ' de ' : '' }}{{ c.valor ? (c.valor | pesos) : '' }}</small>
+                        @if (c.entrega?.observacion) { <small class="d-bloque">Observación: {{ c.entrega.observacion }}</small> }
+                        @if (c.entrega?.lat !== undefined && c.entrega?.lat !== null) {
+                          <button type="button" class="texto pequeno enlace-mapa" (click)="verEntrega(c, i)"><app-icono nombre="ubicacion" [tam]="14" />{{ c.entrega.aproximada ? 'Lugar aproximado' : 'Lugar de la entrega' }}</button>
+                        } @else { <small class="sutil d-bloque">Sin ubicación registrada</small> }
+                        @if (c.entrega?.fotos?.length) {
+                          <span class="fotos">@for (f of c.entrega.fotos; track f) { <a [href]="f" target="_blank" rel="noopener"><img [src]="f" alt="Foto de la entrega" loading="lazy" /></a> }</span>
+                        }
+                      }
+                    </span>
                     <span class="chip sin-punto" [class]="claseEntrega(c.estadoEntrega)">{{ textoEntrega(c.estadoEntrega) }}</span></li>
                 }
               </ul>
@@ -245,8 +260,13 @@ const hace = (h: string | Date | null | undefined) => {
     .oculto { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
     .mapa-caja { position: relative; border: 1px solid var(--gris-2); border-radius: var(--radio); overflow: hidden; min-height: 420px; }
     .mapa { position: absolute; inset: 0; }
-    .lista-clientes { list-style: none; padding: 0; margin: 8px 0; max-height: 170px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+    .lista-clientes { list-style: none; padding: 0; margin: 8px 0; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
     .lista-clientes li { display: flex; align-items: center; gap: 8px; font-size: 13px; } .crece { flex: 1; min-width: 0; }
+    .lista-clientes li.entrega-detalle { align-items: flex-start; padding-bottom: 8px; border-bottom: 1px solid var(--gris-15); }
+    .num-entrega { flex: none; width: 22px; height: 22px; border-radius: 50%; color: #fff; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+    .enlace-mapa { padding: 2px 0; height: auto; gap: 4px; }
+    .fotos { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+    .fotos img { width: 54px; height: 54px; object-fit: cover; border-radius: 6px; border: 1px solid var(--gris-2); }
     .d-bloque { display: block; }
     .mas { padding: 10px; text-align: center; }
     .detalle { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; }
@@ -391,7 +411,7 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
       if (this.elegido() !== id) return;
       this.recorrido.set(r);
       this.linea?.remove();
-      this.capas.forEach(c => c.remove()); this.capas = [];
+      this.capas.forEach(c => c.remove()); this.capas = []; this.marcadoresEntrega.clear();
       if (this.mapa) this.pintarParadas(this.mapa, r, this.capas);
       const pts = r.puntos.map((p: any) => [p.lat, p.lng] as L.LatLngTuple);
       if (pts.length > 1 && this.mapa) {
@@ -415,11 +435,39 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
     if (r.modalidad !== 'clientes' && r.destino?.lat !== undefined && r.destino?.lat !== null) capas.push(L.marker([r.destino.lat, r.destino.lng], { icon: L.divIcon({ className: '', iconSize: [24, 24], iconAnchor: [12, 24],
       html: '<div style="width:24px;height:24px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#d63939;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>' }), title: 'Destino' })
       .bindPopup(`<strong>Destino</strong><br>${r.destino.nombre || ''}`).addTo(m));
-    for (const c of r.clientes || []) {
-      if (c.lat === undefined || c.lat === null || c.lng === undefined || c.lng === null) continue;
-      capas.push(L.circleMarker([c.lat, c.lng], { radius: 7, color: '#fff', weight: 2, fillColor: this.colorEntrega(c.estadoEntrega), fillOpacity: 1 })
-        .bindPopup(`<strong>${c.nombre}</strong><br>${c.direccion || ''}<br>${this.textoEntrega(c.estadoEntrega)}`).addTo(m));
-    }
+    (r.clientes || []).forEach((c: any, i: number) => {
+      const e = c.entrega;
+      const lat = e?.lat ?? c.lat; const lng = e?.lng ?? c.lng;
+      if (lat === undefined || lat === null || lng === undefined || lng === null) return;
+      const color = this.colorEntrega(c.estadoEntrega);
+      const icono = L.divIcon({ className: '', iconSize: [24, 24], iconAnchor: [12, 12],
+        html: `<div style="width:24px;height:24px;border-radius:50%;background:${color};color:#fff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:grid;place-items:center;font:700 11px system-ui">${i + 1}</div>` });
+      const marcador = L.marker([lat, lng], { icon: icono, title: c.nombre }).bindPopup(this.popupEntrega(c), { maxWidth: 260 }).addTo(m);
+      this.marcadoresEntrega.set(c.nombre + '|' + i, marcador);
+      capas.push(marcador);
+    });
+  }
+  private marcadoresEntrega = new Map<string, L.Marker>();
+  private esc(t: any) { return String(t ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch]); }
+  private popupEntrega(c: any) {
+    const e = c.entrega || {};
+    const hora = c.fechaEntrega ? new Date(c.fechaEntrega).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '';
+    const pesos = (v: number) => '$ ' + Math.round(v || 0).toLocaleString('es-CO');
+    const fotos = (e.fotos || []).slice(0, 5).map((u: string) => `<a href="${this.esc(u)}" target="_blank" rel="noopener"><img src="${this.esc(u)}" alt="Foto de la entrega" style="width:52px;height:52px;object-fit:cover;border-radius:6px;margin:4px 4px 0 0"></a>`).join('');
+    return `<strong>${this.esc(c.nombre)}</strong><br><span style="color:#666">${this.esc(c.direccion || '')}</span><br>`
+      + `<b>${this.textoEntrega(c.estadoEntrega)}</b>${hora ? ' · ' + hora : ''}`
+      + (c.estadoEntrega !== 'pendiente' ? `<br>Recibido: ${pesos(c.valorRecibido)}${c.valor ? ' de ' + pesos(c.valor) : ''}` : '')
+      + (e.observacion ? `<br>Observación: ${this.esc(e.observacion)}` : '')
+      + (e.conductor ? `<br>Conductor: ${this.esc(e.conductor)}` : '')
+      + (e.lat !== undefined && e.lat !== null ? `<br><small style="color:#666">${e.aproximada ? 'Lugar aproximado (según el recorrido)' : 'Lugar registrado por el GPS del conductor'}</small>` : '')
+      + (fotos ? `<div>${fotos}</div>` : '');
+  }
+  // Centra el mapa en la entrega elegida en la lista y abre su detalle
+  verEntrega(c: any, i: number) {
+    const mk = this.marcadoresEntrega.get(c.nombre + '|' + i);
+    if (!mk) { this.avisos.mostrar('Esta entrega no tiene ubicación registrada', 'info'); return; }
+    const mapa = this.detalle() ? this.mapaDetalle : this.mapa;
+    mapa?.setView(mk.getLatLng(), Math.max(mapa.getZoom(), 15)); mk.openPopup();
   }
   colorEntrega(e: string) { return ({ completa: '#1f9d55', parcial: '#d48806', devolucion: '#d63939', redespacho: '#7c3aed' } as Record<string, string>)[e] || '#9ca3af'; }
   textoEntrega(e: string) { return ({ completa: 'Entregado', parcial: 'Parcial', devolucion: 'Devolución', redespacho: 'Redespacho' } as Record<string, string>)[e] || 'Pendiente'; }
@@ -468,6 +516,7 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
         setTimeout(() => m.invalidateSize(), 250);
         L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(m);
         const capas: L.Layer[] = [];
+        this.marcadoresEntrega.clear();
         this.pintarParadas(m, d, capas);
         const pts = d.puntos.map((p: any) => [p.lat, p.lng] as L.LatLngTuple);
         if (pts.length > 1) capas.push(L.polyline(pts, { color: '#e0ad00', weight: 4 }).addTo(m));
