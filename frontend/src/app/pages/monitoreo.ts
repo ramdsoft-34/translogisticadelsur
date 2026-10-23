@@ -12,6 +12,7 @@ import { Icono } from '../shared/icono';
 import { Modal } from '../shared/modal';
 import { Confirmar } from '../shared/confirmar';
 import { FORMATOS } from '../shared/formato';
+import { ChecklistConductor } from '../shared/checklist-conductor';
 
 const COLORES: Record<string, string> = { en_ruta: '#1f9d55', detenido: '#d48806', sin_senal: '#d63939', esperando: '#3b82f6', llego: '#111111' };
 const PASTO: L.LatLngTuple = [1.2136, -77.2811];
@@ -25,7 +26,7 @@ const hace = (h: string | Date | null | undefined) => {
 // y enlace de los rastreos que se iniciaron desde Cooespatrans.
 @Component({
   selector: 'app-monitoreo',
-  imports: [FormsModule, Icono, Modal, Confirmar, ...FORMATOS],
+  imports: [FormsModule, Icono, Modal, Confirmar, ChecklistConductor, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Monitoreo</h1>
@@ -148,6 +149,7 @@ const hace = (h: string | Date | null | undefined) => {
                   }
                 </ul>
               }
+              <button type="button" class="pequeno" (click)="checklist().abrir(elegido()!)">Checklist del conductor</button>
               @if (puedeRegistrar) {
                 <button type="button" class="peligro pequeno" confirmar="Clic otra vez para terminar el rastreo" (confirmado)="finalizar(elegido()!)">Terminar rastreo</button>
               }
@@ -205,9 +207,12 @@ const hace = (h: string | Date | null | undefined) => {
           </div>
         </div>
       }
-      <ng-container pie><button type="button" (click)="cerrarDetalle()">Cerrar</button></ng-container>
+      <ng-container pie>
+        <button type="button" (click)="checklist().abrir(detalleId)">Checklist del conductor</button>
+        <button type="button" (click)="cerrarDetalle()">Cerrar</button></ng-container>
     </app-modal>
 
+    <app-checklist-conductor />
     <app-modal titulo="Enlazar rastreo a un viaje" [abierto]="!!enlace()" (cerrar)="enlace.set(null)">
       @if (enlace(); as e) {
         <p style="margin-top:0">Rastreo <strong>{{ e.x.codigo }}</strong> de {{ e.x.conductor }} ({{ e.x.placa || 'sin placa' }}). Elija el viaje de Translogística al que corresponde:</p>
@@ -502,9 +507,12 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
   }
 
   readonly detalle = signal<any>(null);
+  detalleId = '';
+  readonly checklist = viewChild.required(ChecklistConductor);
   private contDetalle = viewChild<ElementRef<HTMLDivElement>>('mapaDetalle');
   private mapaDetalle: L.Map | null = null;
   async verDetalle(x: any) {
+    this.detalleId = x._id;
     try {
       const d = await this.api.get<any>(`/rastreo/viajes/${x._id}/recorrido`);
       this.detalle.set(d);

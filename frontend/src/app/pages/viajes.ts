@@ -18,6 +18,7 @@ import { VisorPdf } from '../shared/visor-pdf';
 import { ExportarViajes } from '../shared/exportar-viajes';
 import { ESTADOS_RASTREO, Rastreo } from '../core/rastreo.service';
 import { ActivarRastreo } from '../shared/activar-rastreo';
+import { ChecklistConductor } from '../shared/checklist-conductor';
 import { RouterLink } from '@angular/router';
 
 interface Formulario {
@@ -41,7 +42,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, RouterLink, ActivarRastreo, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
@@ -208,6 +209,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
               @if (rastreoForm()?.activo) {
                 <span><strong>Rastreo activo</strong> · {{ textoRastreo(rastreoForm().estado) }} · {{ rastreoForm().modalidad === 'clientes' ? 'Con ' + (rastreoForm().clientes?.length || 0) + ' cliente(s)' : 'Destino: ' + (rastreoForm().destino?.nombre || f.destino) }} · Sur Track {{ rastreoForm().codigoExterno }}</span>
                 <a class="boton pequeno" [routerLink]="['/monitoreo']" [queryParams]="{ viaje: f._id }">Ver en el mapa</a>
+                <button type="button" class="pequeno" (click)="checklist().abrir(f._id!)">Checklist</button>
                 @if (puedeRegistrar && rastreoForm().estado === 'esperando' && rastreoForm().origen === 'translogistica') {
                   <button type="button" class="pequeno" (click)="abrirActivar(true)">Cambiar destino o clientes</button> }
                 @if (puedeRegistrar) { <button type="button" class="pequeno peligro" confirmar="Clic otra vez para terminar" (confirmado)="terminarRastreo()">Terminar rastreo</button> }
@@ -291,6 +293,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     </app-modal>
     <app-visor-pdf />
     <app-activar-rastreo (listo)="rastreoListo($event)" />
+    <app-checklist-conductor />
     <app-exportar-viajes [clientes]="clientes()" />
     <app-plantillas-whatsapp [abierto]="plantillasAbierto()" [fecha]="waFecha" (cerrar)="plantillasAbierto.set(false)" (cambiadas)="cargarPlantillas()" />`,
   styles: [`
@@ -629,6 +632,7 @@ export class Viajes {
   claseRastreo(e: string) { return 'chip sin-punto gps ' + (ESTADOS_RASTREO[e]?.clase || ''); }
   // Asistente de rastreo: modalidad solo destino o con clientes
   private activador = viewChild.required(ActivarRastreo);
+  readonly checklist = viewChild.required(ChecklistConductor);
   private viajeRastreo: any = null;
   activarRastreo() { this.abrirActivar(false); }
   abrirActivar(cambiar: boolean) {

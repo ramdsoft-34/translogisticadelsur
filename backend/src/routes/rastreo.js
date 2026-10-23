@@ -10,6 +10,7 @@ import { auditar } from '../services/auditoria.js';
 import * as st from '../services/rastreo/surtrack.js';
 import { leerLibro, filas, txt, num } from '../services/importacion/excel.js';
 import { libroExcel } from '../services/reportes/comun.js';
+import { checklistPdf } from '../services/reportes/checklist.js';
 import { normalizar, parseFecha } from '../utils/texto.js';
 
 const r = Router();
@@ -95,6 +96,17 @@ r.get('/historial', permitir(P.VIAJES_VER), async (req, res) => {
   res.json(await st.historial(req.empresaId, { desde: parseFecha(q.desde), hasta: hasta ? new Date(hasta.getTime() + 86399999) : null,
     placa: q.placa, conductor: mongoose.isValidObjectId(q.conductor) ? q.conductor : null, modalidad: ['destino', 'clientes'].includes(q.modalidad) ? q.modalidad : '',
     pagina: q.pagina, limite: q.limite }));
+});
+
+// Checklist preoperacional del día del conductor del viaje: ver (con la firma) y descargar en PDF
+r.get('/viajes/:id/checklist', permitir(P.VIAJES_VER), async (req, res) => res.json(await st.checklistDelViaje(req.empresaId, id(req.params.id), { conFirma: true })));
+r.get('/viajes/:id/checklist/pdf', permitir(P.VIAJES_VER), async (req, res) => {
+  const d = await st.checklistDelViaje(req.empresaId, id(req.params.id), { conFirma: true });
+  if (!d.checklist) throw new ErrorHttp(404, 'El conductor no tiene checklist registrado en Sur Track');
+  const buf = await checklistPdf(await Empresa.findById(req.empresaId).lean(), d);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `${req.query.ver === '1' ? 'inline' : 'attachment'}; filename="checklist_${d.viaje.placa}_${new Date(d.checklist.fecha).toISOString().slice(0, 10)}.pdf"`);
+  res.send(buf);
 });
 
 r.post('/viajes/:id/finalizar', permitir(P.VIAJES_REGISTRAR), async (req, res) => {

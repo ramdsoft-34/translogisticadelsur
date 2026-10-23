@@ -407,3 +407,16 @@ function distanciaKm(a, b) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
+
+// ── Checklist preoperacional diario del conductor (lo diligencia en Sur Track) ──
+// La asignación del viaje no lo exige; Sur Track no deja iniciar el viaje sin el checklist del día.
+export async function checklistDelViaje(empresaId, viajeId, { conFirma = false } = {}) {
+  await exigirHabilitado(empresaId);
+  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('numero placa conductor conductorNombre rastreo.checklistId').lean();
+  if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
+  const cond = v.conductor ? await Tercero.findOne({ empresa: empresaId, _id: v.conductor }).select('numId').lean() : null;
+  const r = await llamar(`/checklist?cedula=${encodeURIComponent(cond?.numId || '')}&placa=${encodeURIComponent(v.placa || '')}`);
+  let checklist = r.checklist;
+  if (checklist && conFirma) checklist = (await llamar(`/checklist/${checklist.checklistId}`)).checklist;
+  return { viaje: { numero: v.numero, placa: v.placa, conductor: v.conductorNombre }, conductor: r.chofer, checklist };
+}

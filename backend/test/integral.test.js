@@ -32,6 +32,10 @@ surTrack.servidor = http.createServer((req, res) => {
       { choferId: 'c2', nombre: 'Ana Ruiz', cedula: '55667788', placa: 'XYZ987' }, { choferId: 'c3', nombre: 'Sin Placa', cedula: '1', placa: '' }];
     if (ruta === '/vehiculos') return json(200, choferes);
     if (ruta === '/rastreo/activos') return json(200, surTrack.activos);
+    const ck = { checklistId: 'c'.repeat(24), fecha: new Date().toISOString(), completo: true, vigente: true, documentos: { seguroSOAT: true }, equipos: { luces: false }, vehiculo: {},
+      firma: { nombre: 'Pedro', cedula: '12345678', fecha: new Date().toISOString(), imagenBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==' } };
+    if (ruta === '/checklist') return json(200, { chofer: { nombre: 'Pedro' }, checklist: { ...ck, firma: { ...ck.firma, imagenBase64: undefined } } });
+    if (ruta === '/checklist/' + 'c'.repeat(24)) return json(200, { chofer: { nombre: 'Pedro' }, checklist: ck });
     if (ruta === '/viajes' && req.method === 'GET') return json(200, [...surTrack.viajes.values()]);
     if (ruta === '/viajes' && req.method === 'POST') {
       const b = JSON.parse(cuerpo);
@@ -1130,6 +1134,11 @@ test('Rastreo: modalidad solo destino (ruta sugerida) y con clientes (Excel, ent
   assert.equal((await adm.get('/api/rastreo/historial')).body.items.some(x => x._id === v1._id), false, 'el historial no muestra rastreos en curso');
   assert.equal((await adm.get('/api/rastreo/historial?placa=xyz-987')).body.items.every(x => x.placa === 'XYZ987'), true);
   assert.ok(((await s.adminB.get('/api/rastreo/historial')).body.items || []).every(x => x._id !== v2._id), 'otra empresa no ve el historial');
+  // Checklist del conductor: se ve con la firma y se descarga en PDF
+  const ckv = (await adm.get(`/api/rastreo/viajes/${v1._id}/checklist`)).body;
+  assert.equal(ckv.checklist.vigente, true); assert.ok(ckv.checklist.firma.imagenBase64);
+  const pdf = await adm.get(`/api/rastreo/viajes/${v1._id}/checklist/pdf`).buffer(true).parse((res, cb) => { const d = []; res.on('data', c => d.push(c)); res.on('end', () => cb(null, Buffer.concat(d))); });
+  assert.equal(pdf.status, 200); assert.equal(pdf.headers['content-type'], 'application/pdf'); assert.equal(pdf.body.subarray(0, 4).toString(), '%PDF');
   await adm.post(`/api/rastreo/viajes/${v1._id}/finalizar`);
 });
 
