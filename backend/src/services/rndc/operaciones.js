@@ -711,6 +711,31 @@ export async function traerVehiculo(empresaId, clave, usuarioId, { placa }) {
 
 // Actualiza un vehículo YA registrado en la empresa con lo que tenga el RNDC.
 // resultado.estado: actualizado | sin_cambios | no_encontrado (en el RNDC) | no_registrado (en la empresa) | error
+// Actualiza un tercero (todas sus sedes) con lo que tiene el RNDC; queda confirmado («Datos traídos del RNDC»)
+const COMPARAR_TERCERO = ['nombres', 'apellido1', 'apellido2', 'telefono', 'celular', 'direccion', 'codMunicipio', 'sede.nombre',
+  'licencia.categoria', 'licencia.numero', 'licencia.vence'];
+const valorDe = (o, k) => { const v = k.split('.').reduce((x, p) => x?.[p], o); return v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? ''); };
+export async function actualizarTercero(empresaId, clave, usuarioId, { tipoId, numId, etiqueta }) {
+  const ref = etiqueta || `${tipoId} ${numId}`;
+  const antes = await Tercero.find({ empresa: empresaId, tipoId, numId }).lean();
+  if (!antes.length) return { ref, estado: 'no_registrado', mensaje: 'No está registrado en su empresa' };
+  const r = await traerTercero(empresaId, clave, usuarioId, { tipoId, numId });
+  if (!r.ok) {
+    const m = r.mensaje || 'El RNDC no respondió';
+    const sinDatos = /no (se )?encontr|no existe|no hay|sin registros|no tiene/i.test(m);
+    return { ref, estado: sinDatos ? 'no_encontrado' : 'error', mensaje: m, conexion: /No hubo conexión/.test(m) };
+  }
+  const campos = new Set();
+  for (const g of r.guardados) {
+    const previo = antes.find(x => String(x._id) === String(g.id));
+    if (!previo) { campos.add('sede nueva'); continue; }
+    const ahora = await Tercero.findOne({ empresa: empresaId, _id: g.id }).lean();
+    for (const k of COMPARAR_TERCERO) if (valorDe(previo, k) !== valorDe(ahora, k)) campos.add(k);
+  }
+  const lista = [...campos];
+  return { ref, estado: lista.length ? 'actualizado' : 'sin_cambios', campos: lista,
+    mensaje: lista.length ? `Actualizado y confirmado: ${lista.join(', ')}` : 'Confirmado: ya coincidía con el RNDC' };
+}
 export async function actualizarVehiculo(empresaId, clave, usuarioId, placa) {
   const doc = await Vehiculo.findOne({ empresa: empresaId, placa });
   if (!doc) return { placa, estado: 'no_registrado', mensaje: 'La placa no está registrada en su empresa' };

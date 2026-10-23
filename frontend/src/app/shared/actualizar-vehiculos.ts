@@ -14,26 +14,42 @@ const ETIQUETAS: Record<string, string> = {
   pesoVacio: 'Peso vacío', capacidad: 'Capacidad', unidadMedida: 'Unidad de medida', carroceria: 'Carrocería', combustible: 'Combustible',
   'propietario.tipoId': 'Tipo doc. propietario', 'propietario.numId': 'Propietario', 'tenedor.tipoId': 'Tipo doc. tenedor', 'tenedor.numId': 'Tenedor',
   'soat.numero': 'Póliza SOAT', 'soat.vence': 'Vence SOAT', 'soat.aseguradoraNit': 'Aseguradora SOAT',
+  nombres: 'Nombres', apellido1: 'Primer apellido', apellido2: 'Segundo apellido', telefono: 'Teléfono', celular: 'Celular', direccion: 'Dirección',
+  codMunicipio: 'Municipio', 'sede.nombre': 'Nombre de sede', 'licencia.categoria': 'Categoría licencia', 'licencia.numero': 'N° licencia', 'licencia.vence': 'Vence licencia',
 };
 const ESTADOS: Record<string, [string, string]> = {
   actualizado: ['Actualizado', 'ok'], sin_cambios: ['Sin cambios', ''], no_encontrado: ['No está en el RNDC', 'alerta'],
   no_registrado: ['No registrado en la empresa', 'alerta'], error: ['Error', 'error'],
 };
 
-// Actualiza los vehículos de la empresa con la información del RNDC:
-// uno por placa, todos o por lotes de 30. El servidor consulta de una placa a la vez.
+// Actualiza los vehículos o los terceros (conductores, titulares, clientes) con la información del RNDC:
+// uno, todos o por lotes de 30. El servidor consulta de uno a la vez. Los terceros quedan confirmados con el RNDC.
 @Component({
   selector: 'app-actualizar-vehiculos',
   imports: [FormsModule, Modal, Icono, Confirmar, ...FORMATOS],
   template: `
-    <app-modal titulo="Actualizar vehículos desde el RNDC" [abierto]="abierto()" (cerrar)="cerrar.emit()" [ancho]="true">
+    <app-modal [titulo]="esTercero() ? 'Actualizar conductores y terceros desde el RNDC' : 'Actualizar vehículos desde el RNDC'" [abierto]="abierto()" (cerrar)="cerrar.emit()" [ancho]="true">
       <div class="pestanas" role="tablist">
-        <button type="button" [class.activa]="modo() === 'uno'" (click)="modo.set('uno')">Un vehículo</button>
+        <button type="button" [class.activa]="modo() === 'uno'" (click)="modo.set('uno')">{{ esTercero() ? 'Uno' : 'Un vehículo' }}</button>
         <button type="button" [class.activa]="modo() === 'lotes'" (click)="modo.set('lotes')">Por lotes de 30</button>
         <button type="button" [class.activa]="modo() === 'todos'" (click)="modo.set('todos')">Todos</button>
       </div>
 
-      @if (modo() === 'uno') {
+      @if (modo() === 'uno' && esTercero()) {
+        <form class="fila" (ngSubmit)="actualizarUno()">
+          <div class="campo"><label for="at-tipo">Tipo</label>
+            <select id="at-tipo" name="tipoId" [(ngModel)]="tipoId"><option value="C">Cédula</option><option value="N">NIT</option><option value="E">Cédula de extranjería</option><option value="P">Pasaporte</option></select></div>
+          <div class="campo crece"><label for="at-num">Número de documento</label>
+            <input id="at-num" name="numId" [(ngModel)]="numId" inputmode="numeric" maxlength="20" required autocomplete="off" /></div>
+          <button class="primario" type="submit" [disabled]="trabajando() || numId.trim().length < 3"><app-icono nombre="buscar" [tam]="16" />{{ trabajando() ? 'Consultando…' : 'Consultar y actualizar' }}</button>
+        </form>
+        @if (resultadoUno(); as r) {
+          <div class="mensaje" [class.ok]="r.estado === 'actualizado' || r.estado === 'sin_cambios'" [class.alerta]="r.estado === 'no_encontrado' || r.estado === 'no_registrado'" [class.error]="r.estado === 'error'">
+            <strong>{{ r.ref }} · {{ textoEstado(r.estado) }}</strong> <span> — {{ r.campos?.length ? 'campos actualizados: ' + campos(r.campos) : r.mensaje }}</span>
+          </div>
+        }
+        <p class="sutil">Trae del RNDC nombres, teléfonos, dirección, municipio, licencia y sedes. Al terminar queda confirmado y deja de salir «Importado del Excel (sin confirmar)».</p>
+      } @else if (modo() === 'uno') {
         <form class="fila" (ngSubmit)="actualizarUno()">
           <div class="campo crece"><label for="av-placa">Placa</label>
             <input id="av-placa" name="placa" [(ngModel)]="placa" (input)="buscarPlacas()" list="av-placas" placeholder="ABC123" maxlength="7" required style="text-transform:uppercase" autocomplete="off" />
@@ -51,11 +67,17 @@ const ESTADOS: Record<string, [string, string]> = {
       } @else {
         @if (!proceso() || terminado()) {
           <div class="inicio">
+            @if (esTercero()) {
+              <div class="segmentos" role="group" aria-label="Qué terceros actualizar">
+                <button type="button" [class.activo]="solo() === 'pendientes'" (click)="solo.set('pendientes')">Solo los sin confirmar</button>
+                <button type="button" [class.activo]="solo() === 'todos'" (click)="solo.set('todos')">Todos los terceros</button>
+              </div>
+            }
             <p>{{ modo() === 'lotes'
-              ? 'Se consultan 30 placas, el proceso se detiene para que revise los resultados y usted decide si continúa con el siguiente lote.'
-              : 'Se consultan todas las placas seguidas, una a la vez. Puede detener el proceso en cualquier momento.' }}</p>
-            <p class="sutil">Para no saturar el web service del RNDC las placas se consultan de una en una, con una pausa entre cada consulta.
-              @if (info(); as i) { Con {{ i.total }} vehículos tardará aproximadamente {{ estimado(i.total) }}. }</p>
+              ? 'Se consultan 30 ' + unidad() + ', el proceso se detiene para que revise los resultados y usted decide si continúa con el siguiente lote.'
+              : 'Se consultan todos seguidos, uno a la vez. Puede detener el proceso en cualquier momento.' }}</p>
+            <p class="sutil">Para no saturar el web service del RNDC se consulta de uno en uno, con una pausa entre cada consulta.
+              @if (!esTercero() && info(); as i) { Con {{ i.total }} vehículos tardará aproximadamente {{ estimado(i.total) }}. }</p>
             <button class="primario" type="button" (click)="iniciar()" [disabled]="trabajando()"><app-icono nombre="enviar" [tam]="16" />
               {{ modo() === 'lotes' ? 'Iniciar por lotes de 30' : 'Actualizar todos' }}</button>
           </div>
@@ -88,9 +110,9 @@ const ESTADOS: Record<string, [string, string]> = {
               <details [open]="$first">
                 <summary>Lote {{ l.numero }} · {{ resumenLote(l) }}</summary>
                 <div class="tabla-caja"><table>
-                  <thead><tr><th>Placa</th><th>Resultado</th><th>Detalle</th></tr></thead>
-                  <tbody>@for (r of l.resultados; track r.placa) {
-                    <tr><td><span class="placa">{{ r.placa }}</span></td>
+                  <thead><tr><th>{{ esTercero() ? 'Tercero' : 'Placa' }}</th><th>Resultado</th><th>Detalle</th></tr></thead>
+                  <tbody>@for (r of l.resultados; track $index) {
+                    <tr><td>@if (esTercero()) { {{ r.ref }} } @else { <span class="placa">{{ r.placa }}</span> }</td>
                       <td><span class="chip" [class]="claseEstado(r.estado)">{{ textoEstado(r.estado) }}</span></td>
                       <td class="detalle">{{ r.campos?.length ? campos(r.campos) : r.mensaje }}</td></tr>
                   }</tbody>
@@ -129,6 +151,13 @@ export class ActualizarVehiculos {
   private avisos = inject(Avisos);
   private clave = inject(RndcClave);
   readonly abierto = input(false);
+  // 'vehiculos' o 'terceros'
+  readonly tipo = input<'vehiculos' | 'terceros'>('vehiculos');
+  readonly esTercero = computed(() => this.tipo() === 'terceros');
+  readonly unidad = computed(() => this.esTercero() ? 'terceros' : 'placas');
+  readonly solo = signal<'pendientes' | 'todos'>('pendientes');
+  tipoId = 'C';
+  numId = '';
   readonly cerrar = output<void>();
   readonly actualizados = output<void>();
   readonly modo = signal<Modo>('lotes');
@@ -167,6 +196,7 @@ export class ActualizarVehiculos {
   }
 
   private async contar() {
+    if (this.esTercero()) return;
     try { const r = await this.api.get<any>('/maestros/vehiculos', { pagina: 1, limite: 1 }); this.info.set({ total: r.total }); } catch { /* opcional */ }
   }
 
@@ -182,7 +212,7 @@ export class ActualizarVehiculos {
 
   async consultarEstado() {
     try {
-      const r = await this.api.get<any>('/rndc/vehiculos/actualizacion');
+      const r = await this.api.get<any>(`/rndc/${this.tipo()}/actualizacion`);
       const p = r.proceso;
       this.proceso.set(p);
       if (p && this.modo() === 'uno' && !['terminado', 'detenido', 'error'].includes(p.estado)) this.modo.set(p.modo);
@@ -202,11 +232,13 @@ export class ActualizarVehiculos {
     if (!c) return;
     this.trabajando.set(true); this.resultadoUno.set(null);
     try {
-      const r = await this.api.post<any>('/rndc/vehiculos/actualizar', { clave: c, placa: this.placa.trim().toUpperCase() });
+      const r = this.esTercero()
+        ? await this.api.post<any>('/rndc/terceros/actualizar', { clave: c, tipoId: this.tipoId, numId: this.numId.replace(/\D/g, '') || this.numId.trim() })
+        : await this.api.post<any>('/rndc/vehiculos/actualizar', { clave: c, placa: this.placa.trim().toUpperCase() });
       this.resultadoUno.set(r);
       if (r.estado === 'error' && /usuario|contrase|clave/i.test(r.mensaje || '')) this.clave.olvidar();
-      if (r.estado === 'actualizado') this.actualizados.emit();
-    } catch (e) { this.resultadoUno.set({ placa: this.placa.toUpperCase(), estado: 'error', mensaje: await mensajeError(e) }); }
+      if (r.estado === 'actualizado' || (this.esTercero() && r.estado === 'sin_cambios')) this.actualizados.emit();
+    } catch (e) { this.resultadoUno.set({ placa: this.placa.toUpperCase(), ref: `${this.tipoId} ${this.numId}`, estado: 'error', mensaje: await mensajeError(e) }); }
     finally { this.trabajando.set(false); }
   }
 
@@ -215,7 +247,7 @@ export class ActualizarVehiculos {
     if (!c) return;
     this.trabajando.set(true);
     try {
-      this.proceso.set(await this.api.post<any>('/rndc/vehiculos/actualizacion', { clave: c, modo: this.modo() }));
+      this.proceso.set(await this.api.post<any>(`/rndc/${this.tipo()}/actualizacion`, { clave: c, modo: this.modo(), ...(this.esTercero() ? { solo: this.solo() } : {}) }));
       this.iniciarSondeo();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
@@ -223,14 +255,14 @@ export class ActualizarVehiculos {
   async continuar() {
     this.trabajando.set(true);
     try {
-      this.proceso.set(await this.api.post<any>('/rndc/vehiculos/actualizacion/continuar', {}));
+      this.proceso.set(await this.api.post<any>(`/rndc/${this.tipo()}/actualizacion/continuar`, {}));
       this.iniciarSondeo();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 
   async detener() {
     this.trabajando.set(true);
-    try { this.proceso.set(await this.api.post<any>('/rndc/vehiculos/actualizacion/detener', {})); this.iniciarSondeo(); }
+    try { this.proceso.set(await this.api.post<any>(`/rndc/${this.tipo()}/actualizacion/detener`, {})); this.iniciarSondeo(); }
     catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 }

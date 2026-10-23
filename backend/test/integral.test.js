@@ -457,6 +457,46 @@ test('Actualizar vehículos desde el RNDC: individual y por lotes de 30', async 
   await M.Vehiculo.deleteMany({ empresa: s.empresaA, placa: /^LOT/ });
 });
 
+test('Actualizar terceros desde el RNDC: confirma los importados del Excel', async () => {
+  const esperar = async (estados) => {
+    for (let i = 0; i < 150; i += 1) {
+      const p = (await s.manif.get('/api/rndc/terceros/actualizacion')).body.proceso;
+      if (p && estados.includes(p.estado)) return p;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    throw new Error('el proceso no llegó a ' + estados.join('/'));
+  };
+  // El conductor está en el RNDC; aquí queda como «importado sin confirmar» y con un dato distinto
+  const env = await s.manif.post(`/api/rndc/terceros/${s.conductor}/enviar`, { clave: CLAVE_RNDC, forzar: true });
+  assert.equal(env.body.ok, true, JSON.stringify(env.body));
+  const c = await M.Tercero.findOne({ empresa: s.empresaA, _id: s.conductor }).lean();
+  await M.Tercero.updateOne({ empresa: s.empresaA, _id: s.conductor }, { $set: { direccion: 'CAMBIADA', 'rndc.mensaje': 'Importado de la plantilla (datos del RNDC)' } });
+  const uno = await s.manif.post('/api/rndc/terceros/actualizar', { clave: CLAVE_RNDC, tipoId: c.tipoId, numId: c.numId });
+  assert.equal(uno.body.estado, 'actualizado', JSON.stringify(uno.body));
+  assert.ok(uno.body.campos.includes('direccion'), JSON.stringify(uno.body.campos));
+  const conf = await M.Tercero.findOne({ empresa: s.empresaA, _id: s.conductor }).lean();
+  assert.equal(conf.direccion, c.direccion);
+  assert.doesNotMatch(conf.rndc.mensaje, /^Importado/, 'queda confirmado con el RNDC');
+  assert.equal((await s.manif.post('/api/rndc/terceros/actualizar', { clave: CLAVE_RNDC, tipoId: 'C', numId: '99999999' })).body.estado, 'no_registrado');
+  assert.equal((await s.reportero.post('/api/rndc/terceros/actualizar', { clave: CLAVE_RNDC, tipoId: c.tipoId, numId: c.numId })).status, 403);
+
+  // Masivo solo de los sin confirmar
+  await M.Tercero.updateOne({ empresa: s.empresaA, _id: s.conductor }, { $set: { 'rndc.mensaje': 'Importado de la plantilla' } });
+  const ini = await s.manif.post('/api/rndc/terceros/actualizacion', { clave: CLAVE_RNDC, modo: 'todos', solo: 'pendientes' });
+  assert.equal(ini.status, 202, JSON.stringify(ini.body));
+  assert.equal(ini.body.clave, undefined, 'la contraseña no se devuelve');
+  assert.equal(ini.body.placas, undefined, 'no expone la lista completa');
+  const fin = await esperar(['terminado', 'detenido', 'error']);
+  assert.equal(fin.estado, 'terminado', fin.mensaje);
+  assert.ok(fin.lotes[0].resultados.some(r => r.ref.includes(c.numId) && ['actualizado', 'sin_cambios'].includes(r.estado)), JSON.stringify(fin.lotes[0].resultados));
+  assert.doesNotMatch((await M.Tercero.findOne({ empresa: s.empresaA, _id: s.conductor }).lean()).rndc.mensaje, /^Importado/);
+  // El de vehículos es un proceso aparte
+  assert.notEqual((await s.manif.get('/api/rndc/vehiculos/actualizacion')).body.proceso?.tipo, 'terceros');
+  // Se deja el conductor como estaba para las pruebas siguientes
+  const { _id, empresa, createdAt, updatedAt, __v, ...original } = c;
+  await M.Tercero.updateOne({ empresa: s.empresaA, _id: s.conductor }, { $set: original });
+});
+
 test('Vehículos y terceros: verificar antes de crear (base local, RNDC o nuevo)', async () => {
   // Ya existe en la empresa: no se duplica
   const local = await s.manif.post('/api/rndc/verificar/vehiculo', { placa: 'abc-123' });

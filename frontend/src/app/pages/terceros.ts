@@ -13,6 +13,7 @@ import { SelectorMunicipio } from '../shared/municipio';
 import { FORMATOS, isoDia } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
 import { TraerRndc } from '../shared/traer-rndc';
+import { ActualizarVehiculos } from '../shared/actualizar-vehiculos';
 import { CargarMas } from '../shared/cargar-mas';
 import { mensajeError } from '../core/api.service';
 import { VistaRndc } from '../shared/vista-rndc';
@@ -30,19 +31,21 @@ const vacio = () => ({
 
 @Component({
   selector: 'app-terceros',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, TraerRndc, CargarMas, VistaRndc, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, VistaRndc, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Conductores y terceros</h1><p class="sutil">Conductores, titulares, propietarios, tenedores y destinatarios que se registran en el RNDC.</p></div>
       <div class="acciones">
         @if (puedeEditar) {
           <button (click)="importar.set(true)"><app-icono nombre="descargar" />Importar Excel</button>
+          @if (puedeConsultar) { <button (click)="actualizar.set(true)" title="Confirma con el RNDC los datos de los terceros (también los importados del Excel)"><app-icono nombre="reloj" />Actualizar desde el RNDC</button> }
           @if (puedeRndc) { <button (click)="traer.set(true)"><app-icono nombre="buscar" />Traer del RNDC</button> }
           <button class="primario" (click)="nuevo()"><app-icono nombre="mas" />Nuevo en el RNDC</button>
         }
       </div>
     </div>
     <app-importar-excel tipo="terceros" titulo="conductores y terceros" [abierto]="importar()" (cerrar)="importar.set(false)" (importado)="cargar()" />
+    <app-actualizar-vehiculos tipo="terceros" [abierto]="actualizar()" (cerrar)="actualizar.set(false); cargar()" (actualizados)="cargar()" />
     <app-traer-rndc tipo="terceros" [abierto]="traer()" (cerrar)="traer.set(false)" (traidos)="cargar()" />
     <div class="barra">
       <div class="campo crece"><label for="t-q">Buscar</label><input id="t-q" type="search" placeholder="Nombre o número de documento" [(ngModel)]="q" (input)="buscarDiferido()" /></div>
@@ -216,6 +219,7 @@ export class Terceros {
   readonly abierto = signal(false);
   readonly importar = signal(false);
   readonly traer = signal(false);
+  readonly actualizar = signal(false);
   readonly form = signal<any>(vacio());
   readonly editando = computed(() => !!this.form()._id);
   q = ''; rol = '';

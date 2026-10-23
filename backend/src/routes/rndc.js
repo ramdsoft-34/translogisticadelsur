@@ -402,6 +402,31 @@ r.post('/vehiculos/actualizacion/detener', ...actualizarVeh, (req, res) => {
   res.json(masiva.detener(req.empresaId));
 });
 
+// ── Actualización de terceros (conductores, titulares, clientes) desde el RNDC ──
+const docTercero = z.object({ tipoId: z.string().trim().toUpperCase().regex(/^[A-Z]$/, 'tipo de documento inválido'),
+  numId: z.string().trim().regex(/^[0-9A-Za-z]{3,20}$/, 'documento inválido') });
+r.post('/terceros/actualizar', ...actualizarVeh, async (req, res) => {
+  const d = z.object({ clave }).merge(docTercero).parse(req.body);
+  const r1 = await op.actualizarTercero(req.empresaId, d.clave, req.usuario._id, d);
+  const { conexion, ...resultado } = r1;
+  await auditar(req, 'actualizar_tercero_rndc', { entidad: 'Tercero', detalle: { documento: `${d.tipoId} ${d.numId}`, estado: r1.estado, campos: r1.campos } });
+  res.json(resultado);
+});
+r.get('/terceros/actualizacion', ...actualizarVeh, (req, res) => {
+  res.json({ proceso: masiva.estadoProceso(req.empresaId, 'terceros'), tamLote: masiva.TAM_LOTE, limitador: estadoLimitador() });
+});
+r.post('/terceros/actualizacion', ...actualizarVeh, async (req, res) => {
+  const d = z.object({ clave, modo: z.enum(['todos', 'lotes']), solo: z.enum(['pendientes', 'todos']).default('pendientes') }).parse(req.body);
+  res.status(202).json(await masiva.iniciar({ empresaId: req.empresaId, usuario: req.usuario, clave: d.clave, modo: d.modo, tipo: 'terceros', solo: d.solo }));
+});
+r.post('/terceros/actualizacion/continuar', ...actualizarVeh, (req, res) => {
+  const d = z.object({ clave: z.string().max(100).optional() }).parse(req.body);
+  res.json(masiva.continuar(req.empresaId, d.clave, 'terceros'));
+});
+r.post('/terceros/actualizacion/detener', ...actualizarVeh, (req, res) => {
+  res.json(masiva.detener(req.empresaId, 'terceros'));
+});
+
 // ── Verificar antes de crear (evita duplicados y trae los datos del RNDC) ───
 // Sin contraseña solo revisa la base de la empresa; con contraseña consulta el RNDC.
 function exigirConsulta(req, c) {
