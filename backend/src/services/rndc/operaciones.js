@@ -579,6 +579,17 @@ export const TIPOS_CONSULTA = Object.keys(CONSULTAS);
 // Consulta el RNDC y crea o actualiza el tercero/vehículo de la empresa con esos
 // datos. Queda marcado como sincronizado (no se reenvía lo que ya está en el RNDC).
 const fechaRndc = (v) => { const m = txt(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(Date.UTC(+m[3], +m[2] - 1, +m[1])) : null; };
+
+// El RNDC devuelve todo el historial de registros de una placa y sin orden: el vigente es el de
+// SOAT con vencimiento más lejano (ante empate, el que aparece después).
+export function registroVigente(documentos) {
+  let mejor = null; let fecha = -Infinity;
+  for (const d of documentos || []) {
+    const f = fechaRndc(d.fechavencimientosoat)?.getTime() ?? -Infinity;
+    if (!mejor || f >= fecha) { mejor = d; fecha = f; }
+  }
+  return mejor;
+}
 const numero = (v) => (txt(v) === '' ? null : Number(txt(v).replace(',', '.')));
 
 export async function traerTercero(empresaId, clave, usuarioId, { tipoId, numId, roles = [] }) {
@@ -645,7 +656,7 @@ function marcarSincronizado(empresa, doc) {
 export async function traerVehiculo(empresaId, clave, usuarioId, { placa }) {
   const r = await consultar(empresaId, clave, usuarioId, { que: 'vehiculo', filtros: { NUMPLACA: placa } });
   if (!r.ok) return { ok: false, mensaje: r.mensaje };
-  const d = r.documentos.at(-1);
+  const d = registroVigente(r.documentos);
   if (!d) return { ok: false, mensaje: 'El RNDC no tiene registrado ese vehículo para su empresa' };
   const empresa = await empresaConRndc(empresaId);
   const existente = await Vehiculo.findOne({ empresa: empresaId, placa });
@@ -667,7 +678,7 @@ export async function actualizarVehiculo(empresaId, clave, usuarioId, placa) {
     const sinDatos = /no (se )?encontr|no existe|no hay|sin registros|no tiene/i.test(r.mensaje || '');
     return { placa, estado: sinDatos ? 'no_encontrado' : 'error', mensaje: r.mensaje || 'El RNDC no respondió', conexion: /No hubo conexión/.test(r.mensaje || '') };
   }
-  const d = r.documentos.at(-1);
+  const d = registroVigente(r.documentos);
   if (!d) return { placa, estado: 'no_encontrado', mensaje: 'El RNDC no tiene registrado ese vehículo para su empresa' };
   const empresa = await empresaConRndc(empresaId);
   const campos = aplicarDatos(doc, datosVehiculoRndc(d));
@@ -675,6 +686,21 @@ export async function actualizarVehiculo(empresaId, clave, usuarioId, placa) {
   await doc.save();
   return { placa, id: doc._id, estado: campos.length ? 'actualizado' : 'sin_cambios', campos,
     mensaje: campos.length ? `Actualizado: ${campos.join(', ')}` : 'Ya coincidía con el RNDC' };
+}
+
+// Vuelve a aplicar a un vehículo una respuesta del RNDC ya guardada (sin consultar de nuevo).
+// Sirve para corregir datos tomados de un registro antiguo del historial de la placa.
+export async function reaplicarConsultaVehiculo(empresaId, placa, respuestaXml, { guardar = true } = {}) {
+  const doc = await Vehiculo.findOne({ empresa: empresaId, placa });
+  if (!doc) return { placa, estado: 'no_registrado' };
+  const r = interpretarConsulta(respuestaXml);
+  const d = r.ok ? registroVigente(r.documentos) : null;
+  if (!d) return { placa, estado: 'sin_datos' };
+  const antes = { soat: doc.soat?.vence ? doc.soat.vence.toISOString().slice(0, 10) : '', tenedor: doc.tenedor?.numId || '' };
+  const campos = aplicarDatos(doc, datosVehiculoRndc(d));
+  if (campos.length && guardar) { marcarSincronizado(await empresaConRndc(empresaId), doc); await doc.save(); }
+  return { placa, estado: campos.length ? 'actualizado' : 'sin_cambios', campos, antes,
+    despues: { soat: doc.soat?.vence ? doc.soat.vence.toISOString().slice(0, 10) : '', tenedor: doc.tenedor?.numId || '' } };
 }
 
 // ── Verificar antes de crear un vehículo o tercero ───────────────────────────
