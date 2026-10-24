@@ -1,8 +1,58 @@
 // Utilidades comunes para PDF (pdfkit) y Excel (exceljs).
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import PDFDocument from 'pdfkit';
 import ExcelJS from 'exceljs';
 
+// ── Marca de Translogística en todo lo que se exporta ──────────────────────
+// Discreta: el logo muy tenue en el centro de cada página y una línea pequeña al pie.
+const LOGO_TLS = fs.readFileSync(fileURLToPath(new URL('../../assets/logos/translogistica.png', import.meta.url)));
+const PROPORCION_LOGO = 66 / 160;
+const ahoraTexto = () => new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+export const TEXTO_MARCA = 'Exportado desde Translogística del Sur';
+
+function marcarPagina(doc, cuando) {
+  const { width: W, height: H } = doc.page;
+  const margenInf = doc.page.margins.bottom;
+  doc.page.margins.bottom = 0;
+  doc.save();
+  // Marca de agua central: ~28 % del ancho, casi transparente
+  const ancho = Math.min(W * 0.28, 240);
+  doc.opacity(0.05).image(LOGO_TLS, (W - ancho) / 2, (H - ancho * PROPORCION_LOGO) / 2, { width: ancho });
+  // Pie: logo pequeño + texto gris
+  const x = Math.max(doc.page.margins.left, 18);
+  doc.opacity(0.55).image(LOGO_TLS, x, H - 17, { width: 24 });
+  doc.opacity(0.7).font('Helvetica').fontSize(6.5).fillColor('#555555')
+    .text(`${TEXTO_MARCA} · ${cuando}`, x + 28, H - 13.5, { lineBreak: false });
+  doc.restore();
+  doc.page.margins.bottom = margenInf;
+}
+
+export function marcarPdf(doc) {
+  const cuando = ahoraTexto();
+  let rango = null;
+  try { rango = doc.bufferedPageRange(); } catch { rango = null; }
+  if (rango && rango.count > 0 && doc.options?.bufferPages) {
+    for (let i = 0; i < rango.count; i += 1) { doc.switchToPage(rango.start + i); marcarPagina(doc, cuando); }
+  } else marcarPagina(doc, cuando);
+}
+
+// Excel: logo pequeño arriba a la derecha, nota al final y pie de página al imprimir
+export function marcarLibro(wb) {
+  const cuando = ahoraTexto();
+  const imagen = wb.addImage({ buffer: LOGO_TLS, extension: 'png' });
+  wb.eachSheet(ws => {
+    const ultimaCol = Math.max(ws.columnCount, 1);
+    ws.addImage(imagen, { tl: { col: Math.max(ultimaCol - 1, 0), row: 0 }, ext: { width: 72, height: 30 }, editAs: 'absolute' });
+    ws.addRow([]);
+    const r = ws.addRow([`${TEXTO_MARCA} · ${cuando}`]);
+    r.font = { italic: true, size: 8, color: { argb: 'FF8A8A8A' } };
+    ws.headerFooter = { ...(ws.headerFooter || {}), oddFooter: `&L&8${TEXTO_MARCA} · ${cuando}&R&8Página &P de &N` };
+  });
+}
+
 export function pdfABuffer(doc) {
+  marcarPdf(doc);
   return new Promise((resolve, reject) => {
     const partes = [];
     doc.on('data', b => partes.push(b));
@@ -99,5 +149,6 @@ export async function libroExcel({ empresa, titulo, subtitulo, columnas, filas, 
     if (c.formato) col.numFmt = c.formato;
   });
   ws.autoFilter = { from: { row: h.number, column: 1 }, to: { row: h.number, column: columnas.length } };
+  marcarLibro(wb);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

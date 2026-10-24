@@ -4,6 +4,7 @@
 // Solo se escriben datos de la empresa del usuario; las filas existentes se
 // actualizan únicamente con las celdas que traen valor (no se borra nada).
 import ExcelJS from 'exceljs';
+import { marcarLibro } from '../reportes/comun.js';
 import { Cliente, Tarifa, Tercero, Vehiculo, Municipio, Empresa } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { normalizar, soloDigitos } from '../../utils/texto.js';
@@ -83,6 +84,7 @@ export async function generarPlantilla(tipo) {
   ayuda.addRow(['Escriba los datos en la primera hoja, desde la fila 2. Las filas existentes se actualizan solo con las celdas que tengan valor.']);
   ayuda.addRow([`Tipos de documento: ${Object.entries(TIPOS_ID).map(([k, v]) => `${k} = ${v}`).join('; ')}`]);
   ayuda.getColumn(1).width = 28; ayuda.getColumn(2).width = 12; ayuda.getColumn(3).width = 70;
+  marcarLibro(wb);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
