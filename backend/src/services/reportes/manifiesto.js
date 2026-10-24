@@ -362,8 +362,8 @@ export async function manifiestoPdf(d) {
     radicacion: d.fechaRad, expedicion: d.fechaExp, cantidad: fmtMilManifiesto(d.cantidad), letras: numeroALetras(d.flete) };
   for (const k of ['flete', 'rete', 'ica', 'fopat', 'neto', 'anticipo', 'saldo']) v[k] = fmtMilManifiesto(d[k]);
   for (const [k, def] of Object.entries(C)) campo(doc, def, v[k]);
-  // Los manifiestos no llevan marca de agua: el del RNDC sale sin marca y el soporte interno solo con la línea al pie
-  return pdfABuffer(doc, { marca: interno ? 'pie' : false });
+  // Ni el manifiesto del RNDC ni el soporte interno llevan marca de Translogística
+  return pdfABuffer(doc, { marca: false });
 }
 
 export const nombreArchivo = (d) => `Manifiesto_${txt(d.numero) || 'sin_numero'}.pdf`;
