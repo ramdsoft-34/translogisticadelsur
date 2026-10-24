@@ -271,6 +271,18 @@ import { Confirmar } from './confirmar';
                   }
                   <div class="campo ancho"><label for="ex-obs">Observaciones</label><input id="ex-obs" name="obs" maxlength="200" [(ngModel)]="f.observaciones" /></div>
                 </div></fieldset>
+                @if (p.documentos.manifiesto.estado !== 'aceptado') {
+                  <!-- Retenciones: las calcula la plataforma, pero se pueden escribir a mano (p. ej. si el RNDC exige otra FOPAT) -->
+                  <fieldset><legend>Retenciones del manifiesto</legend><div class="formulario">
+                    @for (r of RETENCIONES; track r[0]) {
+                      <div class="campo" [class.cambiado]="r[0] in ajustes().manifiesto"><label [for]="'ex-' + r[0]">{{ r[1] }}</label>
+                        <div class="moneda"><input [id]="'ex-' + r[0]" moneda [name]="'ret-' + r[0]" [ngModel]="retencion(r[0])" (ngModelChange)="fijarRetencion(r[0], $event)" /></div>
+                        @if (r[0] in ajustes().manifiesto) {
+                          <small class="corregido">Calculada: {{ retencionBase(r[0]) | pesos }} · <button type="button" class="texto" (click)="ajustar('manifiesto', r[0], baseTexto(r[0]))">Usar la calculada</button></small>
+                        } @else { <small>Calculada por la plataforma.</small> }</div>
+                    }
+                  </div></fieldset>
+                }
                 @if (p.destinoManifiesto && p.destinatario?.municipio && p.destinatario.municipio !== f.codDestino) {
                   <p class="sutil nota-num">El manifiesto irá al municipio <strong>{{ p.destinoManifiesto }}</strong>, el de la sede del destinatario{{ p.destinatario.nombreSede ? ' (' + p.destinatario.nombreSede + ')' : '' }}, como lo exige el RNDC.</p>
                 }
@@ -279,12 +291,12 @@ import { Confirmar } from './confirmar';
                   <table class="valores" aria-label="Valores del viaje como los calcula el RNDC">
                     <tbody>
                       <tr><td>Valor a pagar por el viaje</td><td class="num">{{ val.flete | pesos }}</td></tr>
-                      <tr><td>Retención en la fuente</td><td class="num">{{ val.retefuente | pesos }}</td></tr>
-                      <tr><td>Retención ICA</td><td class="num">{{ val.ica | pesos }}</td></tr>
-                      <tr><td>Retención FOPAT (0,1 %){{ val.fopatAplica ? '' : ' · no aplica' }}</td><td class="num">{{ val.fopat | pesos }}</td></tr>
-                      <tr class="total"><td>Neto a pagar</td><td class="num">{{ val.neto | pesos }}</td></tr>
+                      <tr><td>Retención en la fuente</td><td class="num">{{ valoresVista().retefuente | pesos }}</td></tr>
+                      <tr><td>Retención ICA</td><td class="num">{{ valoresVista().ica | pesos }}</td></tr>
+                      <tr><td>Retención FOPAT (0,1 %){{ val.fopatAplica ? '' : ' · no aplica' }}</td><td class="num">{{ valoresVista().fopat | pesos }}</td></tr>
+                      <tr class="total"><td>Neto a pagar</td><td class="num">{{ valoresVista().neto | pesos }}</td></tr>
                       <tr><td>Valor anticipo</td><td class="num">{{ val.anticipo | pesos }}</td></tr>
-                      <tr class="total"><td>Saldo por pagar</td><td class="num">{{ val.saldo | pesos }}</td></tr>
+                      <tr class="total"><td>Saldo por pagar</td><td class="num">{{ valoresVista().saldo | pesos }}</td></tr>
                     </tbody>
                   </table>
                   @if (val.anticipoAjustado) {
@@ -563,6 +575,19 @@ export class ExpedirRndc {
     // Se abre la sección con correcciones o con datos vacíos
     for (const x of salida) x.abierta = x.cambiados > 0 || x.campos.some(c => !c.valor);
     return salida;
+  }
+  // Retenciones del manifiesto editables a mano (se guardan como corrección del formulario del RNDC)
+  readonly RETENCIONES: [string, string][] = [['RETENCIONFUENTEMANIFIESTO', 'Retención en la fuente'], ['RETENCIONICAMANIFIESTOCARGA', 'Retención ICA'], ['RETENCIONFOPAT', 'Retención FOPAT (0,1 %)']];
+  baseTexto(k: string) { return String(new Map<string, string>(this.previa()?.manifiesto?.base || []).get(k) ?? ''); }
+  retencionBase(k: string) { return Number(this.baseTexto(k)) || 0; }
+  retencion(k: string) { const a = this.ajustes().manifiesto; return k in a ? Number(a[k]) || 0 : this.retencionBase(k); }
+  fijarRetencion(k: string, v: any) { this.ajustar('manifiesto', k, String(Math.max(0, Math.round(Number(v) || 0)))); }
+  // Neto y saldo con las retenciones que se van a enviar (calculadas o escritas a mano)
+  valoresVista() {
+    const val = this.previa()?.valores || {};
+    const rete = this.retencion('RETENCIONFUENTEMANIFIESTO'); const ica = this.retencion('RETENCIONICAMANIFIESTOCARGA'); const fopat = this.retencion('RETENCIONFOPAT');
+    const neto = (Number(val.flete) || 0) - rete - ica - fopat;
+    return { retefuente: rete, ica, fopat, neto, saldo: neto - (Number(val.anticipo) || 0) };
   }
   readonly form = signal<any>({});
   readonly trabajando = signal(false);
