@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -41,7 +41,7 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
         @if (sel(); as c) {
           <div class="tarjeta">
             <div class="pagina-cab" style="margin-bottom:8px"><div><h2 style="margin:0">{{ c.nombre }}</h2>
-              <span class="sutil">{{ c.razonSocial }} · {{ c.tipoId }} {{ c.nit }}{{ c.dv ? '-' + c.dv : '' }} · Sede remitente RNDC: {{ c.sedeRemitente || '—' }}</span></div>
+              <span class="sutil">{{ c.razonSocial }} · {{ c.tipoId }} {{ c.nit }}{{ c.dv ? '-' + c.dv : '' }} · Sede remitente: {{ c.sedeRemitente ? nombreSede(c.sedeRemitente) : '—' }}</span></div>
               <div class="acciones">@if (puedeEditar) { <button class="pequeno" (click)="editarCliente(c)">Editar cliente</button> }
                 @if (puedeTarifas) { <button class="pequeno primario" (click)="nuevaTarifa()"><app-icono nombre="mas" [tam]="15" />Destino</button> }</div></div>
             <div class="filtro-rapido"><input type="search" placeholder="Buscar destino o municipio" aria-label="Buscar destino o municipio" [value]="qTar()" (input)="qTar.set($any($event.target).value)" /></div>
@@ -70,10 +70,18 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
         <div class="campo"><label for="ct">Tipo de documento</label><select id="ct" name="tipo" [(ngModel)]="f.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
         <div class="campo"><label for="cnit">Número (sin DV)</label><input id="cnit" name="nit" [(ngModel)]="f.nit" /></div>
         <div class="campo"><label for="cdv">DV</label><input id="cdv" name="dv" maxlength="1" [(ngModel)]="f.dv" /></div>
-        <div class="campo"><label for="cs">Sede remitente RNDC</label><input id="cs" name="sede" maxlength="6" [(ngModel)]="f.sedeRemitente" /><small>Código de la sede del cliente en el RNDC (lugar de cargue).</small></div>
-        <div class="campo ancho"><label for="cc">Correos (separados por coma)</label><input id="cc" name="correos" [(ngModel)]="f.correos" /></div>
-        <div class="campo ancho"><label for="cw">WhatsApp para el reporte de vehículos</label><input id="cw" name="wa" [(ngModel)]="f.whatsapp" placeholder="3001234567" />
-          <small>Opcional. Vacío = al abrir WhatsApp se elige el contacto o grupo.</small></div>
+        <div class="campo ancho"><label for="cs">Sede remitente (lugar de cargue)</label>
+          @if (sedesCliente().length && f._id && f._id === sel()?._id) {
+            <select id="cs" name="sede" [(ngModel)]="f.sedeRemitente">
+              <option value="">Sin sede</option>
+              @if (f.sedeRemitente && !existeSede(f.sedeRemitente)) { <option [value]="f.sedeRemitente">{{ f.sedeRemitente }} · (no registrada en la plataforma)</option> }
+              @for (x of sedesCliente(); track x.sede.codigo) { <option [value]="x.sede.codigo">{{ x.sede.codigo }} · {{ x.sede.nombre || '(sin nombre)' }}{{ x.codMunicipio ? ' (' + x.codMunicipio + ')' : '' }}</option> }
+            </select>
+            <small>Sedes del cliente registradas en el RNDC.</small>
+          } @else {
+            <input id="cs" name="sede" maxlength="6" [(ngModel)]="f.sedeRemitente" />
+            <small>Código de la sede del cliente en el RNDC. Las sedes aparecen en lista cuando el NIT está en Conductores y terceros.</small>
+          }</div>
         @if (f._id) { <label class="casilla"><input type="checkbox" name="activo" [(ngModel)]="f.activo" />Activo</label> }
       </form>
       <ng-container pie><button type="button" (click)="abiertoCliente.set(false)">Cancelar</button>
@@ -152,6 +160,26 @@ export class Clientes {
 
   nuevoCliente() { this.clienteForm.set(clienteVacio()); this.abiertoCliente.set(true); }
   editarCliente(c: any) { this.clienteForm.set({ ...clienteVacio(), ...c, correos: (c.correos || []).join(', ') }); this.abiertoCliente.set(true); }
+
+  // Sedes del cliente seleccionado (código y nombre), para mostrar y elegir la sede remitente
+  readonly sedesCliente = signal<any[]>([]);
+  private sedesDe = effect(() => {
+    const c = this.sel();
+    const nit = String(c?.nit || '').replace(/\D/g, '');
+    if (!nit) { this.sedesCliente.set([]); return; }
+    const conDv = nit + String(c?.dv || '').replace(/\D/g, '');
+    (async () => {
+      for (const numId of [...new Set([nit, conDv])]) {
+        try {
+          const l = (await this.api.get<any>('/maestros/terceros/sedes', { numId })).sedes.filter((x: any) => x.sede?.codigo);
+          if (l.length) { this.sedesCliente.set(l); return; }
+        } catch { /* sin sedes */ }
+      }
+      this.sedesCliente.set([]);
+    })();
+  });
+  existeSede(cod: string) { return this.sedesCliente().some(x => x.sede.codigo === String(cod)); }
+  nombreSede(cod: string) { const x = this.sedesCliente().find(y => y.sede.codigo === String(cod)); return x ? `${cod} · ${x.sede.nombre || '(sin nombre)'}` : cod; }
 
   async guardarCliente() {
     const f = this.clienteForm();

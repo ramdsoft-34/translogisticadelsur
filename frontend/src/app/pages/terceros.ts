@@ -43,7 +43,7 @@ const vacio = () => ({
             @if (puedeRndc) { <button (click)="traer.set(true)"><app-icono nombre="buscar" />Traer del RNDC<small>Crea en la plataforma terceros que ya existen en el RNDC</small></button> }
             <button (click)="importar.set(true)"><app-icono nombre="descargar" />Importar Excel<small>Carga masiva desde una plantilla</small></button>
           </app-menu-acciones>
-          <button class="primario" (click)="nuevo()"><app-icono nombre="mas" />Nuevo tercero</button>
+          <button class="primario" (click)="nuevo()"><app-icono nombre="mas" />{{ textoNuevo() }}</button>
         }
       </div>
     </div>
@@ -64,13 +64,19 @@ const vacio = () => ({
     </div>
     <div class="tabla-caja">
       <table>
-        <thead><tr><th>Documento</th><th>Nombre</th><th>Roles</th><th>Celular</th><th>Licencia vence</th><th>RNDC</th><th></th></tr></thead>
+        <thead><tr><th>Documento</th><th>Nombre</th>@if (verSede()) { <th>Sede RNDC</th> }<th>Roles</th><th>Celular</th>@if (verLicencia()) { <th>Licencia vence</th> }<th>RNDC</th><th></th></tr></thead>
         <tbody>
           @for (t of lista(); track t._id) {
             <tr [class.sutil]="!t.activo">
               <td>{{ t.tipoId }} {{ t.numId }}</td><td><strong>{{ nombre(t) }}</strong>@if (!t.activo) { <span class="chip">inactivo</span> }</td>
+              @if (verSede()) {
+                <td>@if (t.sede?.codigo || t.sede?.nombre) { <div class="celda-doble"><span><span class="cod-sede">{{ t.sede.codigo || '—' }}</span> {{ t.sede.nombre || '(sin nombre)' }}</span>
+                  @if (t.codMunicipio) { <small>Municipio {{ t.codMunicipio }}</small> }</div> } @else { <span class="sutil">—</span> }</td>
+              }
               <td>{{ t.roles.join(', ') }}</td><td>{{ t.celular }}</td>
-              <td>@if (t.licencia?.vence) { <span [class.chip]="vencida(t.licencia.vence)" [class.error]="vencida(t.licencia.vence)">{{ t.licencia.vence | dia }}</span> }</td>
+              @if (verLicencia()) {
+                <td>@if (t.licencia?.vence) { <span [class.chip]="vencida(t.licencia.vence)" [class.error]="vencida(t.licencia.vence)">{{ t.licencia.vence | dia }}</span> }</td>
+              }
               <td><span class="chip" [class]="chip(t.rndc?.estado)" [title]="t.rndc?.mensaje || ''">{{ estadoRndc(t.rndc?.estado) }}</span></td>
               <td><div class="acciones" style="justify-content:flex-end">
                 <button class="pequeno" (click)="editar(t)">{{ puedeEditar ? 'Editar' : 'Ver' }}</button>
@@ -78,8 +84,8 @@ const vacio = () => ({
               </div></td>
             </tr>
           } @empty {
-            @if (cargando()) { @for (i of [1, 2, 3]; track i) { <tr><td colspan="7"><span class="esqueleto"></span></td></tr> } }
-            @else { <tr><td colspan="7" class="vacio"><strong>Sin resultados</strong>Pruebe con otro nombre o documento.</td></tr> }
+            @if (cargando()) { @for (i of [1, 2, 3]; track i) { <tr><td colspan="8"><span class="esqueleto"></span></td></tr> } }
+            @else { <tr><td colspan="8" class="vacio"><strong>Sin resultados</strong>Pruebe con otro nombre o documento.</td></tr> }
           }
         </tbody>
       </table>
@@ -177,6 +183,8 @@ const vacio = () => ({
       </ng-container>
     </app-modal>`,
   styles: [`
+    .cod-sede { display: inline-block; min-width: 26px; text-align: center; font-weight: 750; font-size: 12px; padding: 1px 7px; margin-right: 4px;
+      border-radius: 6px; background: var(--gris-15); color: var(--gris-7); font-variant-numeric: tabular-nums; }
     .que-es { margin: -6px 0 16px; color: var(--gris-5); }
     .que { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
     .que legend { font-weight: 650; font-size: 13px; color: var(--gris-6); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .04em; }
@@ -278,16 +286,28 @@ export class Terceros {
   ver(campo: string) { return !this.soloFaltantes() || this.falta(campo); }
   verAlguno(campos: string[]) { return campos.some(c => this.ver(c)); }
 
+  // Lo que se crea depende de la pestaña: conductor, persona (titular, propietario, tenedor) o empresa/sede (remitente, destinatario)
+  private static readonly EMPRESA = ['remitente', 'destinatario'];
+  textoNuevo() {
+    return ({ '': 'Nuevo tercero', conductor: 'Nuevo conductor', titular: 'Nuevo titular', propietario: 'Nuevo propietario', tenedor: 'Nuevo tenedor',
+      remitente: 'Nueva empresa o sede', destinatario: 'Nueva empresa o sede' } as Record<string, string>)[this.rol] || 'Nuevo tercero';
+  }
+  verSede() { return !this.rol || Terceros.EMPRESA.includes(this.rol); }
+  verLicencia() { return !this.rol || this.rol === 'conductor'; }
   nuevo() {
-    this.buscar = { tipoId: 'C', numId: '', rol: this.rol || 'conductor' }; this.consultarRndc = this.puedeConsultar;
-    this.tipoNuevo.set(this.rol && this.rol !== 'conductor' ? 'persona' : 'conductor');
+    const empresa = Terceros.EMPRESA.includes(this.rol);
+    this.buscar = { tipoId: empresa ? 'N' : 'C', numId: '', rol: this.rol || 'conductor' }; this.consultarRndc = this.puedeConsultar;
+    this.tipoNuevo.set(empresa ? 'empresa' : this.rol && this.rol !== 'conductor' ? 'persona' : 'conductor');
     this.verificando.set(true);
   }
   elegirTipo(t: TipoNuevo) {
     if (t === 'vehiculo' || t === 'remolque') { this.verificando.set(false); this.router.navigate(['/vehiculos'], { queryParams: { nuevo: t } }); return; }
     this.tipoNuevo.set(t);
     const conf = ({ conductor: ['C', 'conductor'], persona: ['C', 'titular'], empresa: ['N', 'destinatario'], sede: ['N', 'destinatario'] } as Record<string, string[]>)[t];
-    this.buscar = { ...this.buscar, tipoId: conf[0], rol: conf[1] };
+    // Conserva el rol de la pestaña cuando corresponde al tipo elegido (p. ej. «Tenedores» → persona tenedor)
+    const rolPestana = t === 'persona' && ['titular', 'propietario', 'tenedor'].includes(this.rol) ? this.rol
+      : (t === 'empresa' || t === 'sede') && Terceros.EMPRESA.includes(this.rol) ? this.rol : conf[1];
+    this.buscar = { ...this.buscar, tipoId: conf[0], rol: rolPestana };
   }
 
   // Sede de una empresa existente: toma sus datos y el código de la próxima sede

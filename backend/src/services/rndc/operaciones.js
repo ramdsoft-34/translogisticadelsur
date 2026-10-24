@@ -671,8 +671,11 @@ export async function traerTercero(empresaId, clave, usuarioId, { tipoId, numId,
     // Las personas son únicas por documento (la sede solo distingue a las empresas con NIT)
     const existente = await Tercero.findOne(tipoId === 'N' ? { empresa: empresaId, tipoId, numId, 'sede.codigo': datos.sede.codigo } : { empresa: empresaId, tipoId: { $ne: 'N' }, numId });
     const doc = existente || new Tercero({ empresa: empresaId, tipoId, numId, roles: [] });
+    // El RNDC devuelve «0» cuando no hay licencia; una empresa (NIT) nunca es conductor
+    if (/^0*$/.test(datos.licencia.numero)) datos.licencia.numero = '';
     doc.set(datos);
-    doc.roles = [...new Set([...(doc.roles || []), ...roles, ...(datos.licencia.numero ? ['conductor'] : [])])];
+    const conLicencia = !!datos.licencia.numero && tipoId !== 'N';
+    doc.roles = [...new Set([...(doc.roles || []), ...roles, ...(conLicencia ? ['conductor'] : [])])].filter(r => tipoId !== 'N' || r !== 'conductor');
     doc.rndc = { estado: 'enviado', fecha: new Date(), verificadoEn: new Date(), hash: huella(variablesTercero(empresa, doc.toObject())), radicado: '', mensaje: 'Datos traídos del RNDC' };
     await doc.save({ validateBeforeSave: true });
     guardados.push({ id: doc._id, nuevo: !existente, nombre: [datos.nombres, datos.apellido1, datos.apellido2].filter(Boolean).join(' '), sede: datos.sede.codigo });
