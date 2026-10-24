@@ -19,7 +19,7 @@ import { Confirmar } from './confirmar';
   selector: 'app-expedir-rndc',
   imports: [FormsModule, Modal, Icono, Moneda, SelectorMunicipio, BuscarTercero, Confirmar, ...FORMATOS],
   template: `
-    <app-modal [titulo]="(modoVer() ? 'Ver viaje N° ' : 'Expedir viaje N° ') + (viaje()?.numero || '')" [abierto]="!!viajeId()" (cerrar)="cerrar.emit()" [ancho]="true">
+    <app-modal [titulo]="(soloVer() ? 'Viaje N° ' : 'Expedir viaje N° ') + (viaje()?.numero || '')" [abierto]="!!viajeId()" (cerrar)="cerrar.emit()" [ancho]="true">
       @if (previa(); as p) {
         <!-- Estado de los documentos -->
         <div class="estado">
@@ -414,6 +414,7 @@ export class ExpedirRndc {
   readonly viajeId = input<string | null>(null);
   // «Ver»: abre en solo consulta; con «Expedir» se pasa a corregir y enviar
   readonly soloVer = input(false);
+  // «Ver» abre la misma ventana con todo editable (se conserva la señal por si se necesita solo consulta)
   readonly modoVer = signal(false);
   readonly cerrar = output<void>();
   readonly actualizado = output<void>();
@@ -563,7 +564,7 @@ export class ExpedirRndc {
 
   constructor() {
     effect(() => { const p = this.previa(); if (p) this.ajustes.set({ remesa: { ...(p.remesa.ajustes || {}) }, manifiesto: { ...(p.manifiesto.ajustes || {}) } }); });
-    effect(() => { const id = this.viajeId(); this.modoVer.set(!!id && this.soloVer()); if (id) this.cargar(id); else { this.previa.set(null); this.viaje.set(null); } });
+    effect(() => { const id = this.viajeId(); this.modoVer.set(false); if (id) this.cargar(id); else { this.previa.set(null); this.viaje.set(null); } });
   }
 
   private async cargar(id: string) {
@@ -598,6 +599,7 @@ export class ExpedirRndc {
   // Explicación sencilla de los rechazos más comunes del RNDC
   ayudaError(m: string) {
     const t = String(m || '');
+    if (/Pasod+ Expidiendo/i.test(t)) return 'Es una falla interna del RNDC al procesar el documento, no un error de sus datos. Presione «Corregir y reenviar»: antes de enviar se verifica en el RNDC que no haya quedado registrado, así no se duplica.';
     if (/MAN130|titular no existe/i.test(t)) return 'El titular no está registrado en el RNDC. Use «Registrar de nuevo» junto al TITULAR (arriba) o cambie el titular en «Viaje» y presione «Corregir y reenviar».';
     if (/conductor.*no existe|MAN12\d/i.test(t)) return 'El conductor no está registrado en el RNDC. Use «Registrar de nuevo» junto al CONDUCTOR o elija otro conductor y reenvíe.';
     if (/MAN353|municipio origen/i.test(t)) return 'El origen del manifiesto debe ser el municipio de la remesa (el de la sede del remitente). La plataforma ya lo toma así: presione «Corregir y reenviar».';
