@@ -432,7 +432,7 @@ test('Actualizar vehículos desde el RNDC: individual y por lotes de 30', async 
   // 31 vehículos más (no están en el RNDC) para tener dos lotes
   await M.Vehiculo.insertMany(Array.from({ length: 31 }, (_, i) => ({ empresa: s.empresaA, placa: `LOT${String(i).padStart(3, '0')}` })));
   const total = await M.Vehiculo.countDocuments({ empresa: s.empresaA });
-  const ini = await s.manif.post('/api/rndc/vehiculos/actualizacion', { clave: CLAVE_RNDC, modo: 'lotes' });
+  const ini = await s.manif.post('/api/rndc/vehiculos/actualizacion', { clave: CLAVE_RNDC, modo: 'lotes', solo: 'todos' });
   assert.equal(ini.status, 202, JSON.stringify(ini.body));
   assert.equal(ini.body.clave, undefined, 'la contraseña no se devuelve');
   assert.equal((await s.manif.post('/api/rndc/vehiculos/actualizacion', { clave: CLAVE_RNDC, modo: 'todos' })).status, 409, 'un solo proceso por empresa');
@@ -450,10 +450,17 @@ test('Actualizar vehículos desde el RNDC: individual y por lotes de 30', async 
   assert.equal(await M.Vehiculo.countDocuments({ empresa: s.empresaA }), total, 'no se crean vehículos');
 
   // Contraseña rechazada: el proceso se detiene de inmediato
-  await s.manif.post('/api/rndc/vehiculos/actualizacion', { clave: 'clave-incorrecta', modo: 'todos' });
+  await s.manif.post('/api/rndc/vehiculos/actualizacion', { clave: 'clave-incorrecta', modo: 'todos', solo: 'todos' });
   const det = await esperar(['detenido']);
   assert.equal(det.procesados, 1);
   assert.match(det.mensaje, /contraseña/);
+  // Sigue donde quedó: con «solo pendientes» se saltan los consultados en los últimos días
+  await M.Vehiculo.updateMany({ empresa: s.empresaA, placa: /^LOT0[0-1]/ }, { $set: { 'rndc.consultadoEn': null } });
+  const resto = await s.manif.post('/api/rndc/vehiculos/actualizacion', { clave: CLAVE_RNDC, modo: 'todos', solo: 'pendientes' });
+  assert.equal(resto.status, 202, JSON.stringify(resto.body));
+  assert.equal(resto.body.total, 20, 'solo los no consultados');
+  await esperar(['terminado']);
+  assert.equal((await s.manif.post('/api/rndc/vehiculos/actualizacion', { clave: CLAVE_RNDC, modo: 'todos', solo: 'pendientes' })).status, 400, 'nada pendiente');
   await M.Vehiculo.deleteMany({ empresa: s.empresaA, placa: /^LOT/ });
 });
 

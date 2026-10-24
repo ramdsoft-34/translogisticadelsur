@@ -391,8 +391,8 @@ r.get('/vehiculos/actualizacion', ...actualizarVeh, (req, res) => {
   res.json({ proceso: masiva.estadoProceso(req.empresaId), tamLote: masiva.TAM_LOTE, limitador: estadoLimitador() });
 });
 r.post('/vehiculos/actualizacion', ...actualizarVeh, async (req, res) => {
-  const d = z.object({ clave, modo: z.enum(['todos', 'lotes']) }).parse(req.body);
-  res.status(202).json(await masiva.iniciar({ empresaId: req.empresaId, usuario: req.usuario, clave: d.clave, modo: d.modo }));
+  const d = z.object({ clave, modo: z.enum(['todos', 'lotes']), solo: z.enum(['pendientes', 'todos']).default('pendientes') }).parse(req.body);
+  res.status(202).json(await masiva.iniciar({ empresaId: req.empresaId, usuario: req.usuario, clave: d.clave, modo: d.modo, solo: d.solo }));
 });
 r.post('/vehiculos/actualizacion/continuar', ...actualizarVeh, (req, res) => {
   const d = z.object({ clave: z.string().max(100).optional() }).parse(req.body);

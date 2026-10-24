@@ -20,6 +20,10 @@ const procesos = new Map();                 // «tipo|empresaId» → proceso
 const llave = (empresaId, tipo = 'vehiculos') => `${tipo}|${empresaId}`;
 
 const dormir = (ms) => new Promise(r => setTimeout(r, ms));
+// «Solo pendientes»: lo no consultado en estos días; así, si el proceso se corta, al iniciarlo de nuevo sigue donde quedó
+const DIAS_RECIENTE = 7;
+const reciente = () => new Date(Date.now() - DIAS_RECIENTE * 86400000);
+const sinConsultaReciente = () => ({ $or: [{ 'rndc.consultadoEn': null }, { 'rndc.consultadoEn': { $lt: reciente() } }] });
 const esClave = (m) => /usuario|contrase|clave|password|autentic/i.test(m || '');
 
 // Vista pública del proceso (sin la clave).
@@ -67,6 +71,11 @@ async function procesarLote(p, numero) {
     p.mensaje = `Lote ${numero} de ${p.totalLotes}: consultando ${p.placaActual}`;
     const r = await consultarPlaca(p, placa);
     const { conexion, ...res } = r;
+    // Se marca como consultado (salvo error de conexión o del servicio) para poder retomar sin repetirlo
+    if (r.estado !== 'error') {
+      const f = p.tipo === 'terceros' ? { empresa: p.empresa, tipoId: placa.tipoId, numId: placa.numId } : { empresa: p.empresa, placa };
+      await (p.tipo === 'terceros' ? Tercero : Vehiculo).updateMany(f, { $set: { 'rndc.consultadoEn': new Date() } }).catch(() => {});
+    }
     if (p.tipo !== 'terceros') res.ref = res.placa;
     lote.resultados.push(res);
     contar(p, r);
@@ -121,7 +130,7 @@ async function cerrar(p) {
 // solo = 'pendientes': importados del Excel sin confirmar, sin enviar o con error.
 async function documentosTerceros(empresaId, solo) {
   const f = { empresa: empresaId };
-  if (solo === 'pendientes') f.$or = [{ 'rndc.mensaje': /^Importado/i }, { 'rndc.estado': { $in: ['sin_enviar', 'error', '', null] } }];
+  if (solo === 'pendientes') f.$and = [{ $or: [{ 'rndc.mensaje': /^Importado/i }, { 'rndc.estado': { $in: ['sin_enviar', 'error', '', null] } }] }, sinConsultaReciente()];
   const ts = await Tercero.find(f).select('tipoId numId nombres apellido1 apellido2 razonSocial').sort({ nombres: 1 }).lean();
   const vistos = new Map();
   for (const t of ts) {
@@ -140,9 +149,9 @@ export async function iniciar({ empresaId, usuario, clave, modo, tipo = 'vehicul
   }
   const empresa = await Empresa.findById(empresaId).select('rndc.ambiente').lean();
   const placas = tipo === 'terceros' ? await documentosTerceros(empresaId, solo)
-    : (await Vehiculo.find({ empresa: empresaId }).select('placa').sort({ placa: 1 }).lean()).map(v => v.placa);
+    : (await Vehiculo.find({ empresa: empresaId, ...(solo === 'pendientes' ? sinConsultaReciente() : {}) }).select('placa').sort({ placa: 1 }).lean()).map(v => v.placa);
   if (!placas.length) {
-    const e = new Error(tipo !== 'terceros' ? 'La empresa no tiene vehículos registrados' : solo === 'pendientes' ? 'No hay terceros sin confirmar' : 'La empresa no tiene terceros registrados');
+    const e = new Error(solo === 'pendientes' ? `No queda nada pendiente: todo se consultó en los últimos ${DIAS_RECIENTE} días` : tipo !== 'terceros' ? 'La empresa no tiene vehículos registrados' : 'La empresa no tiene terceros registrados');
     e.status = 400; throw e;
   }
   const p = {

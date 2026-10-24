@@ -17,6 +17,7 @@ const idTercero = () => ({ tipoId: str({ uppercase: true }), numId: str() });
 const sincronizacion = new Schema({
   hash: str(), radicado: str(), fecha,
   verificadoEn: fecha,                    // última vez que se trajeron sus datos del RNDC
+  consultadoEn: fecha,                    // última consulta de la actualización masiva (aunque el RNDC no lo tenga): permite seguir donde quedó
   estado: { type: String, enum: ['sin_enviar', 'enviado', 'error'], default: 'sin_enviar' },
   mensaje: str(),
 }, { _id: false });

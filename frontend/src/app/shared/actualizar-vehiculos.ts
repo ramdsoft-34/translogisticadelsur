@@ -67,11 +67,12 @@ const ESTADOS: Record<string, [string, string]> = {
       } @else {
         @if (!proceso() || terminado()) {
           <div class="inicio">
-            @if (esTercero()) {
-              <div class="segmentos" role="group" aria-label="Qué terceros actualizar">
-                <button type="button" [class.activo]="solo() === 'pendientes'" (click)="solo.set('pendientes')">Solo los sin confirmar</button>
-                <button type="button" [class.activo]="solo() === 'todos'" (click)="solo.set('todos')">Todos los terceros</button>
-              </div>
+            <div class="segmentos" role="group" aria-label="Qué actualizar">
+              <button type="button" [class.activo]="solo() === 'pendientes'" (click)="solo.set('pendientes')">{{ esTercero() ? 'Solo los sin confirmar' : 'Solo los pendientes' }}</button>
+              <button type="button" [class.activo]="solo() === 'todos'" (click)="solo.set('todos')">{{ esTercero() ? 'Todos los terceros' : 'Todos los vehículos' }}</button>
+            </div>
+            @if (solo() === 'pendientes') {
+              <p class="sutil">Se saltan los ya consultados en los últimos 7 días: si el proceso se corta (cierre de sesión, reinicio o error), vuelva a iniciarlo y seguirá donde quedó.</p>
             }
             <p>{{ modo() === 'lotes'
               ? 'Se consultan 30 ' + unidad() + ', el proceso se detiene para que revise los resultados y usted decide si continúa con el siguiente lote.'
@@ -247,7 +248,7 @@ export class ActualizarVehiculos {
     if (!c) return;
     this.trabajando.set(true);
     try {
-      this.proceso.set(await this.api.post<any>(`/rndc/${this.tipo()}/actualizacion`, { clave: c, modo: this.modo(), ...(this.esTercero() ? { solo: this.solo() } : {}) }));
+      this.proceso.set(await this.api.post<any>(`/rndc/${this.tipo()}/actualizacion`, { clave: c, modo: this.modo(), solo: this.solo() }));
       this.iniciarSondeo();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
