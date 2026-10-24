@@ -599,7 +599,7 @@ export class ExpedirRndc {
   // Explicación sencilla de los rechazos más comunes del RNDC
   ayudaError(m: string) {
     const t = String(m || '');
-    if (/Pasod+ Expidiendo/i.test(t)) return 'Es una falla interna del RNDC al procesar el documento, no un error de sus datos. Presione «Corregir y reenviar»: antes de enviar se verifica en el RNDC que no haya quedado registrado, así no se duplica.';
+    if (/Paso\d+ Expidiendo/i.test(t)) return 'Es una falla interna del RNDC al procesar el documento, no un error de sus datos. Presione «Corregir y reenviar»: antes de enviar se verifica en el RNDC que no haya quedado registrado, así no se duplica.';
     if (/MAN130|titular no existe/i.test(t)) return 'El titular no está registrado en el RNDC. Use «Registrar de nuevo» junto al TITULAR (arriba) o cambie el titular en «Viaje» y presione «Corregir y reenviar».';
     if (/conductor.*no existe|MAN12\d/i.test(t)) return 'El conductor no está registrado en el RNDC. Use «Registrar de nuevo» junto al CONDUCTOR o elija otro conductor y reenvíe.';
     if (/MAN353|municipio origen/i.test(t)) return 'El origen del manifiesto debe ser el municipio de la remesa (el de la sede del remitente). La plataforma ya lo toma así: presione «Corregir y reenviar».';
