@@ -11,14 +11,14 @@ const PROPORCION_LOGO = 66 / 160;
 const ahoraTexto = () => new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 export const TEXTO_MARCA = 'Exportado desde Translogística del Sur';
 
-function marcarPagina(doc, cuando) {
+function marcarPagina(doc, cuando, conAgua = true) {
   const { width: W, height: H } = doc.page;
   const margenInf = doc.page.margins.bottom;
   doc.page.margins.bottom = 0;
   doc.save();
   // Marca de agua central: ~28 % del ancho, casi transparente
   const ancho = Math.min(W * 0.28, 240);
-  doc.opacity(0.05).image(LOGO_TLS, (W - ancho) / 2, (H - ancho * PROPORCION_LOGO) / 2, { width: ancho });
+  if (conAgua) doc.opacity(0.05).image(LOGO_TLS, (W - ancho) / 2, (H - ancho * PROPORCION_LOGO) / 2, { width: ancho });
   // Pie: logo pequeño + texto gris
   const x = Math.max(doc.page.margins.left, 18);
   doc.opacity(0.55).image(LOGO_TLS, x, H - 17, { width: 24 });
@@ -28,13 +28,13 @@ function marcarPagina(doc, cuando) {
   doc.page.margins.bottom = margenInf;
 }
 
-export function marcarPdf(doc) {
+export function marcarPdf(doc, conAgua = true) {
   const cuando = ahoraTexto();
   let rango = null;
   try { rango = doc.bufferedPageRange(); } catch { rango = null; }
   if (rango && rango.count > 0 && doc.options?.bufferPages) {
-    for (let i = 0; i < rango.count; i += 1) { doc.switchToPage(rango.start + i); marcarPagina(doc, cuando); }
-  } else marcarPagina(doc, cuando);
+    for (let i = 0; i < rango.count; i += 1) { doc.switchToPage(rango.start + i); marcarPagina(doc, cuando, conAgua); }
+  } else marcarPagina(doc, cuando, conAgua);
 }
 
 // Excel: logo pequeño arriba a la derecha, nota al final y pie de página al imprimir
@@ -51,8 +51,9 @@ export function marcarLibro(wb) {
   });
 }
 
-export function pdfABuffer(doc) {
-  marcarPdf(doc);
+// marca: 'completa' (marca de agua + pie), 'pie' (solo la línea al pie) o false (sin marca, p. ej. el manifiesto del RNDC)
+export function pdfABuffer(doc, { marca = 'completa' } = {}) {
+  if (marca) marcarPdf(doc, marca === 'completa');
   return new Promise((resolve, reject) => {
     const partes = [];
     doc.on('data', b => partes.push(b));
