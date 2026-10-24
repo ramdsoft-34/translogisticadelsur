@@ -1230,3 +1230,18 @@ test('Cambios en vivo: un cambio de una empresa llega por el canal SSE solo a es
   a.cerrar();
   srv.close();
 });
+
+test('Logo de la empresa: solo el administrador lo cambia, la vista previa no guarda y el soporte interno lo usa', async () => {
+  // PNG de 1×1 píxel
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  assert.equal((await s.manif.put('/api/gestion/empresa/logo', { imagen: png })).status, 403, 'solo quien gestiona la configuración');
+  assert.equal((await s.adminA.put('/api/gestion/empresa/logo', { imagen: 'data:image/gif;base64,AAAA' })).status, 400, 'solo PNG o JPG');
+  const previa = await s.adminA.post('/api/gestion/soportes/vista-previa', { imagen: png });
+  assert.equal(previa.status, 200);
+  assert.match(previa.headers['content-type'], /pdf/);
+  assert.equal((await s.adminA.get('/api/gestion/empresa/logo')).body.logo, '', 'la vista previa no guarda el logo');
+  assert.equal((await s.adminA.put('/api/gestion/empresa/logo', { imagen: png })).status, 200);
+  assert.equal((await s.manif.get('/api/gestion/empresa/logo')).body.logo, png);
+  assert.equal((await s.adminA.del('/api/gestion/empresa/logo')).status, 200);
+  assert.equal((await s.adminA.get('/api/gestion/empresa/logo')).body.logo, '');
+});

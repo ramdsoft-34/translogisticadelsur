@@ -28,6 +28,8 @@ const empresaSchema = new Schema({
   nit: str({ required: true }),          // sin dígito de verificación
   dv: str(),
   direccion: str(), telefono: str(), ciudad: str(), correo: str({ lowercase: true }),
+  // Logo propio (data URL PNG/JPEG) para el soporte interno; no se carga salvo que se pida (+logo)
+  logo: { type: String, default: '', select: false },
   activa: { type: Boolean, default: true },
   rndc: {
     ambiente: { type: String, enum: ['SIMULADO', 'PRUEBAS', 'PRODUCCION'], default: 'SIMULADO' },

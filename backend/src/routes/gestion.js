@@ -15,7 +15,7 @@ import * as liq from '../services/gestion/liquidacionConductor.js';
 import * as pre from '../services/gestion/prestamos.js';
 import * as cont from '../services/gestion/contabilidad.js';
 import * as cierre from '../services/gestion/cierre.js';
-import { soporteInterno, asegurarSoporte } from '../services/gestion/soporteInterno.js';
+import { soporteInterno, asegurarSoporte, soporteDeEjemplo } from '../services/gestion/soporteInterno.js';
 import { manifiestoPdf } from '../services/reportes/manifiesto.js';
 import * as dulces from '../services/gestion/remesasDulces.js';
 
@@ -467,6 +467,31 @@ r.post('/relaciones/copiar/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) 
   await asegurarSoporte(req.empresaId, nuevo._id);
   await auditar(req, 'copiar_viaje', { entidad: 'Viaje', entidadId: nuevo._id, detalle: { de: v.numero, a: nuevo.numero } });
   res.status(201).json({ numero: nuevo.numero, _id: nuevo._id });
+});
+
+// ═════════════ Logo de la empresa (soporte interno) ═════════════
+const LOGO_MAX = 600 * 1024;   // ~450 KB de imagen
+const logoSchema = z.object({ imagen: z.string().max(LOGO_MAX).regex(/^data:image\/(png|jpe?g);base64,[A-Za-z0-9+/=]+$/, 'El logo debe ser una imagen PNG o JPG') });
+r.get('/empresa/logo', permitir(P.VIAJES_VER), async (req, res) => {
+  const e = await Empresa.findById(req.empresaId).select('+logo').lean();
+  res.json({ logo: e?.logo || '' });
+});
+r.put('/empresa/logo', permitir(P.CONFIG_GESTIONAR), express.json({ limit: '1mb' }), async (req, res) => {
+  const { imagen } = logoSchema.parse(req.body);
+  await Empresa.updateOne({ _id: req.empresaId }, { $set: { logo: imagen } });
+  await auditar(req, 'logo_empresa', { detalle: { accion: 'cambiar', bytes: imagen.length } });
+  res.json({ ok: true });
+});
+r.delete('/empresa/logo', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  await Empresa.updateOne({ _id: req.empresaId }, { $set: { logo: '' } });
+  await auditar(req, 'logo_empresa', { detalle: { accion: 'quitar' } });
+  res.json({ ok: true });
+});
+// Vista previa del soporte interno con el logo indicado (o el guardado), sin guardar nada
+r.post('/soportes/vista-previa', permitir(P.CONFIG_GESTIONAR), express.json({ limit: '1mb' }), async (req, res) => {
+  const e = await Empresa.findById(req.empresaId).select('+logo').lean();
+  const imagen = req.body?.imagen ? logoSchema.parse(req.body).imagen : e?.logo;
+  archivo(res, await manifiestoPdf(soporteDeEjemplo(e, imagen)), 'vista-previa-soporte.pdf', 'application/pdf', true);
 });
 
 // ═════════════ Soporte interno MC / RC ═════════════

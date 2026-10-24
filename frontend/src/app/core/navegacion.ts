@@ -37,7 +37,7 @@ export const MODULOS: Modulo[] = [
     { ruta: '/rndc/correos', texto: 'Correos', icono: 'correo', permisos: [P.RNDC_OPERAR], descripcion: 'Manifiestos y cartas de salida enviados a clientes' },
   ] },
   { id: 'empresa', nombre: 'Empresa', icono: 'ajustes', paginas: [
-    { ruta: '/configuracion', texto: 'Configuración', icono: 'ajustes', permisos: [P.CONFIG_GESTIONAR, P.USUARIOS_GESTIONAR], descripcion: 'Conexión RNDC, correo, usuarios, importación y auditoría', claves: 'usuarios correo auditoria importar' },
+    { ruta: '/configuracion', texto: 'Configuración', icono: 'ajustes', permisos: [P.CONFIG_GESTIONAR, P.USUARIOS_GESTIONAR], descripcion: 'Conexión RNDC, correo, usuarios, importación y auditoría', claves: 'usuarios correo auditoria importar logo soporte' },
     { ruta: '/admin/empresas', texto: 'Empresas', icono: 'edificio', permisos: [P.EMPRESAS_GESTIONAR], descripcion: 'Empresas de la plataforma' },
     { ruta: '/admin/auditoria', texto: 'Auditoría global', icono: 'escudo', permisos: [P.EMPRESAS_GESTIONAR], descripcion: 'Registro de actividad de toda la plataforma' },
   ] },

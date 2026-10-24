@@ -48,7 +48,9 @@ export async function soporteInterno(empresa, viajeId, { asignar = true } = {}) 
   const fin = new Date(Date.UTC(new Date(v.fecha).getUTCFullYear(), new Date(v.fecha).getUTCMonth() + 1, 0));
   const nota = [`Soporte interno - Viaje N ${v.numero}`, v.conAuxiliar ? 'Con auxiliar' : '', txt(v.observaciones)].filter(Boolean).join(' · ');
   const lic = cond?.licencia || {};
+  const conLogo = await Empresa.findById(empresa._id).select('+logo').lean();
   return {
+    interno: true, logoEmpresa: conLogo?.logo || '',
     soporte: s,
     empresa: txt(empresa.rndc?.razonSocial) || empresa.nombre.toUpperCase(), empNit: `${empresa.nit}${empresa.dv || ''}`,
     empDir: txt(empresa.direccion), empTel: txt(empresa.telefono), empCiudad: 'PASTO NARINO',
@@ -99,5 +101,27 @@ export async function verificarSoporte(codigo) {
     mc: v.soporteInterno.mc, rc: v.soporteInterno.rc, codigo: c, expedido: v.soporteInterno.fecha,
     viaje: v.numero, fecha: v.fecha, placa: v.placa, remolque: v.remolque || '', conductor: oculto(v.conductorNombre),
     origen: (await lugar(v.codOrigen || empresa?.rndc?.codOrigen)) || '', destino: (await lugar(v.codDestino)) || txt(v.destino),
+  };
+}
+
+// Vista previa del soporte interno con datos de ejemplo (para revisar el logo antes de guardarlo)
+export function soporteDeEjemplo(empresa, logo) {
+  const hoy = new Date();
+  const f = `${hoy.getFullYear()}/${String(hoy.getMonth() + 1).padStart(2, '0')}/${String(hoy.getDate()).padStart(2, '0')}`;
+  return {
+    interno: true, logoEmpresa: logo || '', soporte: { mc: 'MC000000', rc: 'RC000000', codigo: 'EJEMPLO0EJEMPLO0' },
+    empresa: txt(empresa.rndc?.razonSocial) || empresa.nombre.toUpperCase(), empNit: `${empresa.nit}${empresa.dv || ''}`,
+    empDir: txt(empresa.direccion), empTel: txt(empresa.telefono), empCiudad: 'PASTO NARINO',
+    numero: 'MC000000', radicado: 'EJEMPLO0', seguro: 'EJEMPLO0EJEMPLO0', qrObs: '', qrTexto: `${env.urlPublica || 'https://translogisticadelsur.com'}/verificar/EJEMPLO`,
+    fechaRad: f, fechaExp: f, tipo: 'Urbano', origen: 'PASTO NARINO', destino: 'IPIALES NARINO',
+    titular: 'NOMBRE DEL TITULAR', titDoc: '0000000000', titDir: 'DIRECCION DEL TITULAR', titTel: '0', titCiudad: 'PASTO NARINO',
+    placa: 'ABC123', marca: 'MARCA', remolque: '', config: '2', pesoVacio: '0', pesoVacioRemolque: '0',
+    soatAseg: '', soatNum: '', soatVence: '', condNom: 'NOMBRE DEL CONDUCTOR', condDoc: '0000000000', condDir: 'DIRECCION', condTel: '0 0',
+    condLic: 'C2-0000000000', condCiudad: 'PASTO NARINO', remesa: 'RC000000', unidad: 'Kilogramos', cantidad: 1000, naturaleza: 'Carga Normal', empaque: 'Varios',
+    mercanciaCod: '', mercancia: 'CARGA GENERAL SEGUN REMISION', remNit: '', remNom: 'CLIENTE DE EJEMPLO', remDir: '', remLugar: 'PASTO NARINO',
+    desNit: '', desNom: '', desDir: 'DESTINO DE EJEMPLO', desLugar: 'IPIALES NARINO', dueno: 'Empresa de Transporte',
+    flete: 1000000, rete: 10000, ica: 0, fopat: 0, neto: 990000, anticipo: 500000, saldo: 490000,
+    lugarPago: 'PASTO NARINO', fechaPago: f, carguePor: 'REMITENTE', descarguePor: 'DESTINATARIO', observaciones: 'Vista previa: así se verá el soporte interno',
+    fechaTexto: f,
   };
 }

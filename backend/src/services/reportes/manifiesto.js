@@ -253,6 +253,12 @@ function campo(doc, def, valor) {
   });
 }
 
+// Imagen PNG/JPEG guardada como data URL → Buffer (vacío si no es válida)
+export function imagenDeDataUrl(u) {
+  const m = String(u || '').match(/^data:image\/(png|jpe?g);base64,([A-Za-z0-9+/=]+)$/);
+  return m ? Buffer.from(m[2], 'base64') : null;
+}
+
 export async function manifiestoPdf(d) {
   const [ancho, alto] = PLANTILLA.pagina;
   const doc = new PDFDocument({ size: [ancho, alto], margin: 0, info: { Title: `Manifiesto ${d.numero}` } });
@@ -265,13 +271,36 @@ export async function manifiestoPdf(d) {
       doc.moveTo(x.x1, x.y1).lineTo(x.x2, x.y2).lineWidth(x.grosor).strokeColor(x.trazo).stroke();
     }
   }
+  // Soporte interno: sin logos ni leyendas del Ministerio; lleva el logo y el nombre de la empresa que lo expide
+  const interno = !!d.interno;
+  const leyendaRndc = (t) => (t.x > 480 && t.y < 90) || (t.x < 40 && t.y > 510);
   for (const t of PLANTILLA.textos) {
+    if (interno && leyendaRndc(t)) continue;
+    const texto = interno && t.texto === 'MANIFIESTO ELECTRONICO DE CARGA' ? 'SOPORTE INTERNO DE CARGA' : t.texto;
     doc.font(t.negrita ? 'Helvetica-Bold' : 'Helvetica').fontSize(t.tam).fillColor(t.color || 'black')
-      .text(t.texto, t.x, t.y, { lineBreak: false, baseline: 'alphabetic' });
+      .text(texto, t.x, t.y, { lineBreak: false, baseline: 'alphabetic' });
   }
   const im = PLANTILLA.imagenes;
-  doc.image(LOGO_TRANSPORTE, im.transporte[0], im.transporte[1], { width: im.transporte[2], height: im.transporte[3] });
-  doc.image(LOGO_SUPERTRANSPORTE, im.supertransporte[0], im.supertransporte[1], { width: im.supertransporte[2], height: im.supertransporte[3] });
+  if (interno) {
+    // Zona de los dos logos oficiales (arriba a la izquierda)
+    const [x, y] = [im.transporte[0], im.transporte[1]];
+    const w = Math.max(im.transporte[2], im.supertransporte[2]); const h = im.supertransporte[1] + im.supertransporte[3] - y;
+    const logo = imagenDeDataUrl(d.logoEmpresa);
+    if (logo) {
+      try { doc.image(logo, x, y, { fit: [w, h], align: 'center', valign: 'center' }); }
+      catch { campo(doc, { x: x + w / 2, y: y + h / 2, tam: 9, alin: 'centro', ancho: w, lineas: 3, paso: 11 }, d.empresa); }
+    } else {
+      campo(doc, { x: x + w / 2, y: y + h / 2, tam: 9, alin: 'centro', ancho: w, lineas: 3, paso: 11 }, d.empresa);
+    }
+    doc.font('Helvetica').fontSize(6).fillColor('black');
+    ['Soporte interno de la empresa transportadora para viajes', 'que no se expiden en el RNDC. No es un documento del', 'Ministerio de Transporte.',
+      'Compruebe que existe y es válido escaneando el código QR.'].forEach((l, i) => doc.text(l, 490.96, 36.65 + i * 7.5, { lineBreak: false, baseline: 'alphabetic' }));
+    doc.text('Documento interno de la empresa transportadora.', 31.14, 519.4, { lineBreak: false, baseline: 'alphabetic' });
+    doc.text('Verifique su validez escaneando el código QR del encabezado.', 31.14, 527.4, { lineBreak: false, baseline: 'alphabetic' });
+  } else {
+    doc.image(LOGO_TRANSPORTE, im.transporte[0], im.transporte[1], { width: im.transporte[2], height: im.transporte[3] });
+    doc.image(LOGO_SUPERTRANSPORTE, im.supertransporte[0], im.supertransporte[1], { width: im.supertransporte[2], height: im.supertransporte[3] });
+  }
   if (d.seguro && d.radicado) {
     // El soporte interno lleva su propio texto de QR (código interno), nunca el del RNDC
     const png = await QRCode.toBuffer(d.qrTexto || textoQR(d), { errorCorrectionLevel: 'L', margin: 0, scale: 6 });
@@ -282,7 +311,7 @@ export async function manifiestoPdf(d) {
   }
 
   const v = { ...d, nit: `Nit: ${d.empNit}`, dir: d.empDir ? `   ${d.empDir}` : '',
-    tel: `Tel:  ${d.empTel}  ${d.empCiudad}`, manifiesto: `Manifiesto  : ${d.numero}`, autorizacion: `Autorización:  ${d.radicado}`,
+    tel: `Tel:  ${d.empTel}  ${d.empCiudad}`, manifiesto: `${interno ? 'Soporte     ' : 'Manifiesto  '}: ${d.numero}`, autorizacion: `${interno ? 'Código' : 'Autorización'}:  ${d.radicado}`,
     radicacion: d.fechaRad, expedicion: d.fechaExp, cantidad: fmtMilManifiesto(d.cantidad), letras: numeroALetras(d.flete) };
   for (const k of ['flete', 'rete', 'ica', 'fopat', 'neto', 'anticipo', 'saldo']) v[k] = fmtMilManifiesto(d[k]);
   for (const [k, def] of Object.entries(C)) campo(doc, def, v[k]);
