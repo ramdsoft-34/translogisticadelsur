@@ -7,6 +7,7 @@ import { Avisos } from '../core/avisos.service';
 import { ESTADOS_VIAJE, P, Viaje } from '../core/modelos';
 import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
+import { MenuAcciones } from '../shared/menu-acciones';
 import { FORMATOS, hoyIso, inicioMesIso, isoDia } from '../shared/formato';
 import { SelectorMunicipio } from '../shared/municipio';
 import { Moneda } from '../shared/moneda';
@@ -42,13 +43,15 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
       <div class="acciones">
-        <button (click)="abrirWhatsapp()"><app-icono nombre="enviar" [tam]="16" />WhatsApp</button>
-        <button (click)="descargar()" title="Exportar a Excel o PDF: general, por empresa o por placa"><app-icono nombre="descargar" [tam]="16" />Exportar Excel / PDF</button>
+        <app-menu-acciones texto="Reportes">
+          <button (click)="abrirWhatsapp()"><app-icono nombre="enviar" [tam]="16" />Reporte por WhatsApp<small>Mensaje por cliente con los viajes seleccionados</small></button>
+          <button (click)="descargar()"><app-icono nombre="descargar" [tam]="16" />Exportar Excel o PDF<small>General, por empresa o por placa</small></button>
+        </app-menu-acciones>
         @if (puedeRegistrar) { <button class="primario" (click)="nuevo()"><app-icono nombre="mas" [tam]="16" />Registrar viaje</button> }
       </div>
     </div>

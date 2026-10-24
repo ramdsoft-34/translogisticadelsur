@@ -8,6 +8,7 @@ import { RndcClave } from '../core/rndc-clave.service';
 import { P, TIPOS_ID, nombreTercero } from '../core/modelos';
 import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
+import { MenuAcciones } from '../shared/menu-acciones';
 import { FORMATOS, isoDia } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
 import { TraerRndc } from '../shared/traer-rndc';
@@ -28,16 +29,18 @@ const vacio = () => ({
 
 @Component({
   selector: 'app-vehiculos',
-  imports: [FormsModule, Modal, Icono, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, BuscarTercero, VistaRndc, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, MenuAcciones, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, BuscarTercero, VistaRndc, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Vehículos</h1><p class="sutil">Vehículos y remolques con sus documentos. Los códigos (configuración, marca, línea…) son los de las tablas del RNDC.</p></div>
       <div class="acciones">
         @if (puedeEditar) {
-          <button (click)="importar.set(true)"><app-icono nombre="descargar" />Importar Excel</button>
-          @if (puedeRndc) { <button (click)="traer.set(true)"><app-icono nombre="buscar" />Traer del RNDC</button> }
-          @if (puedeConsultar) { <button (click)="actualizar.set(true)"><app-icono nombre="reloj" />Actualizar desde el RNDC</button> }
-          @if (rastreoHabilitado()) { <button (click)="abrirSurTrack()"><app-icono nombre="ubicacion" />Traer de Sur Track</button> }
+          <app-menu-acciones>
+            @if (puedeConsultar) { <button (click)="actualizar.set(true)"><app-icono nombre="reloj" />Actualizar desde el RNDC<small>SOAT, propietario y demás datos, uno, por lotes o todos</small></button> }
+            @if (puedeRndc) { <button (click)="traer.set(true)"><app-icono nombre="buscar" />Traer del RNDC<small>Crea en la plataforma placas que ya existen en el RNDC</small></button> }
+            @if (rastreoHabilitado()) { <button (click)="abrirSurTrack()"><app-icono nombre="ubicacion" />Traer de Sur Track<small>Vehículos registrados en la app de rastreo</small></button> }
+            <button (click)="importar.set(true)"><app-icono nombre="descargar" />Importar Excel<small>Carga masiva desde una plantilla</small></button>
+          </app-menu-acciones>
           <button class="primario" (click)="nuevo()"><app-icono nombre="mas" />Nuevo vehículo</button>
         }
       </div>

@@ -6,6 +6,7 @@ import { Auth } from '../core/auth.service';
 import { Avisos } from '../core/avisos.service';
 import { P } from '../core/modelos';
 import { Icono } from '../shared/icono';
+import { MenuAcciones } from '../shared/menu-acciones';
 import { Modal } from '../shared/modal';
 import { Moneda } from '../shared/moneda';
 import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
@@ -21,14 +22,16 @@ const INFORMES: [string, string][] = [['balance', 'Balance general'], ['resultad
 import { CierreMes } from './gestion-varios';
 @Component({
   selector: 'app-contabilidad',
-  imports: [FormsModule, Icono, Modal, Moneda, Confirmar, CierreMes, ...FORMATOS],
+  imports: [FormsModule, Icono, MenuAcciones, Modal, Moneda, Confirmar, CierreMes, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Contabilidad</h1>
       <p class="sutil">Partida doble simplificada: facturas a clientes, cobros, pagos a conductores, gastos e informes. Información de apoyo; debe revisarla un contador.</p></div>
       @if (puedeGestionar) {
         <div class="acciones">
-          <button (click)="abrir('gasto')"><app-icono nombre="mas" />Gasto</button>
-          <button (click)="abrir('manual')"><app-icono nombre="mas" />Asiento manual</button>
+          <app-menu-acciones texto="Registrar">
+            <button (click)="abrir('gasto')"><app-icono nombre="dinero" />Gasto<small>Un pago de la empresa con su soporte</small></button>
+            <button (click)="abrir('manual')"><app-icono nombre="editar" />Asiento manual<small>Débitos y créditos escritos a mano</small></button>
+          </app-menu-acciones>
           <button class="primario" (click)="abrir('factura')"><app-icono nombre="documento" />Facturar a un cliente</button>
         </div>
       }

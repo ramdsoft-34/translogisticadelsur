@@ -9,6 +9,7 @@ import { RndcClave } from '../core/rndc-clave.service';
 import { P, TIPOS_ID, nombreTercero } from '../core/modelos';
 import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
+import { MenuAcciones } from '../shared/menu-acciones';
 import { SelectorMunicipio } from '../shared/municipio';
 import { FORMATOS, isoDia } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
@@ -31,16 +32,18 @@ const vacio = () => ({
 
 @Component({
   selector: 'app-terceros',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, VistaRndc, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, VistaRndc, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Conductores y terceros</h1><p class="sutil">Conductores, titulares, propietarios, tenedores y destinatarios que se registran en el RNDC.</p></div>
       <div class="acciones">
         @if (puedeEditar) {
-          <button (click)="importar.set(true)"><app-icono nombre="descargar" />Importar Excel</button>
-          @if (puedeConsultar) { <button (click)="actualizar.set(true)" title="Confirma con el RNDC los datos de los terceros (también los importados del Excel)"><app-icono nombre="reloj" />Actualizar desde el RNDC</button> }
-          @if (puedeRndc) { <button (click)="traer.set(true)"><app-icono nombre="buscar" />Traer del RNDC</button> }
-          <button class="primario" (click)="nuevo()"><app-icono nombre="mas" />Nuevo en el RNDC</button>
+          <app-menu-acciones>
+            @if (puedeConsultar) { <button (click)="actualizar.set(true)"><app-icono nombre="reloj" />Actualizar desde el RNDC<small>Confirma los datos con el RNDC, uno, por lotes o todos</small></button> }
+            @if (puedeRndc) { <button (click)="traer.set(true)"><app-icono nombre="buscar" />Traer del RNDC<small>Crea en la plataforma terceros que ya existen en el RNDC</small></button> }
+            <button (click)="importar.set(true)"><app-icono nombre="descargar" />Importar Excel<small>Carga masiva desde una plantilla</small></button>
+          </app-menu-acciones>
+          <button class="primario" (click)="nuevo()"><app-icono nombre="mas" />Nuevo tercero</button>
         }
       </div>
     </div>

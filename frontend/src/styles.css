@@ -143,8 +143,9 @@ a { color: var(--primario-texto); text-underline-offset: 3px; text-decoration-th
 
 /* ── Encabezado de página ───────────────────────────────────────────────────
    Título grande a la izquierda, explicación corta debajo y acciones a la derecha. */
-.pagina-cab { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px 24px; flex-wrap: wrap;
-  margin: 2px 0 22px; padding-bottom: 18px; border-bottom: 1px solid var(--gris-2); }
+.pagina-cab { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px 24px; flex-wrap: wrap; margin-bottom: 14px; }
+/* Solo el encabezado principal de cada página lleva la línea divisoria */
+main > * > .pagina-cab:first-child { margin: 2px 0 22px; padding-bottom: 18px; border-bottom: 1px solid var(--gris-2); }
 .pagina-cab > div:first-child { min-width: 0; flex: 1 1 380px; }
 .pagina-cab p { margin: 6px 0 0; max-width: 72ch; color: var(--gris-5); font-size: 14px; }
 .pagina-cab .acciones { margin-left: auto; }

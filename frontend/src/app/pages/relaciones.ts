@@ -7,6 +7,7 @@ import { Auth } from '../core/auth.service';
 import { Avisos } from '../core/avisos.service';
 import { P } from '../core/modelos';
 import { Icono } from '../shared/icono';
+import { MenuAcciones } from '../shared/menu-acciones';
 import { Modal } from '../shared/modal';
 import { FORMATOS } from '../shared/formato';
 import { Confirmar } from '../shared/confirmar';
@@ -22,17 +23,20 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
 // registro masivo de un vehículo para varios días, relación en Excel/PDF, pago a conductores e informe de utilidad.
 @Component({
   selector: 'app-relaciones',
-  imports: [FormsModule, RouterLink, Icono, Modal, Confirmar, BuscarTercero, VisorPdf, ExportarViajes, ...FORMATOS],
+  imports: [MenuAcciones, FormsModule, RouterLink, Icono, Modal, Confirmar, BuscarTercero, VisorPdf, ExportarViajes, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Programación por placa</h1>
         <p class="sutil">Revise los viajes por empresa y placa, regístrelos en bloque y saque la relación, el pago y la utilidad.</p></div>
       <div class="acciones">
+        <app-menu-acciones texto="Informes">
+          <button (click)="exportador().abrir({ cliente: f.cliente })"><app-icono nombre="descargar" [tam]="16" />Relación en Excel o PDF<small>Viajes por empresa o por placa</small></button>
+          <button (click)="informe('pdf')"><app-icono nombre="ojo" [tam]="16" />Informe de utilidad<small>Ver en pantalla (PDF)</small></button>
+          <button (click)="informe('xlsx')"><app-icono nombre="descargar" [tam]="16" />Informe de utilidad en Excel</button>
+          <hr />
+          <a routerLink="/pago-conductores"><app-icono nombre="dinero" [tam]="16" />Ir a Pago a conductores</a>
+        </app-menu-acciones>
         @if (puedeRegistrar) { <button class="primario" (click)="abrirMasivo()"><app-icono nombre="mas" [tam]="16" />Registro masivo</button> }
-        <button (click)="exportador().abrir({ cliente: f.cliente })"><app-icono nombre="descargar" [tam]="16" />Relación Excel / PDF</button>
-        <button (click)="informe('pdf')"><app-icono nombre="ojo" [tam]="16" />Informe de utilidad</button>
-        <button (click)="informe('xlsx')" title="Informe de utilidad en Excel"><app-icono nombre="descargar" [tam]="16" />Utilidad Excel</button>
-        <a class="boton" routerLink="/pago-conductores"><app-icono nombre="dinero" [tam]="16" />Pagos</a>
       </div>
     </div>
     <app-visor-pdf />
