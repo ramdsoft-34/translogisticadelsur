@@ -192,13 +192,18 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                         @if (v.estado === 'remesa') { <button class="pequeno peligro" (click)="abrirAnular(v)" title="Anular la remesa aceptada">Anular remesa</button> }
                       }
                       @case ('manifestados') {
-                        @if (tienePorAprobar(v._id)) {
-                          <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([v._id])" [disabled]="trabajando()"
-                            title="Envía al cliente el manifiesto y la carta de salida de este viaje"><app-icono nombre="correo" [tam]="15" />Aprobar correo</button>
-                        }
-                        <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
-                        <button class="pequeno primario" (click)="abrirCumplido(v)">Cumplir</button>
-                        <button class="pequeno peligro" (click)="abrirAnular(v)">Anular</button>
+                        <!-- «Aprobar correo» va encima, ocupando el ancho de los otros tres botones -->
+                        <div class="pila-acciones">
+                          @if (tienePorAprobar(v._id)) {
+                            <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([v._id])" [disabled]="trabajando()"
+                              title="Envía al cliente el manifiesto y la carta de salida de este viaje"><app-icono nombre="correo" [tam]="15" />Aprobar correo</button>
+                          }
+                          <div class="fila-acciones">
+                            <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
+                            <button class="pequeno primario" (click)="abrirCumplido(v)">Cumplir</button>
+                            <button class="pequeno peligro" (click)="abrirAnular(v)">Anular</button>
+                          </div>
+                        </div>
                       }
                       @case ('soporte') {
                         <button class="pequeno" [class.primario]="!$any(v).soporteInterno?.mc" (click)="verSoporte(v)" [disabled]="trabajando()" title="Manifiesto y remesa internos con QR de verificación">
@@ -383,6 +388,8 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       </ng-container>
     </app-modal>`,
   styles: [`
+    .pila-acciones { display: inline-flex; flex-direction: column; align-items: stretch; gap: 6px; }
+    .fila-acciones { display: flex; gap: 8px; justify-content: flex-end; }
     label.sub { margin-top: 10px; }
     .visor-pdf { width: 100%; height: 70vh; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-1); }
     .resultado-lote { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
