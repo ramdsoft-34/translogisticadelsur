@@ -342,6 +342,21 @@ function enFila(k, fn) {
 }
 
 // ¿Ya existe ese número en el RNDC para la empresa?
+// El RNDC a veces responde con un error interno («Paso3 Expidiendo…») o se corta la conexión, pero el
+// documento sí queda radicado. En esos casos se consulta y, si existe, se toma como aceptado con su radicado.
+const RESPUESTA_DUDOSA = /Paso\d+ Expidiendo|No hubo conexión/i;
+async function confirmarSiQuedo(empresa, claveRndc, usuarioId, clave, numero, res) {
+  if (res.ok || !RESPUESTA_DUDOSA.test(res.mensaje || '')) return res;
+  try {
+    const n = NUMERACION[clave];
+    const q = await consultar(empresa._id, claveRndc, usuarioId, { que: n.que, filtros: { [n.filtro]: numero } });
+    const d = (q.documentos || [])[0];
+    if (q.ok && d) return { ok: true, radicado: txt(d.ingresoid), qr: '', qrObs: '',
+      mensaje: `El RNDC respondió «${txt(res.mensaje)}», pero el documento sí quedó radicado (confirmado por consulta)` };
+  } catch { /* si no se puede confirmar queda como rechazado */ }
+  return res;
+}
+
 export async function existeEnRndc(empresa, claveRndc, usuarioId, clave, numero) {
   const n = NUMERACION[clave];
   const q = await consultar(empresa._id, claveRndc, usuarioId, { que: n.que, filtros: { [n.filtro]: numero } });
@@ -436,7 +451,7 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
       if (problemas.length) throw new ErrorHttp(422, 'Faltan datos para la remesa', problemas);
       numR = await numeroParaEnviar(empresa, clave, usuarioId, 'remesa', v);
       const vars = varsRemesa(empresa, v, ctx, numR);
-      const res = await registrar(empresa, cred, 3, vars, meta);
+      const res = await confirmarSiQuedo(empresa, clave, usuarioId, 'remesa', numR, await registrar(empresa, cred, 3, vars, meta));
       const doc = { numero: numR, radicado: res.radicado, fecha: new Date(), estado: res.ok ? 'aceptado' : 'rechazado', mensaje: res.mensaje, qr: '' };
       await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: { remesa: doc, ...(res.ok ? { estado: 'remesa', 'numerosManuales.remesa': '' } : {}) } });
       if (res.ok && txt(v.numerosManuales?.remesa)) await avanzarConsecutivo(empresa, 'remesa', numR);
@@ -460,7 +475,7 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
       await Viaje.updateOne({ empresa: empresaId, _id: v._id }, { $set: { 'manifiesto.numero': numM, 'manifiesto.estado': 'rechazado', 'manifiesto.mensaje': resultado.manifiesto.mensaje } });
       return resultado;
     }
-    const res = await registrar(empresa, cred, 4, vars, meta, bloqueRemesas([numR]));
+    const res = await confirmarSiQuedo(empresa, clave, usuarioId, 'manifiesto', numM, await registrar(empresa, cred, 4, vars, meta, bloqueRemesas([numR])));
     const doc = { numero: numM, radicado: res.radicado, qr: res.qr, qrObs: res.qrObs || '', fecha: new Date(), estado: res.ok ? 'aceptado' : 'rechazado', mensaje: res.mensaje };
     if (!res.ok && /MAN275/.test(res.mensaje || '') && vehiculo) {
       await Vehiculo.updateOne({ empresa: empresaId, _id: vehiculo._id }, { $set: { aplicaFopat: true } });
