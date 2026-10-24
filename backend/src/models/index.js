@@ -30,6 +30,8 @@ const empresaSchema = new Schema({
   direccion: str(), telefono: str(), ciudad: str(), correo: str({ lowercase: true }),
   // Logo propio (data URL PNG/JPEG) para el soporte interno; no se carga salvo que se pida (+logo)
   logo: { type: String, default: '', select: false },
+  // Posición y tamaño del logo en el soporte interno (desplazamiento en puntos y escala), con límites
+  logoAjuste: { dx: { type: Number, default: 0 }, dy: { type: Number, default: 0 }, escala: { type: Number, default: 1 } },
   activa: { type: Boolean, default: true },
   rndc: {
     ambiente: { type: String, enum: ['SIMULADO', 'PRUEBAS', 'PRODUCCION'], default: 'SIMULADO' },

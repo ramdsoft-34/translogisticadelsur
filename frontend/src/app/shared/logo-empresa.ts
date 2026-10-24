@@ -46,6 +46,30 @@ function comprimir(img: HTMLImageElement, esPng: boolean): string {
             <button type="button" class="peligro" confirmar="Clic otra vez para quitarlo" (confirmado)="quitar()" [disabled]="trabajando()">Quitar logo</button>
           }
         </div>
+        @if (logoVisible()) {
+          <!-- Mover y escalar el logo dentro del encabezado (queda debajo de los textos) -->
+          <div class="ajuste">
+            <h3>Posición y tamaño</h3>
+            <div class="control"><label for="lg-x">Horizontal</label>
+              <button type="button" class="pequeno" (click)="mover('dx', -5)" aria-label="Mover a la izquierda">←</button>
+              <input id="lg-x" type="range" [min]="LIM.dx[0]" [max]="LIM.dx[1]" step="1" [value]="ajuste().dx" (input)="cambiar('dx', $any($event.target).value)" />
+              <button type="button" class="pequeno" (click)="mover('dx', 5)" aria-label="Mover a la derecha">→</button></div>
+            <div class="control"><label for="lg-y">Vertical</label>
+              <button type="button" class="pequeno" (click)="mover('dy', -5)" aria-label="Subir">↑</button>
+              <input id="lg-y" type="range" [min]="LIM.dy[0]" [max]="LIM.dy[1]" step="1" [value]="ajuste().dy" (input)="cambiar('dy', $any($event.target).value)" />
+              <button type="button" class="pequeno" (click)="mover('dy', 5)" aria-label="Bajar">↓</button></div>
+            <div class="control"><label for="lg-t">Tamaño</label>
+              <button type="button" class="pequeno" (click)="mover('escala', -0.1)" aria-label="Más pequeño">−</button>
+              <input id="lg-t" type="range" [min]="LIM.escala[0]" [max]="LIM.escala[1]" step="0.05" [value]="ajuste().escala" (input)="cambiar('escala', $any($event.target).value)" />
+              <button type="button" class="pequeno" (click)="mover('escala', 0.1)" aria-label="Más grande">+</button>
+              <span class="pct">{{ pct() }} %</span></div>
+            <small class="sutil">El logo queda debajo de líneas y textos y no sale del encabezado.</small>
+            <div class="acciones">
+              <button type="button" class="pequeno" (click)="restablecer()">Restablecer</button>
+              @if (ajusteCambiado() && !pendiente()) { <button type="button" class="pequeno primario" (click)="guardarAjuste()" [disabled]="trabajando()">Guardar posición</button> }
+            </div>
+          </div>
+        }
       </section>
       <section class="tarjeta previa">
         <div class="cab"><h2>Vista previa del soporte interno</h2>
@@ -63,6 +87,13 @@ function comprimir(img: HTMLImageElement, esPng: boolean): string {
     .muestra.vacia span { color: var(--gris-5); font-size: 13px; text-align: center; padding: 0 10px; }
     .mensaje { margin-bottom: 12px; }
     label.boton { cursor: pointer; }
+    .ajuste { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--gris-15); display: flex; flex-direction: column; gap: 10px; }
+    .ajuste h3 { margin: 0; }
+    .control { display: grid; grid-template-columns: 74px 32px 1fr 32px auto; gap: 6px; align-items: center; }
+    .control label { font-size: 13px; font-weight: 600; color: var(--gris-6); }
+    .control input[type=range] { min-height: 0; padding: 0; border: 0; accent-color: var(--primario-borde); box-shadow: none; }
+    .control .pequeno { min-height: 30px; padding: 0; }
+    .pct { font-size: 12px; color: var(--gris-5); min-width: 38px; text-align: right; }
     .cab { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; } .cab h2 { margin: 0; }
     iframe { width: 100%; height: 62vh; min-height: 420px; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-1); }
     .esqueleto.alto { height: 420px; }
@@ -79,9 +110,34 @@ export class LogoEmpresa {
   readonly cargandoPrevia = signal(false);
   readonly trabajando = signal(false);
   private urlPrevia = '';
+  // Límites iguales a los del servidor
+  readonly LIM = { dx: [-15, 150], dy: [-15, 45], escala: [0.5, 1.8] } as const;
+  readonly ajuste = signal({ dx: 0, dy: 0, escala: 1 });
+  private ajusteGuardado = { dx: 0, dy: 0, escala: 1 };
+  private temporizador: ReturnType<typeof setTimeout> | undefined;
+  ajusteCambiado() { const a = this.ajuste(); const g = this.ajusteGuardado; return a.dx !== g.dx || a.dy !== g.dy || a.escala !== g.escala; }
+  pct() { return Math.round(this.ajuste().escala * 100); }
+  cambiar(k: 'dx' | 'dy' | 'escala', v: string | number) {
+    const [a, b] = this.LIM[k];
+    const n = Math.min(b, Math.max(a, Math.round(Number(v) * 100) / 100));
+    this.ajuste.update(x => ({ ...x, [k]: n }));
+    clearTimeout(this.temporizador);
+    this.temporizador = setTimeout(() => this.actualizarPrevia(), 350);
+  }
+  mover(k: 'dx' | 'dy' | 'escala', paso: number) { this.cambiar(k, this.ajuste()[k] + paso); }
+  restablecer() { this.ajuste.set({ dx: 0, dy: 0, escala: 1 }); this.actualizarPrevia(); }
+  async guardarAjuste() {
+    this.trabajando.set(true);
+    try { await this.api.put('/gestion/empresa/logo', { ajuste: this.ajuste() }); this.ajusteGuardado = { ...this.ajuste() }; this.avisos.ok('Posición del logo guardada'); }
+    catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
 
   constructor() {
-    this.api.get<{ logo: string }>('/gestion/empresa/logo').then(r => { this.guardado.set(r.logo || ''); this.actualizarPrevia(); })
+    this.api.get<{ logo: string; ajuste: { dx: number; dy: number; escala: number } }>('/gestion/empresa/logo').then(r => {
+      this.guardado.set(r.logo || '');
+      if (r.ajuste) { this.ajuste.set({ ...r.ajuste }); this.ajusteGuardado = { ...r.ajuste }; }
+      this.actualizarPrevia();
+    })
       .catch(e => this.avisos.error(e));
     inject(DestroyRef).onDestroy(() => { if (this.urlPrevia) URL.revokeObjectURL(this.urlPrevia); });
   }
@@ -105,10 +161,10 @@ export class LogoEmpresa {
   async actualizarPrevia() {
     this.cargandoPrevia.set(true);
     try {
-      const blob = await this.api.archivoPost('/gestion/soportes/vista-previa', this.pendiente() ? { imagen: this.pendiente() } : {});
+      const blob = await this.api.archivoPost('/gestion/soportes/vista-previa', { ...(this.pendiente() ? { imagen: this.pendiente() } : {}), ajuste: this.ajuste() });
       if (this.urlPrevia) URL.revokeObjectURL(this.urlPrevia);
       this.urlPrevia = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
-      this.previa.set(this.sanitizer.bypassSecurityTrustResourceUrl(this.urlPrevia + '#toolbar=0&view=FitH'));
+      this.previa.set(this.sanitizer.bypassSecurityTrustResourceUrl(this.urlPrevia + '#toolbar=0&navpanes=0&view=Fit'));
     } catch (e) { this.avisos.error(e); } finally { this.cargandoPrevia.set(false); }
   }
 
@@ -117,8 +173,8 @@ export class LogoEmpresa {
   async guardar() {
     this.trabajando.set(true);
     try {
-      await this.api.put('/gestion/empresa/logo', { imagen: this.pendiente() });
-      this.guardado.set(this.pendiente()); this.pendiente.set('');
+      await this.api.put('/gestion/empresa/logo', { imagen: this.pendiente(), ajuste: this.ajuste() });
+      this.guardado.set(this.pendiente()); this.pendiente.set(''); this.ajusteGuardado = { ...this.ajuste() };
       this.avisos.ok('Logo guardado: los soportes internos ya salen con él');
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }

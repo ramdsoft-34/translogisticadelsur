@@ -1242,6 +1242,9 @@ test('Logo de la empresa: solo el administrador lo cambia, la vista previa no gu
   assert.equal((await s.adminA.get('/api/gestion/empresa/logo')).body.logo, '', 'la vista previa no guarda el logo');
   assert.equal((await s.adminA.put('/api/gestion/empresa/logo', { imagen: png })).status, 200);
   assert.equal((await s.manif.get('/api/gestion/empresa/logo')).body.logo, png);
+  // Posición: se guarda dentro de los límites (no sale del encabezado)
+  assert.equal((await s.adminA.put('/api/gestion/empresa/logo', { ajuste: { dx: 999, dy: 10, escala: 0.1 } })).status, 200);
+  assert.deepEqual((await s.adminA.get('/api/gestion/empresa/logo')).body.ajuste, { dx: 150, dy: 10, escala: 0.5 });
   assert.equal((await s.adminA.del('/api/gestion/empresa/logo')).status, 200);
   assert.equal((await s.adminA.get('/api/gestion/empresa/logo')).body.logo, '');
 });

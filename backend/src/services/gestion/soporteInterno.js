@@ -50,7 +50,7 @@ export async function soporteInterno(empresa, viajeId, { asignar = true } = {}) 
   const lic = cond?.licencia || {};
   const conLogo = await Empresa.findById(empresa._id).select('+logo').lean();
   return {
-    interno: true, logoEmpresa: conLogo?.logo || '',
+    interno: true, logoEmpresa: conLogo?.logo || '', logoAjuste: conLogo?.logoAjuste,
     soporte: s,
     empresa: txt(empresa.rndc?.razonSocial) || empresa.nombre.toUpperCase(), empNit: `${empresa.nit}${empresa.dv || ''}`,
     empDir: txt(empresa.direccion), empTel: txt(empresa.telefono), empCiudad: 'PASTO NARINO',
@@ -105,11 +105,11 @@ export async function verificarSoporte(codigo) {
 }
 
 // Vista previa del soporte interno con datos de ejemplo (para revisar el logo antes de guardarlo)
-export function soporteDeEjemplo(empresa, logo) {
+export function soporteDeEjemplo(empresa, logo, logoAjuste = null) {
   const hoy = new Date();
   const f = `${hoy.getFullYear()}/${String(hoy.getMonth() + 1).padStart(2, '0')}/${String(hoy.getDate()).padStart(2, '0')}`;
   return {
-    interno: true, logoEmpresa: logo || '', soporte: { mc: 'MC000000', rc: 'RC000000', codigo: 'EJEMPLO0EJEMPLO0' },
+    interno: true, logoEmpresa: logo || '', logoAjuste, soporte: { mc: 'MC000000', rc: 'RC000000', codigo: 'EJEMPLO0EJEMPLO0' },
     empresa: txt(empresa.rndc?.razonSocial) || empresa.nombre.toUpperCase(), empNit: `${empresa.nit}${empresa.dv || ''}`,
     empDir: txt(empresa.direccion), empTel: txt(empresa.telefono), empCiudad: 'PASTO NARINO',
     numero: 'MC000000', radicado: 'EJEMPLO0', seguro: 'EJEMPLO0EJEMPLO0', qrObs: '', qrTexto: `${env.urlPublica || 'https://translogisticadelsur.com'}/verificar/EJEMPLO`,

@@ -162,64 +162,64 @@ export async function datosManifiesto(empresa, viajeId) {
 // Campos: x (izquierda, centro o derecha según alin), y = línea base, tamaño en puntos.
 // Con ancho, el texto se parte en palabras como FastReport y se recorta a las líneas indicadas.
 const C = {
-  empresa: { x: 348.7, y: 60.16, tam: 10, negrita: true, alin: 'centro' },
-  nit: { x: 352.8, y: 84.91, tam: 8, negrita: true, alin: 'centro' },
-  dir: { x: 346.2, y: 98.61, tam: 8, alin: 'centro' },
-  tel: { x: 348.4, y: 113.61, tam: 8, alin: 'centro' },
-  manifiesto: { x: 495.4, y: 97.14, tam: 11, negrita: true },
-  autorizacion: { x: 495.4, y: 121.11, tam: 12, negrita: true },
-  radicacion: { x: 120.4, y: 122.38, tam: 9 },
-  expedicion: { x: 33.7, y: 149.08, tam: 9 },
+  empresa: { x: 348.7, y: 60.16, tam: 10, negrita: true, alin: 'centro', max: 270 },
+  nit: { x: 352.8, y: 84.91, tam: 8, negrita: true, alin: 'centro', max: 260 },
+  dir: { x: 346.2, y: 98.61, tam: 8, alin: 'centro', max: 260 },
+  tel: { x: 348.4, y: 113.61, tam: 8, alin: 'centro', max: 260 },
+  manifiesto: { x: 495.4, y: 97.14, tam: 11, negrita: true, max: 185 },
+  autorizacion: { x: 495.4, y: 121.11, tam: 12, negrita: true, max: 185 },
+  radicacion: { x: 120.4, y: 122.38, tam: 9, max: 95 },
+  expedicion: { x: 33.7, y: 149.08, tam: 9, max: 85 },
   tipo: { x: 158, y: 146.53, tam: 7, alin: 'centro', ancho: 82, lineas: 2, paso: 8 },
-  origen: { x: 207, y: 149.08, tam: 9, ancho: 168, lineas: 2, paso: 10.2 },
-  destino: { x: 513.2, y: 149.78, tam: 9, ancho: 168, lineas: 2, paso: 10.2 },
+  origen: { x: 207, y: 149.08, tam: 9, ancho: 168 },
+  destino: { x: 513.2, y: 149.78, tam: 9, ancho: 168 },
   titular: { x: 119.5, y: 227.29, tam: 10, alin: 'centro', ancho: 178 },
-  titDoc: { x: 265, y: 227.29, tam: 10, alin: 'centro' },
+  titDoc: { x: 265, y: 227.29, tam: 10, alin: 'centro', max: 100 },
   titDir: { x: 415, y: 225.51, tam: 8, alin: 'centro', ancho: 132, lineas: 2, paso: 10 },
-  titTel: { x: 538, y: 227.29, tam: 10, alin: 'centro' },
+  titTel: { x: 538, y: 227.29, tam: 10, alin: 'centro', max: 70 },
   titCiudad: { x: 628.5, y: 227.29, tam: 10, alin: 'centro', ancho: 110 },
-  placa: { x: 62.5, y: 254.06, tam: 10, alin: 'centro' },
+  placa: { x: 62.5, y: 254.06, tam: 10, alin: 'centro', max: 60 },
   marca: { x: 99.7, y: 253.26, tam: 10, ancho: 72, cortar: true },
-  remolque: { x: 193, y: 253.26, tam: 10 },
-  config: { x: 353, y: 253.26, tam: 10, alin: 'centro' },
-  pesoVacio: { x: 412, y: 253.26, tam: 10, alin: 'centro' },
-  pesoVacioRemolque: { x: 473, y: 253.26, tam: 10, alin: 'centro' },
+  remolque: { x: 193, y: 253.26, tam: 10, max: 80 },
+  config: { x: 353, y: 253.26, tam: 10, alin: 'centro', max: 60 },
+  pesoVacio: { x: 412, y: 253.26, tam: 10, alin: 'centro', max: 55 },
+  pesoVacioRemolque: { x: 473, y: 253.26, tam: 10, alin: 'centro', max: 55 },
   soatAseg: { x: 511, y: 251.51, tam: 8, ancho: 172 },
-  soatNum: { x: 689.3, y: 251.51, tam: 8 },
-  soatVence: { x: 733.8, y: 253.26, tam: 10 },
+  soatNum: { x: 689.3, y: 247.6, tam: 7, max: 42, lineas: 2, paso: 7, partir: true },
+  soatVence: { x: 733.8, y: 253.26, tam: 10, max: 58 },
   condNom: { x: 34.9, y: 278.86, tam: 10, ancho: 175 },
-  condDoc: { x: 217.3, y: 278.86, tam: 10 },
+  condDoc: { x: 217.3, y: 278.86, tam: 10, max: 105 },
   condDir: { x: 328.7, y: 275.51, tam: 8, ancho: 178, lineas: 2, paso: 10 },
   condTel: { x: 512.7, y: 274.53, tam: 7, ancho: 78 },
-  condLic: { x: 594.5, y: 277.11, tam: 8 },
+  condLic: { x: 594.5, y: 277.11, tam: 8, max: 68 },
   condCiudad: { x: 665.5, y: 278.86, tam: 10, ancho: 128 },
-  remesa: { x: 31.1, y: 345.33, tam: 7 },
-  unidad: { x: 91.4, y: 345.33, tam: 7 },
-  cantidad: { x: 158.75, y: 345.33, tam: 7, alin: 'centro' },
+  remesa: { x: 31.1, y: 345.33, tam: 7, max: 58 },
+  unidad: { x: 91.4, y: 345.33, tam: 7, max: 46 },
+  cantidad: { x: 158.75, y: 345.33, tam: 7, alin: 'centro', max: 40 },
   naturaleza: { x: 181.5, y: 345.33, tam: 7, ancho: 52 },
   empaque: { x: 237.6, y: 345.33, tam: 7, ancho: 48 },
-  mercanciaCod: { x: 288.1, y: 345.33, tam: 7 },
+  mercanciaCod: { x: 288.1, y: 345.33, tam: 7, max: 78 },
   mercancia: { x: 238, y: 358.53, tam: 7, ancho: 128, lineas: 3, paso: 8.4 },
-  remNit: { x: 374.1, y: 345.33, tam: 7 },
+  remNit: { x: 374.1, y: 345.33, tam: 7, max: 43 },
   remNom: { x: 419, y: 345.43, tam: 7, ancho: 122, lineas: 2, paso: 8.3 },
   remDir: { x: 374.1, y: 361.83, tam: 7, ancho: 168 },
   remLugar: { x: 374.1, y: 374.33, tam: 7, ancho: 168 },
-  desNit: { x: 547.5, y: 345.33, tam: 7 },
+  desNit: { x: 547.5, y: 345.33, tam: 7, max: 45 },
   desNom: { x: 595.3, y: 345.33, tam: 7, ancho: 125, lineas: 2, paso: 8.3 },
   desDir: { x: 547.9, y: 361.83, tam: 7, ancho: 172 },
   desLugar: { x: 548.4, y: 373.93, tam: 7, ancho: 172 },
   dueno: { x: 725.3, y: 344.36, tam: 6, ancho: 68, lineas: 2, paso: 7 },
-  flete: { x: 260.4, y: 402.23, tam: 7, alin: 'der' },
-  rete: { x: 260.4, y: 416.43, tam: 7, alin: 'der' },
-  ica: { x: 260.4, y: 429.83, tam: 7, alin: 'der' },
-  fopat: { x: 260.4, y: 444.03, tam: 7, alin: 'der' },
-  neto: { x: 260.4, y: 457.43, tam: 7, alin: 'der' },
-  anticipo: { x: 260.4, y: 469.43, tam: 7, alin: 'der' },
-  saldo: { x: 260.4, y: 482.63, tam: 7, alin: 'der' },
+  flete: { x: 260.4, y: 402.23, tam: 7, alin: 'der', max: 80 },
+  rete: { x: 260.4, y: 416.43, tam: 7, alin: 'der', max: 80 },
+  ica: { x: 260.4, y: 429.83, tam: 7, alin: 'der', max: 80 },
+  fopat: { x: 260.4, y: 444.03, tam: 7, alin: 'der', max: 80 },
+  neto: { x: 260.4, y: 457.43, tam: 7, alin: 'der', max: 80 },
+  anticipo: { x: 260.4, y: 469.43, tam: 7, alin: 'der', max: 80 },
+  saldo: { x: 260.4, y: 482.63, tam: 7, alin: 'der', max: 80 },
   lugarPago: { x: 327.3, y: 404.33, tam: 7, ancho: 72 },
-  fechaPago: { x: 437.7, y: 404.33, tam: 7 },
-  carguePor: { x: 389.15, y: 437.53, tam: 7, alin: 'centro' },
-  descarguePor: { x: 386.35, y: 466.93, tam: 7, alin: 'centro' },
+  fechaPago: { x: 437.7, y: 404.33, tam: 7, max: 52 },
+  carguePor: { x: 389.15, y: 437.53, tam: 7, alin: 'centro', max: 105 },
+  descarguePor: { x: 386.35, y: 466.93, tam: 7, alin: 'centro', max: 105 },
   letras: { x: 177.3, y: 499.06, tam: 6, ancho: 320 },
   observaciones: { x: 500, y: 407.3, tam: 8, ancho: 290, lineas: 9, paso: 9.5 },
 };
@@ -241,16 +241,52 @@ function lineas(doc, texto, ancho, cortar) {
   return res;
 }
 
+// Ningún texto invade el recuadro vecino: si no cabe, se reduce la letra (hasta 5 pt) y,
+// si aún no cabe, se parte en las líneas permitidas; solo en último caso se recorta.
 function campo(doc, def, valor) {
   const texto = txt(valor);
   if (!texto) return;
-  doc.font(def.negrita ? 'Helvetica-Bold' : 'Helvetica').fontSize(def.tam).fillColor('black');
-  const filas = def.ancho ? lineas(doc, texto, def.ancho, def.cortar).slice(0, def.lineas || 1) : [texto];
+  doc.font(def.negrita ? 'Helvetica-Bold' : 'Helvetica').fillColor('black');
+  const limite = def.ancho || def.max;
+  const maxLineas = def.lineas || 1;
+  let tam = def.tam;
+  let filas = [texto];
+  if (limite) {
+    const MIN = Math.min(5, def.tam);
+    for (;;) {
+      doc.fontSize(tam);
+      filas = def.partir ? partirEnTrozos(doc, texto, limite) : def.cortar || maxLineas === 1 ? [texto] : lineasEnteras(doc, texto, limite);
+      const cabe = filas.length <= maxLineas && filas.every(f => doc.widthOfString(f) <= limite);
+      if (cabe || tam <= MIN) break;
+      tam = Math.max(MIN, tam - 0.5);
+    }
+    const cabe = filas.length <= maxLineas && filas.every(f => doc.widthOfString(f) <= limite);
+    if (!cabe) filas = def.partir && maxLineas > 1 ? partirEnTrozos(doc, texto, limite).slice(0, maxLineas) : lineas(doc, texto, limite, def.cortar).slice(0, maxLineas);
+  } else doc.fontSize(tam);
+  const paso = (def.paso || 0) * (tam / def.tam);
   filas.forEach((t, i) => {
     const w = doc.widthOfString(t);
     const x = def.alin === 'centro' ? def.x - w / 2 : def.alin === 'der' ? def.x - w : def.x;
-    doc.text(t, x, def.y + i * (def.paso || 0), { lineBreak: false, baseline: 'alphabetic' });
+    doc.text(t, x, def.y + i * paso, { lineBreak: false, baseline: 'alphabetic' });
   });
+}
+// Palabras completas por línea (sin recortar): sirve para medir si el texto cabe
+function lineasEnteras(doc, texto, ancho) {
+  const res = []; let actual = '';
+  for (const p of texto.split(/\s+/).filter(Boolean)) {
+    const prueba = actual ? `${actual} ${p}` : p;
+    if (!actual || doc.widthOfString(prueba) <= ancho) { actual = prueba; continue; }
+    res.push(actual); actual = p;
+  }
+  if (actual) res.push(actual);
+  return res;
+}
+// Un número largo sin espacios (p. ej. la póliza SOAT) en trozos que caben en el ancho
+function partirEnTrozos(doc, texto, ancho) {
+  const res = []; let actual = '';
+  for (const c of texto) { if (actual && doc.widthOfString(actual + c) > ancho) { res.push(actual); actual = ''; } actual += c; }
+  if (actual) res.push(actual);
+  return res;
 }
 
 // Imagen PNG/JPEG guardada como data URL → Buffer (vacío si no es válida)
@@ -259,17 +295,33 @@ export function imagenDeDataUrl(u) {
   return m ? Buffer.from(m[2], 'base64') : null;
 }
 
+// Límites para mover el logo del soporte interno: no sale del encabezado ni tapa el título
+export const LIMITES_LOGO = { dx: [-15, 150], dy: [-15, 45], escala: [0.5, 1.8] };
+const limitar = (v, [a, b], def) => (Number.isFinite(Number(v)) ? Math.min(b, Math.max(a, Number(v))) : def);
+export function ajusteLogo(a) {
+  return { dx: limitar(a?.dx, LIMITES_LOGO.dx, 0), dy: limitar(a?.dy, LIMITES_LOGO.dy, 0), escala: limitar(a?.escala, LIMITES_LOGO.escala, 1) };
+}
+
 export async function manifiestoPdf(d) {
   const [ancho, alto] = PLANTILLA.pagina;
   const doc = new PDFDocument({ size: [ancho, alto], margin: 0, info: { Title: `Manifiesto ${d.numero}` } });
-  // Fondos grises, cajas y líneas del formato oficial
-  for (const x of PLANTILLA.dibujos) {
-    if (x.t === 'r') {
-      if (x.relleno) doc.rect(x.x, x.y, x.w, x.h).fillColor(x.relleno).fill();
-      if (x.trazo) doc.rect(x.x, x.y, x.w, x.h).lineWidth(x.grosor).strokeColor(x.trazo).stroke();
-    } else {
-      doc.moveTo(x.x1, x.y1).lineTo(x.x2, x.y2).lineWidth(x.grosor).strokeColor(x.trazo).stroke();
+  // Fondos grises del formato oficial
+  for (const x of PLANTILLA.dibujos) if (x.t === 'r' && x.relleno) doc.rect(x.x, x.y, x.w, x.h).fillColor(x.relleno).fill();
+  // Soporte interno: el logo de la empresa va debajo de líneas y textos (se puede mover y escalar con límites)
+  const im0 = PLANTILLA.imagenes;
+  let logoDibujado = false;
+  if (d.interno) {
+    const logo = imagenDeDataUrl(d.logoEmpresa);
+    if (logo) {
+      const a = ajusteLogo(d.logoAjuste);
+      const w = 94 * a.escala; const h = 84 * a.escala;
+      try { doc.image(logo, im0.transporte[0] + a.dx, im0.transporte[1] + a.dy, { fit: [w, h], align: 'center', valign: 'center' }); logoDibujado = true; } catch { /* imagen inválida: va el nombre */ }
     }
+  }
+  // Cajas y líneas
+  for (const x of PLANTILLA.dibujos) {
+    if (x.t === 'r') { if (x.trazo) doc.rect(x.x, x.y, x.w, x.h).lineWidth(x.grosor).strokeColor(x.trazo).stroke(); }
+    else doc.moveTo(x.x1, x.y1).lineTo(x.x2, x.y2).lineWidth(x.grosor).strokeColor(x.trazo).stroke();
   }
   // Soporte interno: sin logos ni leyendas del Ministerio; lleva el logo y el nombre de la empresa que lo expide
   const interno = !!d.interno;
@@ -286,13 +338,7 @@ export async function manifiestoPdf(d) {
     const [x, y] = [im.transporte[0], im.transporte[1]];
     // Sin tocar el recuadro «Fecha hora radicación» (empieza en x≈128, y≈118)
     const w = Math.min(Math.max(im.transporte[2], im.supertransporte[2]), 94); const h = 84;
-    const logo = imagenDeDataUrl(d.logoEmpresa);
-    if (logo) {
-      try { doc.image(logo, x, y, { fit: [w, h], align: 'center', valign: 'center' }); }
-      catch { campo(doc, { x: x + w / 2, y: y + h / 2, tam: 9, alin: 'centro', ancho: w, lineas: 3, paso: 11 }, d.empresa); }
-    } else {
-      campo(doc, { x: x + w / 2, y: y + h / 2, tam: 9, alin: 'centro', ancho: w, lineas: 3, paso: 11 }, d.empresa);
-    }
+    if (!logoDibujado) campo(doc, { x: x + w / 2, y: y + h / 2, tam: 9, alin: 'centro', ancho: w, lineas: 3, paso: 11 }, d.empresa);
     doc.font('Helvetica').fontSize(6).fillColor('black');
     ['Soporte interno de la empresa transportadora para viajes', 'que no se expiden en el RNDC. No es un documento del', 'Ministerio de Transporte.',
       'Compruebe que existe y es válido escaneando el código QR.'].forEach((l, i) => doc.text(l, 490.96, 36.65 + i * 7.5, { lineBreak: false, baseline: 'alphabetic' }));

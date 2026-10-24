@@ -79,29 +79,59 @@ export function encabezadoPdf(doc, { empresa, titulo, subtitulo }) {
   doc.moveDown(0.6);
 }
 
-// Tabla simple con encabezado repetido y paginación.
+// Ancho de cada columna: proporcional a su peso, pero nunca menos que su palabra más larga
+// (fechas, placas, estados no se parten a la mitad); el espacio sale de las columnas con holgura.
+function anchosColumnas(doc, columnas, todas, ancho, sumaPesos, relleno, tam) {
+  const base = columnas.map(c => (ancho * (c.peso || 1)) / sumaPesos);
+  const minimos = columnas.map((c, i) => {
+    let max = 0;
+    for (const f of todas) {
+      doc.font(f === todas[0] ? 'Helvetica-Bold' : 'Helvetica').fontSize(tam);
+      for (const p of String(f[i] ?? '').split(/\s+/)) max = Math.max(max, doc.widthOfString(p));
+    }
+    return Math.min(max + 2 * relleno + 1, ancho * 0.3);
+  });
+  const res = base.map((b, i) => Math.max(b, minimos[i]));
+  let exceso = res.reduce((a, b) => a + b, 0) - ancho;
+  for (let vuelta = 0; exceso > 0.5 && vuelta < 5; vuelta += 1) {
+    const holgura = res.map((w, i) => Math.max(0, w - minimos[i]));
+    const total = holgura.reduce((a, b) => a + b, 0);
+    if (!total) break;
+    res.forEach((w, i) => { res[i] = w - (exceso * holgura[i]) / total; });
+    exceso = res.reduce((a, b) => a + b, 0) - ancho;
+  }
+  return res;
+}
+
+// Tabla con encabezado repetido y paginación. Cada fila toma la altura de su celda más alta,
+// así los textos largos (nombres, destinos) se ven completos en varias líneas sin montarse sobre la fila siguiente.
 export function tablaPdf(doc, columnas, filas, { total } = {}) {
   const x0 = doc.page.margins.left;
   const ancho = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   const sumaPesos = columnas.reduce((a, c) => a + (c.peso || 1), 0);
-  const anchos = columnas.map(c => (ancho * (c.peso || 1)) / sumaPesos);
-  const alto = 15;
+  const RELLENO = 4; const TAM = 7.5; const MIN = 15;
+  const anchos = anchosColumnas(doc, columnas, [columnas.map(c => c.titulo), ...filas, ...(total ? [total] : [])], ancho, sumaPesos, RELLENO, TAM);
+  const limite = () => doc.page.height - doc.page.margins.bottom - 22;   // deja libre el pie (página y marca)
   let y = doc.y;
-  const fila = (valores, { negrita = false, fondo = null } = {}) => {
-    if (y + alto > doc.page.height - doc.page.margins.bottom - 15) {
+  const fila = (valores, { negrita = false, fondo = null, esEncabezado = false } = {}) => {
+    doc.font(negrita ? 'Helvetica-Bold' : 'Helvetica').fontSize(TAM);
+    const textos = valores.map(v => String(v ?? ''));
+    const alto = Math.max(MIN, ...textos.map((t, i) => doc.heightOfString(t || ' ', { width: anchos[i] - 2 * RELLENO, lineGap: 0.5 }) + 2 * RELLENO));
+    if (y + alto > limite() && !esEncabezado) {
       doc.addPage(); y = doc.page.margins.top; encabezado();
+      doc.font(negrita ? 'Helvetica-Bold' : 'Helvetica').fontSize(TAM);
     }
     let x = x0;
     if (fondo) doc.rect(x0, y, ancho, alto).fill(fondo);
-    doc.font(negrita ? 'Helvetica-Bold' : 'Helvetica').fontSize(7.5).fillColor('black');
-    valores.forEach((v, i) => {
-      doc.text(String(v ?? ''), x + 3, y + 4, { width: anchos[i] - 6, align: columnas[i].alin || 'left', lineBreak: false, ellipsis: true });
+    doc.fillColor('black');
+    textos.forEach((t, i) => {
+      doc.text(t, x + RELLENO, y + RELLENO, { width: anchos[i] - 2 * RELLENO, height: alto - RELLENO, align: columnas[i].alin || 'left', lineGap: 0.5 });
       x += anchos[i];
     });
     doc.moveTo(x0, y + alto).lineTo(x0 + ancho, y + alto).lineWidth(0.4).strokeColor(COLOR.borde).stroke();
     y += alto;
   };
-  const encabezado = () => fila(columnas.map(c => c.titulo), { negrita: true, fondo: COLOR.encabezado });
+  const encabezado = () => fila(columnas.map(c => c.titulo), { negrita: true, fondo: COLOR.encabezado, esEncabezado: true });
   encabezado();
   filas.forEach((f, i) => fila(f, { fondo: i % 2 ? COLOR.cebra : null }));
   if (total) fila(total, { negrita: true, fondo: COLOR.encabezado });
@@ -125,7 +155,8 @@ export function numerarPaginas(doc) {
 export async function libroExcel({ empresa, titulo, subtitulo, columnas, filas, total }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = empresa.nombre;
-  const ws = wb.addWorksheet(titulo.slice(0, 30), { pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  // Excel no admite * ? : \ / [ ] en el nombre de la hoja (p. ej. «Balance general al 31/10/2026»)
+  const ws = wb.addWorksheet(titulo.replace(/[*?:\\/[\]]/g, '-').slice(0, 31), { pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
   ws.addRow([empresa.nombre]).font = { bold: true, size: 14, color: { argb: 'FF111111' } };
   ws.addRow([titulo]).font = { bold: true, size: 12 };
   if (subtitulo) ws.addRow([subtitulo]).font = { italic: true, size: 10 };

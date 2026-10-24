@@ -16,7 +16,7 @@ import * as pre from '../services/gestion/prestamos.js';
 import * as cont from '../services/gestion/contabilidad.js';
 import * as cierre from '../services/gestion/cierre.js';
 import { soporteInterno, asegurarSoporte, soporteDeEjemplo } from '../services/gestion/soporteInterno.js';
-import { manifiestoPdf } from '../services/reportes/manifiesto.js';
+import { manifiestoPdf, ajusteLogo } from '../services/reportes/manifiesto.js';
 import * as dulces from '../services/gestion/remesasDulces.js';
 
 const r = Router();
@@ -471,15 +471,21 @@ r.post('/relaciones/copiar/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) 
 
 // ═════════════ Logo de la empresa (soporte interno) ═════════════
 const LOGO_MAX = 900 * 1024;   // ~650 KB de imagen (la pantalla la comprime a menos de 400 mil caracteres)
-const logoSchema = z.object({ imagen: z.string().max(LOGO_MAX).regex(/^data:image\/(png|jpe?g);base64,[A-Za-z0-9+/=]+$/, 'El logo debe ser una imagen PNG o JPG') });
+const imagenLogo = z.string().max(LOGO_MAX).regex(/^data:image\/(png|jpe?g);base64,[A-Za-z0-9+/=]+$/, 'El logo debe ser una imagen PNG o JPG');
+const ajusteSchema = z.object({ dx: z.coerce.number(), dy: z.coerce.number(), escala: z.coerce.number() }).partial();
+const logoSchema = z.object({ imagen: imagenLogo.optional(), ajuste: ajusteSchema.optional() });
 r.get('/empresa/logo', permitir(P.VIAJES_VER), async (req, res) => {
   const e = await Empresa.findById(req.empresaId).select('+logo').lean();
-  res.json({ logo: e?.logo || '' });
+  res.json({ logo: e?.logo || '', ajuste: ajusteLogo(e?.logoAjuste) });
 });
 r.put('/empresa/logo', permitir(P.CONFIG_GESTIONAR), express.json({ limit: '1mb' }), async (req, res) => {
-  const { imagen } = logoSchema.parse(req.body);
-  await Empresa.updateOne({ _id: req.empresaId }, { $set: { logo: imagen } });
-  await auditar(req, 'logo_empresa', { detalle: { accion: 'cambiar', bytes: imagen.length } });
+  const { imagen, ajuste } = logoSchema.parse(req.body);
+  if (!imagen && !ajuste) throw new ErrorHttp(400, 'Nada que guardar');
+  const set = {};
+  if (imagen) set.logo = imagen;
+  if (ajuste) set.logoAjuste = ajusteLogo(ajuste);
+  await Empresa.updateOne({ _id: req.empresaId }, { $set: set });
+  await auditar(req, 'logo_empresa', { detalle: { accion: imagen ? 'cambiar' : 'ajustar', ...(imagen ? { bytes: imagen.length } : {}), ajuste: set.logoAjuste } });
   res.json({ ok: true });
 });
 r.delete('/empresa/logo', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
@@ -490,8 +496,8 @@ r.delete('/empresa/logo', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
 // Vista previa del soporte interno con el logo indicado (o el guardado), sin guardar nada
 r.post('/soportes/vista-previa', permitir(P.CONFIG_GESTIONAR), express.json({ limit: '1mb' }), async (req, res) => {
   const e = await Empresa.findById(req.empresaId).select('+logo').lean();
-  const imagen = req.body?.imagen ? logoSchema.parse(req.body).imagen : e?.logo;
-  archivo(res, await manifiestoPdf(soporteDeEjemplo(e, imagen)), 'vista-previa-soporte.pdf', 'application/pdf', true);
+  const d = logoSchema.parse(req.body || {});
+  archivo(res, await manifiestoPdf(soporteDeEjemplo(e, d.imagen || e?.logo, d.ajuste ? ajusteLogo(d.ajuste) : e?.logoAjuste)), 'vista-previa-soporte.pdf', 'application/pdf', true);
 });
 
 // ═════════════ Soporte interno MC / RC ═════════════
