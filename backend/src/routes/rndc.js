@@ -51,6 +51,8 @@ r.get('/catalogos', (_req, res) => {
 const configSchema = z.object({
   ambiente: z.enum(['SIMULADO', 'PRUEBAS', 'PRODUCCION']).optional(),
   usuario: t(60), razonSocial: t(120), prefijoRemesa: t(8), prefijoManifiesto: t(8), codOrigen: divipola,
+  marcaReemplazoRemesa: z.string().trim().toUpperCase().regex(/^([A-Z0-9.\-]{1,3})?$/, 'marca de reemplazo inválida').optional(),
+  marcaReemplazoManifiesto: z.string().trim().toUpperCase().regex(/^([A-Z0-9.\-]{1,3})?$/, 'marca de reemplazo inválida').optional(),
   poliza: z.object({ numero: t(20), vence: z.union([z.string(), z.null()]).optional().transform(v => (v ? parseFecha(v) : null)),
     aseguradoraNit: t(11), dueno: z.enum(['E', 'G', 'N']).optional().default('E') }).optional(),
   mercancia: z.object({ codigo: t(6), descripcion: t(60) }).optional(),

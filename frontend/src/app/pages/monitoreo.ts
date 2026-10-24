@@ -1,7 +1,7 @@
 import { AfterViewInit, Component, ElementRef, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import * as L from 'leaflet';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -26,7 +26,7 @@ const hace = (h: string | Date | null | undefined) => {
 // y enlace de los rastreos que se iniciaron desde Cooespatrans.
 @Component({
   selector: 'app-monitoreo',
-  imports: [FormsModule, Icono, Modal, Confirmar, ChecklistConductor, ...FORMATOS],
+  imports: [FormsModule, RouterLink, Icono, Modal, Confirmar, ChecklistConductor, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Monitoreo</h1>
@@ -36,7 +36,7 @@ const hace = (h: string | Date | null | undefined) => {
           <span class="sutil" aria-live="polite">{{ actualizado() ? 'Actualizado ' + hace(actualizado()) : 'Cargando…' }}</span>
           <button (click)="cargar()" [disabled]="cargando()"><app-icono nombre="reloj" [tam]="16" />Actualizar</button>
         }
-        @if (puedeConfigurar) { <button (click)="abrirConfig()"><app-icono nombre="ajustes" [tam]="16" />Configurar</button> }
+        @if (puedeConfigurar) { <a class="boton" routerLink="/configuracion" [queryParams]="{ tab: 'rastreo' }"><app-icono nombre="ajustes" [tam]="16" />Configurar</a> }
       </div>
     </div>
 
@@ -83,7 +83,7 @@ const hace = (h: string | Date | null | undefined) => {
         <app-icono nombre="camion" [tam]="32" />
         <h2>El rastreo no está habilitado</h2>
         @if (!estado()!.configuradoServidor) { <p class="sutil">El servidor aún no tiene la conexión con Sur Track configurada.</p> }
-        @else if (puedeConfigurar) { <p class="sutil">Actívelo en <strong>Configurar</strong> para rastrear viajes con la app Sur Track.</p> }
+        @else if (puedeConfigurar) { <p class="sutil">Actívelo en <strong>Configuración → Rastreo GPS</strong> para rastrear viajes con la app Sur Track.</p> }
         @else { <p class="sutil">Pida al administrador de su empresa que lo active.</p> }
       </div>
     } @else if (estado()) {
@@ -224,20 +224,6 @@ const hace = (h: string | Date | null | undefined) => {
       <ng-container pie>
         <button type="button" (click)="enlace.set(null)">Cancelar</button>
         <button type="button" class="primario" [disabled]="!enlaceViaje" (click)="enlazar()">Enlazar</button>
-      </ng-container>
-    </app-modal>
-
-    <app-modal titulo="Configurar rastreo" [abierto]="configAbierta()" (cerrar)="configAbierta.set(false)">
-      <label class="casilla"><input type="checkbox" [(ngModel)]="conf.surTrack" />Rastrear viajes con la app Sur Track</label>
-      <div class="rejilla" style="margin-top:14px">
-        <div class="campo"><label for="mo-vel">Velocidad máxima (km/h)</label><input id="mo-vel" type="number" min="20" max="150" [(ngModel)]="conf.velocidadMaxima" />
-          <small>Por encima se marca alerta de exceso de velocidad.</small></div>
-        <div class="campo"><label for="mo-sen">Minutos sin señal</label><input id="mo-sen" type="number" min="2" max="240" [(ngModel)]="conf.minutosSinSenal" />
-          <small>Sin posición nueva por más tiempo, el viaje pasa a «Sin señal».</small></div>
-      </div>
-      <ng-container pie>
-        <button type="button" (click)="configAbierta.set(false)">Cancelar</button>
-        <button type="button" class="primario" (click)="guardarConfig()">Guardar</button>
       </ng-container>
     </app-modal>`,
   styles: [`
@@ -559,25 +545,5 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
     } catch (err) { this.avisos.error(err); }
   }
 
-  // ── Configuración ──
-  readonly configAbierta = signal(false);
-  conf = { surTrack: false, velocidadMaxima: 80, minutosSinSenal: 10 };
-  abrirConfig() {
-    const e = this.estado();
-    this.conf = { surTrack: !!e?.surTrack, velocidadMaxima: e?.velocidadMaxima ?? 80, minutosSinSenal: e?.minutosSinSenal ?? 10 };
-    this.configAbierta.set(true);
-  }
-  async guardarConfig() {
-    try {
-      await this.api.put('/rastreo/configuracion', this.conf);
-      this.configAbierta.set(false); this.avisos.ok('Configuración guardada');
-      const antes = !!this.estado()?.habilitado;
-      await this.rastreo.cargar(true);
-      if (!antes && this.estado()?.habilitado) {
-        setTimeout(() => this.iniciarMapa(), 0);
-        clearInterval(this.temporizador);
-        this.temporizador = setInterval(() => { if (!document.hidden) this.cargar(); }, 15000);
-      }
-    } catch (e) { this.avisos.error(e); }
-  }
+
 }

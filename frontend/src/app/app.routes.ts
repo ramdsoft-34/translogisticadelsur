@@ -26,6 +26,7 @@ export const routes: Routes = [
       // El cierre de mes ahora es una pestaña de Contabilidad
       { path: 'cierre-mes', ...pagina([P.CONFIG_GESTIONAR, P.LIQUIDACION_VER], () => import('./pages/contabilidad').then(m => m.Contabilidad)), data: { permisos: [P.CONFIG_GESTIONAR, P.LIQUIDACION_VER], tab: 'cierre' } },
       { path: 'remesas-dulces', ...pagina([P.VIAJES_REGISTRAR], () => import('./pages/gestion-varios').then(m => m.RemesasDulces)) },
+      { path: 'importar', ...pagina([P.MAESTROS_EDITAR, P.TARIFAS_EDITAR, P.CONFIG_GESTIONAR], () => import('./pages/importar').then(m => m.Importar)) },
       { path: 'revision', ...pagina([P.MAESTROS_VER], () => import('./pages/revision').then(m => m.Revision)) },
       { path: 'vehiculos', ...pagina([P.MAESTROS_VER], () => import('./pages/vehiculos').then(m => m.Vehiculos)) },
       { path: 'clientes', ...pagina([P.MAESTROS_VER], () => import('./pages/clientes').then(m => m.Clientes)) },

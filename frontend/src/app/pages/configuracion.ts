@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { input, Component, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -15,7 +15,7 @@ import { Confirmar } from '../shared/confirmar';
 import { filtrar } from '../shared/filtro';
 import { RndcClave } from '../core/rndc-clave.service';
 
-type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
+type Pestana = 'rndc' | 'correo' | 'rastreo' | 'usuarios' | 'importar' | 'auditoria';
 
 @Component({
   selector: 'app-configuracion',
@@ -25,6 +25,7 @@ type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
     <div class="pestanas">
       @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'rndc'" (click)="ir('rndc')">Conexión RNDC y valores</button> }
       @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'correo'" (click)="ir('correo')">Correo</button> }
+      @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'rastreo'" (click)="ir('rastreo')">Rastreo GPS</button> }
       @if (auth.tiene(P.USUARIOS_GESTIONAR)) { <button [class.activa]="pestana() === 'usuarios'" (click)="ir('usuarios')">Usuarios</button> }
       @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'importar'" (click)="ir('importar')">Importar plantilla Excel</button> }
       @if (auth.tiene(P.AUDITORIA_VER)) { <button [class.activa]="pestana() === 'auditoria'" (click)="ir('auditoria')">Auditoría</button> }
@@ -66,6 +67,12 @@ type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
                   <input id="sm" name="sm" maxlength="15" [ngModel]="c.consecutivoManifiesto" (ngModelChange)="c.consecutivoManifiesto = limpiarConsecutivo($event)"
                     placeholder="M10063903" style="text-transform:uppercase" autocomplete="off" />
                   <small>Solo letras y números; debe terminar en número.</small></div>
+                <div class="campo"><label for="mr">Marca de reemplazo de remesa</label>
+                  <input id="mr" name="mr" maxlength="3" [(ngModel)]="c.marcaReemplazoRemesa" placeholder="A" style="text-transform:uppercase" autocomplete="off" />
+                  <small>Al expedir de nuevo una remesa anulada: R100 → R100{{ c.marcaReemplazoRemesa || 'A' }}.</small></div>
+                <div class="campo"><label for="mm">Marca de reemplazo de manifiesto</label>
+                  <input id="mm" name="mm" maxlength="3" [(ngModel)]="c.marcaReemplazoManifiesto" placeholder="." style="text-transform:uppercase" autocomplete="off" />
+                  <small>Al expedir de nuevo un manifiesto anulado: M100 → M100{{ c.marcaReemplazoManifiesto || '.' }}. Se usa siempre, aunque un intento anterior haya sido rechazado.</small></div>
                 <div class="ancho mensaje info">Los números de remesa y manifiesto se toman <strong>del RNDC</strong> automáticamente: antes de cada envío se consulta
                   el último radicado (incluidos los del portal del Ministerio o la plantilla de Excel), se toma el siguiente y se confirma que esté libre.
                   Estos campos solo indican el prefijo (por ejemplo «R» o «M») y el punto de partida si el RNDC no devuelve el listado.</div>
@@ -194,6 +201,22 @@ type Pestana = 'rndc' | 'correo' | 'usuarios' | 'importar' | 'auditoria';
       @case ('auditoria') {
         <app-auditoria />
       }
+      @case ('rastreo') {
+        <div class="tarjeta">
+          <h2>Rastreo GPS con Sur Track</h2>
+          @if (rastreoConf(); as rc) {
+            @if (!rc.configuradoServidor) { <div class="mensaje alerta" style="margin-bottom:14px">El servidor aún no tiene la conexión con Sur Track configurada.</div> }
+            <label class="casilla"><input type="checkbox" [(ngModel)]="rc.surTrack" />Rastrear viajes con la app Sur Track</label>
+            <div class="formulario" style="margin-top:16px">
+              <div class="campo"><label for="ra-vel">Velocidad máxima (km/h)</label><input id="ra-vel" type="number" min="20" max="150" [(ngModel)]="rc.velocidadMaxima" />
+                <small>Por encima se marca alerta de exceso de velocidad.</small></div>
+              <div class="campo"><label for="ra-sen">Minutos sin señal</label><input id="ra-sen" type="number" min="2" max="240" [(ngModel)]="rc.minutosSinSenal" />
+                <small>Sin posición nueva por más tiempo, el viaje pasa a «Sin señal».</small></div>
+            </div>
+            <div class="acciones" style="margin-top:18px; justify-content:flex-end"><button class="primario" (click)="guardarRastreo()">Guardar</button></div>
+          } @else { <span class="esqueleto"></span> }
+        </div>
+      }
     }
 
     <app-modal [titulo]="usuarioForm()._id ? 'Editar usuario' : 'Nuevo usuario'" [abierto]="abiertoUsuario()" (cerrar)="abiertoUsuario.set(false)">
@@ -244,16 +267,33 @@ export class Configuracion {
   // Cambios de otros usuarios: la pantalla se actualiza sola
   private enVivo = inject(EnVivo).al(['usuarios', 'rndc', 'correo'], () => this.refrescarConfig());
 
+  // Pestaña inicial desde el enlace (p. ej. Importar datos → ?tab=importar)
+  readonly tab = input<Pestana | ''>('');
+  ngOnInit() { const t = this.tab(); this.ir(t && ['rndc', 'correo', 'rastreo', 'usuarios', 'importar', 'auditoria'].includes(t) ? t as Pestana : this.pestana()); }
+
   constructor() {
-    this.ir(this.pestana());
     this.api.get<any>('/rndc/catalogos').then(c => this.naturaleza.set(Object.entries(c.naturaleza))).catch(() => {});
   }
 
   refrescarConfig() { if (this.pestana() === 'usuarios') this.ir('usuarios'); }
 
+  // Rastreo GPS (antes en Monitoreo): activar Sur Track y sus alertas
+  readonly rastreoConf = signal<any>(null);
+  async guardarRastreo() {
+    const rc = this.rastreoConf();
+    try {
+      await this.api.put('/rastreo/configuracion', { surTrack: !!rc.surTrack, velocidadMaxima: Number(rc.velocidadMaxima), minutosSinSenal: Number(rc.minutosSinSenal) });
+      this.avisos.ok('Configuración del rastreo guardada');
+    } catch (e) { this.avisos.error(e); }
+  }
+
   async ir(p: Pestana) {
     this.pestana.set(p);
     try {
+      if (p === 'rastreo') {
+        const e = await this.api.get<any>('/rastreo/estado');
+        this.rastreoConf.set({ surTrack: !!e.surTrack, velocidadMaxima: e.velocidadMaxima ?? 80, minutosSinSenal: e.minutosSinSenal ?? 10, configuradoServidor: e.configuradoServidor !== false });
+      }
       if (p === 'rndc') {
         const c = await this.api.get<any>('/rndc/config');
         this.ambienteGuardado.set(c.ambiente);
@@ -274,7 +314,7 @@ export class Configuracion {
     const campos = ['ambiente', 'usuario', 'razonSocial', 'codOrigen', 'poliza', 'mercancia', 'naturalezaCarga', 'tipoEmpaque',
       'unidadMedida', 'operacion', 'retefuentePct', 'reteIca', 'responsablePagoCargue', 'responsablePagoDescargue', 'horaCitaCargue',
       'horaCitaDescargue', 'horasPactoCargue', 'horasPactoDescargue', 'aceptacionElectronica', 'pagoSaldo', 'diasPagoSaldo',
-      'codMunicipioPagoSaldo', 'nitMonitoreoFlota', 'aplicarFopat', 'extras', 'consecutivoRemesa', 'consecutivoManifiesto'];
+      'codMunicipioPagoSaldo', 'nitMonitoreoFlota', 'aplicarFopat', 'extras', 'consecutivoRemesa', 'consecutivoManifiesto', 'marcaReemplazoRemesa', 'marcaReemplazoManifiesto'];
     const cuerpo: any = Object.fromEntries(campos.map(k => [k, c[k]]));
     cuerpo.poliza = { ...c.poliza, vence: c.poliza.vence || null };
     cuerpo.extras = (c.extras || []).filter((x: any) => x.variable);

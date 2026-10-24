@@ -868,10 +868,19 @@ test('RNDC: anular manifiesto y remesa a la vez; el reemplazo conserva los núme
   assert.equal(x.manifiesto.estado, 'anulado');
   const previa = (await s.manif.get(`/api/rndc/viajes/${v.body._id}/vista-previa`)).body;
   assert.deepEqual(previa.reemplazo, { remesa: `${d.remesa.numero}A`, manifiesto: `${d.manifiesto.numero}.` });
+  // Un intento de reemplazo rechazado no cambia la regla: sigue en «Anulados» y el nuevo vuelve a ser R…A y M….
+  await M.Viaje.updateOne({ empresa: s.empresaA, _id: v.body._id }, { $set: {
+    remesa: { numero: `${d.remesa.numero}A`, estado: 'rechazado', mensaje: 'Error de prueba' },
+    manifiesto: { numero: `${d.manifiesto.numero}.`, estado: '', mensaje: '' } } });
+  const enAnulados = (await s.manif.get('/api/viajes?estado=registrado,remesa&anulados=1&historico=0&rndc=1')).body.viajes.map(y => y._id);
+  assert.ok(enAnulados.includes(v.body._id), 'sigue en la pestaña Anulados');
+  const previa2 = (await s.manif.get(`/api/rndc/viajes/${v.body._id}/vista-previa`)).body;
+  assert.deepEqual(previa2.reemplazo, { remesa: `${d.remesa.numero}A`, manifiesto: `${d.manifiesto.numero}.` });
   const nuevo = (await s.manif.post(`/api/rndc/viajes/${v.body._id}/despachar`, { clave: CLAVE_RNDC })).body;
   assert.equal(nuevo.remesa.numero, `${d.remesa.numero}A`);
   assert.equal(nuevo.manifiesto.numero, `${d.manifiesto.numero}.`);
   assert.equal(nuevo.manifiesto.estado, 'aceptado', JSON.stringify(nuevo));
+  assert.equal((await M.Viaje.findOne({ empresa: s.empresaA, _id: v.body._id }).lean()).anuladoBase.manifiesto, '', 'aceptado el reemplazo, sale de Anulados');
 });
 
 test('RNDC: cumplido de remesa y manifiesto', async () => {

@@ -42,8 +42,17 @@ import { Confirmar } from './confirmar';
             @else { <small>Corrija los datos abajo (o el vehículo / las personas) y vuelva a enviar.</small> }
           </div>
         }
-        @if (faltan().length) {
-          <div class="mensaje error"><strong>Faltan datos según el diccionario del RNDC:</strong><ul>@for (x of faltan(); track x) { <li>{{ x }}</li> }</ul></div>
+        @if (faltan().length || p.avisos.length) {
+          <!-- Un solo bloque con lo que falta y lo que conviene revisar: abierto solo si falta algo obligatorio -->
+          <details class="revisar" [class.grave]="faltan().length" [open]="faltan().length > 0">
+            <summary>
+              @if (faltan().length) { <span class="chip error sin-punto">{{ faltan().length }} dato(s) obligatorio(s) por completar</span> }
+              @if (p.avisos.length) { <span class="chip alerta sin-punto">{{ p.avisos.length }} aviso(s)</span> }
+              <span class="ver-det">Ver detalle</span>
+            </summary>
+            @if (faltan().length) { <strong>Faltan según el diccionario del RNDC:</strong><ul>@for (x of faltan(); track x) { <li>{{ x }}</li> }</ul> }
+            @if (p.avisos.length) { <strong>Revise:</strong><ul>@for (a of p.avisos; track a) { <li>{{ a }}</li> }</ul> }
+          </details>
         }
         @let f = form();
         @if (destinoManifiestoMal()) {
@@ -100,7 +109,6 @@ import { Confirmar } from './confirmar';
             }
           </div>
         }
-        @if (p.avisos.length) { <div class="mensaje alerta"><strong>Revise:</strong><ul>@for (a of p.avisos; track a) { <li>{{ a }}</li> }</ul></div> }
 
         <!-- Pestañas: vehículo y personas, remesa y manifiesto por separado; cada una separa lo que se ingresa de lo que va fijo -->
         <div class="pestanas" role="tablist" aria-label="Partes del despacho">
@@ -367,6 +375,13 @@ import { Confirmar } from './confirmar';
     fieldset + fieldset { margin-top: 12px; }
     .dest { margin: 10px 0 0; font-size: 13px; color: var(--gris-7); }
     .dest.mal { color: var(--rojo-texto); }
+    .revisar { margin-bottom: 12px; border: 1px solid var(--ambar-borde); background: var(--ambar-claro); border-radius: var(--radio); padding: 0 14px; font-size: 13.5px; }
+    .revisar.grave { border-color: var(--rojo-borde); background: var(--rojo-claro); }
+    .revisar > summary { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 0; }
+    .revisar > summary::-webkit-details-marker { display: none; }
+    .revisar .ver-det { margin-left: auto; font-size: 12.5px; color: var(--gris-6); text-decoration: underline; }
+    .revisar[open] .ver-det { display: none; }
+    .revisar ul { margin: 4px 0 10px; padding-left: 18px; }
     .una-col { display: flex; flex-direction: column; gap: 12px; }
     .todos-datos { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
     .titulo-col small { text-transform: none; letter-spacing: 0; font-weight: 400; }

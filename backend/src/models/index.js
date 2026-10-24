@@ -34,6 +34,8 @@ const empresaSchema = new Schema({
     usuario: str(),                       // usuario web service asignado por el Ministerio
     razonSocial: str(),                   // nombre de la empresa tal como está registrada en el RNDC (encabezado del manifiesto)
     prefijoRemesa: str(), prefijoManifiesto: str(),
+    // Marca que se agrega al número anulado para expedir el reemplazo (R100 → R100A, M100 → M100.)
+    marcaReemplazoRemesa: str({ default: 'A' }), marcaReemplazoManifiesto: str({ default: '.' }),
     codOrigen: str(),                     // DIVIPOLA (8 dígitos) del origen habitual
     poliza: { numero: str(), vence: fecha, aseguradoraNit: str(), dueno: str({ default: 'E' }) },
     mercancia: { codigo: str(), descripcion: str() },
@@ -245,6 +247,8 @@ const viajeSchema = new Schema({
   cumplidoManifiesto: { type: documentoRndc, default: nuevoDoc },
   liquidacion: { type: Schema.Types.ObjectId, ref: 'Liquidacion', default: null },
   manifiestoReemplazado: str(),
+  // Número anulado de cada documento: mientras el reemplazo no sea aceptado, se expide con ese número + la marca
+  anuladoBase: { remesa: str(), manifiesto: str() },
   // Pago al conductor (liquidación del conductor) y soporte interno MC/RC para viajes sin RNDC
   liquidacionConductor: { type: Schema.Types.ObjectId, ref: 'LiquidacionConductor', default: null },
   soporteInterno: { mc: str(), rc: str(), codigo: str(), fecha },

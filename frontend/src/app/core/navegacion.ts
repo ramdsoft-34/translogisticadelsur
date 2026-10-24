@@ -29,6 +29,7 @@ export const MODULOS: Modulo[] = [
     { ruta: '/conductores', texto: 'Conductores y terceros', icono: 'personas', permisos: [P.MAESTROS_VER], descripcion: 'Conductores, titulares, tenedores y empresas', claves: 'cedula licencia tercero' },
     { ruta: '/vehiculos', texto: 'Vehículos', icono: 'camion', permisos: [P.MAESTROS_VER], descripcion: 'Placas, SOAT, tecnomecánica y propietarios', claves: 'placa soat tecnomecanica' },
     { ruta: '/revision', texto: 'Revisión de datos', icono: 'alerta', permisos: [P.MAESTROS_VER], descripcion: 'Datos por corregir antes de expedir' },
+    { ruta: '/importar', texto: 'Importar datos', icono: 'descargar', permisos: [P.MAESTROS_EDITAR, P.TARIFAS_EDITAR, P.CONFIG_GESTIONAR], descripcion: 'Cargas desde Excel: terceros, vehículos, tarifas y plantilla de viajes', claves: 'excel plantilla cargar' },
   ] },
   { id: 'rndc', nombre: 'RNDC', icono: 'enviar', paginas: [
     { ruta: '/consultas-rndc', texto: 'Consultas', icono: 'buscar', permisos: [P.RNDC_CONSULTAR], descripcion: 'Lo que el RNDC tiene registrado para la empresa' },

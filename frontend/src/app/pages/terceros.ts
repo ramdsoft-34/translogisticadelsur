@@ -50,10 +50,13 @@ const vacio = () => ({
     <app-importar-excel tipo="terceros" titulo="conductores y terceros" [abierto]="importar()" (cerrar)="importar.set(false)" (importado)="cargar()" />
     <app-actualizar-vehiculos tipo="terceros" [abierto]="actualizar()" (cerrar)="actualizar.set(false); cargar()" (actualizados)="cargar()" />
     <app-traer-rndc tipo="terceros" [abierto]="traer()" (cerrar)="traer.set(false)" (traidos)="cargar()" />
+    <div class="pestanas" role="tablist" aria-label="Tipo de tercero">
+      @for (p of PESTANAS_LISTA; track p[0]) {
+        <button type="button" role="tab" [class.activa]="rol === p[0]" [attr.aria-selected]="rol === p[0]" (click)="rol = p[0]; cargar()">{{ p[1] }}</button>
+      }
+    </div>
     <div class="barra">
       <div class="campo crece"><label for="t-q">Buscar</label><input id="t-q" type="search" placeholder="Nombre o número de documento" [(ngModel)]="q" (input)="buscarDiferido()" /></div>
-      <div class="campo"><label for="t-rol">Rol</label><select id="t-rol" [(ngModel)]="rol" (change)="cargar()"><option value="">Todos</option>
-        @for (r of roles; track r[0]) { <option [value]="r[0]">{{ r[1] }}</option> }</select></div>
       <div class="campo"><label for="t-rndc">En el RNDC</label><select id="t-rndc" [(ngModel)]="rndc" (change)="cargar()"><option value="">Todos</option>
         <option value="enviado">Registrados</option><option value="importado">Importados sin confirmar</option><option value="error">Con error</option><option value="sin_enviar">Sin registrar</option></select></div>
       <div class="campo"><label for="t-act">Estado</label><select id="t-act" [(ngModel)]="activos" (change)="cargar()"><option value="">Todos</option>
@@ -84,33 +87,32 @@ const vacio = () => ({
     </div>
 
     <!-- Paso 1: verificar el documento en la empresa y en el RNDC -->
-    <app-modal titulo="Nuevo en el RNDC" [abierto]="verificando()" (cerrar)="verificando.set(false)">
-      <fieldset class="que">
-        <legend>¿Qué va a crear?</legend>
-        <div class="opciones-nuevo">
-          @for (o of TIPOS_NUEVO; track o.v) {
-            <button type="button" class="opcion" [class.activo]="tipoNuevo() === o.v" [attr.aria-pressed]="tipoNuevo() === o.v" (click)="elegirTipo(o.v)">
-              <app-icono [nombre]="o.icono" [tam]="18" /><strong>{{ o.t }}</strong><span>{{ o.d }}</span></button>
-          }
-        </div>
-      </fieldset>
+    <app-modal titulo="Crear" [abierto]="verificando()" (cerrar)="verificando.set(false)">
+      <div class="pestanas" role="tablist" aria-label="Qué va a crear">
+        @for (o of TIPOS_NUEVO; track o.v) {
+          <button type="button" role="tab" [class.activa]="tipoNuevo() === o.v" [attr.aria-selected]="tipoNuevo() === o.v" (click)="elegirTipo(o.v)">
+            <app-icono [nombre]="o.icono" [tam]="16" />{{ o.t }}</button>
+        }
+      </div>
+      <p class="que-es">{{ descripcionTipo() }}</p>
       <form id="form-verificar-t" class="formulario" (ngSubmit)="verificar()">
         @if (tipoNuevo() === 'sede') {
           <p class="sutil ancho" style="margin:0">Escriba el NIT de la empresa: se muestran sus sedes y se asigna el código de la próxima. La sede queda lista como destinatario de las remesas.</p>
           <div class="campo"><label for="vt-num">NIT</label><input id="vt-num" name="num" [(ngModel)]="buscar.numId" required inputmode="numeric" autofocus />
             <small>Con dígito de verificación, sin guion.</small></div>
         } @else {
-          <p class="sutil ancho" style="margin:0">Primero se busca el documento en su empresa{{ puedeConsultar ? ' y en el RNDC' : '' }}, para no duplicarlo y traer los datos que ya existan.</p>
+          <div class="mensaje info ancho">Escriba el documento y presione «Buscar». Primero se busca en la plataforma{{ puedeConsultar ? ' y luego en lo que su empresa ya tiene registrado en el RNDC' : '' }}:
+            si existe, se traen todos sus datos (nombres, licencia, dirección, municipio y sedes) y solo completa lo que falte.</div>
           <div class="campo"><label for="vt-tipo">Tipo de documento</label><select id="vt-tipo" name="tipo" [(ngModel)]="buscar.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
           <div class="campo"><label for="vt-num">Número</label><input id="vt-num" name="num" [(ngModel)]="buscar.numId" required inputmode="numeric" autofocus />
             @if (buscar.tipoId === 'N') { <small>NIT con dígito de verificación, sin guion.</small> }</div>
           <div class="campo"><label for="vt-rol">Rol</label><select id="vt-rol" name="rol" [(ngModel)]="buscar.rol">@for (r of roles; track r[0]) { <option [value]="r[0]">{{ r[1] }}</option> }</select></div>
         }
-        @if (puedeConsultar && tipoNuevo() !== 'sede') { <label class="casilla ancho"><input type="checkbox" name="rndc" [(ngModel)]="consultarRndc" />Consultar en el RNDC (pide la contraseña del web service)</label> }
+        @if (puedeConsultar && tipoNuevo() !== 'sede') { <label class="casilla ancho"><input type="checkbox" name="rndc" [(ngModel)]="consultarRndc" />Traer los datos que su empresa tiene en el RNDC (pide la contraseña del web service una vez)</label> }
       </form>
       <ng-container pie>
         <button type="button" (click)="verificando.set(false)">Cancelar</button>
-        <button class="primario" type="submit" form="form-verificar-t" [disabled]="trabajando() || digitos(buscar.numId).length < 5">{{ trabajando() ? 'Buscando…' : 'Continuar' }}</button>
+        <button class="primario" type="submit" form="form-verificar-t" [disabled]="trabajando() || digitos(buscar.numId).length < 5"><app-icono nombre="buscar" [tam]="16" />{{ trabajando() ? 'Buscando…' : 'Buscar' }}</button>
       </ng-container>
     </app-modal>
 
@@ -175,6 +177,7 @@ const vacio = () => ({
       </ng-container>
     </app-modal>`,
   styles: [`
+    .que-es { margin: -6px 0 16px; color: var(--gris-5); }
     .que { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
     .que legend { font-weight: 650; font-size: 13px; color: var(--gris-6); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .04em; }
     .opciones-nuevo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -188,13 +191,17 @@ const vacio = () => ({
 export class Terceros {
   private router = inject(Router);
   readonly TIPOS_NUEVO: { v: TipoNuevo; t: string; d: string; icono: string }[] = [
-    { v: 'conductor', t: 'Conductor', d: 'Persona con licencia', icono: 'usuario' },
-    { v: 'persona', t: 'Titular o tenedor', d: 'Propietario, tenedor o titular', icono: 'personas' },
-    { v: 'empresa', t: 'Empresa nueva', d: 'Con su primera sede', icono: 'edificio' },
-    { v: 'sede', t: 'Sede de empresa', d: 'Otra sede de una empresa existente', icono: 'edificio' },
-    { v: 'vehiculo', t: 'Vehículo', d: 'Camión o tractocamión', icono: 'camion' },
-    { v: 'remolque', t: 'Remolque', d: 'Remolque o semirremolque', icono: 'camion' },
+    { v: 'conductor', t: 'Conductor', d: 'Persona con licencia de conducción que maneja los vehículos.', icono: 'usuario' },
+    { v: 'persona', t: 'Titular o tenedor', d: 'Persona propietaria, tenedora o titular de manifiestos (sin licencia).', icono: 'personas' },
+    { v: 'empresa', t: 'Empresa', d: 'Empresa con NIT (cliente, remitente o destinatario) con su primera sede.', icono: 'edificio' },
+    { v: 'sede', t: 'Sede', d: 'Otra sede de una empresa ya registrada: se asigna el código de la próxima sede.', icono: 'edificio' },
+    { v: 'vehiculo', t: 'Vehículo', d: 'Camión o tractocamión: se crea en Vehículos.', icono: 'camion' },
+    { v: 'remolque', t: 'Remolque', d: 'Remolque o semirremolque: se crea en Vehículos.', icono: 'camion' },
   ];
+  // Pestañas de la lista: agrupan por el papel que cumple cada tercero
+  readonly PESTANAS_LISTA: [string, string][] = [['', 'Todos'], ['conductor', 'Conductores'], ['titular', 'Titulares'], ['propietario', 'Propietarios'],
+    ['tenedor', 'Tenedores'], ['remitente', 'Remitentes'], ['destinatario', 'Destinatarios y sedes']];
+  descripcionTipo() { return this.TIPOS_NUEVO.find(o => o.v === this.tipoNuevo())?.d || ''; }
   readonly tipoNuevo = signal<TipoNuevo>('conductor');
   readonly sedesEmpresa = signal<any[]>([]);
   readonly vistaRndc = signal<[string, string][] | null>(null);

@@ -88,7 +88,9 @@ function filtroLista(req) {
   // Viajes sin manifiesto del RNDC (pestaña «Soporte interno»)
   if (req.query.soporte === '1') f.requiereManifiesto = false;
   // Con remesa o manifiesto anulados en el RNDC: fuera de «Por enviar» (anulados=0) o solo ellos (anulados=1)
-  const anulado = [{ 'remesa.estado': 'anulado' }, { 'manifiesto.estado': 'anulado' }];
+  const anulado = [{ 'remesa.estado': 'anulado' }, { 'manifiesto.estado': 'anulado' },
+    { 'anuladoBase.remesa': { $nin: ['', null] }, 'remesa.estado': { $ne: 'aceptado' } },
+    { 'anuladoBase.manifiesto': { $nin: ['', null] }, 'manifiesto.estado': { $ne: 'aceptado' } }];
   if (req.query.anulados === '0') f.$nor = anulado;
   if (req.query.anulados === '1') (f.$and ||= []).push({ $or: anulado });
   if (req.query.q) {
