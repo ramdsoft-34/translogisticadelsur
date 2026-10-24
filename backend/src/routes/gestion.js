@@ -470,7 +470,7 @@ r.post('/relaciones/copiar/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) 
 });
 
 // ═════════════ Logo de la empresa (soporte interno) ═════════════
-const LOGO_MAX = 600 * 1024;   // ~450 KB de imagen
+const LOGO_MAX = 900 * 1024;   // ~650 KB de imagen (la pantalla la comprime a menos de 400 mil caracteres)
 const logoSchema = z.object({ imagen: z.string().max(LOGO_MAX).regex(/^data:image\/(png|jpe?g);base64,[A-Za-z0-9+/=]+$/, 'El logo debe ser una imagen PNG o JPG') });
 r.get('/empresa/logo', permitir(P.VIAJES_VER), async (req, res) => {
   const e = await Empresa.findById(req.empresaId).select('+logo').lean();

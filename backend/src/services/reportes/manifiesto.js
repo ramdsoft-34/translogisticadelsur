@@ -284,7 +284,8 @@ export async function manifiestoPdf(d) {
   if (interno) {
     // Zona de los dos logos oficiales (arriba a la izquierda)
     const [x, y] = [im.transporte[0], im.transporte[1]];
-    const w = Math.max(im.transporte[2], im.supertransporte[2]); const h = im.supertransporte[1] + im.supertransporte[3] - y;
+    // Sin tocar el recuadro «Fecha hora radicación» (empieza en x≈128, y≈118)
+    const w = Math.min(Math.max(im.transporte[2], im.supertransporte[2]), 94); const h = 84;
     const logo = imagenDeDataUrl(d.logoEmpresa);
     if (logo) {
       try { doc.image(logo, x, y, { fit: [w, h], align: 'center', valign: 'center' }); }

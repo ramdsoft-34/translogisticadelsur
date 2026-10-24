@@ -5,7 +5,23 @@ import { Avisos } from '../core/avisos.service';
 import { Icono } from './icono';
 import { Confirmar } from './confirmar';
 
-const MAX_LADO = 800;          // el logo se reduce a este tamaño para que el PDF quede liviano
+const MAX_LADO = 700;          // el logo se reduce a este tamaño para que el PDF quede liviano
+const MAX_CARACTERES = 380_000; // límite seguro para guardarlo (data URL)
+
+// Reduce la imagen hasta que quepa: primero PNG (conserva transparencia); si pesa mucho, JPG sobre fondo blanco
+function comprimir(img: HTMLImageElement, esPng: boolean): string {
+  let lado = MAX_LADO; let datos = '';
+  for (let intento = 0; intento < 8; intento += 1) {
+    const f = Math.min(1, lado / Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.width * f)); c.height = Math.max(1, Math.round(img.height * f));
+    const g = c.getContext('2d')!;
+    if (esPng && intento === 0) { g.drawImage(img, 0, 0, c.width, c.height); datos = c.toDataURL('image/png'); }
+    else { g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height); datos = c.toDataURL('image/jpeg', 0.85); }
+    if (datos.length <= MAX_CARACTERES) return datos;
+    if (intento > 0) lado = Math.round(lado * 0.8);
+  }
+  return datos;
+}
 
 // Logo de la empresa para el soporte interno: subir, ver cómo queda el documento y guardar.
 @Component({
@@ -80,11 +96,8 @@ export class LogoEmpresa {
     if (!/^image\/(png|jpeg)$/.test(archivo.type)) { this.avisos.mostrar('El logo debe ser PNG o JPG', 'error'); return; }
     try {
       const img = await new Promise<HTMLImageElement>((ok, mal) => { const i = new Image(); i.onload = () => ok(i); i.onerror = mal; i.src = URL.createObjectURL(archivo); });
-      const f = Math.min(1, MAX_LADO / Math.max(img.width, img.height));
-      const c = document.createElement('canvas'); c.width = Math.round(img.width * f); c.height = Math.round(img.height * f);
-      c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+      this.pendiente.set(comprimir(img, archivo.type === 'image/png'));
       URL.revokeObjectURL(img.src);
-      this.pendiente.set(c.toDataURL(archivo.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.9));
       this.actualizarPrevia();
     } catch { this.avisos.mostrar('No se pudo leer la imagen', 'error'); }
   }
