@@ -31,8 +31,8 @@ const ESTADOS: Record<string, [string, string]> = {
       </div>
       <div class="hero-acciones">
         @if (auth.tiene(P.VIAJES_REGISTRAR)) { <a routerLink="/viajes" class="boton primario"><app-icono nombre="mas" [tam]="16" />Registrar viaje</a> }
-        @if (auth.tiene(P.RNDC_OPERAR)) { <a routerLink="/manifiestos" class="boton claro"><app-icono nombre="documento" [tam]="16" />Manifiestos</a> }
-        <a routerLink="/monitoreo" class="boton claro"><app-icono nombre="ubicacion" [tam]="16" />Monitoreo</a>
+        @if (auth.tiene(P.RNDC_OPERAR)) { <a routerLink="/manifiestos" class="boton"><app-icono nombre="documento" [tam]="16" />Manifiestos</a> }
+        <a routerLink="/monitoreo" class="boton"><app-icono nombre="ubicacion" [tam]="16" />Monitoreo</a>
       </div>
     </section>
 
@@ -151,25 +151,20 @@ const ESTADOS: Record<string, [string, string]> = {
     </div>`,
   styles: [`
     :host { display: block; }
-    /* Encabezado oscuro con acento amarillo (igual en tema claro y oscuro) */
-    .hero { position: relative; overflow: hidden; display: grid; grid-template-columns: 1fr auto; gap: 18px 28px; align-items: end;
-      padding: 26px 28px; border-radius: 20px; background: #0f0e0c; color: #f4f1ea; margin-bottom: 18px; }
-    .hero::after { content: ''; position: absolute; right: -80px; top: -120px; width: 340px; height: 340px; border-radius: 50%;
-      background: radial-gradient(circle, rgba(255,194,14,.28), rgba(255,194,14,0) 70%); pointer-events: none; }
-    .hero-txt { position: relative; z-index: 1; }
-    .fecha { margin: 0; color: #ffc20e; font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
-    .hero h1 { margin: 6px 0 2px; font-size: clamp(24px, 3vw, 34px); letter-spacing: -.02em; color: #fff; }
-    .empresa { margin: 0; color: #b9b3a5; }
-    .hero-datos { position: relative; z-index: 1; display: flex; gap: 10px; }
-    .dato { display: flex; flex-direction: column; min-width: 104px; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.06);
-      border: 1px solid rgba(255,255,255,.1); color: inherit; text-decoration: none; transition: background var(--transicion); }
-    .dato:hover { background: rgba(255,255,255,.12); }
-    .dato .n { font-size: 26px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; color: #fff; }
-    .dato .t { font-size: 12px; color: #b9b3a5; }
-    .dato.rojo { border-color: rgba(255,120,100,.55); } .dato.rojo .n { color: #ff8a75; }
-    .hero-acciones { position: relative; z-index: 1; grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
-    .boton.claro { background: rgba(255,255,255,.08); color: #f4f1ea; border-color: rgba(255,255,255,.18); }
-    .boton.claro:hover { background: rgba(255,255,255,.16); }
+    /* Encabezado: saludo grande, cifras del momento y accesos directos */
+    .hero { display: grid; grid-template-columns: 1fr auto; gap: 18px 28px; align-items: end; padding: 4px 0 24px; margin-bottom: 22px; border-bottom: 1px solid var(--gris-2); }
+    .fecha { margin: 0; color: var(--primario-texto); font-size: 13px; font-weight: 700; }
+    .fecha::first-letter { text-transform: uppercase; }
+    .hero h1 { margin: 6px 0 4px; font-size: clamp(28px, 3.2vw, 40px); letter-spacing: -.035em; font-weight: 800; }
+    .empresa { margin: 0; color: var(--gris-5); font-weight: 500; }
+    .hero-datos { display: flex; gap: 0; background: var(--gris-0); border: 1px solid var(--gris-2); border-radius: 14px; overflow: hidden; }
+    .dato { display: flex; flex-direction: column; min-width: 120px; padding: 12px 18px; color: inherit; text-decoration: none; transition: background var(--transicion); }
+    .dato + .dato { border-left: 1px solid var(--gris-2); }
+    .dato:hover { background: var(--gris-1); }
+    .dato .n { font-size: 26px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+    .dato .t { font-size: 12.5px; color: var(--gris-5); font-weight: 500; }
+    .dato.rojo .n { color: var(--rojo); }
+    .hero-acciones { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
 
     .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
     .kpi { display: flex; flex-direction: column; gap: 8px; padding: 16px 18px; border-radius: var(--radio-l); background: var(--gris-0); border: 1px solid var(--gris-2); }
@@ -240,7 +235,7 @@ const ESTADOS: Record<string, [string, string]> = {
       .grafico, .atencion, .ultimos { grid-column: 1 / -1; } .flujo, .clientes { grid-column: span 6; }
     }
     @media (max-width: 720px) {
-      .hero { grid-template-columns: 1fr; padding: 20px 18px; } .hero-datos { flex-wrap: wrap; } .dato { min-width: 0; flex: 1 1 90px; }
+      .hero { grid-template-columns: 1fr; } .dato { min-width: 0; flex: 1 1 0; padding: 10px 12px; }
       .kpis { gap: 10px; } .kpi strong { font-size: 20px; }
       .flujo, .clientes { grid-column: 1 / -1; }
       .barras { height: 160px; gap: 3px; } .col .d { font-size: 9px; writing-mode: vertical-rl; transform: rotate(180deg); } .col .v { display: none; }

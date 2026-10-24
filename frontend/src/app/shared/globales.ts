@@ -11,7 +11,8 @@ import { Modal } from './modal';
   template: `
     <div class="avisos" role="status" aria-live="polite">
       @for (a of avisos.lista(); track a.id) {
-        <div class="aviso" [class]="a.tipo" (click)="avisos.cerrar(a.id)">{{ a.texto }}</div>
+        <div class="aviso" [class]="'aviso ' + a.tipo" (click)="avisos.cerrar(a.id)" title="Clic para cerrar">
+          <span class="marca-aviso">{{ a.tipo === 'ok' ? '✓' : a.tipo === 'error' ? '!' : 'i' }}</span><span class="texto-aviso">{{ a.texto }}</span></div>
       }
     </div>
     <app-modal titulo="Contraseña del RNDC" [abierto]="clave.visible()" (cerrar)="cancelar()">
@@ -32,9 +33,15 @@ import { Modal } from './modal';
       </ng-container>
     </app-modal>`,
   styles: [`
-    .avisos { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; max-width: min(420px, calc(100vw - 32px)); }
-    .aviso { padding: 12px 16px; border-radius: 10px; color: #fff; background: var(--negro); box-shadow: var(--sombra-2); border: 1px solid #2b2823; border-left: 4px solid var(--primario); cursor: pointer; font-size: 14px; }
-    .aviso.ok { background: var(--negro); } .aviso.ok::before { content: "✓ "; color: #86efac; } .aviso.error { background: #7f1d1d; border-color: #7f1d1d; border-left-color: #f87171; }
+    .avisos { position: fixed; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 1000; width: min(400px, calc(100vw - 32px)); }
+    .aviso { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; color: var(--gris-8); background: var(--gris-0);
+      border: 1px solid var(--gris-2); box-shadow: var(--sombra-menu); cursor: pointer; font-size: 14px; line-height: 1.45; animation: subir .2s ease-out; }
+    @keyframes subir { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .marca-aviso { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; font-weight: 800; font-size: 13px;
+      background: var(--gris-15); color: var(--gris-6); }
+    .aviso.ok .marca-aviso { background: var(--verde-claro); color: var(--verde); }
+    .aviso.error { border-color: var(--rojo-borde); } .aviso.error .marca-aviso { background: var(--rojo); color: #fff; }
+    .texto-aviso { padding-top: 2px; }
   `],
 })
 export class Globales {

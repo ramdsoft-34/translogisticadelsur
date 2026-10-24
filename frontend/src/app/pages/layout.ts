@@ -1,4 +1,4 @@
-import { Component, DestroyRef, HostListener, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, ElementRef, HostListener, computed, inject, signal, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { environment } from '../../environments/environment';
 import { Avisos } from '../core/avisos.service';
@@ -6,262 +6,321 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet, NavigationEnd } from '@angular/router';
 import { Auth } from '../core/auth.service';
 import { RndcClave } from '../core/rndc-clave.service';
-import { P } from '../core/modelos';
 import { Icono } from '../shared/icono';
 import { TemaService } from '../core/tema.service';
+import { MODULOS, OTRAS, Pagina } from '../core/navegacion';
 
-interface Opcion { ruta: string; texto: string; icono: string; permisos: string[]; grupo?: string }
+const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
-const MENU: Opcion[] = [
-  { ruta: '/inicio', texto: 'Inicio', icono: 'inicio', permisos: [P.VIAJES_VER] },
-  // Operación diaria
-  { ruta: '/viajes', texto: 'Viajes', icono: 'camion', permisos: [P.VIAJES_VER], grupo: 'Operación' },
-  { ruta: '/relaciones', texto: 'Programación por placa', icono: 'lista', permisos: [P.VIAJES_VER], grupo: 'Operación' },
-  { ruta: '/monitoreo', texto: 'Monitoreo', icono: 'ubicacion', permisos: [P.VIAJES_VER], grupo: 'Operación' },
-
-  { ruta: '/manifiestos', texto: 'Manifiestos', icono: 'documento', permisos: [P.RNDC_OPERAR], grupo: 'Documentos' },
-  { ruta: '/soporte-interno', texto: 'Soporte interno', icono: 'documento', permisos: [P.VIAJES_VER], grupo: 'Documentos' },
-  { ruta: '/remesas-dulces', texto: 'Remesas Dulces', icono: 'documento', permisos: [P.VIAJES_REGISTRAR], grupo: 'Documentos' },
-  // Dinero
-  { ruta: '/liquidaciones', texto: 'Facturación a clientes', icono: 'dinero', permisos: [P.LIQUIDACION_VER], grupo: 'Finanzas' },
-  { ruta: '/pago-conductores', texto: 'Pago a conductores', icono: 'personas', permisos: [P.LIQUIDACION_VER], grupo: 'Finanzas' },
-  { ruta: '/contabilidad', texto: 'Contabilidad y cierre', icono: 'lista', permisos: [P.LIQUIDACION_VER], grupo: 'Finanzas' },
-  // Datos maestros
-  { ruta: '/clientes', texto: 'Clientes y tarifas', icono: 'edificio', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
-  { ruta: '/conductores', texto: 'Conductores y terceros', icono: 'personas', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
-  { ruta: '/vehiculos', texto: 'Vehículos', icono: 'camion', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
-  { ruta: '/revision', texto: 'Revisión de datos', icono: 'alerta', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
-
-  { ruta: '/consultas-rndc', texto: 'Consultas al RNDC', icono: 'buscar', permisos: [P.RNDC_CONSULTAR], grupo: 'RNDC' },
-  { ruta: '/rndc/envios', texto: 'Envíos al RNDC', icono: 'enviar', permisos: [P.RNDC_OPERAR], grupo: 'RNDC' },
-  { ruta: '/rndc/correos', texto: 'Correos de manifiestos', icono: 'correo', permisos: [P.RNDC_OPERAR], grupo: 'RNDC' },
-  // Administración
-  { ruta: '/configuracion', texto: 'Configuración', icono: 'ajustes', permisos: [P.CONFIG_GESTIONAR, P.USUARIOS_GESTIONAR], grupo: 'Empresa' },
-  { ruta: '/admin/empresas', texto: 'Empresas', icono: 'edificio', permisos: [P.EMPRESAS_GESTIONAR], grupo: 'Plataforma' },
-  { ruta: '/admin/auditoria', texto: 'Auditoría', icono: 'escudo', permisos: [P.EMPRESAS_GESTIONAR], grupo: 'Plataforma' },
-];
-
-function leerFijo() {
-  try { return localStorage.getItem('tls_menu_fijo') === '1'; } catch { return false; }
-}
-
+// Contenedor de la aplicación:
+// - Barra superior oscura con los MÓDULOS (Operación, Documentos, Finanzas…).
+// - Subnavegación con las PÁGINAS del módulo activo: siempre se ve dónde está y qué más hay ahí.
+// - Buscador de páginas (Ctrl + K) y menú completo en el celular.
 @Component({
   selector: 'app-layout',
   imports: [RouterOutlet, RouterLink, RouterLinkActive, Icono],
   template: `
     <a class="saltar" href="#contenido">Saltar al contenido</a>
-    <div class="app" [class.fijo]="fijo()" [class.menu-abierto]="menuAbierto()">
-      <!-- Barra lateral: solo íconos; se despliega al pasar el mouse o queda fija -->
-      <aside aria-label="Navegación principal" [class.desplegado]="fijo()">
-        <div class="marca">
-          <!-- Contraído: solo el ícono. Desplegado: el nombre de la empresa -->
-          <span class="logos">
-            <img class="logo" src="icono.png" alt="Translogística del Sur" width="40" height="17">
-            <img class="etq nombre" src="nombre.webp" alt="" width="400" height="60">
-          </span>
-          <button type="button" class="fijar etq" (click)="alternarFijo()" [attr.aria-pressed]="fijo()"
-            [title]="fijo() ? 'No fijar el menú (mostrar solo íconos)' : 'Fijar el menú abierto'">
-            <app-icono [nombre]="fijo() ? 'desfijar' : 'fijar'" [tam]="15" />
-          </button>
-        </div>
-        <nav>
-          @for (g of grupos(); track g.nombre) {
-            @if (g.nombre) { <div class="grupo"><span class="etq">{{ g.nombre }}</span></div> }
-            @for (o of g.opciones; track o.ruta) {
-              <a [routerLink]="o.ruta" routerLinkActive="activa" (click)="alNavegar($event)" [attr.aria-label]="o.texto" [title]="fijo() ? '' : o.texto">
-                <app-icono [nombre]="o.icono" [tam]="18" /><span class="etq">{{ o.texto }}</span></a>
-            }
+
+    <header class="global">
+      <div class="fila">
+        <button type="button" class="ico-btn solo-movil" (click)="menuMovil.set(true)" aria-label="Abrir menú"><app-icono nombre="menu" [tam]="20" /></button>
+        <a routerLink="/inicio" class="marca" aria-label="Ir al inicio">
+          <img class="logo" src="icono.png" alt="" width="40" height="17">
+          <img class="nombre" src="nombre.webp" alt="Translogística del Sur" width="400" height="60">
+        </a>
+
+        <nav class="modulos" aria-label="Módulos">
+          @for (m of modulos(); track m.id) {
+            <a [routerLink]="m.paginas[0].ruta" [class.activo]="moduloActivo()?.id === m.id" [attr.aria-current]="moduloActivo()?.id === m.id ? 'page' : null">{{ m.nombre }}</a>
           }
         </nav>
-      </aside>
 
-      <div class="principal">
-        <header>
-          <button class="texto menu" (click)="menuAbierto.set(!menuAbierto())" aria-label="Abrir menú"><app-icono nombre="menu" /></button>
-          <div class="contexto">
-            <strong>{{ u()?.empresa?.nombre || 'Administración global' }}</strong>
-            @if (u()?.empresa; as e) {
-              <span class="ambiente" [class.prod]="e.ambienteRndc === 'PRODUCCION'" title="Ambiente del RNDC de la empresa"><i></i>RNDC {{ ambiente(e.ambienteRndc) }}</span>
-            }
-          </div>
+        <button type="button" class="buscador" (click)="abrirBuscador()" aria-label="Buscar una página (Ctrl + K)">
+          <app-icono nombre="buscar" [tam]="16" /><span class="txt-buscar">Ir a…</span><kbd>Ctrl K</kbd>
+        </button>
 
-          <button type="button" class="tema" (click)="tema.alternar()" [attr.aria-pressed]="tema.tema() === 'oscuro'"
-            [attr.aria-label]="tema.tema() === 'oscuro' ? 'Activar modo claro' : 'Activar modo oscuro'"
-            [title]="tema.tema() === 'oscuro' ? 'Modo claro' : 'Modo oscuro'">
-            <app-icono [nombre]="tema.tema() === 'oscuro' ? 'sol' : 'luna'" [tam]="18" />
+        @if (u()?.empresa; as e) {
+          <span class="ambiente" [class.prod]="e.ambienteRndc === 'PRODUCCION'" [title]="'Ambiente del RNDC: ' + ambiente(e.ambienteRndc)"><i></i><span>RNDC {{ ambiente(e.ambienteRndc) }}</span></span>
+        }
+
+        <div class="usuario">
+          <button type="button" class="disparador" aria-label="Menú de usuario" (click)="menuUsuario.set(!menuUsuario())" [attr.aria-expanded]="menuUsuario()" aria-haspopup="menu">
+            <span class="avatar">{{ iniciales(u()?.nombre || '') }}</span>
+            <app-icono nombre="chevron" [tam]="14" class="flecha" [class.girada]="menuUsuario()" />
           </button>
-
-          <!-- Menú de usuario -->
-          <div class="usuario">
-            <button type="button" class="disparador" aria-label="Menú de usuario" (click)="menuUsuario.set(!menuUsuario())" [attr.aria-expanded]="menuUsuario()" aria-haspopup="menu">
-              <span class="avatar">{{ iniciales(u()?.nombre || '') }}</span>
-              <span class="txt"><strong>{{ u()?.nombre }}</strong><small>{{ u()?.rolNombre }}</small></span>
-              <app-icono nombre="chevron" [tam]="16" class="flecha" [class.girada]="menuUsuario()" />
-            </button>
-            @if (menuUsuario()) {
-              <div class="desplegable" role="menu">
-                <div class="cabeza">
-                  <span class="avatar grande">{{ iniciales(u()?.nombre || '') }}</span>
-                  <span class="txt"><strong>{{ u()?.nombre }}</strong><small>{{ u()?.rolNombre }}</small><small>{{ u()?.email }}</small></span>
-                </div>
-                <a role="menuitem" routerLink="/mi-cuenta" (click)="menuUsuario.set(false)"><app-icono nombre="usuario" [tam]="17" />Mi perfil</a>
-                <a role="menuitem" routerLink="/privacidad" (click)="menuUsuario.set(false)"><app-icono nombre="escudo" [tam]="17" />Política y privacidad</a>
-                <button type="button" role="menuitem" (click)="tema.alternar()"><app-icono [nombre]="tema.tema() === 'oscuro' ? 'sol' : 'luna'" [tam]="17" />{{ tema.tema() === 'oscuro' ? 'Modo claro' : 'Modo oscuro' }}</button>
-                <hr />
-                <button type="button" role="menuitem" class="cerrar" (click)="salir()"><app-icono nombre="salir" [tam]="17" />Cerrar sesión</button>
+          @if (menuUsuario()) {
+            <div class="desplegable" role="menu">
+              <div class="cabeza">
+                <span class="avatar grande">{{ iniciales(u()?.nombre || '') }}</span>
+                <span class="txt"><strong>{{ u()?.nombre }}</strong><small>{{ u()?.rolNombre }}</small><small>{{ u()?.email }}</small></span>
               </div>
-            }
-          </div>
-        </header>
-        <main id="contenido"><router-outlet /></main>
+              @if (u()?.empresa; as e) { <div class="empresa-u"><app-icono nombre="edificio" [tam]="15" />{{ e.nombre }}</div> }
+              <a role="menuitem" routerLink="/mi-cuenta" (click)="menuUsuario.set(false)"><app-icono nombre="usuario" [tam]="17" />Mi perfil y seguridad</a>
+              <button type="button" role="menuitem" (click)="tema.alternar()"><app-icono [nombre]="tema.tema() === 'oscuro' ? 'sol' : 'luna'" [tam]="17" />{{ tema.tema() === 'oscuro' ? 'Tema claro' : 'Tema oscuro' }}</button>
+              <a role="menuitem" routerLink="/privacidad" (click)="menuUsuario.set(false)"><app-icono nombre="escudo" [tam]="17" />Política y privacidad</a>
+              <hr />
+              <button type="button" role="menuitem" class="cerrar" (click)="salir()"><app-icono nombre="salir" [tam]="17" />Cerrar sesión</button>
+            </div>
+          }
+        </div>
       </div>
-      <div class="velo" (click)="menuAbierto.set(false)"></div>
-    </div>`,
+    </header>
+
+    <!-- Páginas del módulo activo -->
+    @if (moduloActivo(); as m) {
+      @if (m.paginas.length > 1) {
+        <nav class="subnav" [attr.aria-label]="'Páginas de ' + m.nombre">
+          <div class="fila">
+            <span class="mod">{{ m.nombre }}</span>
+            <div class="paginas">
+              @for (p of m.paginas; track p.ruta) {
+                <a [routerLink]="p.ruta" routerLinkActive="activa" [title]="p.descripcion"><app-icono [nombre]="p.icono" [tam]="16" />{{ p.texto }}</a>
+              }
+            </div>
+          </div>
+        </nav>
+      }
+    }
+
+    <main id="contenido"><router-outlet /></main>
+
+    <!-- Menú completo (celular) -->
+    @if (menuMovil()) {
+      <div class="velo" (click)="menuMovil.set(false)"></div>
+      <aside class="hoja" aria-label="Menú">
+        <div class="hoja-cab">
+          <img src="nombre.webp" alt="Translogística del Sur" width="160" height="24">
+          <button type="button" class="ico-btn" (click)="menuMovil.set(false)" aria-label="Cerrar menú"><app-icono nombre="x" [tam]="20" /></button>
+        </div>
+        <div class="hoja-cuerpo">
+          @for (m of modulos(); track m.id) {
+            <section>
+              <h3>{{ m.nombre }}</h3>
+              @for (p of m.paginas; track p.ruta) {
+                <a [routerLink]="p.ruta" routerLinkActive="activa" (click)="menuMovil.set(false)">
+                  <app-icono [nombre]="p.icono" [tam]="18" /><span><strong>{{ p.texto }}</strong><small>{{ p.descripcion }}</small></span></a>
+              }
+            </section>
+          }
+        </div>
+      </aside>
+    }
+
+    <!-- Buscador de páginas (Ctrl + K) -->
+    @if (buscador()) {
+      <div class="velo velo-buscador" (click)="buscador.set(false)"></div>
+      <div class="paleta" role="dialog" aria-modal="true" aria-label="Ir a una página">
+        <div class="paleta-entrada">
+          <app-icono nombre="buscar" [tam]="18" />
+          <input #entrada type="text" placeholder="¿A dónde quiere ir? Ej.: manifiestos, placas, préstamos…" [value]="consulta()"
+            (input)="consulta.set($any($event.target).value); indice.set(0)" (keydown)="teclaBuscador($event)" aria-label="Buscar página" autocomplete="off" />
+          <kbd>Esc</kbd>
+        </div>
+        <ul class="resultados" role="listbox">
+          @for (r of resultados(); track r.ruta; let i = $index) {
+            <li role="option" [attr.aria-selected]="i === indice()" [class.sel]="i === indice()" (mouseenter)="indice.set(i)" (click)="ir(r.ruta)">
+              <span class="ico"><app-icono [nombre]="r.icono" [tam]="17" /></span>
+              <span class="txt"><strong>{{ r.texto }}</strong><small>{{ r.modulo }} · {{ r.descripcion }}</small></span>
+              <app-icono nombre="chevron" [tam]="14" class="ir" />
+            </li>
+          } @empty { <li class="nada">No hay páginas que coincidan con «{{ consulta() }}».</li> }
+        </ul>
+        <div class="paleta-pie"><span><kbd>↑</kbd><kbd>↓</kbd> moverse</span><span><kbd>Enter</kbd> abrir</span></div>
+      </div>
+    }`,
   styles: [`
-    .saltar { position: absolute; left: -999px; top: 8px; z-index: 100; background: var(--negro); color: #fff; padding: 8px 12px; border-radius: 8px; }
+    :host { display: block; min-height: 100dvh; }
+    .saltar { position: absolute; left: -999px; top: 8px; z-index: 100; background: var(--tinta); color: #fff; padding: 8px 12px; border-radius: 8px; }
     .saltar:focus { left: 8px; }
-    .app { --ancho-min: 64px; --ancho-max: 232px; display: grid; grid-template-columns: var(--ancho-min) 1fr; min-height: 100dvh; transition: grid-template-columns .2s ease; }
-    .app.fijo { grid-template-columns: var(--ancho-max) 1fr; }
+    .fila { max-width: var(--ancho-pagina); margin: 0 auto; padding: 0 28px; display: flex; align-items: center; gap: 14px; }
 
-    /* Barra lateral: ocupa el ancho mínimo y se superpone al desplegarse con el mouse */
-    aside { position: sticky; top: 0; height: 100dvh; z-index: var(--z-menu); width: var(--ancho-min); background: var(--lateral);
-      border-right: 1px solid var(--lateral-borde); color: var(--lateral-texto); display: flex; flex-direction: column; overflow: hidden;
-      transition: width .2s ease, box-shadow .2s ease; }
-    /* Se despliega solo mientras el cursor está encima, con foco de teclado (Tab) o si el usuario lo fijó.
-       No se usa :focus-within: el clic deja el foco en el enlace y el menú quedaba abierto al navegar. */
-    aside:hover, aside:has(:focus-visible), aside.desplegado { width: var(--ancho-max); }
-    .app:not(.fijo) aside:hover, .app:not(.fijo) aside:has(:focus-visible) { box-shadow: 14px 0 36px -14px rgba(0,0,0,.45); }
-    .etq { opacity: 0; white-space: nowrap; transition: opacity .12s ease; pointer-events: none; }
-    aside:hover .etq, aside:has(:focus-visible) .etq, aside.desplegado .etq { opacity: 1; pointer-events: auto; transition-delay: .06s; }
+    /* ── Barra superior ── */
+    .global { position: sticky; top: 0; z-index: var(--z-cabecera); background: var(--tinta); color: var(--tinta-texto);
+      border-bottom: 1px solid rgba(255,255,255,.06); }
+    .global .fila { height: 60px; }
+    .marca { display: flex; align-items: center; flex: none; margin-right: 10px; }
+    .marca .logo { display: none; width: 40px; height: auto; }
+    .marca .nombre { width: 150px; height: auto; display: block; }
+    .modulos { display: flex; gap: 2px; height: 100%; align-items: stretch; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+    .modulos::-webkit-scrollbar { display: none; }
+    .modulos a { position: relative; display: flex; align-items: center; padding: 0 13px; color: var(--tinta-tenue); text-decoration: none;
+      font-weight: 600; font-size: 14px; white-space: nowrap; transition: color var(--transicion); }
+    .modulos a:hover { color: #fff; }
+    .modulos a.activo { color: #fff; }
+    .modulos a.activo::after { content: ''; position: absolute; left: 13px; right: 13px; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--primario); }
+    .modulos a:focus-visible { box-shadow: inset 0 0 0 2px var(--primario); border-radius: 8px; }
 
-    .marca { display: flex; gap: 10px; align-items: center; padding: 16px 12px 12px; min-height: 62px; }
-    .logos { position: relative; flex: 1; min-width: 0; height: 30px; display: flex; align-items: center; }
-    .logo { flex: none; width: 40px; height: auto; display: block; transition: opacity .12s ease; }
-    .nombre { position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 168px; height: auto; display: block; }
-    aside:hover .logo, aside:has(:focus-visible) .logo, aside.desplegado .logo { opacity: 0; }
-    .marca { border-bottom: 1px solid var(--lateral-linea); margin-bottom: 6px; }
-    .fijar { min-height: 0; width: 28px; height: 28px; padding: 0; border-radius: 7px; border-color: transparent; background: transparent; color: var(--lateral-tenue); flex: none; }
-    .fijar:hover:not(:disabled) { background: var(--lateral-hover); color: #fff; border-color: transparent; }
-    .fijo .fijar { color: var(--primario); }
+    .buscador { min-height: 36px; height: 36px; padding: 0 8px 0 12px; gap: 8px; background: var(--tinta-2); border: 1px solid var(--tinta-3);
+      color: var(--tinta-tenue); font-weight: 500; box-shadow: none; border-radius: 10px; flex: none; }
+    .buscador:hover:not(:disabled) { background: var(--tinta-3); border-color: #343c4a; color: #fff; }
+    kbd { font: 600 11px var(--fuente); padding: 2px 6px; border-radius: 5px; border: 1px solid currentColor; opacity: .7; white-space: nowrap; }
+    .ambiente { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--tinta-tenue); white-space: nowrap; flex: none; }
+    .ambiente i { width: 8px; height: 8px; border-radius: 50%; background: #ffa04d; box-shadow: 0 0 0 3px rgba(255,160,77,.18); }
+    .ambiente.prod i { background: #4fd18b; box-shadow: 0 0 0 3px rgba(79,209,139,.18); }
+    .ico-btn { min-height: 0; width: 38px; height: 38px; padding: 0; border-radius: 10px; border: 0; background: transparent; color: inherit; box-shadow: none; }
+    .ico-btn:hover:not(:disabled) { background: var(--tinta-3); }
+    .solo-movil { display: none; }
 
-    /* El menú se desplaza cuando no cabe en la pantalla (la marca queda fija arriba) */
-    nav { display: flex; flex-direction: column; padding: 4px 12px 16px; gap: 2px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
-      overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--lateral-linea) transparent; }
-    nav::-webkit-scrollbar { width: 6px; } nav::-webkit-scrollbar-thumb { background: var(--lateral-linea); border-radius: 3px; }
-    .grupo { height: 26px; margin-top: 10px; padding: 0 9px; display: flex; align-items: center; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
-      color: var(--lateral-tenue); border-top: 1px solid var(--lateral-linea); }
-    aside:hover .grupo, aside.desplegado .grupo { border-top-color: transparent; }
-    nav a { position: relative; display: flex; gap: 12px; align-items: center; height: 38px; padding: 0 10px; border-radius: 9px; color: var(--lateral-texto);
-      text-decoration: none; font-weight: 500; transition: background var(--transicion), color var(--transicion); }
-    nav a app-icono { flex: none; }
-    nav a:hover { background: var(--lateral-hover); color: #fff; }
-    nav a.activa { background: var(--primario); color: var(--sobre-primario); font-weight: 650; }
-    nav a.activa::before { content: ""; position: absolute; left: -12px; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: var(--primario); }
-    nav a:focus-visible { box-shadow: 0 0 0 2px var(--primario); }
-
-    .principal { min-width: 0; display: flex; flex-direction: column; }
-    header { display: flex; align-items: center; gap: 12px; padding: 10px 28px; background: var(--cabecera); backdrop-filter: blur(8px);
-      border-bottom: 1px solid var(--gris-2); box-shadow: inset 0 -3px 0 var(--primario); position: sticky; top: 0; z-index: var(--z-cabecera); }
-    .contexto { flex: 1; display: flex; gap: 10px; align-items: center; min-width: 0; }
-    .contexto strong { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ambiente { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gris-5); white-space: nowrap; }
-    .ambiente i { width: 7px; height: 7px; border-radius: 50%; background: var(--ambar); }
-    .ambiente.prod i { background: var(--verde); }
-
-    .tema { min-height: 0; width: 38px; height: 38px; padding: 0; border-radius: 50%; border: 1px solid var(--gris-2); background: var(--gris-0); color: var(--gris-8); }
-    .tema:hover:not(:disabled) { background: var(--negro); border-color: var(--negro); color: var(--primario); }
-
-    /* Menú de usuario */
-    .usuario { position: relative; }
-    .disparador { display: flex; gap: 10px; align-items: center; min-height: 0; padding: 5px 10px 5px 5px; border-radius: 999px; border: 1px solid var(--gris-2); background: var(--gris-0); }
-    .disparador:hover:not(:disabled) { background: var(--gris-1); border-color: var(--gris-3); }
-    .avatar { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--primario); color: var(--sobre-primario);
-      font-weight: 650; font-size: 12px; }
-    .avatar.grande { width: 42px; height: 42px; font-size: 14px; }
-    .txt { display: flex; flex-direction: column; line-height: 1.2; text-align: left; min-width: 0; }
-    .txt strong { font-weight: 600; font-size: 13px; }
-    .txt small { color: var(--gris-5); font-size: 11.5px; font-weight: 400; }
-    .flecha { color: var(--gris-5); transition: transform var(--transicion); }
+    /* Usuario */
+    .usuario { position: relative; flex: none; }
+    .disparador { display: flex; gap: 6px; align-items: center; min-height: 0; padding: 3px 8px 3px 3px; border-radius: 999px; border: 1px solid var(--tinta-3);
+      background: var(--tinta-2); color: var(--tinta-tenue); box-shadow: none; }
+    .disparador:hover:not(:disabled) { background: var(--tinta-3); border-color: #343c4a; }
+    .avatar { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--primario); color: var(--sobre-primario);
+      font-weight: 750; font-size: 12px; }
+    .avatar.grande { width: 42px; height: 42px; font-size: 14px; border-radius: 12px; }
+    .flecha { transition: transform var(--transicion); }
     .flecha.girada { transform: rotate(180deg); }
-    .desplegable { position: absolute; right: 0; top: calc(100% + 8px); width: 248px; background: var(--gris-0); border: 1px solid var(--gris-2); border-radius: 14px;
-      box-shadow: var(--sombra-menu); padding: 6px; animation: abrir .14s ease-out; z-index: var(--z-menu); }
-    @keyframes abrir { from { transform: translateY(-4px); } to { transform: none; } }
-    .cabeza { display: flex; gap: 11px; align-items: center; padding: 10px 10px 12px; border-bottom: 1px solid var(--gris-15); margin-bottom: 4px; }
-    .cabeza .txt strong { font-size: 14px; }
-    .cabeza .txt small:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+    .desplegable { position: absolute; right: 0; top: calc(100% + 10px); width: 270px; background: var(--gris-0); color: var(--gris-8); border: 1px solid var(--gris-2);
+      border-radius: 14px; box-shadow: var(--sombra-menu); padding: 6px; animation: abrir .14s ease-out; z-index: var(--z-menu); }
+    @keyframes abrir { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+    .cabeza { display: flex; gap: 11px; align-items: center; padding: 10px 10px 12px; }
+    .txt { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+    .txt strong { font-weight: 700; font-size: 14px; }
+    .txt small { color: var(--gris-5); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .empresa-u { display: flex; align-items: center; gap: 8px; margin: 0 4px 6px; padding: 8px 10px; border-radius: 9px; background: var(--gris-1);
+      font-size: 12.5px; font-weight: 600; color: var(--gris-6); }
     .desplegable a, .desplegable button { display: flex; gap: 10px; align-items: center; width: 100%; padding: 9px 10px; border-radius: 9px; border: 0;
-      background: none; color: var(--gris-7); font-weight: 500; text-decoration: none; min-height: 0; justify-content: flex-start; }
+      background: none; color: var(--gris-7); font-weight: 550; font-size: 14px; text-decoration: none; min-height: 0; justify-content: flex-start; box-shadow: none; }
     .desplegable a:hover, .desplegable button:hover:not(:disabled) { background: var(--gris-1); color: var(--gris-8); }
     .desplegable app-icono { color: var(--gris-5); }
     .desplegable hr { border: 0; border-top: 1px solid var(--gris-15); margin: 4px 0; }
     .desplegable .cerrar, .desplegable .cerrar app-icono { color: var(--rojo); }
-    .desplegable .cerrar:hover:not(:disabled) { background: var(--rojo-claro); color: var(--rojo); }
+    .desplegable .cerrar:hover:not(:disabled) { background: var(--rojo-claro); }
 
-    main { padding: 28px; max-width: 1400px; width: 100%; margin: 0 auto; }
-    .menu { display: none; }
-    .velo { display: none; }
+    /* ── Subnavegación ── */
+    .subnav { position: sticky; top: 60px; z-index: calc(var(--z-cabecera) - 1); background: var(--cabecera); backdrop-filter: saturate(1.4) blur(10px);
+      border-bottom: 1px solid var(--gris-2); }
+    .subnav .fila { height: 50px; }
+    .mod { font-size: 12px; font-weight: 700; color: var(--gris-4); letter-spacing: .02em; padding-right: 14px; margin-right: 2px; border-right: 1px solid var(--gris-2); flex: none; }
+    .paginas { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+    .paginas::-webkit-scrollbar { display: none; }
+    .paginas a { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 8px; color: var(--gris-5); text-decoration: none;
+      font-weight: 600; font-size: 13.5px; white-space: nowrap; transition: background var(--transicion), color var(--transicion); }
+    .paginas a:hover { background: var(--gris-15); color: var(--gris-8); }
+    .paginas a.activa { background: var(--gris-8); color: var(--gris-0); }
+    .paginas a.activa app-icono { color: var(--primario); }
 
+    main { padding: 28px 28px 56px; max-width: var(--ancho-pagina); width: 100%; margin: 0 auto; animation: entrar .22s ease-out; }
+    @keyframes entrar { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+    /* ── Menú del celular ── */
+    .velo { position: fixed; inset: 0; background: var(--velo); z-index: var(--z-modal); animation: fundir .15s ease-out; }
+    @keyframes fundir { from { opacity: 0; } to { opacity: 1; } }
+    .hoja { position: fixed; top: 0; left: 0; bottom: 0; width: min(360px, 88vw); z-index: calc(var(--z-modal) + 1); background: var(--gris-0);
+      display: flex; flex-direction: column; box-shadow: var(--sombra-menu); animation: deslizar .2s ease-out; }
+    @keyframes deslizar { from { transform: translateX(-100%); } to { transform: none; } }
+    .hoja-cab { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 12px 18px; background: var(--tinta); color: #fff; }
+    .hoja-cuerpo { overflow-y: auto; padding: 8px 10px 24px; }
+    .hoja h3 { margin: 16px 10px 6px; font-size: 12px; color: var(--gris-4); letter-spacing: .03em; }
+    .hoja a { display: flex; gap: 12px; align-items: flex-start; padding: 10px; border-radius: 10px; color: var(--gris-7); text-decoration: none; }
+    .hoja a span { display: flex; flex-direction: column; line-height: 1.3; }
+    .hoja a strong { font-size: 14.5px; } .hoja a small { color: var(--gris-5); font-size: 12px; }
+    .hoja a app-icono { margin-top: 2px; color: var(--gris-5); }
+    .hoja a:hover { background: var(--gris-1); }
+    .hoja a.activa { background: var(--primario-claro); } .hoja a.activa app-icono { color: var(--primario-texto); }
+
+    /* ── Buscador (Ctrl + K) ── */
+    .velo-buscador { backdrop-filter: blur(3px); }
+    .paleta { position: fixed; top: 12vh; left: 50%; transform: translateX(-50%); width: min(620px, calc(100vw - 24px)); z-index: calc(var(--z-modal) + 1);
+      background: var(--gris-0); border: 1px solid var(--gris-2); border-radius: 16px; box-shadow: var(--sombra-menu); overflow: hidden; animation: abrir .14s ease-out; }
+    .paleta-entrada { display: flex; align-items: center; gap: 12px; padding: 4px 16px; border-bottom: 1px solid var(--gris-15); color: var(--gris-5); }
+    .paleta-entrada input { border: 0; box-shadow: none; min-height: 54px; padding: 0; font-size: 16px; background: transparent; }
+    .paleta-entrada input:focus { box-shadow: none; }
+    .resultados { list-style: none; margin: 0; padding: 6px; max-height: 52vh; overflow-y: auto; }
+    .resultados li { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 10px; cursor: pointer; }
+    .resultados li.sel { background: var(--gris-15); }
+    .resultados .ico { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: var(--gris-1); color: var(--gris-6); flex: none; }
+    .resultados li.sel .ico { background: var(--primario); color: var(--sobre-primario); }
+    .resultados .txt { flex: 1; }
+    .resultados .ir { transform: rotate(-90deg); color: var(--gris-4); }
+    .resultados .nada { padding: 22px; color: var(--gris-5); cursor: default; }
+    .paleta-pie { display: flex; gap: 16px; padding: 9px 16px; border-top: 1px solid var(--gris-15); font-size: 12px; color: var(--gris-5); background: var(--gris-1); }
+    .paleta-pie kbd { margin-right: 3px; }
+
+    @media (max-width: 1180px) {
+      .ambiente span { display: none; }
+      .txt-buscar, .buscador kbd { display: none; }
+      .buscador { width: 38px; padding: 0; justify-content: center; }
+    }
     @media (max-width: 960px) {
-      .app, .app.fijo { grid-template-columns: 1fr; }
-      aside { position: fixed; left: 0; top: 0; bottom: 0; width: 248px; transform: translateX(-100%); transition: transform .22s ease; }
-      aside .etq { opacity: 1; pointer-events: auto; }
-      .fijar { display: none; }
-      .menu-abierto aside { transform: none; box-shadow: var(--sombra-2); }
-      .menu-abierto .velo { display: block; position: fixed; inset: 0; background: var(--velo); z-index: calc(var(--z-menu) - 1); }
-      .menu { display: inline-flex; }
-      .disparador .txt { display: none; }
-      header { padding: 10px 14px; }
-      main { padding: 18px 14px; }
+      .fila { padding: 0 14px; gap: 8px; }
+      .solo-movil { display: inline-flex; }
+      .modulos { display: none; }
+      .marca { margin-right: auto; }
+      .marca .nombre { width: 132px; }
+      .subnav { top: 60px; } .subnav .fila { height: 46px; }
+      .mod { display: none; }
+      main { padding: 18px 14px 40px; }
     }
   `],
 })
 export class Layout {
   private auth = inject(Auth);
   private clave = inject(RndcClave);
+  private router = inject(Router);
   readonly u = this.auth.usuario;
   readonly tema = inject(TemaService);
-  readonly menuAbierto = signal(false);
   readonly menuUsuario = signal(false);
-  // Preferencia de este navegador: menú lateral fijo o solo íconos
-  readonly fijo = signal(leerFijo());
+  readonly menuMovil = signal(false);
+  readonly buscador = signal(false);
+  readonly consulta = signal('');
+  readonly indice = signal(0);
+  private entrada = viewChild<ElementRef<HTMLInputElement>>('entrada');
+  private readonly url = signal(this.router.url);
 
-  // Al elegir una opción con el mouse se quita el foco del enlace, para que el
-  // menú se contraiga en cuanto el cursor salga (salvo que esté fijado).
-  alNavegar(e: MouseEvent) {
-    this.menuAbierto.set(false);
-    if (e.detail > 0) (e.currentTarget as HTMLElement).blur();
+  // Módulos y páginas que el rol puede ver
+  readonly modulos = computed(() => {
+    this.u();
+    return MODULOS.map(m => ({ ...m, paginas: m.paginas.filter(p => this.auth.tiene(...p.permisos)) })).filter(m => m.paginas.length);
+  });
+  readonly moduloActivo = computed(() => {
+    const ruta = this.url().split(/[?#]/)[0];
+    const porPagina = this.modulos().find(m => m.paginas.some(p => ruta === p.ruta || ruta.startsWith(p.ruta + '/')));
+    if (porPagina) return porPagina;
+    const id = OTRAS[ruta];
+    return id ? this.modulos().find(m => m.id === id) || null : null;
+  });
+  readonly resultados = computed(() => {
+    const q = sinTildes(this.consulta().trim());
+    const todas: (Pagina & { modulo: string })[] = this.modulos().flatMap(m => m.paginas.map(p => ({ ...p, modulo: m.nombre })));
+    if (!q) return todas;
+    const palabras = q.split(/\s+/);
+    return todas.filter(p => { const t = sinTildes(`${p.texto} ${p.modulo} ${p.descripcion} ${p.claves || ''}`); return palabras.every(w => t.includes(w)); });
+  });
+
+  abrirBuscador() { this.consulta.set(''); this.indice.set(0); this.buscador.set(true); setTimeout(() => this.entrada()?.nativeElement.focus()); }
+  ir(ruta: string) { this.buscador.set(false); this.router.navigateByUrl(ruta); }
+  teclaBuscador(e: KeyboardEvent) {
+    const n = this.resultados().length;
+    if (e.key === 'ArrowDown') { e.preventDefault(); this.indice.set(Math.min(this.indice() + 1, n - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); this.indice.set(Math.max(this.indice() - 1, 0)); }
+    else if (e.key === 'Enter' && n) { e.preventDefault(); this.ir(this.resultados()[this.indice()].ruta); }
   }
 
-  alternarFijo() {
-    this.fijo.set(!this.fijo());
-    try { localStorage.setItem('tls_menu_fijo', this.fijo() ? '1' : '0'); } catch { /* sin almacenamiento */ }
+  @HostListener('document:keydown', ['$event'])
+  atajos(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); this.buscador() ? this.buscador.set(false) : this.abrirBuscador(); }
+    if (e.key === 'Escape') { this.menuUsuario.set(false); this.buscador.set(false); this.menuMovil.set(false); }
   }
-
-  // Cierra el menú de usuario al hacer clic fuera o con Escape
+  // Cierra el menú de usuario al hacer clic fuera
   @HostListener('document:click', ['$event'])
   clicFuera(e: MouseEvent) {
     const t = e.target as HTMLElement | null;
     if (this.menuUsuario() && t?.isConnected && !t.closest('.usuario')) this.menuUsuario.set(false);
   }
-  @HostListener('document:keydown.escape')
-  escape() { this.menuUsuario.set(false); }
-  readonly grupos = computed(() => {
-    this.u();
-    const visibles = MENU.filter(o => this.auth.tiene(...o.permisos));
-    const nombres = [...new Set(visibles.map(o => o.grupo || ''))];
-    return nombres.map(nombre => ({ nombre, opciones: visibles.filter(o => (o.grupo || '') === nombre) }));
-  });
 
   private enVivoSrv = inject(EnVivo);
   constructor() {
     this.enVivoSrv.iniciar();
     inject(DestroyRef).onDestroy(() => this.enVivoSrv.detener());
-    // Si debe cambiar la contraseña, no puede usar otras secciones
-    const router = inject(Router);
-    router.events.pipe(takeUntilDestroyed()).subscribe(ev => {
-      if (ev instanceof NavigationEnd && this.u()?.debeCambiarClave && !ev.urlAfterRedirects.startsWith('/mi-cuenta')) {
-        router.navigateByUrl('/mi-cuenta');
-      }
+    this.router.events.pipe(takeUntilDestroyed()).subscribe(ev => {
+      if (!(ev instanceof NavigationEnd)) return;
+      this.url.set(ev.urlAfterRedirects);
+      this.menuMovil.set(false);
+      // Si debe cambiar la contraseña, no puede usar otras secciones
+      if (this.u()?.debeCambiarClave && !ev.urlAfterRedirects.startsWith('/mi-cuenta')) this.router.navigateByUrl('/mi-cuenta');
     });
     this.auth.refrescar().catch(() => { /* el interceptor maneja 401 */ });
     this.vigilarInactividad();

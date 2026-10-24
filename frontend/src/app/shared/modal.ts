@@ -1,32 +1,39 @@
 import { Component, ElementRef, effect, input, output, viewChild } from '@angular/core';
 import { Icono } from './icono';
 
-// Ventana modal basada en <dialog> (accesible, cierra con Esc).
+// Panel lateral basado en <dialog> (accesible, cierra con Esc): se desliza desde la derecha,
+// deja ver la pantalla de fondo y mantiene el título y los botones siempre a la vista.
+// No se cierra al hacer clic afuera, para no perder lo que se está escribiendo.
 @Component({
   selector: 'app-modal',
   imports: [Icono],
   template: `
     <dialog #dlg (close)="cerrar.emit()" [class.ancho]="ancho()">
-      <header>
-        <h2>{{ titulo() }}</h2>
-        <button class="texto" type="button" (click)="cerrar.emit()" aria-label="Cerrar"><app-icono nombre="x" /></button>
-      </header>
-      <div class="cuerpo"><ng-content /></div>
-      <footer><ng-content select="[pie]" /></footer>
+      <div class="panel">
+        <header>
+          <h2>{{ titulo() }}</h2>
+          <button class="cerrar" type="button" (click)="cerrar.emit()" aria-label="Cerrar"><app-icono nombre="x" [tam]="18" /></button>
+        </header>
+        <div class="cuerpo"><ng-content /></div>
+        <footer><ng-content select="[pie]" /></footer>
+      </div>
     </dialog>`,
   styles: [`
-    dialog { border: 1px solid var(--gris-2); border-radius: 18px; padding: 0; width: min(580px, calc(100vw - 24px)); color: var(--gris-8); background: var(--gris-0);
-      box-shadow: var(--sombra-menu); overflow: hidden; }
-    dialog[open] { animation: aparecer .2s cubic-bezier(.2, .7, .2, 1); }
-    @keyframes aparecer { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
-    dialog.ancho { width: min(1000px, calc(100vw - 24px)); }
+    dialog { position: fixed; inset: 0 0 0 auto; margin: 0; height: 100dvh; max-height: 100dvh; width: min(620px, 100vw); max-width: 100vw;
+      border: 0; padding: 0; color: var(--gris-8); background: transparent; overflow: visible; }
+    dialog.ancho { width: min(1080px, 100vw); }
+    dialog[open] .panel { animation: entrar .24s cubic-bezier(.2, .8, .2, 1); }
+    @keyframes entrar { from { transform: translateX(32px); opacity: 0; } to { transform: none; opacity: 1; } }
     dialog::backdrop { background: var(--velo); backdrop-filter: blur(2px); }
-    header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 22px 14px;
-      border-bottom: 1px solid var(--gris-15); }
-    header h2 { margin: 0; font-size: 18px; }
-    .cuerpo { padding: 18px 22px; max-height: calc(100dvh - 200px); overflow: auto; }
-    footer { padding: 12px 22px; display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; background: var(--gris-1); border-top: 1px solid var(--gris-15); }
+    .panel { height: 100%; display: flex; flex-direction: column; background: var(--fondo); border-left: 1px solid var(--gris-2); box-shadow: var(--sombra-menu); }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 22px; background: var(--gris-0);
+      border-bottom: 1px solid var(--gris-2); flex: none; }
+    header h2 { margin: 0; font-size: 18px; letter-spacing: -.015em; }
+    .cerrar { min-height: 0; width: 36px; height: 36px; padding: 0; border-radius: 10px; box-shadow: none; flex: none; }
+    .cuerpo { padding: 20px 22px 24px; overflow: auto; flex: 1 1 auto; }
+    footer { padding: 12px 22px; display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; background: var(--gris-0); border-top: 1px solid var(--gris-2); flex: none; }
     footer:empty { display: none; }
+    @media (max-width: 640px) { header { padding: 12px 16px; } .cuerpo { padding: 16px; } footer { padding: 10px 16px; } }
   `],
 })
 export class Modal {
