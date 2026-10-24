@@ -16,21 +16,25 @@ const MENU: Opcion[] = [
   { ruta: '/inicio', texto: 'Inicio', icono: 'inicio', permisos: [P.VIAJES_VER] },
   // Operación diaria
   { ruta: '/viajes', texto: 'Viajes', icono: 'camion', permisos: [P.VIAJES_VER], grupo: 'Operación' },
+  { ruta: '/relaciones', texto: 'Programación por placa', icono: 'lista', permisos: [P.VIAJES_VER], grupo: 'Operación' },
   { ruta: '/monitoreo', texto: 'Monitoreo', icono: 'ubicacion', permisos: [P.VIAJES_VER], grupo: 'Operación' },
-  { ruta: '/manifiestos', texto: 'Manifiestos RNDC', icono: 'documento', permisos: [P.RNDC_OPERAR], grupo: 'Operación' },
-  { ruta: '/remesas-dulces', texto: 'Remesas Dulces', icono: 'documento', permisos: [P.VIAJES_REGISTRAR], grupo: 'Operación' },
-  { ruta: '/consultas-rndc', texto: 'Consultas RNDC', icono: 'buscar', permisos: [P.RNDC_CONSULTAR], grupo: 'Operación' },
+
+  { ruta: '/manifiestos', texto: 'Manifiestos', icono: 'documento', permisos: [P.RNDC_OPERAR], grupo: 'Documentos' },
+  { ruta: '/soporte-interno', texto: 'Soporte interno', icono: 'documento', permisos: [P.VIAJES_VER], grupo: 'Documentos' },
+  { ruta: '/remesas-dulces', texto: 'Remesas Dulces', icono: 'documento', permisos: [P.VIAJES_REGISTRAR], grupo: 'Documentos' },
   // Dinero
-  { ruta: '/relaciones', texto: 'Relaciones', icono: 'lista', permisos: [P.VIAJES_VER], grupo: 'Pagos y facturación' },
-  { ruta: '/liquidaciones', texto: 'Liquidación de fletes', icono: 'dinero', permisos: [P.LIQUIDACION_VER], grupo: 'Pagos y facturación' },
-  { ruta: '/pago-conductores', texto: 'Pago a conductores', icono: 'dinero', permisos: [P.LIQUIDACION_VER], grupo: 'Pagos y facturación' },
-  { ruta: '/contabilidad', texto: 'Contabilidad', icono: 'lista', permisos: [P.LIQUIDACION_VER], grupo: 'Pagos y facturación' },
-  { ruta: '/cierre-mes', texto: 'Cierre de mes', icono: 'candado', permisos: [P.CONFIG_GESTIONAR, P.LIQUIDACION_VER], grupo: 'Pagos y facturación' },
+  { ruta: '/liquidaciones', texto: 'Facturación a clientes', icono: 'dinero', permisos: [P.LIQUIDACION_VER], grupo: 'Finanzas' },
+  { ruta: '/pago-conductores', texto: 'Pago a conductores', icono: 'personas', permisos: [P.LIQUIDACION_VER], grupo: 'Finanzas' },
+  { ruta: '/contabilidad', texto: 'Contabilidad y cierre', icono: 'lista', permisos: [P.LIQUIDACION_VER], grupo: 'Finanzas' },
   // Datos maestros
+  { ruta: '/clientes', texto: 'Clientes y tarifas', icono: 'edificio', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
   { ruta: '/conductores', texto: 'Conductores y terceros', icono: 'personas', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
   { ruta: '/vehiculos', texto: 'Vehículos', icono: 'camion', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
-  { ruta: '/clientes', texto: 'Clientes y tarifas', icono: 'edificio', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
   { ruta: '/revision', texto: 'Revisión de datos', icono: 'alerta', permisos: [P.MAESTROS_VER], grupo: 'Datos' },
+
+  { ruta: '/consultas-rndc', texto: 'Consultas al RNDC', icono: 'buscar', permisos: [P.RNDC_CONSULTAR], grupo: 'RNDC' },
+  { ruta: '/rndc/envios', texto: 'Envíos al RNDC', icono: 'enviar', permisos: [P.RNDC_OPERAR], grupo: 'RNDC' },
+  { ruta: '/rndc/correos', texto: 'Correos de manifiestos', icono: 'correo', permisos: [P.RNDC_OPERAR], grupo: 'RNDC' },
   // Administración
   { ruta: '/configuracion', texto: 'Configuración', icono: 'ajustes', permisos: [P.CONFIG_GESTIONAR, P.USUARIOS_GESTIONAR], grupo: 'Empresa' },
   { ruta: '/admin/empresas', texto: 'Empresas', icono: 'edificio', permisos: [P.EMPRESAS_GESTIONAR], grupo: 'Plataforma' },

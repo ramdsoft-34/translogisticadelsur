@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, input, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -12,15 +12,16 @@ import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
 import { Confirmar } from '../shared/confirmar';
 import { filtrar } from '../shared/filtro';
 
-type Pestana = 'diario' | 'facturas' | 'pagos' | 'informes' | 'plan';
+type Pestana = 'diario' | 'facturas' | 'pagos' | 'informes' | 'plan' | 'cierre';
 const INFORMES: [string, string][] = [['balance', 'Balance general'], ['resultados', 'Estado de resultados'], ['cxc', 'Cuentas por cobrar'],
   ['cxp', 'Cuentas por pagar'], ['retenciones', 'Retenciones'], ['diario', 'Libro diario']];
 
 // Contabilidad simplificada (apoyo administrativo; un contador debe revisarla).
 // Los asientos de liquidaciones, préstamos y abonos se hacen solos; aquí se facturan, cobran y pagan y se registran gastos.
+import { CierreMes } from './gestion-varios';
 @Component({
   selector: 'app-contabilidad',
-  imports: [FormsModule, Icono, Modal, Moneda, Confirmar, ...FORMATOS],
+  imports: [FormsModule, Icono, Modal, Moneda, Confirmar, CierreMes, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Contabilidad</h1>
       <p class="sutil">Partida doble simplificada: facturas a clientes, cobros, pagos a conductores, gastos e informes. Información de apoyo; debe revisarla un contador.</p></div>
@@ -107,6 +108,7 @@ const INFORMES: [string, string][] = [['balance', 'Balance general'], ['resultad
           }</tbody></table></div>
         @if (puedeGestionar) { <button style="margin-top:10px" (click)="abrir('cuenta')"><app-icono nombre="mas" />Agregar cuenta</button> }
       }
+      @case ('cierre') { <app-cierre-mes [embebido]="true" /> }
     }
 
     <app-modal [titulo]="tituloForm()" [abierto]="!!form()" (cerrar)="form.set(null)">
@@ -170,7 +172,7 @@ export class Contabilidad {
   private auth = inject(Auth);
   private avisos = inject(Avisos);
   readonly puedeGestionar = this.auth.tiene(P.LIQUIDACION_GESTIONAR);
-  readonly pestanas: [Pestana, string][] = [['diario', 'Libro diario'], ['facturas', 'Facturas y cobros'], ['pagos', 'Pagos a conductores'], ['informes', 'Informes'], ['plan', 'Plan de cuentas']];
+  readonly pestanas: [Pestana, string][] = [['diario', 'Libro diario'], ['facturas', 'Facturas y cobros'], ['pagos', 'Cuentas por pagar'], ['informes', 'Informes'], ['plan', 'Plan de cuentas'], ['cierre', 'Cierre de mes']];
   readonly informes = INFORMES;
   readonly pestana = signal<Pestana>('diario');
   readonly trabajando = signal(false);
@@ -192,8 +194,11 @@ export class Contabilidad {
   // Cambios de otros usuarios: la pantalla se actualiza sola
   private enVivo = inject(EnVivo).al(['gestion', 'liquidaciones'], () => this.cargar());
 
+  // Pestaña inicial desde la ruta (p. ej. /cierre-mes abre «Cierre de mes»)
+  readonly tab = input<Pestana | ''>('');
+  ngOnInit() { if (this.tab()) this.pestana.set(this.tab() as Pestana); this.cargar(); }
+
   constructor() {
-    this.cargar();
     this.api.get<any[]>('/gestion/contabilidad/cuentas').then(c => this.cuentas.set(c)).catch(() => {});
     this.api.get<any[]>('/maestros/clientes').then(c => this.clientes.set(c)).catch(() => {});
   }

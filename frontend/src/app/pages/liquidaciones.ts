@@ -1,6 +1,7 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
 import { Avisos } from '../core/avisos.service';
@@ -12,10 +13,12 @@ import { filtrar } from '../shared/filtro';
 
 @Component({
   selector: 'app-liquidaciones',
-  imports: [FormsModule, Icono, Confirmar, ...FORMATOS],
+  imports: [FormsModule, RouterLink, Icono, Confirmar, ...FORMATOS],
   template: `
-    <div class="pagina-cab"><div><h1>Liquidación de fletes</h1>
-      <p class="sutil">Relación de viajes por cliente y periodo: lo que se cobra, lo que se paga al conductor y la utilidad. Un viaje liquidado no se vuelve a cobrar.</p></div></div>
+    <div class="pagina-cab"><div><h1>Facturación a clientes</h1>
+      <p class="sutil">Relación de viajes por cliente y periodo: lo que se cobra, lo que se paga al conductor y la utilidad. Un viaje liquidado no se vuelve a cobrar.
+        Paso siguiente: la factura y su cobro, en Contabilidad.</p></div>
+      <div class="acciones"><a class="boton" routerLink="/contabilidad" [queryParams]="{ tab: 'facturas' }"><app-icono nombre="documento" [tam]="16" />Facturas y cobros</a></div></div>
 
     <div class="tarjeta">
       <div class="filtros" style="margin:0">

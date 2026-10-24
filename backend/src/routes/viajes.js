@@ -131,7 +131,35 @@ r.get('/resumen', permitir(P.VIAJES_VER), async (req, res) => {
       { $group: { _id: null, viajes: { $sum: 1 }, tarifa: { $sum: '$tarifa' }, flete: { $sum: '$flete' }, anticipo: { $sum: '$anticipo' } } }]),
   ]);
   const estados = Object.fromEntries(porEstado.map(x => [x._id, x.n]));
-  res.json({ hoy: hoyN, estados, mes: mes[0] || { viajes: 0, tarifa: 0, flete: 0, anticipo: 0 } });
+  // Tablero de inicio: tendencia de 14 días, mes anterior al mismo día, clientes, rechazos, en ruta y últimos viajes
+  const desde14 = new Date(hoy.getTime() - 13 * 86400000);
+  const inicioAnt = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - 1, 1));
+  const mismoDiaAnt = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - 1, Math.min(hoy.getUTCDate(), 28), 23, 59));
+  const vivos = { ...base, estado: { $ne: 'anulado' } };
+  const [serie, mesAnt, clientes, rechazos, enRuta, ultimos] = await Promise.all([
+    Viaje.aggregate([{ $match: { ...vivos, fecha: { $gte: desde14 } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$fecha' } }, viajes: { $sum: 1 }, tarifa: { $sum: '$tarifa' } } }]),
+    Viaje.aggregate([{ $match: { ...vivos, fecha: { $gte: inicioAnt, $lte: mismoDiaAnt } } },
+      { $group: { _id: null, viajes: { $sum: 1 }, tarifa: { $sum: '$tarifa' } } }]),
+    Viaje.aggregate([{ $match: { ...vivos, fecha: { $gte: inicioMes } } },
+      { $group: { _id: '$cliente', viajes: { $sum: 1 }, tarifa: { $sum: '$tarifa' } } }, { $sort: { tarifa: -1 } }, { $limit: 5 },
+      { $lookup: { from: 'clientes', localField: '_id', foreignField: '_id', as: 'c' } }]),
+    Viaje.countDocuments(deEmpresa(req, { historico: { $ne: true }, requiereManifiesto: { $ne: false },
+      $or: [{ 'remesa.estado': 'rechazado' }, { 'manifiesto.estado': 'rechazado' }], estado: { $in: ['registrado', 'remesa'] } })),
+    Viaje.countDocuments(deEmpresa(req, { 'rastreo.activo': true })),
+    Viaje.find(deEmpresa(req, {})).sort({ createdAt: -1 }).limit(6)
+      .select('numero fecha placa destino estado conductorNombre tarifa cliente requiereManifiesto').populate(pob(req.empresaId, 'cliente', 'nombre')).lean(),
+  ]);
+  const porDia = new Map(serie.map(x => [x._id, x]));
+  const dias = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date(desde14.getTime() + i * 86400000).toISOString().slice(0, 10);
+    return { dia: d, viajes: porDia.get(d)?.viajes || 0, tarifa: porDia.get(d)?.tarifa || 0 };
+  });
+  res.json({ hoy: hoyN, estados, mes: mes[0] || { viajes: 0, tarifa: 0, flete: 0, anticipo: 0 },
+    mesAnterior: mesAnt[0] || { viajes: 0, tarifa: 0 }, dias, rechazos, enRuta,
+    clientes: clientes.map(c => ({ nombre: c.c?.[0]?.nombre || 'Sin cliente', viajes: c.viajes, tarifa: c.tarifa })),
+    ultimos: ultimos.map(v => ({ _id: v._id, numero: v.numero, fecha: v.fecha, placa: v.placa, destino: v.destino, estado: v.estado,
+      conductor: v.conductorNombre, cliente: v.cliente?.nombre || '', tarifa: v.tarifa, sinManifiesto: v.requiereManifiesto === false })) });
 });
 
 // ── Reporte de vehículos por WhatsApp (plantillas editables) ──────────────

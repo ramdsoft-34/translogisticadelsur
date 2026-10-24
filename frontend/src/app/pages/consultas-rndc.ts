@@ -19,7 +19,7 @@ const OPCIONES: Record<string, { texto: string; filtros: [string, string][] ; ra
   selector: 'app-consultas-rndc',
   imports: [FormsModule],
   template: `
-    <div class="pagina-cab"><div><h1>Consultas RNDC</h1><p class="sutil">Consulta lo que el RNDC tiene registrado para su empresa (web service, tipos 2 y 3).</p></div></div>
+    <div class="pagina-cab"><div><h1>Consultas al RNDC</h1><p class="sutil">Consulte lo que el RNDC tiene registrado para su empresa: terceros, vehículos, remesas, manifiestos y cumplidos.</p></div></div>
     @if (ambiente() === 'SIMULADO') {
       <div class="mensaje alerta" style="margin-bottom:14px">Ambiente: <strong>simulador local</strong>. Estas consultas NO van al Ministerio, por eso no aparecen
         sus manifiestos ni vehículos reales. El administrador cambia el ambiente en Configuración → Conexión RNDC (y debe pulsar «Guardar configuración»).</div>

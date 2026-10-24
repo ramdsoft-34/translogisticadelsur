@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal, viewChild } from '@angular/core';
+import { Component, computed, inject, input, signal, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -16,7 +16,7 @@ import { filtrar } from '../shared/filtro';
   selector: 'app-cierre-mes',
   imports: [FormsModule, Icono, Confirmar, ...FORMATOS],
   template: `
-    <div class="pagina-cab"><div><h1>Cierre de mes</h1>
+    <div class="pagina-cab" [class.embebida]="embebido()"><div>@if (!embebido()) { <h1>Cierre de mes</h1> }
       <p class="sutil">Al cerrar un mes ya no se pueden registrar, modificar ni anular viajes, liquidaciones, préstamos ni asientos con fecha de ese mes.
         Los datos se conservan. Solo el administrador cierra y reabre meses.</p></div></div>
     <div class="tarjeta">
@@ -52,6 +52,8 @@ import { filtrar } from '../shared/filtro';
     .resumen-mes span { font-size: 12.5px; color: var(--gris-5); } .resumen-mes strong { font-size: 20px; }`],
 })
 export class CierreMes {
+  // Dentro de Contabilidad (pestaña) no repite el título de página
+  readonly embebido = input(false);
   private api = inject(Api);
   private auth = inject(Auth);
   private avisos = inject(Avisos);

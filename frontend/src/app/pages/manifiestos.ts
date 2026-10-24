@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, input, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
@@ -37,8 +37,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
   imports: [FormsModule, Modal, Icono, Moneda, CargarMas, ExpedirRndc, SelectorMunicipio, BuscarTercero, Confirmar, ...FORMATOS],
   template: `
     <div class="pagina-cab">
-      <div><h1>Manifiestos RNDC</h1><p class="sutil">Aquí se expiden las remesas y los manifiestos: revise los datos, envíelos al RNDC y, si hay un rechazo, corríjalos y reenvíe.
-        Los viajes marcados como «no requiere manifiesto» no aparecen.</p></div>
+      <div><h1>{{ titulo() }}</h1><p class="sutil">{{ descripcion() }}</p></div>
       <div class="acciones">
         @if (pestana() === 'pendientes' && seleccion().size) {
           <button (click)="enviarLote()" [disabled]="trabajando()"><app-icono nombre="enviar" />Enviar {{ seleccion().size }} seleccionado(s)</button>
@@ -52,7 +51,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
               <app-icono nombre="correo" />Aprobar correos ({{ seleccion().size }})</button>
           }
         }
-        @if (puedeCrear) { <button class="primario" (click)="nuevoManifiesto()"><app-icono nombre="mas" />Nuevo manifiesto</button> }
+        @if (puedeCrear && !vista()) { <button class="primario" (click)="nuevoManifiesto()"><app-icono nombre="mas" />Nuevo manifiesto</button> }
       </div>
     </div>
 
@@ -63,15 +62,14 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       </div>
     }
 
+    @if (!vista()) {
     <div class="pestanas">
       <button [class.activa]="pestana() === 'pendientes'" (click)="ir('pendientes')">Por enviar</button>
       <button [class.activa]="pestana() === 'manifestados'" (click)="ir('manifestados')">Manifestados</button>
       <button [class.activa]="pestana() === 'cumplidos'" (click)="ir('cumplidos')">Cumplidos</button>
       <button [class.activa]="pestana() === 'anulados'" (click)="ir('anulados')" title="Viajes con la remesa o el manifiesto anulados en el RNDC">Anulados</button>
-      <button [class.activa]="pestana() === 'soporte'" (click)="ir('soporte')" title="Viajes sin manifiesto del RNDC: llevan soporte interno MC/RC">Soporte interno</button>
-      <button [class.activa]="pestana() === 'correos'" (click)="ir('correos')">Correos</button>
-      <button [class.activa]="pestana() === 'historial'" (click)="ir('historial')">Historial RNDC</button>
     </div>
+    }
     <section class="barra" aria-label="Filtros">
       @if (pestana() !== 'correos' && pestana() !== 'historial') {
         <div class="campo"><label for="m-desde">Desde</label><input id="m-desde" type="date" [(ngModel)]="filtro.desde" (change)="cargar()" /></div>
@@ -457,8 +455,23 @@ export class Manifiestos {
   // Cambios de otros usuarios: la pantalla se actualiza sola
   private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'correo'], () => this.cargar());
 
-  constructor() {
+  // Vista fija desde el menú (Soporte interno, Envíos al RNDC, Correos); vacía = Manifiestos con sus pestañas
+  readonly vista = input<'' | 'soporte' | 'historial' | 'correos'>('');
+  private static readonly VISTAS: Record<string, [string, string]> = {
+    '': ['Manifiestos', 'Expida las remesas y los manifiestos, cumpla y anule. Si el RNDC rechaza algo, corríjalo y reenvíe. Los viajes sin manifiesto están en «Soporte interno».'],
+    soporte: ['Soporte interno', 'Viajes que no van al RNDC. Cada uno lleva su soporte interno (MC/RC) con un código QR que cualquiera puede escanear para comprobar que es válido.'],
+    historial: ['Envíos al RNDC', 'Todo lo que la plataforma ha enviado al RNDC y lo que respondió: útil para revisar rechazos y radicados.'],
+    correos: ['Correos de manifiestos', 'Envío de manifiestos y cartas de salida a los clientes: por aprobar, enviados y con error.'],
+  };
+  readonly titulo = computed(() => Manifiestos.VISTAS[this.vista() || ''][0]);
+  readonly descripcion = computed(() => Manifiestos.VISTAS[this.vista() || ''][1]);
+
+  ngOnInit() {
+    if (this.vista()) this.pestana.set(this.vista() as Pestana);
     this.cargar();
+  }
+
+  constructor() {
     this.api.get<any[]>('/maestros/clientes').then(c => this.clientesFiltro.set(c)).catch(() => {});
     this.api.get('/rndc/catalogos').then(c => this.catalogos.set(c)).catch(() => {});
     this.api.get<any>('/rndc/config').then(c => this.ambiente.set(c.ambiente)).catch(() => {});

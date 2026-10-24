@@ -25,7 +25,7 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
   imports: [FormsModule, RouterLink, Icono, Modal, Confirmar, BuscarTercero, VisorPdf, ExportarViajes, ...FORMATOS],
   template: `
     <div class="pagina-cab">
-      <div><h1>Relaciones</h1>
+      <div><h1>Programación por placa</h1>
         <p class="sutil">Revise los viajes por empresa y placa, regístrelos en bloque y saque la relación, el pago y la utilidad.</p></div>
       <div class="acciones">
         @if (puedeRegistrar) { <button class="primario" (click)="abrirMasivo()"><app-icono nombre="mas" [tam]="16" />Registro masivo</button> }
