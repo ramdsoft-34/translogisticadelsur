@@ -739,6 +739,10 @@ export class ExpedirRndc {
     this.trabajando.set(true); this.detalles.set([]);
     try {
       this.previa.set(await this.api.put<any>(`/rndc/viajes/${id}/datos`, this.cuerpo()));
+      // Placa, remolque, conductor o titular corregidos en el formulario del RNDC pasan al viaje: se recargan aquí
+      const v = await this.api.get<any>(`/viajes/${id}`);
+      this.viaje.set(v);
+      this.form.update(f => ({ ...f, placa: v.placa, remolque: v.remolque || '', conductor: v.conductor?._id || '', titular: v.titular?._id || '', titularInicial: v.titular?._id || '' }));
       if (!silencioso) { this.avisos.ok('Datos del viaje guardados'); this.actualizado.emit(); }
       return true;
     } catch (e) {

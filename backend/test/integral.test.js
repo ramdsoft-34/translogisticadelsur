@@ -755,7 +755,9 @@ test('RNDC: la numeración sale del RNDC y salta los números ya radicados', asy
 });
 
 test('RNDC: verificación previa contra el RNDC y consecutivos', async () => {
-  const v = await s.reportero.post('/api/viajes', { fecha: '2026-11-08', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const m = con(await login('manif@a.test'));   // sesión nueva: las anteriores pueden haberse cerrado en otras pruebas
+  { const u = await M.Usuario.findOne({ email: 'manif@a.test' }).lean(); console.log('DEPURAR', u.activo, u.tokenVersion, u.empresa); }
+  const v = await m.post('/api/viajes', { fecha: '2026-11-08', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
   const r1 = await s.manif.post(`/api/rndc/viajes/${v.body._id}/verificar`, { clave: CLAVE_RNDC, forzar: true });
   assert.equal(r1.status, 200, JSON.stringify(r1.body));
   const roles = r1.body.resultados.map(x => x.rol);
@@ -1248,3 +1250,4 @@ test('Logo de la empresa: solo el administrador lo cambia, la vista previa no gu
   assert.equal((await s.adminA.del('/api/gestion/empresa/logo')).status, 200);
   assert.equal((await s.adminA.get('/api/gestion/empresa/logo')).body.logo, '');
 });
+

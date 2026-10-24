@@ -188,7 +188,22 @@ r.put('/viajes/:id/datos', operar, async (req, res) => {
       if (v.remesa?.estado === 'aceptado' && JSON.stringify(nuevo) !== JSON.stringify(v.ajustesRndc?.remesa || {})) throw new ErrorHttp(409, 'La remesa ya fue aceptada: sus datos no se pueden cambiar');
       d['ajustesRndc.remesa'] = nuevo;
     }
-    if (d.ajustes.manifiesto) d['ajustesRndc.manifiesto'] = limpio(d.ajustes.manifiesto);
+    if (d.ajustes.manifiesto) {
+      const man = limpio(d.ajustes.manifiesto);
+      // Placa, remolque, conductor y titular corregidos en el formulario pasan al viaje mismo:
+      // así el viaje, la lista, la FOPAT y el PDF quedan con el vehículo y las personas que van al RNDC.
+      if (man.NUMPLACA) { d.placa = String(man.NUMPLACA).toUpperCase().replace(/[\s-]/g, ''); delete man.NUMPLACA; }
+      if ('NUMPLACAREMOLQUE' in man) { d.remolque = String(man.NUMPLACAREMOLQUE).toUpperCase().replace(/[\s-]/g, ''); delete man.NUMPLACAREMOLQUE; }
+      for (const [campo, rol] of [['NUMIDCONDUCTOR', 'conductor'], ['NUMIDTITULARMANIFIESTO', 'titular']]) {
+        if (!man[campo]) continue;
+        const t = await Tercero.findOne(deEmpresa(req, { tipoId: { $ne: 'N' }, numId: String(man[campo]).trim() })).select('_id').lean();
+        if (!t) throw new ErrorHttp(400, `El documento ${man[campo]} (${rol}) no está registrado en Conductores y terceros: créelo o tráigalo del RNDC primero`);
+        d[rol] = String(t._id);
+        delete man[campo];
+        delete man[campo === 'NUMIDCONDUCTOR' ? 'CODIDCONDUCTOR' : 'CODIDTITULARMANIFIESTO'];
+      }
+      d['ajustesRndc.manifiesto'] = man;
+    }
     delete d.ajustes;
   }
   const antes = v.toObject();
