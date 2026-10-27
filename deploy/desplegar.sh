@@ -23,7 +23,7 @@ if echo "$cambios" | grep -q '^frontend/' || [ "${1:-}" = "--todo" ]; then
   npx ng build --output-path dist-nuevo/frontend > /tmp/ng-build.log 2>&1 || { tail -30 /tmp/ng-build.log; exit 1; }
   # Archivos de versiones anteriores (14 días) para las páginas que ya estaban abiertas
   find dist/frontend/browser -maxdepth 1 -type f \( -name 'chunk-*.js' -o -name 'main-*.js' -o -name 'polyfills-*.js' -o -name 'styles-*.css' \) -mtime -14 \
-    -exec cp -np {} dist-nuevo/frontend/browser/ \;
+    -exec cp -p --update=none {} dist-nuevo/frontend/browser/ \;
   rm -rf dist-viejo
   mv dist dist-viejo
   mv dist-nuevo dist
