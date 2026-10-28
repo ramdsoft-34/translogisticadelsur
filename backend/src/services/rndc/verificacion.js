@@ -11,7 +11,7 @@ import { cargarViaje, traerTercero, traerVehiculo, consultar, empresaConRndc } f
 
 export const DIAS_VIGENCIA = 7;
 const reciente = (rndc) => rndc?.verificadoEn && Date.now() - new Date(rndc.verificadoEn).getTime() < DIAS_VIGENCIA * 86400000;
-const errorClave = (m) => /usuario|contrase|clave|password/i.test(m || '');
+const errorClave = (m) => /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(m || '');
 const fechaCorta = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
 
 // Diferencias que importan para el envío

@@ -24,7 +24,7 @@ const dormir = (ms) => new Promise(r => setTimeout(r, ms));
 const DIAS_RECIENTE = 7;
 const reciente = () => new Date(Date.now() - DIAS_RECIENTE * 86400000);
 const sinConsultaReciente = () => ({ $or: [{ 'rndc.consultadoEn': null }, { 'rndc.consultadoEn': { $lt: reciente() } }] });
-const esClave = (m) => /usuario|contrase|clave|password|autentic/i.test(m || '');
+const esClave = (m) => /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(m || '');
 
 // Vista pública del proceso (sin la clave).
 function vista(p) {

@@ -237,7 +237,7 @@ export class ActualizarVehiculos {
         ? await this.api.post<any>('/rndc/terceros/actualizar', { clave: c, tipoId: this.tipoId, numId: this.numId.replace(/\D/g, '') || this.numId.trim() })
         : await this.api.post<any>('/rndc/vehiculos/actualizar', { clave: c, placa: this.placa.trim().toUpperCase() });
       this.resultadoUno.set(r);
-      if (r.estado === 'error' && /usuario|contrase|clave/i.test(r.mensaje || '')) this.clave.olvidar();
+      if (r.estado === 'error' && /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(r.mensaje || '')) this.clave.olvidar();
       if (r.estado === 'actualizado' || (this.esTercero() && r.estado === 'sin_cambios')) this.actualizados.emit();
     } catch (e) { this.resultadoUno.set({ placa: this.placa.toUpperCase(), ref: `${this.tipoId} ${this.numId}`, estado: 'error', mensaje: await mensajeError(e) }); }
     finally { this.trabajando.set(false); }

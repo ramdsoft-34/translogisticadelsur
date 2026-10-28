@@ -534,7 +534,11 @@ export class ExpedirRndc {
     CODRESPONSABLEPAGOCARGUE: ExpedirRndc.RESPONSABLE, CODRESPONSABLEPAGODESCARGUE: ExpedirRndc.RESPONSABLE, CODRESPONSABLEPAGOSALDO: ExpedirRndc.RESPONSABLE,
     ACEPTACIONELECTRONICA: [['SI', 'Sí'], ['NO', 'No']],
   };
-  private opcionesDe(k: string): [string, string][] | null {
+  // Tipos de manifiesto del RNDC (Guía de Manifiesto v7): la remesa usa otra lista para el mismo campo
+  static readonly TIPOS_MANIFIESTO: [string, string][] = [['G', 'G · General'], ['W', 'W · Viaje vacío'], ['D', 'D · Varios viajes en el día'],
+    ['I', 'I · Viaje de ida y regreso'], ['M', 'M · Viaje multiparada'], ['U', 'U · Viaje municipal o urbano']];
+  private opcionesDe(k: string, doc: 'remesa' | 'manifiesto' = 'remesa'): [string, string][] | null {
+    if (k === 'CODOPERACIONTRANSPORTE' && doc === 'manifiesto') return ExpedirRndc.TIPOS_MANIFIESTO;
     if (/^COD(TIPO)?ID/.test(k)) return ExpedirRndc.TIPOS_DOC.map(([c, n]) => [c, `${c} · ${n}`] as [string, string]);
     return ExpedirRndc.OPCIONES[k] || null;
   }
@@ -561,7 +565,7 @@ export class ExpedirRndc {
     const campo = (k: string) => {
       usados.add(k);
       const original = base.get(k) ?? ''; const valor = k in aj ? aj[k] : original;
-      const opciones = this.opcionesDe(k);
+      const opciones = this.opcionesDe(k, doc);
       const ayuda = desc[k] && valor === original ? desc[k] : '';
       return { clave: k, etiqueta: ExpedirRndc.NOMBRES[k] || k, valor, original, cambiado: k in aj, opciones, conocido: !!opciones?.some(o => o[0] === valor), ayuda };
     };
@@ -639,6 +643,7 @@ export class ExpedirRndc {
   // Explicación sencilla de los rechazos más comunes del RNDC
   ayudaError(m: string) {
     const t = String(m || '');
+    if (/MAN153|municipios de Origen y Destino diferentes/i.test(t)) return 'Con el tipo «General» el origen y el destino deben ser municipios distintos. Si el viaje sale y llega al mismo municipio, cambie el «Tipo de manifiesto» (Características generales, abajo) a «Viaje municipal o urbano» si todo es dentro del municipio, o a «Viaje de ida y regreso» si va y vuelve; luego «Corregir y reenviar».';
     if (/MAN078|omisiones en (el registro|la matr)/i.test(t)) return 'La placa tiene omisiones en su matrícula inicial ante el Ministerio y el RNDC no deja expedirle manifiestos hasta que el propietario lo aclare con el grupo de Reposición Vehicular del Ministerio de Transporte. Mientras tanto: cambie el vehículo en «Vehículo y personas» y reenvíe (la remesa aceptada se conserva), o anule la remesa si el viaje no se hará.';
     if (/Paso\d+ Expidiendo/i.test(t)) return 'Es una falla interna del RNDC al procesar el documento, no un error de sus datos. Presione «Corregir y reenviar»: antes de enviar se verifica en el RNDC que no haya quedado registrado, así no se duplica.';
     if (/MAN130|titular no existe/i.test(t)) return 'El titular no está registrado en el RNDC. Use «Registrar de nuevo» junto al TITULAR (arriba) o cambie el titular en «Viaje» y presione «Corregir y reenviar».';
@@ -652,7 +657,7 @@ export class ExpedirRndc {
     if (/REM019|cargue y la direccion del punto de descargue/i.test(t)) return 'El destinatario no puede ser el mismo remitente en la misma sede. Elija en «Carga» la sede del cliente en el destino o quién recibe.';
     if (/REM180|REM200|destinatario/i.test(t)) return 'El destinatario o su sede no existen en el RNDC. Elija en «Carga» el destinatario y la sede correctos.';
     if (/placa|veh[ií]culo.*no existe/i.test(t)) return 'El vehículo no está registrado en el RNDC. Use «Registrar de nuevo» junto al VEHÍCULO y reenvíe.';
-    if (/usuario|contrase/i.test(t)) return 'La contraseña del RNDC no es correcta. Vuelva a enviar y escríbala de nuevo.';
+    if (/contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(t)) return 'La contraseña del RNDC no es correcta. Vuelva a enviar y escríbala de nuevo.';
     return '';
   }
   etiquetas(f: any[]) { return f.map(x => x.etiqueta).join(', '); }
@@ -685,7 +690,7 @@ export class ExpedirRndc {
     this.trabajando.set(true);
     try {
       const [r] = await this.api.post<any[]>('/rndc/importar/terceros', { clave: c, roles: ['destinatario'], documentos: [{ tipoId: cli.tipoId, numId: cli.numId }] });
-      if (!r?.ok) { this.avisos.mostrar(r?.mensaje || 'El RNDC no devolvió sedes', 'error'); if (/usuario|contrase|clave/i.test(r?.mensaje || '')) this.clave.olvidar(); return; }
+      if (!r?.ok) { this.avisos.mostrar(r?.mensaje || 'El RNDC no devolvió sedes', 'error'); if (/contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(r?.mensaje || '')) this.clave.olvidar(); return; }
       const antes = this.previa()?.sedesCliente?.length || 0;
       const destinoAntes = this.previa()?.destinoManifiesto;
       const p = await this.api.get<any>(`/rndc/viajes/${id}/vista-previa`);
@@ -772,7 +777,7 @@ export class ExpedirRndc {
       return !this.conCambios(r) && r.previa.destinoManifiesto === destinoAntes && !this.faltan().length;
     } catch (e: any) {
       this.resultado.set({ ok: false, texto: await mensajeError(e) });
-      if (/usuario|contrase|clave/i.test(e?.error?.error || '')) this.clave.olvidar();
+      if (/contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(e?.error?.error || '')) this.clave.olvidar();
       return false;
     } finally { this.trabajando.set(false); }
   }
@@ -793,7 +798,7 @@ export class ExpedirRndc {
         return;
       }
       const m = r.manifiesto?.mensaje || r.remesa?.mensaje || 'El RNDC rechazó el envío';
-      if (/usuario|contrase|clave|password/i.test(m)) this.clave.olvidar();
+      if (/contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(m)) this.clave.olvidar();
       this.resultado.set({ ok: false, texto: r.remesa?.estado === 'aceptado' ? `Remesa ${r.remesa.numero} aceptada; el manifiesto fue rechazado. Corrija y reenvíe.` : 'El envío fue rechazado. Corrija y reenvíe.' });
       this.actualizado.emit();
     } catch (e: any) {
@@ -812,7 +817,7 @@ export class ExpedirRndc {
     try {
       const r = await this.api.post<any>(`/rndc/${m.tipo === 'vehiculo' ? 'vehiculos' : 'terceros'}/${m.id}/enviar`, { clave: c, forzar: true, ...(m.comoTitular ? { titular: true } : {}) });
       if (r.ok) this.avisos.ok(`${m.referencia}: ${r.sinCambios ? 'ya estaba registrado' : 'registrado en el RNDC'}`);
-      else { this.avisos.mostrar(`El RNDC rechazó ${m.referencia}: ${r.mensaje}`, 'error'); if (/usuario|contrase|clave/i.test(r.mensaje || '')) this.clave.olvidar(); }
+      else { this.avisos.mostrar(`El RNDC rechazó ${m.referencia}: ${r.mensaje}`, 'error'); if (/contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(r.mensaje || '')) this.clave.olvidar(); }
     } catch (e) { this.avisos.error(e); } finally {
       this.trabajando.set(false);
       const id = this.viajeId();

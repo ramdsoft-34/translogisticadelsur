@@ -67,7 +67,7 @@ export class TraerRndc {
         ? await this.api.post<any[]>('/rndc/importar/vehiculos', { clave: c, placas: valores })
         : await this.api.post<any[]>('/rndc/importar/terceros', { clave: c, roles: this.rol ? [this.rol] : [], documentos: valores.map(numId => ({ tipoId: this.tipoId, numId })) });
       this.resultados.set(r);
-      if (r.some(x => !x.ok && /usuario|contrase|clave/i.test(x.mensaje || ''))) this.clave.olvidar();
+      if (r.some(x => !x.ok && /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(x.mensaje || ''))) this.clave.olvidar();
       const ok = r.filter(x => x.ok).length;
       this.avisos.mostrar(`${ok} de ${r.length} traído(s) del RNDC`, ok ? 'ok' : 'error');
       if (ok) this.traidos.emit();

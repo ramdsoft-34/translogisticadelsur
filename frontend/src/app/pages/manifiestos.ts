@@ -673,7 +673,7 @@ export class Manifiestos {
   }
 
   private revisarClave(mensajes: string[]) {
-    if (mensajes.some(m => /usuario|contrase|clave|password/i.test(m || ''))) this.clave.olvidar();
+    if (mensajes.some(m => /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(m || ''))) this.clave.olvidar();
   }
 
   async enviarLote() {
@@ -753,7 +753,7 @@ export class Manifiestos {
   private mostrarResultadoLote(titulo: string, r: any[]) {
     const fallos = r.filter(x => !x.ok);
     this.resultadoLote.set({ titulo, total: r.length, aceptados: r.length - fallos.length, fallos });
-    if (fallos.some(x => /usuario|contrase|clave/i.test(x.mensaje || ''))) this.clave.olvidar();
+    if (fallos.some(x => /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(x.mensaje || ''))) this.clave.olvidar();
     if (!fallos.length) this.avisos.ok(`${titulo}: ${r.length} aceptados`);
     this.seleccion.set(new Set());
   }

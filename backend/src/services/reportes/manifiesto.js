@@ -15,7 +15,7 @@ import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 import { Municipio, Tercero, Vehiculo } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
-import { contextoViaje, variablesRemesa, variablesManifiesto } from '../rndc/documentos.js';
+import { contextoViaje, variablesRemesa, variablesManifiesto, TIPOS_MANIFIESTO } from '../rndc/documentos.js';
 import { fmtMilManifiesto, numeroALetras, quitarTildes, txt, enColombia, soloDigitos, normalizar } from '../../utils/texto.js';
 import { pdfABuffer } from './comun.js';
 import { lugarRndc } from '../../utils/lugares.js';
@@ -131,7 +131,7 @@ export async function datosManifiesto(empresa, viajeId) {
     empDir: txt(empresa.direccion), empTel: txt(empresa.telefono), empCiudad: await lugarPorNombre(empresa.ciudad),
     numero: v.manifiesto.numero, radicado: v.manifiesto.radicado, seguro: v.manifiesto.qr, qrObs: v.manifiesto.qrObs,
     fechaRad: radicacionRndc(v.manifiesto.fecha), fechaExp: fechaRndc(M.FECHAEXPEDICIONMANIFIESTO || v.fecha),
-    tipo: M.CODOPERACIONTRANSPORTE === 'U' ? 'Viaje Municipal o Urbano' : 'General',
+    tipo: TIPOS_MANIFIESTO[M.CODOPERACIONTRANSPORTE] || 'General',
     origen, destino,
     titular: nombre(titular), titDoc: txt(M.NUMIDTITULARMANIFIESTO), titDir: txt(titular?.direccion), titTel: tel(titular?.telefono),
     titCiudad: await lugar(titular?.codMunicipio),

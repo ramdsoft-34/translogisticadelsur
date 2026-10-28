@@ -362,7 +362,7 @@ export class Terceros {
           : { tipo: 'info', texto: 'Registro nuevo en su empresa. No se consultó el RNDC.' });
         this.abierto.set(true);
       }
-      if (clave && r.mensaje && /usuario|contrase|clave/i.test(r.mensaje)) this.clave.olvidar();
+      if (clave && r.mensaje && /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(r.mensaje)) this.clave.olvidar();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 

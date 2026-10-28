@@ -109,7 +109,7 @@ type Pestana = 'rndc' | 'correo' | 'logo' | 'rastreo' | 'usuarios' | 'importar' 
                 <div class="campo"><label for="ri">Retención ICA (por mil)</label><input id="ri" type="number" step="0.1" name="ri" [(ngModel)]="c.reteIca" /></div>
                 <div class="campo"><label for="rc">Cargue pagado por</label><select id="rc" name="rc" [(ngModel)]="c.responsablePagoCargue">@for (r of responsables; track r[0]) { <option [value]="r[0]">{{ r[1] }}</option> }</select></div>
                 <div class="campo"><label for="rd">Descargue pagado por</label><select id="rd" name="rd" [(ngModel)]="c.responsablePagoDescargue">@for (r of responsables; track r[0]) { <option [value]="r[0]">{{ r[1] }}</option> }</select></div>
-                <div class="campo"><label for="op">Tipo de manifiesto por defecto</label><select id="op" name="op" [(ngModel)]="c.operacion"><option value="G">General</option><option value="U">Municipal o urbano</option></select></div>
+                <div class="campo"><label for="op">Tipo de manifiesto por defecto</label><select id="op" name="op" [(ngModel)]="c.operacion"><option value="G">General</option><option value="W">Viaje vacío</option><option value="D">Varios viajes en el día</option><option value="I">Viaje de ida y regreso</option><option value="M">Viaje multiparada</option><option value="U">Viaje municipal o urbano</option></select></div>
                 <div class="campo"><label for="nm">NIT empresa de monitoreo de flota</label><input id="nm" name="nm" [(ngModel)]="c.nitMonitoreoFlota" /></div>
                 <label class="casilla"><input type="checkbox" name="ae" [(ngModel)]="c.aceptacionElectronica" />Aceptación electrónica del titular y conductor</label>
                 <label class="casilla"><input type="checkbox" name="fo" [(ngModel)]="c.aplicarFopat" />Aplicar retención FOPAT (0,1 % si el PBV supera 10.500 kg)</label>
@@ -349,7 +349,7 @@ export class Configuracion {
       if (k.remesa.sugerido || k.manifiesto.sugerido) this.avisos.mostrar('La plataforma va por detrás del RNDC: ajuste el consecutivo para evitar DUPLICADOS', 'error');
       else this.avisos.ok('Los consecutivos siguen al último número radicado en el RNDC');
     } catch (e: any) {
-      if (/usuario|contrase|clave/i.test(e?.error?.error || '')) this.clave.olvidar();
+      if (/contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(e?.error?.error || '')) this.clave.olvidar();
       this.avisos.error(e);
     } finally { this.verificandoConsec.set(false); }
   }

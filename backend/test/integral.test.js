@@ -283,7 +283,8 @@ test('RNDC: despacho de remesa + manifiesto contra el simulador', async () => {
   assert.equal(r.body.remesa.estado, 'aceptado', JSON.stringify(r.body));
   assert.equal(r.body.remesa.numero, 'R500');
   assert.equal(r.body.manifiesto.estado, 'aceptado', JSON.stringify(r.body));
-  assert.equal(r.body.manifiesto.numero, 'M700');
+  // El manifiesto lleva el mismo número de su remesa (R500 → M500)
+  assert.equal(r.body.manifiesto.numero, 'M500');
   assert.equal(r.body.manifiesto.qr.length, 28);
   const v = (await s.manif.get(`/api/viajes/${s.viaje}`)).body;
   assert.equal(v.estado, 'manifestado');
@@ -318,7 +319,7 @@ test('Manifiesto PDF con QR', async () => {
 });
 
 test('RNDC: consulta de manifiesto en el simulador', async () => {
-  const r = await s.manif.post('/api/rndc/consultar', { clave: CLAVE_RNDC, que: 'manifiesto', filtros: { NUMMANIFIESTOCARGA: 'M700' } });
+  const r = await s.manif.post('/api/rndc/consultar', { clave: CLAVE_RNDC, que: 'manifiesto', filtros: { NUMMANIFIESTOCARGA: 'M500' } });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(r.body.documentos.length, 1);
   assert.equal(r.body.documentos[0].numplaca, 'ABC123');
@@ -692,8 +693,9 @@ test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazab
   assert.deepEqual(man.cc, ['copia@cliente.test']);
   assert.equal(man.attachments.length, 2);
   assert.match(man.subject, /^MANIFIESTOS DISTRIBUIDORA SUR - .+ \(2\)$/);
-  // Solo números de manifiesto y remesa y el agradecimiento: sin placa, conductor, destino ni fecha
-  assert.match(man.text, / {2}- Manifiesto M\d+ · Remesa R\d+\n/);
+  // Solo el número del manifiesto y el agradecimiento: sin remesa, placa, conductor, destino ni fecha
+  assert.match(man.text, / {2}- Manifiesto M\d+\n/);
+  assert.doesNotMatch(man.text, /Remesa/);
   assert.match(man.text, /Muchas gracias\./);
   assert.doesNotMatch(man.text, /Placa|Conductor|Destino|C\.C\./);
   assert.equal(man.attachments[0].contentType, 'application/pdf');

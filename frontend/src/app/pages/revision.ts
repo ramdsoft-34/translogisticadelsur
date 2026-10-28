@@ -140,7 +140,7 @@ export class Revision {
         this.progreso.set(`Consultando ${i + 1}–${Math.min(i + 30, terceros.length)} de ${total}…`);
         const r = await this.api.post<any[]>('/rndc/importar/terceros', { clave: c, documentos: terceros.slice(i, i + 30) });
         ok += r.filter(x => x.ok).length; fallos += r.filter(x => !x.ok).length;
-        if (r.some(x => !x.ok && /usuario|contrase|clave/i.test(x.mensaje || ''))) { this.claveRndc.olvidar(); throw new Error('El RNDC no aceptó el usuario o la contraseña'); }
+        if (r.some(x => !x.ok && /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(x.mensaje || ''))) { this.claveRndc.olvidar(); throw new Error('El RNDC no aceptó el usuario o la contraseña'); }
       }
       for (let i = 0; i < placas.length; i += 30) {
         this.progreso.set(`Consultando ${terceros.length + i + 1}–${terceros.length + Math.min(i + 30, placas.length)} de ${total}…`);

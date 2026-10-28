@@ -161,6 +161,12 @@ export function destinoIgualOrigen(ctx) {
 }
 export const PROBLEMA_DESTINO = 'Destinatario: es el mismo remitente en la misma sede (el RNDC lo rechaza con REM019). Elija quién recibe en destino o la sede del cliente en ese municipio';
 
+// Tipos de manifiesto del RNDC y su código en el XML (Guía de Manifiesto v7 del Ministerio de Transporte)
+export const TIPOS_MANIFIESTO = Object.freeze({
+  G: 'General', W: 'Viaje Vacío', D: 'Varios Viajes en el Día', I: 'Viaje de Ida y Regreso', M: 'Viaje Multiparada', U: 'Viaje Municipal o Urbano',
+});
+const OPERACIONES_REMESA = ['G', 'P', 'C', 'V'];
+
 // ── Remesa (proceso 3) ──────────────────────────────────────────────────────
 export function variablesRemesa(empresa, viaje, ctx, consecutivo) {
   const cfg = empresa.rndc || {};
@@ -168,7 +174,8 @@ export function variablesRemesa(empresa, viaje, ctx, consecutivo) {
   const v = [
     ['NUMNITEMPRESATRANSPORTE', ctx.NIT],
     ['CONSECUTIVOREMESA', consecutivo],
-    ['CODOPERACIONTRANSPORTE', ctx.OPERACION === 'U' ? 'G' : ctx.OPERACION],
+    // La remesa solo admite G, P, C o V: los demás tipos de manifiesto (municipal, ida y regreso…) llevan remesa general
+    ['CODOPERACIONTRANSPORTE', OPERACIONES_REMESA.includes(ctx.OPERACION) ? ctx.OPERACION : 'G'],
     ['CODNATURALEZACARGA', cfg.naturalezaCarga || '1'],
     ['CANTIDADCARGADA', ctx.PESO],
     ['UNIDADMEDIDACAPACIDAD', cfg.unidadMedida || '1'],

@@ -308,7 +308,7 @@ function validarMotivos(d) {
   if (!validos[d.motivo]) throw new ErrorHttp(400, 'Motivo de anulación no válido');
   if (d.documento === 'ambos' && !cat.MOTIVO_ANULACION_REMESA[d.motivoRemesa]) throw new ErrorHttp(400, 'Elija el motivo de anulación de la remesa');
 }
-const claveRechazada = (m) => /usuario|contrase|clave|password/i.test(m || '');
+const claveRechazada = (m) => /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(m || '');
 const listaLote = z.array(z.string().refine(x => mongoose.isValidObjectId(x), 'viaje inválido')).min(1).max(50);
 
 // ── Cumplido y anulación de varios viajes (uno tras otro, al ritmo del limitador del RNDC) ──
@@ -499,7 +499,7 @@ r.post('/importar/terceros', permitir(P.MAESTROS_EDITAR), permitir(P.RNDC_CONSUL
   for (const x of d.documentos) {
     const r1 = await op.traerTercero(req.empresaId, d.clave, req.usuario._id, { ...x, roles: d.roles });
     resultados.push({ ...x, ...r1 });
-    if (!r1.ok && /usuario|contrase|clave/i.test(r1.mensaje || '')) break;
+    if (!r1.ok && /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(r1.mensaje || '')) break;
   }
   await auditar(req, 'importar_rndc', { entidad: 'Tercero', detalle: { solicitados: d.documentos.length, traidos: resultados.filter(x => x.ok).length } });
   res.json(resultados);
@@ -511,7 +511,7 @@ r.post('/importar/vehiculos', permitir(P.MAESTROS_EDITAR), permitir(P.RNDC_CONSU
   for (const placa of d.placas) {
     const r1 = await op.traerVehiculo(req.empresaId, d.clave, req.usuario._id, { placa });
     resultados.push({ placa, ...r1 });
-    if (!r1.ok && /usuario|contrase|clave/i.test(r1.mensaje || '')) break;
+    if (!r1.ok && /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(r1.mensaje || '')) break;
   }
   await auditar(req, 'importar_rndc', { entidad: 'Vehiculo', detalle: { solicitados: d.placas.length, traidos: resultados.filter(x => x.ok).length } });
   res.json(resultados);

@@ -82,7 +82,7 @@ export class ConsultasRndc {
     try {
       const r = await this.api.post<any>('/rndc/consultar', { clave: c, que: this.que, filtros: this.filtros,
         ...(this.desde && this.hasta ? { desde: this.desde, hasta: this.hasta } : {}) });
-      if (!r.ok && /usuario|contrase|clave/i.test(r.mensaje)) this.clave.olvidar();
+      if (!r.ok && /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(r.mensaje)) this.clave.olvidar();
       this.resultado.set(r);
     } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
   }

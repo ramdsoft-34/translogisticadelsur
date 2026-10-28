@@ -104,11 +104,11 @@ async function mensaje(empresa, smtp, envio) {
     return { ...base, subject: c.asunto, text: c.texto,
       html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(c.texto)}</div>` };
   }
-  // Solo los números de manifiesto y remesa, y el agradecimiento
+  // Solo el número del manifiesto (sin la remesa) y el agradecimiento
   const texto = [`${datos.saludo},`, '',
-    `Adjuntamos el manifiesto de carga N.° ${datos.manifiesto} y la remesa N.° ${datos.remesa}.`, '',
+    `Adjuntamos el manifiesto de carga N.° ${datos.manifiesto}.`, '',
     'Muchas gracias.', '', 'Cordialmente,', datos.empresa_mayus].join('\n');
-  return { ...base, subject: `Manifiesto ${datos.manifiesto} - Remesa ${datos.remesa} - ${datos.cliente}`, text: texto,
+  return { ...base, subject: `Manifiesto ${datos.manifiesto} - ${datos.cliente}`, text: texto,
     html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(texto)}</div>`,
     attachments: [{ filename: nombreArchivo(d), content: await manifiestoPdf(d), contentType: 'application/pdf' }] };
 }
@@ -197,7 +197,7 @@ async function mensajeGrupo(empresa, smtp, envios) {
   const lineas = []; const adjuntos = [];
   for (const e of envios) {
     const d = await datosManifiesto(empresa, e.viaje);
-    lineas.push(`  - Manifiesto ${d.numero} · Remesa ${d.remesa}`);
+    lineas.push(`  - Manifiesto ${d.numero}`);
     adjuntos.push({ filename: nombreArchivo(d), content: await manifiestoPdf(d), contentType: 'application/pdf' });
   }
   const cliente = await Cliente.findOne({ empresa: empresa._id, _id: envios[0].cliente }).select('nombre').lean();
