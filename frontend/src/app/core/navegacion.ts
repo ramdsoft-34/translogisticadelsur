@@ -1,7 +1,7 @@
 import { P } from './modelos';
 
-// Mapa de la aplicación: módulos (barra superior) y sus páginas (subnavegación).
-// Es la única fuente de la navegación: la usan el encabezado, el menú del celular y el buscador (Ctrl + K).
+// Mapa de la aplicación: módulos y sus páginas (menú lateral).
+// Es la única fuente de la navegación: la usan el menú lateral y el buscador (Ctrl + K).
 export interface Pagina { ruta: string; texto: string; icono: string; permisos: string[]; descripcion: string; claves?: string }
 export interface Modulo { id: string; nombre: string; icono: string; paginas: Pagina[] }
 
