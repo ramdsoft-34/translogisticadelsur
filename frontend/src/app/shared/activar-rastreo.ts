@@ -86,7 +86,7 @@ const PASTO: L.LatLngTuple = [1.2136, -77.2811];
     </app-modal>`,
   styles: [`
     .bloque { border: 0; padding: 0; margin: 0 0 14px; min-width: 0; }
-    legend { font-weight: 650; font-size: 13px; color: var(--gris-6); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .04em; }
+    legend { font-weight: 650; font-size: 13px; color: var(--gris-6); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .04em; background: none; padding: 0; margin-left: 0; border-radius: 0; }
     .tarjetas { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: stretch; }
     .tarjeta { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px; border-radius: 14px; text-align: left;
       border: 1.5px solid var(--gris-2); background: var(--gris-0); height: auto; white-space: normal; margin: 0; justify-content: flex-start; }

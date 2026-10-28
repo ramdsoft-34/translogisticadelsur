@@ -73,7 +73,7 @@ export function rangoPeriodo(p: Periodo, hoy = new Date()): { desde: string; has
     <app-visor-pdf />`,
   styles: [`
     .bloque { border: 0; padding: 0; margin: 0 0 18px; min-width: 0; }
-    legend { font-weight: 650; font-size: 13px; color: var(--gris-6); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .04em; }
+    legend { font-weight: 650; font-size: 13px; color: var(--gris-6); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .04em; background: none; padding: 0; margin-left: 0; border-radius: 0; }
     .tarjetas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
     .tarjeta { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px; border-radius: 14px; text-align: left;
       border: 1.5px solid var(--gris-2); background: var(--gris-0); height: auto; white-space: normal; cursor: pointer; transition: border-color .15s, background .15s; }

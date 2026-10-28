@@ -226,8 +226,8 @@ input[type=color] { padding: 3px; }
 textarea { resize: vertical; min-height: 76px; }
 .casilla { display: flex; align-items: center; gap: 9px; font-size: 14px; cursor: pointer; }
 .casilla input { width: 18px; }
-fieldset { border: 1px solid var(--gris-2); border-radius: var(--radio-l); padding: 14px 18px 18px; margin: 0; background: var(--gris-0); }
-legend { font-weight: 700; padding: 0 6px; font-size: 13px; color: var(--gris-8); letter-spacing: -.005em; }
+fieldset { border: 1px solid var(--gris-2); border-radius: var(--radio-l); padding: 16px 20px 20px; margin: 0; background: var(--gris-0); box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
+legend { font-weight: 750; padding: 3px 10px; margin-left: -4px; border-radius: 999px; background: var(--gris-8); color: var(--gris-0); font-size: 11.5px; letter-spacing: .05em; text-transform: uppercase; }
 
 /* Campo de dinero: "$ 1.500.000" con sufijo COP */
 .moneda { position: relative; display: flex; align-items: center; }

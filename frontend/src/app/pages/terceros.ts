@@ -187,7 +187,7 @@ const vacio = () => ({
       border-radius: 6px; background: var(--gris-15); color: var(--gris-7); font-variant-numeric: tabular-nums; }
     .que-es { margin: -6px 0 16px; color: var(--gris-5); }
     .que { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
-    .que legend { font-weight: 650; font-size: 13px; color: var(--gris-6); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .04em; }
+    .que legend { font-weight: 650; font-size: 13px; color: var(--gris-6); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .04em; background: none; padding: 0; margin-left: 0; border-radius: 0; }
     .opciones-nuevo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
     .opcion { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 10px 12px; height: auto; white-space: normal; text-align: left;
       border: 1.5px solid var(--gris-2); border-radius: 12px; background: var(--gris-0); }

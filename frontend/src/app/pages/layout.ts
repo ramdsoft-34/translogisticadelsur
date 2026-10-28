@@ -10,6 +10,8 @@ import { Icono } from '../shared/icono';
 import { TemaService } from '../core/tema.service';
 import { MODULOS, OTRAS, Pagina } from '../core/navegacion';
 
+const LLAVE_FIJO = 'tls_menu_fijo';
+const leerFijo = () => { try { return localStorage.getItem(LLAVE_FIJO) !== '0'; } catch { return true; } };
 const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // Contenedor de la aplicación:
@@ -19,6 +21,7 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
 @Component({
   selector: 'app-layout',
   imports: [RouterOutlet, RouterLink, RouterLinkActive, Icono],
+  host: { '[class.suelto]': '!fijo()' },
   template: `
     <a class="saltar" href="#contenido">Saltar al contenido</a>
 
@@ -31,9 +34,14 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
     @if (menuMovil()) { <div class="velo velo-lateral" (click)="menuMovil.set(false)"></div> }
 
     <!-- Menú lateral: módulos y sus páginas -->
-    <aside class="lateral" [class.abierto]="menuMovil()" aria-label="Menú principal">
+    <aside class="lateral" [class.abierto]="menuMovil()" [class.recogido]="!fijo() && !encima() && !menuUsuario()" aria-label="Menú principal"
+      (mouseenter)="encima.set(true)" (mouseleave)="encima.set(false)" (focusin)="encima.set(true)" (focusout)="salioFoco($event)">
       <div class="lat-cab">
-        <a routerLink="/inicio" class="marca" aria-label="Ir al inicio"><img class="nombre" src="nombre.webp" alt="Translogística del Sur" width="400" height="60"></a>
+        <a routerLink="/inicio" class="marca" aria-label="Ir al inicio">
+          <img class="logo" src="icono.png" alt="" width="160" height="66"><img class="nombre" src="nombre.webp" alt="Translogística del Sur" width="400" height="60"></a>
+        <button type="button" class="ico-btn fijar solo-escritorio" (click)="alternarFijo()" [attr.aria-pressed]="fijo()"
+          [attr.aria-label]="fijo() ? 'Soltar el menú (se recoge a los íconos)' : 'Fijar el menú abierto'" [title]="fijo() ? 'Soltar el menú' : 'Fijar el menú'">
+          <app-icono [nombre]="fijo() ? 'desfijar' : 'fijar'" [tam]="17" /></button>
         <button type="button" class="ico-btn solo-movil" (click)="menuMovil.set(false)" aria-label="Cerrar menú"><app-icono nombre="x" [tam]="20" /></button>
       </div>
       <button type="button" class="buscador" (click)="abrirBuscador()" aria-label="Buscar una página (Ctrl + K)">
@@ -122,7 +130,8 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
     .lat-nav h3 { margin: 0 0 4px; padding: 0 10px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #6f7a8a; }
     .lat-nav section.actual h3 { color: var(--primario); }
     .lat-nav a { display: flex; align-items: center; gap: 11px; padding: 8px 10px; margin: 1px 0; border-radius: 9px; color: var(--tinta-tenue); text-decoration: none;
-      font-weight: 600; font-size: 14px; transition: background var(--transicion), color var(--transicion); }
+      font-weight: 600; font-size: 14px; white-space: nowrap; transition: background var(--transicion), color var(--transicion); }
+    .lat-nav a span { overflow: hidden; text-overflow: ellipsis; }
     .lat-nav a:hover { background: var(--tinta-2); color: #fff; }
     .lat-nav a.activa { background: var(--primario); color: var(--sobre-primario); }
     .lat-nav a:focus-visible { box-shadow: inset 0 0 0 2px var(--primario); }
@@ -191,8 +200,29 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
     .paleta-pie { display: flex; gap: 16px; padding: 9px 16px; border-top: 1px solid var(--gris-15); font-size: 12px; color: var(--gris-5); background: var(--gris-1); }
     .paleta-pie kbd { margin-right: 3px; }
 
+    /* ── Menú suelto: se recoge a los íconos y se despliega encima al pasar el mouse ── */
+    :host { --modal-izq: var(--ancho-lateral); }
+    .marca .logo { display: none; width: 40px; height: auto; }
+    .fijar { width: 32px; height: 32px; color: var(--tinta-tenue); }
+    .fijar[aria-pressed="true"] { color: var(--primario); }
+    @media (min-width: 961px) {
+      :host(.suelto) { --ancho-lateral: 72px; }
+      :host(.suelto) .lateral { transition: width .2s ease, box-shadow .2s ease; overflow: hidden; }
+      :host(.suelto) .lateral:not(.recogido) { width: 252px; box-shadow: 18px 0 40px -20px rgba(0,0,0,.6); }
+      :host(.suelto) .recogido .marca .nombre, :host(.suelto) .recogido .fijar, :host(.suelto) .recogido .txt-buscar, :host(.suelto) .recogido .buscador kbd,
+      :host(.suelto) .recogido .lat-nav a span, :host(.suelto) .recogido .quien, :host(.suelto) .recogido .flecha, :host(.suelto) .recogido .ambiente span { display: none; }
+      :host(.suelto) .recogido .marca .logo { display: block; }
+      :host(.suelto) .recogido .lat-cab { padding: 18px 0 14px; justify-content: center; }
+      :host(.suelto) .recogido .buscador { width: 44px; padding: 0; justify-content: center; margin: 0 auto 10px; }
+      :host(.suelto) .recogido .lat-nav a { justify-content: center; padding: 9px 0; }
+      :host(.suelto) .recogido .lat-nav h3 { font-size: 0; height: 1px; margin: 4px 14px 8px; padding: 0; background: rgba(255,255,255,.1); }
+      :host(.suelto) .recogido .disparador { justify-content: center; padding: 6px 0; border-color: transparent; background: transparent; }
+      :host(.suelto) .recogido .ambiente { justify-content: center; padding: 0; }
+    }
+
     @media (max-width: 960px) {
-      :host { --alto-barra: 56px; }
+      :host { --alto-barra: 56px; --modal-izq: 0px; }
+      .solo-escritorio { display: none; }
       .barra-movil { position: sticky; top: 0; z-index: var(--z-cabecera); display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 10px;
         background: var(--tinta); color: var(--tinta-texto); }
       .barra-movil .marca { margin-right: auto; } .barra-movil .marca .nombre { width: 132px; }
@@ -211,6 +241,17 @@ export class Layout {
   readonly u = this.auth.usuario;
   readonly tema = inject(TemaService);
   readonly menuUsuario = signal(false);
+  // Menú lateral fijo (abierto) o suelto (solo íconos; se despliega al pasar el mouse). Se recuerda en este equipo.
+  readonly fijo = signal(leerFijo());
+  readonly encima = signal(false);
+  alternarFijo() {
+    this.fijo.set(!this.fijo());
+    this.encima.set(false);
+    try { localStorage.setItem(LLAVE_FIJO, this.fijo() ? '1' : '0'); } catch { /* sin almacenamiento */ }
+  }
+  salioFoco(e: FocusEvent) {
+    if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) this.encima.set(false);
+  }
   readonly menuMovil = signal(false);
   readonly buscador = signal(false);
   readonly consulta = signal('');
