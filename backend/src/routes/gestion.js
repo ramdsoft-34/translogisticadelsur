@@ -50,6 +50,7 @@ const PESOS = '#,##0';
 
 // ═════════════ Liquidación del conductor ═════════════
 const verLiq = permitir(P.LIQUIDACION_VER); const gestionar = permitir(P.LIQUIDACION_GESTIONAR);
+const verCont = permitir(P.CONTABILIDAD_VER); const gestCont = permitir(P.CONTABILIDAD_GESTIONAR);
 const rango = z.object({ desde: z.string(), hasta: z.string(), q: z.string().max(80).optional().default(''), placa: z.string().max(7).optional().default(''),
   incluirLiquidados: z.boolean().optional().default(false) });
 
@@ -180,21 +181,21 @@ r.get('/prestamos/:numero/pdf', verLiq, async (req, res) => {
 });
 
 // ═════════════ Contabilidad ═════════════
-r.get('/contabilidad/cuentas', verLiq, async (req, res) => {
+r.get('/contabilidad/cuentas', verCont, async (req, res) => {
   await cont.asegurarPuc(req.empresaId);
   res.json(await CuentaContable.find(deEmpresa(req)).sort({ codigo: 1 }).lean());
 });
-r.post('/contabilidad/cuentas', gestionar, async (req, res) => {
+r.post('/contabilidad/cuentas', gestCont, async (req, res) => {
   const d = z.object({ codigo: z.string().regex(/^\d{4,10}$/), nombre: z.string().trim().min(3).max(120),
     tipo: z.enum(['ACTIVO', 'PASIVO', 'PATRIMONIO', 'INGRESO', 'GASTO', 'COSTO']), naturaleza: z.enum(['D', 'C']) }).parse(req.body);
   if (await CuentaContable.exists(deEmpresa(req, { codigo: d.codigo }))) throw new ErrorHttp(409, 'Ya existe una cuenta con ese código');
   res.status(201).json(await CuentaContable.create({ ...d, empresa: req.empresaId }));
 });
-r.get('/contabilidad/asientos', verLiq, async (req, res) => {
+r.get('/contabilidad/asientos', verCont, async (req, res) => {
   const desde = fechaQ(req.query.desde, inicioMes()); const hasta = finDia(fechaQ(req.query.hasta, hoy()));
   res.json(await cont.libroDiario(req.empresaId, desde, hasta));
 });
-r.post('/contabilidad/asientos', gestionar, async (req, res) => {
+r.post('/contabilidad/asientos', gestCont, async (req, res) => {
   const d = z.object({ fecha: z.string(), debito: z.string(), credito: z.string(), valor: z.coerce.number().positive(), concepto: z.string().trim().min(3).max(200),
     centroCosto: z.string().max(40).optional().default('') }).parse(req.body);
   const a = await cont.postear(req.empresaId, { fecha: parseFecha(d.fecha), concepto: d.concepto, centroCosto: d.centroCosto, origen: 'MAN', usuario: req.usuario._id,
@@ -202,54 +203,79 @@ r.post('/contabilidad/asientos', gestionar, async (req, res) => {
   await auditar(req, 'asiento_manual', { entidad: 'Asiento', entidadId: a._id, detalle: { numero: a.numero } });
   res.status(201).json(a);
 });
-r.post('/contabilidad/asientos/:numero/anular', gestionar, async (req, res) => {
+r.post('/contabilidad/asientos/:numero/anular', gestCont, async (req, res) => {
   const a = await cont.anularAsiento(req.empresaId, req.params.numero);
   await auditar(req, 'anular_asiento', { entidad: 'Asiento', entidadId: a._id, detalle: { numero: a.numero } });
   res.json(a);
 });
-r.get('/contabilidad/facturas', verLiq, async (req, res) => res.json(await FacturaCont.find(deEmpresa(req)).populate(pob(req.empresaId, 'cliente', 'nombre nit')).sort({ createdAt: -1 }).limit(300).lean()));
-r.post('/contabilidad/facturas', gestionar, async (req, res) => {
-  const d = z.object({ cliente: id, desde: z.string(), hasta: z.string(), retefuentePct: z.coerce.number().min(0).max(20).optional(),
+r.get('/contabilidad/facturas', verCont, async (req, res) => res.json(await FacturaCont.find(deEmpresa(req)).populate(pob(req.empresaId, 'cliente', 'nombre nit')).sort({ createdAt: -1 }).limit(300).lean()));
+r.post('/contabilidad/facturas', gestCont, async (req, res) => {
+  const d = z.object({ cliente: id, desde: z.string().optional(), hasta: z.string().optional(), viajes: z.array(id).max(2000).optional(),
+    retefuentePct: z.coerce.number().min(0).max(20).optional(),
     icaPct: z.coerce.number().min(0).max(5).default(0), permitirCruce: z.boolean().optional().default(false) }).parse(req.body);
+  if (!d.viajes?.length && !(parseFecha(d.desde) && parseFecha(d.hasta))) throw new ErrorHttp(400, 'Indique el rango de fechas o escoja los viajes');
   if (d.retefuentePct === undefined) d.retefuentePct = (await reglasDe(req.empresaId)).retefuenteFacturaPct;
-  const f = await cont.facturar(req.empresaId, { ...d, desde: parseFecha(d.desde), hasta: finDia(parseFecha(d.hasta)), usuario: req.usuario._id });
+  const f = await cont.facturar(req.empresaId, { ...d, desde: parseFecha(d.desde), hasta: parseFecha(d.hasta) ? finDia(parseFecha(d.hasta)) : null, usuario: req.usuario._id });
   await auditar(req, 'factura_contable', { entidad: 'FacturaCont', entidadId: f._id, detalle: { numero: f.numero, neto: f.neto, cruces: f.cruces } });
   res.status(201).json(f);
 });
 // Aviso previo: facturas del mismo cliente que se cruzan con el periodo
-r.get('/contabilidad/facturas/cruces', verLiq, async (req, res) => {
+r.get('/contabilidad/facturas/cruces', verCont, async (req, res) => {
   const desde = parseFecha(req.query.desde); const hasta = parseFecha(req.query.hasta);
   if (!mongoose.isValidObjectId(req.query.cliente) || !desde || !hasta) return res.json([]);
   res.json(await cont.facturasCruzadas(req.empresaId, { cliente: req.query.cliente, desde, hasta: finDia(hasta) }));
 });
-r.get('/contabilidad/resumen', verLiq, async (req, res) => {
+r.get('/contabilidad/resumen', verCont, async (req, res) => {
   const desde = fechaQ(req.query.desde, inicioMes()); const hasta = finDia(fechaQ(req.query.hasta, hoy()));
   res.json({ desde, hasta, ...(await cont.resumenContable(req.empresaId, desde, hasta)) });
 });
-r.post('/contabilidad/facturas/:numero/anular', gestionar, async (req, res) => {
-  const f = await FacturaCont.findOne(deEmpresa(req, { numero: req.params.numero }));
-  if (!f) throw new ErrorHttp(404, 'Factura no encontrada');
-  if (f.cobrado > 0) throw new ErrorHttp(409, 'La factura ya tiene cobros: no se puede anular');
-  await cont.anularAsiento(req.empresaId, f.asiento);
-  f.estado = 'ANULADA'; await f.save();
+r.post('/contabilidad/facturas/:numero/anular', gestCont, async (req, res) => {
+  const f = await cont.anularFactura(req.empresaId, req.params.numero);
+  await auditar(req, 'anular_factura', { entidad: 'FacturaCont', entidadId: f._id, detalle: { numero: f.numero } });
   res.json(f);
 });
-r.post('/contabilidad/cobros', gestionar, async (req, res) => {
+r.post('/contabilidad/cobros', gestCont, async (req, res) => {
   const d = z.object({ factura: z.string(), valor: z.coerce.number().min(0).optional(), fecha: z.string().optional(), cuenta: z.enum(['1110', '1105']).default('1110') }).parse(req.body);
   res.json(await cont.cobrar(req.empresaId, { ...d, fecha: parseFecha(d.fecha) || hoy(), usuario: req.usuario._id }));
 });
-r.post('/contabilidad/pagos', gestionar, async (req, res) => {
+r.post('/contabilidad/pagos', gestCont, async (req, res) => {
   const d = z.object({ liquidacion: z.string(), valor: z.coerce.number().min(0).optional(), fecha: z.string().optional(), cuenta: z.enum(['1110', '1105']).default('1110') }).parse(req.body);
   res.json(await cont.pagarLiquidacion(req.empresaId, { ...d, fecha: parseFecha(d.fecha) || hoy(), usuario: req.usuario._id }));
 });
-r.post('/contabilidad/gastos', gestionar, async (req, res) => {
+r.post('/contabilidad/gastos', gestCont, async (req, res) => {
   const d = z.object({ fecha: z.string(), cuenta: z.string(), concepto: z.string().trim().min(3).max(200), valor: z.coerce.number().positive(),
     tercero: z.string().max(120).optional().default(''), formaPago: z.enum(['1110', '1105', '2335']).default('1110') }).parse(req.body);
   res.status(201).json(await cont.gasto(req.empresaId, { ...d, fecha: parseFecha(d.fecha), usuario: req.usuario._id }));
 });
 
+// Viajes que se pueden facturar (para escogerlos uno a uno), con la división para terceros / propio
+r.get('/contabilidad/facturas/viajes', verCont, async (req, res) => {
+  const desde = parseFecha(req.query.desde); const hasta = parseFecha(req.query.hasta);
+  if (!mongoose.isValidObjectId(req.query.cliente) || !desde || !hasta) throw new ErrorHttp(400, 'Indique cliente y rango de fechas');
+  const { filas } = await cont.viajesPorFacturar(req.empresaId, { cliente: req.query.cliente, desde, hasta: finDia(hasta) });
+  res.json({ filas, modelo: (await cont.parametros(req.empresaId)).modeloIngresos });
+});
+// Parámetros contables (modelo de ingresos y tipo de sociedad)
+r.get('/contabilidad/parametros', verCont, async (req, res) => res.json(await cont.parametros(req.empresaId)));
+r.put('/contabilidad/parametros', gestCont, async (req, res) => {
+  const d = z.object({ modeloIngresos: z.enum(['bruto', 'terceros']).optional(), tipoSociedad: z.enum(['SAS', 'LTDA', 'SA', 'COOPERATIVA', 'OTRA']).optional() }).parse(req.body);
+  const p = await cont.guardarParametros(req.empresaId, d);
+  await auditar(req, 'parametros_contables', { detalle: p });
+  res.json(p);
+});
+// Saldos iniciales de la contabilidad anterior
+r.post('/contabilidad/saldos-iniciales', gestCont, async (req, res) => {
+  const fila = z.object({ cuenta: z.string().regex(/^\d{4,10}$/), terceroDoc: z.string().max(20).optional().default(''), tercero: z.string().max(120).optional().default(''),
+    documento: z.string().max(40).optional().default(''), debito: z.coerce.number().min(0).default(0), credito: z.coerce.number().min(0).default(0) });
+  const d = z.object({ fecha: z.string(), filas: z.array(fila).min(1).max(5000) }).parse(req.body);
+  const fecha = parseFecha(d.fecha); if (!fecha) throw new ErrorHttp(400, 'Fecha de corte inválida');
+  const r2 = await cont.saldosIniciales(req.empresaId, { fecha, filas: d.filas, usuario: req.usuario._id });
+  await auditar(req, 'saldos_iniciales', { detalle: { asientos: r2.asientos.length, debitos: r2.debitos } });
+  res.status(201).json(r2);
+});
+
 // Informes (JSON, o Excel con ?formato=xlsx)
-r.get('/contabilidad/informes/:tipo', verLiq, async (req, res) => {
+r.get('/contabilidad/informes/:tipo', verCont, async (req, res) => {
   const desde = fechaQ(req.query.desde, inicioMes()); const hasta = finDia(fechaQ(req.query.hasta, hoy()));
   const t = req.params.tipo;
   let datos; let columnas; let filas; let titulo;
@@ -290,6 +316,19 @@ r.get('/contabilidad/informes/:tipo', verLiq, async (req, res) => {
     datos = await cont.retenciones(req.empresaId, desde, hasta); titulo = 'Retenciones';
     columnas = ['Cuenta', 'Nombre', 'Débitos', 'Créditos', 'Saldo'];
     filas = datos.map(c => [c.codigo, c.nombre, c.debito, c.credito, c.saldo]);
+  } else if (t === 'mayor') {
+    const nivel = [1, 2, 4, 6].includes(Number(req.query.nivel)) ? Number(req.query.nivel) : 4;
+    datos = await cont.libroMayor(req.empresaId, desde, hasta, nivel); titulo = 'Libro mayor y balances';
+    columnas = ['Cuenta', 'Nombre', 'Saldo anterior', 'Débitos', 'Créditos', 'Saldo final'];
+    filas = [...datos.map(c => [c.codigo, c.nombre, c.anterior, c.debito, c.credito, c.final]),
+      ['', '', '', datos.reduce((a, c) => a + c.debito, 0), datos.reduce((a, c) => a + c.credito, 0), '']];
+  } else if (t === 'auxiliar') {
+    datos = await cont.auxiliar(req.empresaId, { cuenta: req.query.cuenta, terceroDoc: String(req.query.tercero || '').replace(/\D/g, ''), desde, hasta });
+    titulo = `Auxiliar ${datos.cuenta} ${datos.nombre}`.trim();
+    columnas = ['Fecha', 'Asiento', 'Cuenta', 'Documento', 'NIT / cédula', 'Tercero', 'Concepto', 'Débito', 'Crédito', 'Saldo'];
+    filas = [['', '', '', '', '', '', 'Saldo anterior', '', '', datos.anterior],
+      ...datos.movimientos.map(x => [fmtFecha(x.fecha), x.numero, x.cuenta, x.documento, x.terceroDoc, x.tercero, x.concepto, x.debito, x.credito, x.saldo]),
+      ['', '', '', '', '', '', 'Saldo final', '', '', datos.final]];
   } else if (t === 'plan') {
     datos = await CuentaContable.find(deEmpresa(req)).sort({ codigo: 1 }).lean(); titulo = 'Plan de cuentas';
     columnas = ['Código', 'Cuenta', 'Tipo', 'Naturaleza'];
