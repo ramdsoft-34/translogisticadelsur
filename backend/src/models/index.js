@@ -92,6 +92,14 @@ const empresaSchema = new Schema({
     pesosPorTamano: { type: [{ tamano: String, kg: Number, _id: false }],
       default: () => [{ tamano: '1.0', kg: 800 }, { tamano: '3.0', kg: 1500 }, { tamano: '5.0', kg: 2500 }, { tamano: '6.0', kg: 5000 }] },
   },
+  // Parámetros contables (Contabilidad → Parámetros). modeloIngresos:
+  //   'bruto'    → todo lo facturado es ingreso propio (4135) y el flete del conductor es costo (6155);
+  //   'terceros' → ingresos recibidos para terceros (art. 102-2 E.T.): flete y auxiliar del conductor van al
+  //                pasivo 2815 y solo la diferencia (comisión, 4145) es ingreso propio.
+  contabilidad: {
+    modeloIngresos: { type: String, enum: ['bruto', 'terceros'], default: 'bruto' },
+    tipoSociedad: { type: String, enum: ['SAS', 'LTDA', 'SA', 'COOPERATIVA', 'OTRA'], default: 'SAS' },
+  },
   smtp: {
     activo: { type: Boolean, default: false },
     host: str(), puerto: { type: Number, default: 587 },
@@ -293,6 +301,7 @@ const viajeSchema = new Schema({
   anuladoBase: { remesa: str(), manifiesto: str() },
   // Pago al conductor (liquidación del conductor) y soporte interno MC/RC para viajes sin RNDC
   liquidacionConductor: { type: Schema.Types.ObjectId, ref: 'LiquidacionConductor', default: null },
+  facturaCont: { type: Schema.Types.ObjectId, ref: 'FacturaCont', default: null },   // factura contable que lo cobró
   // Licencia del conductor guardada con el viaje («categoría-número»; va en el reporte de WhatsApp), como en la plantilla
   licencia: str(),
   // Estado del soporte: '' vigente, 'cumplido' (entregado) o 'anulado'. Al reemplazar uno anulado el anterior queda en «anteriores».
@@ -537,6 +546,10 @@ const facturaContSchema = new Schema({
   cliente: { type: Schema.Types.ObjectId, ref: 'Cliente', required: true },
   desde: Date, hasta: Date, viajes: { type: Number, default: 0 },
   total: Number, retefuentePct: Number, retefuente: Number, icaPct: Number, ica: Number, neto: Number,
+  // Modelo de ingresos con el que se contabilizó y la división del total (ingresos para terceros)
+  modeloIngresos: { type: String, enum: ['bruto', 'terceros'], default: 'bruto' },
+  terceros: { type: Number, default: 0 }, propio: { type: Number, default: 0 },
+  viajesIds: [{ type: Schema.Types.ObjectId, ref: 'Viaje' }],
   cobrado: { type: Number, default: 0 },
   estado: { type: String, enum: ['PENDIENTE', 'COBRADA', 'ANULADA'], default: 'PENDIENTE' },
   asiento: str(),
