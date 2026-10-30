@@ -1,6 +1,6 @@
 // Soporte interno (MC / RC): documento con el formato del manifiesto para los viajes que NO se
 // expiden en el RNDC. Numeración propia (MC100000, RC100000…), código de verificación y QR interno.
-// No es un documento del RNDC: no se envía al Ministerio ni por correo.
+// No es un documento del RNDC (no va al Ministerio), pero se cumple, se anula y se envía por correo al cliente.
 import crypto from 'node:crypto';
 import { Empresa, Viaje, Vehiculo, Tercero, Municipio, siguiente, pob } from '../../models/index.js';
 import { env } from '../../config/env.js';
@@ -23,19 +23,22 @@ async function lugar(codigo) {
   return m ? lugarRndc(m) : '';
 }
 
-// Asigna MC/RC al viaje (una sola vez) y devuelve los datos para el PDF
-export async function soporteInterno(empresa, viajeId, { asignar = true } = {}) {
+// Asigna MC/RC al viaje (una sola vez) y devuelve los datos para el PDF.
+// `reemplazar`: si el soporte está anulado, numera uno nuevo y deja el anulado en «anteriores».
+export async function soporteInterno(empresa, viajeId, { asignar = true, reemplazar = false } = {}) {
   const v = await Viaje.findOne({ empresa: empresa._id, _id: viajeId })
     .populate([pob(empresa._id, 'cliente'), pob(empresa._id, 'conductor'), pob(empresa._id, 'titular')]).lean();
   if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
   if (v.manifiesto?.estado === 'aceptado') throw new ErrorHttp(409, 'El viaje tiene manifiesto del RNDC: use ese documento');
   let s = v.soporteInterno;
-  if (!s?.mc) {
+  const reemplazo = reemplazar && s?.mc && s.estado === 'anulado';
+  if (!s?.mc || reemplazo) {
     if (!asignar) throw new ErrorHttp(409, 'El viaje aún no tiene soporte interno');
     const n = await siguiente(empresa._id, 'soporteInterno', NUMERO_INICIAL - 1);
     const mc = `MC${n}`; const rc = `RC${n}`;
     const codigo = codigoVerificacion(`${empresa._id}|SI|${mc}|${rc}|${aaaa(v.fecha)}|${v.placa}|${v.conductor?.numId || ''}|${Math.round(v.flete || 0)}`);
-    s = { mc, rc, codigo, fecha: new Date() };
+    const anteriores = [...(s?.anteriores || []), ...(reemplazo ? [{ mc: s.mc, rc: s.rc, codigo: s.codigo, fecha: s.fecha, anuladoEn: s.anulado?.fecha, motivo: s.anulado?.motivo }] : [])];
+    s = { mc, rc, codigo, fecha: new Date(), estado: '', anteriores };
     await Viaje.updateOne({ empresa: empresa._id, _id: v._id }, { $set: { soporteInterno: s } });
   }
   const veh = await Vehiculo.findOne({ empresa: empresa._id, placa: v.placa }).lean();
@@ -48,7 +51,9 @@ export async function soporteInterno(empresa, viajeId, { asignar = true } = {}) 
   const origen = (await lugar(v.codOrigen || empresa.rndc?.codOrigen)) || 'PASTO NARINO';
   const destino = (await lugar(v.codDestino)) || txt(v.destino).replace(/\s+\d+([.,]\d+)?$/, '').toUpperCase();
   const fin = new Date(Date.UTC(new Date(v.fecha).getUTCFullYear(), new Date(v.fecha).getUTCMonth() + 1, 0));
-  const nota = [`Soporte interno - Viaje N ${v.numero}`, v.conAuxiliar ? 'Con auxiliar' : '', txt(v.observaciones)].filter(Boolean).join(' · ');
+  const estadoTxt = s.estado === 'anulado' ? `ANULADO el ${aaaa(s.anulado?.fecha || new Date())}: ${txt(s.anulado?.motivo)}`
+    : s.estado === 'cumplido' ? `CUMPLIDO el ${aaaa(s.cumplido?.llegada || s.cumplido?.fecha || new Date())}` : '';
+  const nota = [estadoTxt, `Soporte interno - Viaje N ${v.numero}`, v.conAuxiliar ? 'Con auxiliar' : '', txt(v.observaciones)].filter(Boolean).join(' · ');
   const lic = cond?.licencia || {};
   const conLogo = await Empresa.findById(empresa._id).select('+logo').lean();
   return {
@@ -86,21 +91,58 @@ export async function asegurarSoporte(empresaId, viajeId) {
   return (await soporteInterno(empresa, viajeId)).soporte;
 }
 
+// Cumplido del soporte interno: la carga se entregó (fecha de llegada, cantidad y observaciones)
+export async function cumplirSoporte(empresaId, viajeId, { llegada, cantidad = null, observaciones = '' }, usuario) {
+  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('soporteInterno manifiesto').lean();
+  if (!v?.soporteInterno?.mc) throw new ErrorHttp(409, 'El viaje no tiene soporte interno');
+  if (v.manifiesto?.estado === 'aceptado') throw new ErrorHttp(409, 'El viaje tiene manifiesto del RNDC: cúmplalo en el RNDC');
+  if (v.soporteInterno.estado === 'anulado') throw new ErrorHttp(409, 'El soporte está anulado: genere uno nuevo antes de cumplirlo');
+  if (v.soporteInterno.estado === 'cumplido') throw new ErrorHttp(409, 'El soporte ya está cumplido');
+  const cumplido = { fecha: new Date(), llegada: llegada || new Date(), cantidad, observaciones: txt(observaciones), usuario };
+  await Viaje.updateOne({ empresa: empresaId, _id: viajeId }, { $set: { 'soporteInterno.estado': 'cumplido', 'soporteInterno.cumplido': cumplido } });
+  return { ...v.soporteInterno, estado: 'cumplido', cumplido };
+}
+
+// Anulación del soporte interno (con motivo). Si estaba cumplido, se anula el cumplido y vuelve a vigente.
+export async function anularSoporte(empresaId, viajeId, { motivo, soloCumplido = false }, usuario) {
+  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('soporteInterno').lean();
+  const s = v?.soporteInterno;
+  if (!s?.mc) throw new ErrorHttp(409, 'El viaje no tiene soporte interno');
+  if (s.estado === 'anulado') throw new ErrorHttp(409, 'El soporte ya está anulado');
+  if (soloCumplido) {
+    if (s.estado !== 'cumplido') throw new ErrorHttp(409, 'El soporte no está cumplido');
+    await Viaje.updateOne({ empresa: empresaId, _id: viajeId }, { $set: { 'soporteInterno.estado': '', 'soporteInterno.cumplido': {} } });
+    return { ...s, estado: '' };
+  }
+  const anulado = { fecha: new Date(), motivo: txt(motivo), usuario };
+  await Viaje.updateOne({ empresa: empresaId, _id: viajeId }, { $set: { 'soporteInterno.estado': 'anulado', 'soporteInterno.anulado': anulado } });
+  return { ...s, estado: 'anulado', anulado };
+}
+
 // Consulta pública (QR): confirma que el soporte existe y muestra lo mínimo para validarlo
 export async function verificarSoporte(codigo) {
   const c = String(codigo || '').toUpperCase();
   if (!/^[0-9A-F]{16}$/.test(c)) return null;
-  const v = await Viaje.findOne({ empresa: { $exists: true }, 'soporteInterno.codigo': c })
-    .select('empresa numero fecha placa remolque destino codDestino codOrigen conductorNombre soporteInterno requiereManifiesto manifiesto pesoKg').lean();
+  const campos = 'empresa numero fecha placa remolque destino codDestino codOrigen conductorNombre soporteInterno requiereManifiesto manifiesto pesoKg';
+  let v = await Viaje.findOne({ empresa: { $exists: true }, 'soporteInterno.codigo': c }).select(campos).lean();
+  // Código de un soporte anulado y reemplazado
+  const viejo = v ? null : await Viaje.findOne({ empresa: { $exists: true }, 'soporteInterno.anteriores.codigo': c }).select(campos).lean();
+  if (viejo) v = viejo;
   if (!v) return null;
+  const anterior = viejo ? viejo.soporteInterno.anteriores.find(a => a.codigo === c) : null;
+  const doc = anterior || v.soporteInterno;
   const empresa = await Empresa.findById(v.empresa).select('nombre nit dv rndc.razonSocial rndc.codOrigen').lean();
-  const vigente = v.requiereManifiesto === false && v.manifiesto?.estado !== 'aceptado';
+  const sinRndc = v.requiereManifiesto === false && v.manifiesto?.estado !== 'aceptado';
+  const vigente = sinRndc && !anterior && v.soporteInterno.estado !== 'anulado';
+  const motivo = !sinRndc ? 'El viaje se expidió luego con manifiesto del RNDC: este soporte interno ya no es el documento vigente'
+    : anterior ? `Este soporte fue anulado${anterior.motivo ? ` (${anterior.motivo})` : ''} y reemplazado por el ${v.soporteInterno.mc}`
+    : v.soporteInterno.estado === 'anulado' ? `Este soporte fue anulado${v.soporteInterno.anulado?.motivo ? `: ${v.soporteInterno.anulado.motivo}` : ''}` : '';
   const oculto = (n) => String(n || '').split(' ').filter(Boolean).map((p, i) => (i < 2 ? p : p[0] + '.')).join(' ');
   return {
-    valido: vigente,
-    motivo: vigente ? '' : 'El viaje se expidió luego con manifiesto del RNDC: este soporte interno ya no es el documento vigente',
+    valido: vigente, motivo,
+    cumplido: vigente && v.soporteInterno.estado === 'cumplido' ? (v.soporteInterno.cumplido?.llegada || v.soporteInterno.cumplido?.fecha) : null,
     empresa: txt(empresa?.rndc?.razonSocial) || empresa?.nombre || '', nit: `${empresa?.nit || ''}${empresa?.dv ? '-' + empresa.dv : ''}`,
-    mc: v.soporteInterno.mc, rc: v.soporteInterno.rc, codigo: c, expedido: v.soporteInterno.fecha,
+    mc: doc.mc, rc: doc.rc, codigo: c, expedido: doc.fecha,
     viaje: v.numero, fecha: v.fecha, placa: v.placa, remolque: v.remolque || '', conductor: oculto(v.conductorNombre),
     origen: (await lugar(v.codOrigen || empresa?.rndc?.codOrigen)) || '', destino: (await lugar(v.codDestino)) || txt(v.destino),
   };

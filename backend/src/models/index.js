@@ -293,7 +293,14 @@ const viajeSchema = new Schema({
   anuladoBase: { remesa: str(), manifiesto: str() },
   // Pago al conductor (liquidación del conductor) y soporte interno MC/RC para viajes sin RNDC
   liquidacionConductor: { type: Schema.Types.ObjectId, ref: 'LiquidacionConductor', default: null },
-  soporteInterno: { mc: str(), rc: str(), codigo: str(), fecha },
+  // Estado del soporte: '' vigente, 'cumplido' (entregado) o 'anulado'. Al reemplazar uno anulado el anterior queda en «anteriores».
+  soporteInterno: {
+    mc: str(), rc: str(), codigo: str(), fecha,
+    estado: { type: String, enum: ['', 'cumplido', 'anulado'], default: '' },
+    cumplido: { fecha, llegada: fecha, cantidad: { type: Number, default: null }, observaciones: str(), usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null } },
+    anulado: { fecha, motivo: str(), usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null } },
+    anteriores: { type: [{ _id: false, mc: String, rc: String, codigo: String, fecha: Date, anuladoEn: Date, motivo: String }], default: [] },
+  },
   // Valores del formulario del RNDC corregidos a mano en la expedición (variable → valor); se aplican al enviar
   ajustesRndc: { remesa: { type: Schema.Types.Mixed, default: {} }, manifiesto: { type: Schema.Types.Mixed, default: {} } },
   // Rastreo GPS con Sur Track: el viaje es la única fuente; el GPS lo envía la app del conductor
@@ -437,7 +444,8 @@ const auditoriaSchema = new Schema({
   seq: { type: Number, required: true },
   hashPrevio: str(),
   hash: str({ required: true }),
-}, { timestamps: { createdAt: true, updatedAt: false } });
+  // minimize: false conserva los objetos vacíos del detalle tal como se calculó el hash
+}, { timestamps: { createdAt: true, updatedAt: false }, minimize: false });
 auditoriaSchema.index({ empresa: 1, createdAt: -1 });
 auditoriaSchema.index({ cadena: 1, seq: 1 }, { unique: true });
 // Registro de solo inserción: se bloquea cualquier modificación o borrado desde la aplicación.

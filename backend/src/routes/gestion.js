@@ -16,8 +16,9 @@ import * as liq from '../services/gestion/liquidacionConductor.js';
 import * as pre from '../services/gestion/prestamos.js';
 import * as cont from '../services/gestion/contabilidad.js';
 import * as cierre from '../services/gestion/cierre.js';
-import { soporteInterno, asegurarSoporte, soporteDeEjemplo } from '../services/gestion/soporteInterno.js';
+import { soporteInterno, asegurarSoporte, soporteDeEjemplo, cumplirSoporte as soporteCumplir, anularSoporte as soporteAnular } from '../services/gestion/soporteInterno.js';
 import { manifiestoPdf, ajusteLogo } from '../services/reportes/manifiesto.js';
+import { liquidacionPdf, liquidacionesMediaHoja } from '../services/reportes/liquidacion.js';
 import * as dulces from '../services/gestion/remesasDulces.js';
 
 const r = Router();
@@ -109,14 +110,8 @@ r.get('/liq-conductores/:numero/:formato', verLiq, async (req, res) => {
       columnas: COL_LC.map((c, i) => ({ ...c, ancho: i > 4 ? 14 : 16, formato: i > 4 ? PESOS : undefined })),
       filas: [...filas, [], ['Descuento préstamos', ...vacio.slice(1), -$(l.descuentoPrestamos)], ['NETO A PAGAR', ...vacio.slice(1), $(l.neto)]], total }), `${l.numero}.xlsx`, XLSX);
   }
-  const buf = await pdfTabla(req, { titulo, subtitulo, columnas: COL_LC, filas: filas.map(f => f.map((v, i) => (i > 4 ? `$ ${v.toLocaleString('es-CO')}` : v))),
-    total: total.map((v, i) => (i > 4 ? `$ ${v.toLocaleString('es-CO')}` : v)),
-    extra: (doc) => {
-      doc.font('Helvetica-Bold').fontSize(9).text(`Descuento préstamos: $ ${$(l.descuentoPrestamos).toLocaleString('es-CO')}`, { align: 'right' });
-      doc.fontSize(11).text(`NETO A PAGAR: $ ${$(l.neto).toLocaleString('es-CO')}`, { align: 'right' });
-      doc.moveDown(2).font('Helvetica').fontSize(9).text('_____________________________            _____________________________');
-      doc.text('Firma conductor                                                  Firma empresa');
-    } });
+  const empresa = await Empresa.findById(req.empresaId).select('+logo').lean();
+  const buf = await liquidacionPdf(empresa, l);
   archivo(res, buf, `${l.numero}.pdf`, 'application/pdf', req.query.ver === '1');
 });
 
@@ -128,67 +123,9 @@ r.get('/liq-conductores-lote/pdf', verLiq, async (req, res) => {
   const lista = await LiquidacionConductor.find(deEmpresa(req, { numero: { $in: numeros } })).lean();
   if (!lista.length) throw new ErrorHttp(404, 'No se encontraron las liquidaciones');
   lista.sort((a, b) => numeros.indexOf(a.numero) - numeros.indexOf(b.numero));
-  const empresa = await empresaDe(req);
+  const empresa = await Empresa.findById(req.empresaId).select('+logo').lean();
   archivo(res, await liquidacionesMediaHoja(empresa, lista), 'liquidaciones.pdf', 'application/pdf', req.query.ver === '1');
 });
-
-async function liquidacionesMediaHoja(empresa, lista) {
-  const doc = nuevoPdf('Liquidaciones de conductores', 'portrait');
-  // Sin márgenes del documento: cada media hoja maneja los suyos (si no, el texto cerca del borde abre otra página)
-  doc.options.margin = 0; doc.page.margins = { top: 0, bottom: 0, left: 0, right: 0 };
-  const W = doc.page.width; const H = doc.page.height; const M = 28; const mitad = H / 2;
-  const anchos = [44, 40, 70, 92, 46, 46, 40, 46, 46, 40, 32, 54];
-  const cab = ['Fecha', 'Placa', 'Empresa', 'Destino', 'Manif.', 'Flete', 'Aux.', 'Anticipo', 'Ant. rec.', 'Retef.', 'FOPAT', 'Saldo'];
-  const escala = (W - 2 * M) / anchos.reduce((a, b) => a + b, 0);
-  const cols = anchos.map(a => a * escala);
-  const pesos = (v) => `$ ${$(v).toLocaleString('es-CO')}`;
-  const FILA = 9.5; const CAB = 62; const PIE = 74;
-  const filasMedia = Math.floor((mitad - 2 * 14 - CAB - PIE) / FILA);
-  let y = 0; let enMitad = 0; // 0 = hoja vacía, 1 = mitad superior usada
-  const dibujar = (l, y0, alto) => {
-    let yy = y0 + 14;
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('black').text(empresa?.nombre || '', M, yy, { width: W - 2 * M - 160, lineBreak: false });
-    doc.text(`Liquidación ${l.numero}`, W - M - 160, yy, { width: 160, align: 'right', lineBreak: false });
-    yy += 14;
-    doc.font('Helvetica').fontSize(8).text(`Conductor: ${l.conductorNombre}${l.cedula ? ` · C.C. ${l.cedula}` : ''} · Placa ${l.placa}`, M, yy, { width: W - 2 * M, lineBreak: false });
-    yy += 11;
-    doc.text(`Periodo: ${fmtFecha(l.desde)} al ${fmtFecha(l.hasta)} · Empresa(s): ${l.empresas || ''} · Fecha ${fmtFecha(l.fecha)}${l.estado === 'ANULADA' ? ' · ANULADA' : ''}`,
-      M, yy, { width: W - 2 * M, lineBreak: false, ellipsis: true });
-    yy += 15;
-    const fila = (valores, negrita = false, fondo = null) => {
-      if (fondo) doc.rect(M, yy - 2, W - 2 * M, FILA).fill(fondo).fillColor('black');
-      let x = M;
-      doc.font(negrita ? 'Helvetica-Bold' : 'Helvetica').fontSize(6.5);
-      valores.forEach((v, i) => { doc.text(String(v ?? ''), x + 1.5, yy, { width: cols[i] - 3, align: i > 4 ? 'right' : 'left', lineBreak: false, ellipsis: true }); x += cols[i]; });
-      yy += FILA;
-    };
-    fila(cab, true, '#FFF3C4');
-    l.lineas.forEach((x, i) => fila(filaLc(x).map((v, k) => (k > 4 ? pesos(v) : v)), false, i % 2 ? '#FAFAF7' : null));
-    fila(totalLc(l).map((v, k) => (k > 4 ? pesos(v) : v)), true, '#EEEEEE');
-    yy += 4;
-    doc.font('Helvetica').fontSize(8).text(`Descuento préstamos: ${pesos(l.descuentoPrestamos)}`, M, yy, { width: W - 2 * M, align: 'right' });
-    yy += 11;
-    doc.font('Helvetica-Bold').fontSize(10).text(`NETO A PAGAR: ${pesos(l.neto)}`, M, yy, { width: W - 2 * M, align: 'right' });
-    const yf = y0 + alto - 26;
-    doc.font('Helvetica').fontSize(8).moveTo(M, yf).lineTo(M + 180, yf).stroke().moveTo(W - M - 180, yf).lineTo(W - M, yf).stroke();
-    doc.text('Firma conductor', M, yf + 3, { width: 180, align: 'center', lineBreak: false });
-    doc.text('Firma empresa', W - M - 180, yf + 3, { width: 180, align: 'center', lineBreak: false });
-  };
-  lista.forEach((l, i) => {
-    const completa = l.lineas.length > filasMedia;
-    if (i > 0 && (completa || enMitad === 0 || enMitad === 2)) { doc.addPage(); enMitad = 0; }
-    if (completa) { dibujar(l, 0, H); enMitad = 2; return; }
-    y = enMitad === 1 ? mitad : 0;
-    dibujar(l, y, mitad);
-    if (enMitad === 1) enMitad = 2;
-    else {
-      enMitad = 1;
-      // Línea de corte entre las dos mitades
-      doc.save().dash(4, { space: 3 }).strokeColor('#999999').moveTo(12, mitad).lineTo(W - 12, mitad).stroke().undash().restore();
-    }
-  });
-  return pdfABuffer(doc, { marca: 'pie' });
-}
 
 // ═════════════ Préstamos ═════════════
 r.get('/prestamos', verLiq, async (req, res) => {
@@ -644,9 +581,25 @@ r.post('/soportes/vista-previa', permitir(P.CONFIG_GESTIONAR), express.json({ li
 // ═════════════ Soporte interno MC / RC ═════════════
 r.post('/soportes/viajes/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const empresa = await empresaDe(req);
-  const d = await soporteInterno(empresa, req.params.id);
-  await auditar(req, 'soporte_interno', { entidad: 'Viaje', entidadId: req.params.id, detalle: d.soporte });
+  const reemplazar = req.body?.reemplazar === true;
+  const d = await soporteInterno(empresa, req.params.id, { reemplazar });
+  await auditar(req, reemplazar ? 'soporte_interno_reemplazo' : 'soporte_interno', { entidad: 'Viaje', entidadId: req.params.id, detalle: { mc: d.soporte.mc, rc: d.soporte.rc, codigo: d.soporte.codigo } });
   res.json(d.soporte);
+});
+// Cumplido y anulación del soporte interno (no van al RNDC)
+r.post('/soportes/viajes/:id/cumplir', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
+  const d = z.object({ llegada: z.string().optional(), cantidad: z.number().nonnegative().nullable().optional(), observaciones: z.string().trim().max(300).optional().default('') }).parse(req.body || {});
+  const llegada = d.llegada ? parseFecha(d.llegada) : null;
+  if (d.llegada && !llegada) throw new ErrorHttp(400, 'Fecha de llegada inválida');
+  const s = await soporteCumplir(req.empresaId, req.params.id, { llegada, cantidad: d.cantidad ?? null, observaciones: d.observaciones }, req.usuario._id);
+  await auditar(req, 'cumplir_soporte_interno', { entidad: 'Viaje', entidadId: req.params.id, detalle: { mc: s.mc, llegada: d.llegada || '', cantidad: d.cantidad ?? null } });
+  res.json(s);
+});
+r.post('/soportes/viajes/:id/anular', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
+  const d = z.object({ motivo: z.string().trim().min(3, 'Escriba el motivo').max(300), soloCumplido: z.boolean().optional().default(false) }).parse(req.body || {});
+  const s = await soporteAnular(req.empresaId, req.params.id, d, req.usuario._id);
+  await auditar(req, d.soloCumplido ? 'anular_cumplido_soporte' : 'anular_soporte_interno', { entidad: 'Viaje', entidadId: req.params.id, detalle: { mc: s.mc, motivo: d.motivo } });
+  res.json(s);
 });
 r.get('/soportes/viajes/:id/pdf', permitir(P.VIAJES_VER), async (req, res) => {
   const empresa = await empresaDe(req);

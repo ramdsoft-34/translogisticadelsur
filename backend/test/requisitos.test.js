@@ -350,6 +350,14 @@ test('RF-COR-01/03: relación por correo a sus destinatarios y correo manual con
   assert.equal(buzonPruebas.at(-1).attachments[0].filename, 'soporte.txt');
   const envios = await M.EnvioCorreo.find({ empresa: s.empresa, tipo: { $in: ['relacion', 'manual'] } }).lean();
   assert.equal(envios.length, 2);
+  // Soporte interno de un viaje sin RNDC: se envía en PDF por el correo manual
+  const vs = await M.Viaje.findOne({ empresa: s.empresa, 'manifiesto.estado': { $ne: 'aceptado' } }).lean();
+  await M.Viaje.updateOne({ empresa: s.empresa, _id: vs._id }, { $set: { requiereManifiesto: false } });
+  const sop = (await s.admin.post(`/api/gestion/soportes/viajes/${vs._id}`, {})).body;
+  const cs = await s.admin.post('/api/correo/manual', { para: ['cliente@req.test'], soportes: [String(vs._id)] });
+  assert.equal(cs.status, 200, JSON.stringify(cs.body));
+  assert.equal(cs.body.estado, 'enviado', JSON.stringify(cs.body));
+  assert.equal(buzonPruebas.at(-1).attachments[0].filename, `Soporte_${sop.mc}.pdf`);
   assert.equal((await s.admin.post('/api/correo/manual', { para: ['x@req.test'] })).status, 400);
 });
 

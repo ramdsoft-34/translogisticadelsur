@@ -262,7 +262,7 @@ export class Layout {
   // Módulos y páginas que el rol puede ver
   readonly modulos = computed(() => {
     this.u();
-    return MODULOS.map(m => ({ ...m, paginas: m.paginas.filter(p => this.auth.tiene(...p.permisos)) })).filter(m => m.paginas.length);
+    return MODULOS.map(m => ({ ...m, paginas: m.paginas.filter(p => this.auth.tiene(...p.permisos) && !(p.ocultarCon && this.auth.tiene(p.ocultarCon))) })).filter(m => m.paginas.length);
   });
   readonly moduloActivo = computed(() => {
     const ruta = this.url().split(/[?#]/)[0];

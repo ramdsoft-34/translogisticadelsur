@@ -109,10 +109,11 @@ r.post('/relaciones', permitir(P.REPORTES_VER, P.LIQUIDACION_VER), conAdjuntos, 
 r.post('/manual', operar, conAdjuntos, async (req, res) => {
   const d = z.object({ para: z.array(correo).min(1).max(30), cc: z.array(correo).max(30).optional().default([]), asunto: z.string().trim().max(200).optional().default(''),
     texto: z.string().max(5000).optional().default(''), viajes: z.array(z.string().refine(v => mongoose.isValidObjectId(v), 'viaje inválido')).max(100).optional().default([]),
+    soportes: z.array(z.string().refine(v => mongoose.isValidObjectId(v), 'viaje inválido')).max(100).optional().default([]),
     unir: z.boolean().optional().default(false), adjuntos }).parse(req.body);
-  if (!d.viajes.length && !d.adjuntos.length) throw new ErrorHttp(400, 'Escoja manifiestos o adjunte al menos un archivo');
+  if (!d.viajes.length && !d.soportes.length && !d.adjuntos.length) throw new ErrorHttp(400, 'Escoja manifiestos o soportes, o adjunte al menos un archivo');
   const x = await enviarManual(req.empresaId, { ...d, usuario: req.usuario._id });
-  await auditar(req, 'enviar_correo_manual', { detalle: { para: d.para, viajes: d.viajes.length, adjuntos: d.adjuntos.map(a => a.nombre), unir: d.unir, estado: x.estado } });
+  await auditar(req, 'enviar_correo_manual', { detalle: { para: d.para, viajes: d.viajes.length, soportes: d.soportes.length, adjuntos: d.adjuntos.map(a => a.nombre), unir: d.unir, estado: x.estado } });
   res.json(x);
 });
 

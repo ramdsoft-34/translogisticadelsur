@@ -62,12 +62,21 @@ const quincena = () => {
         </section>
         @if (calc(); as c) {
           @if (grupos().length) {
+            <div class="cifras" aria-label="Totales del periodo">
+              <div><span>Viajes sin liquidar</span><strong>{{ c.totales.viajes ?? c.lineas.length }}</strong></div>
+              <div><span>Flete</span><strong>{{ c.totales.flete | pesos }}</strong></div>
+              <div><span>Auxiliar</span><strong>{{ c.totales.auxiliar | pesos }}</strong></div>
+              <div><span>Anticipo reconocido</span><strong>{{ c.totales.anticipoReconocido | pesos }}</strong></div>
+              <div><span>Retefuente + FOPAT</span><strong>{{ (c.totales.retefuente + c.totales.fopat) | pesos }}</strong></div>
+              <div class="destacada"><span>Saldo a pagar</span><strong>{{ c.totales.saldo | pesos }}</strong></div>
+            </div>
             @for (g of grupos(); track g.clave) {
               <div class="tarjeta grupo">
                 <div class="cab-grupo">
-                  <label class="casilla"><input type="checkbox" [checked]="todosGrupo(g)" (change)="alternarGrupo(g)" />
-                    <strong>{{ g.titulo }}</strong> <span class="sutil">{{ g.subtitulo }}</span></label>
-                  <span class="sutil">{{ g.lineas.length }} viaje(s) · Saldo {{ g.saldo | pesos }}</span>
+                  <label class="casilla quien"><input type="checkbox" [checked]="todosGrupo(g)" (change)="alternarGrupo(g)" [attr.aria-label]="'Elegir todos los viajes de ' + g.titulo" />
+                    <span class="avatar-grupo" aria-hidden="true">{{ iniciales(g.titulo) }}</span>
+                    <span><strong>{{ g.titulo }}</strong><small class="sutil">{{ g.subtitulo }}</small></span></label>
+                  <span class="chip sin-punto">{{ seleccionGrupo(g).length }} de {{ g.lineas.length }} viaje(s)</span>
                   @if (c.prestamos[g.cedula]; as pr) {
                     @if (pr.total) { <span class="chip alerta sin-punto" [title]="pr.detalle.join(', ')">Préstamo vencido {{ pr.total | pesos }}</span> }
                     @if (puedeGestionar && g.unConductor) {
@@ -83,47 +92,67 @@ const quincena = () => {
                 </div>
                 <div class="tabla-caja" style="box-shadow:none"><table class="tabla-movil">
                   <thead><tr><th></th><th>Fecha</th><th>Placa</th><th>Empresa</th><th>Destino</th><th>Manifiesto</th>
-                    <th class="num">Flete</th><th class="num">Auxiliar</th><th class="num">Anticipo</th><th class="num" title="Anticipo que se descuenta: 0 si es igual o mayor al flete en Pasto, Mayorista o Popayán">Ant. reconocido</th>
-                    <th class="num">Retefuente</th><th class="num">FOPAT</th><th class="num">Saldo</th></tr></thead>
+                    <th class="num">Flete</th><th class="num">Auxiliar</th><th class="num" title="Anticipo que se descuenta: 0 si es igual o mayor al flete en Pasto, Mayorista o Popayán">Anticipo</th>
+                    <th class="num" title="Flete + auxiliar − anticipo reconocido">Saldo</th></tr></thead>
                   <tbody>@for (l of g.lineas; track l.viaje) {
                     <tr><td data-etiqueta="Elegir"><input type="checkbox" [checked]="sel().has(l.viaje)" (change)="alternar(l.viaje)" [attr.aria-label]="'Viaje ' + l.numero" /></td>
                       <td data-etiqueta="Fecha">{{ l.fecha | dia }}</td><td data-etiqueta="Placa">{{ l.placa }}</td><td data-etiqueta="Empresa">{{ l.empresa }}</td>
                       <td data-etiqueta="Destino">{{ l.destino }}</td><td data-etiqueta="Manifiesto">{{ l.manifiesto }}</td>
                       <td data-etiqueta="Flete" class="num">{{ l.flete | pesos }}</td><td data-etiqueta="Auxiliar" class="num">{{ l.auxiliar | pesos }}</td>
-                      <td data-etiqueta="Anticipo" class="num">{{ l.anticipo | pesos }}</td>
-                      <td data-etiqueta="Ant. reconocido" class="num" [class.cero]="l.anticipoReconocido !== l.anticipo">{{ l.anticipoReconocido | pesos }}</td>
-                      <td data-etiqueta="Retefuente" class="num">{{ l.retefuente | pesos }}</td><td data-etiqueta="FOPAT" class="num">{{ l.fopat | pesos }}</td>
-                      <td data-etiqueta="Saldo" class="num"><strong>{{ l.saldo | pesos }}</strong></td></tr>
-                  }</tbody></table></div>
+                      <td data-etiqueta="Anticipo" class="num">@if (l.anticipoReconocido !== l.anticipo) { <s class="sutil" title="No se descuenta: pago completo en Pasto, Mayorista o Popayán">{{ l.anticipo | pesos }}</s><br /> }{{ l.anticipoReconocido | pesos }}</td>
+                      <td data-etiqueta="Saldo" class="num"><strong>{{ (l.flete + l.auxiliar - l.anticipoReconocido) | pesos }}</strong></td></tr>
+                  }</tbody>
+                  @if (totalesGrupo(g); as t) {
+                    <tfoot><tr><td></td><td colspan="5">Elegidos ({{ t.viajes }})</td><td class="num">{{ t.flete | pesos }}</td><td class="num">{{ t.auxiliar | pesos }}</td>
+                      <td class="num">{{ t.anticipo | pesos }}</td><td class="num">{{ t.saldos | pesos }}</td></tr></tfoot>
+                  }</table></div>
+                @if (totalesGrupo(g); as t) {
+                  <dl class="resumen-liq">
+                    <div><dt>(+) Saldos</dt><dd>{{ t.saldos | pesos }}</dd></div>
+                    <div><dt>(−) Retefuente</dt><dd>{{ t.retefuente | pesos }}</dd></div>
+                    <div><dt>(−) FOPAT</dt><dd>{{ t.fopat | pesos }}</dd></div>
+                    @if (descuentoGrupo(g); as d) { <div><dt>(−) Préstamo</dt><dd>{{ d | pesos }}</dd></div> }
+                    <div class="neto"><dt>Neto a pagar</dt><dd>{{ (t.saldos - t.retefuente - t.fopat - descuentoGrupo(g)) | pesos }}</dd></div>
+                  </dl>
+                }
               </div>
             }
-            <div class="mensaje info">Totales del periodo: Flete {{ c.totales.flete | pesos }} · Auxiliar {{ c.totales.auxiliar | pesos }} · Anticipo reconocido {{ c.totales.anticipoReconocido | pesos }} · Retefuente {{ c.totales.retefuente | pesos }}
-              · FOPAT {{ c.totales.fopat | pesos }} · <strong>Saldo a pagar {{ c.totales.saldo | pesos }}</strong></div>
           } @else { <p class="vacio">No hay viajes sin liquidar en ese periodo.</p> }
         }
       }
 
       @case ('liquidaciones') {
+        @if (resumenLiq(); as r) {
+          <div class="cifras" aria-label="Resumen de liquidaciones">
+            <div><span>Liquidaciones vigentes</span><strong>{{ r.vigentes }}</strong></div>
+            <div><span>Neto liquidado</span><strong>{{ r.neto | pesos }}</strong></div>
+            <div><span>Pagado</span><strong>{{ r.pagado | pesos }}</strong></div>
+            <div class="destacada"><span>Por pagar</span><strong>{{ r.porPagar | pesos }}</strong></div>
+          </div>
+        }
         <div class="acciones" style="margin-bottom:12px">
           <div class="filtro-rapido" style="margin:0"><input type="search" placeholder="Buscar N°, conductor, placa o cédula" [value]="q()" (input)="q.set($any($event.target).value)" aria-label="Buscar liquidaciones" /></div>
           <button style="margin-left:auto" [disabled]="!selLiq().size" (click)="imprimirLote()"><app-icono nombre="ojo" [tam]="15" />Imprimir {{ selLiq().size || '' }} (dos por hoja)</button>
         </div>
         <div class="tabla-caja"><table class="tabla-movil">
-          <thead><tr><th><input type="checkbox" aria-label="Elegir todas" [checked]="todasLiq()" (change)="alternarTodasLiq()" /></th><th>N°</th><th>Fecha</th><th>Conductor</th><th>Placa</th><th>Periodo</th><th class="num">Flete</th><th class="num">Desc. préstamos</th>
-            <th class="num">Neto</th><th class="num">Pagado</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th><input type="checkbox" aria-label="Elegir todas" [checked]="todasLiq()" (change)="alternarTodasLiq()" /></th><th>N°</th><th>Conductor</th><th>Placa</th><th>Periodo</th><th class="num">Flete + auxiliar</th><th class="num">Desc. préstamos</th>
+            <th class="num">Neto</th><th class="num">Por pagar</th><th>Estado</th><th></th></tr></thead>
           <tbody>@for (l of liquidacionesVisibles(); track l._id) {
             <tr><td data-etiqueta="Elegir"><input type="checkbox" [checked]="selLiq().has(l.numero)" (change)="alternarLiq(l.numero)" [attr.aria-label]="'Liquidación ' + l.numero" /></td>
-              <td data-etiqueta="N°">{{ l.numero }}</td><td data-etiqueta="Fecha">{{ l.fecha | dia }}</td><td data-etiqueta="Conductor">{{ l.conductorNombre }}</td>
-              <td data-etiqueta="Placa">{{ l.placa }}</td><td data-etiqueta="Periodo">{{ l.desde | dia }} – {{ l.hasta | dia }}</td>
-              <td data-etiqueta="Flete" class="num">{{ l.flete | pesos }}</td><td data-etiqueta="Desc. préstamos" class="num">{{ l.descuentoPrestamos | pesos }}</td>
-              <td data-etiqueta="Neto" class="num"><strong>{{ l.neto | pesos }}</strong></td><td data-etiqueta="Pagado" class="num">{{ l.pagado | pesos }}</td>
-              <td data-etiqueta="Estado"><span class="chip" [class.ok]="l.estado === 'VIGENTE'" [class.error]="l.estado === 'ANULADA'">{{ l.estado }}</span></td>
+              <td data-etiqueta="N°"><strong class="num-liq">{{ l.numero }}</strong><br /><span class="sutil">{{ l.fecha | dia }}</span></td>
+              <td data-etiqueta="Conductor">{{ l.conductorNombre }}@if (l.cedula) { <br /><span class="sutil">C.C. {{ l.cedula }}</span> }</td>
+              <td data-etiqueta="Placa"><span class="placa">{{ l.placa }}</span></td>
+              <td data-etiqueta="Periodo">{{ l.desde | dia }} – {{ l.hasta | dia }}<br /><span class="sutil">{{ l.viajes?.length || 0 }} viaje(s) · {{ l.empresas }}</span></td>
+              <td data-etiqueta="Flete + auxiliar" class="num">{{ (l.flete + (l.auxiliar || 0)) | pesos }}</td><td data-etiqueta="Desc. préstamos" class="num">{{ l.descuentoPrestamos | pesos }}</td>
+              <td data-etiqueta="Neto" class="num"><strong>{{ l.neto | pesos }}</strong></td>
+              <td data-etiqueta="Por pagar" class="num">{{ (l.estado === 'ANULADA' ? 0 : l.neto - (l.pagado || 0)) | pesos }}</td>
+              <td data-etiqueta="Estado"><span class="chip" [class]="estadoPago(l)[1]">{{ estadoPago(l)[0] }}</span></td>
               <td class="celda-acciones"><div class="acciones" style="justify-content:flex-end">
-                <button class="pequeno" (click)="visor.ver('/gestion/liq-conductores/' + l.numero + '/pdf', 'Liquidación ' + l.numero, { ver: 1 })"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
+                <button class="pequeno primario" (click)="visor.ver('/gestion/liq-conductores/' + l.numero + '/pdf', 'Liquidación ' + l.numero, { ver: 1 })"><app-icono nombre="ojo" [tam]="15" />Ver</button>
                 <button class="pequeno" (click)="excel('/gestion/liq-conductores/' + l.numero + '/xlsx', l.numero + '.xlsx')">Excel</button>
                 @if (puedeGestionar && l.estado === 'VIGENTE' && !l.pagado) { <button class="pequeno peligro" confirmar="Clic otra vez para anular" (confirmado)="anularLiq(l)">Anular</button> }
               </div></td></tr>
-          } @empty { <tr><td colspan="12" class="vacio">Aún no hay liquidaciones de conductores</td></tr> }</tbody></table></div>
+          } @empty { <tr><td colspan="11" class="vacio">Aún no hay liquidaciones de conductores</td></tr> }</tbody></table></div>
       }
 
       @case ('prestamos') {
@@ -204,8 +233,21 @@ const quincena = () => {
       <ng-container pie><button type="button" (click)="abono.set(null)">Cancelar</button><button class="primario" type="submit" form="form-ab" [disabled]="trabajando()">Abonar</button></ng-container>
     </app-modal>`,
   styles: [`
-    .grupo { margin-bottom: 12px; padding: 12px 14px; }
-    .cab-grupo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 8px; }
+    .cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 0 0 14px; }
+    .cifras > div { background: var(--gris-0); border: 1px solid var(--gris-2); border-radius: var(--radio-l); padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
+    .cifras span { font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gris-5); }
+    .cifras strong { font-size: 18px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+    .cifras .destacada { background: var(--tinta); border-color: var(--tinta); color: #fff; } .cifras .destacada span { color: var(--primario); }
+    .grupo { margin-bottom: 14px; padding: 14px 16px; }
+    .cab-grupo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 10px; }
+    .quien { display: inline-flex; align-items: center; gap: 10px; } .quien > span:last-child { display: flex; flex-direction: column; line-height: 1.25; }
+    .avatar-grupo { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--primario); color: var(--sobre-primario); font-weight: 800; font-size: 12.5px; flex: none; }
+    .resumen-liq { margin: 10px 0 0 auto; max-width: 340px; display: flex; flex-direction: column; gap: 3px; font-size: 13.5px; }
+    .resumen-liq div { display: flex; justify-content: space-between; gap: 16px; } .resumen-liq dt { color: var(--gris-5); } .resumen-liq dd { margin: 0; font-variant-numeric: tabular-nums; }
+    .resumen-liq .neto { margin-top: 4px; padding: 7px 10px; border-radius: 9px; background: var(--primario); color: var(--sobre-primario); font-weight: 800; }
+    .resumen-liq .neto dt { color: inherit; }
+    tfoot td { font-weight: 700; background: var(--gris-1); }
+    .num-liq { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
     .cab-grupo button { margin-left: auto; }
     .descuento { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; } .descuento input { width: 120px; }
     td.cero { color: var(--verde); font-weight: 600; }
@@ -288,11 +330,41 @@ export class PagoConductores {
   imprimirLote() { this.visorPdf?.ver('/gestion/liq-conductores-lote/pdf', 'Liquidaciones (dos por hoja)', { numeros: [...this.selLiq()].join(','), ver: 1 }); }
   async calcular() {
     this.agrupar.set(this.agrupacion);
-    try { this.calc.set(await this.api.post('/gestion/liq-conductores/calcular', { desde: this.f.desde, hasta: this.f.hasta, q: this.f.q })); this.sel.set(new Set()); this.descuentos.set({}); }
+    // Como en la plantilla, se liquidan todos los viajes del periodo: quedan elegidos y se pueden quitar uno a uno
+    try {
+      const c = await this.api.post<any>('/gestion/liq-conductores/calcular', { desde: this.f.desde, hasta: this.f.hasta, q: this.f.q });
+      this.calc.set(c); this.sel.set(new Set((c.lineas || []).map((l: any) => l.viaje))); this.descuentos.set({});
+    }
     catch (e) { this.avisos.error(e); }
   }
   alternar(id: string) { const s = new Set(this.sel()); if (s.has(id)) s.delete(id); else s.add(id); this.sel.set(s); }
   seleccionGrupo(g: any) { return g.lineas.filter((l: any) => this.sel().has(l.viaje)); }
+  // Totales de los viajes elegidos del grupo (como el resumen del documento de la liquidación)
+  totalesGrupo(g: any) {
+    const ls = this.seleccionGrupo(g); const s = (k: string) => ls.reduce((a: number, l: any) => a + (Number(l[k]) || 0), 0);
+    const t = { viajes: ls.length, flete: s('flete'), auxiliar: s('auxiliar'), anticipo: s('anticipoReconocido'), retefuente: s('retefuente'), fopat: s('fopat'), saldos: 0 };
+    t.saldos = t.flete + t.auxiliar - t.anticipo;
+    return ls.length ? t : null;
+  }
+  // Préstamo que se descontará: el escrito a mano o, si no, las cuotas vencidas (sin pasar del saldo)
+  descuentoGrupo(g: any) {
+    const pr = this.calc()?.prestamos?.[g.cedula]; const t = this.totalesGrupo(g);
+    if (!pr || !t || !g.unConductor) return 0;
+    const escrito = this.descuentos()[g.clave];
+    return Math.max(0, Math.min(escrito ?? pr.total ?? 0, t.saldos - t.retefuente - t.fopat));
+  }
+  iniciales(t: string) { return String(t || '').split(/[\s·]+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase(); }
+  estadoPago(l: any): [string, string] {
+    if (l.estado === 'ANULADA') return ['Anulada', 'error'];
+    const pagado = Number(l.pagado) || 0;
+    return pagado >= l.neto - 0.5 ? ['Pagada', 'ok'] : pagado > 0 ? ['Pago parcial', 'alerta'] : ['Por pagar', 'alerta'];
+  }
+  readonly resumenLiq = computed(() => {
+    const v = this.liquidaciones().filter(l => l.estado !== 'ANULADA');
+    if (!v.length) return null;
+    const neto = v.reduce((a, l) => a + (Number(l.neto) || 0), 0); const pagado = v.reduce((a, l) => a + Math.min(Number(l.pagado) || 0, Number(l.neto) || 0), 0);
+    return { vigentes: v.length, neto, pagado, porPagar: neto - pagado };
+  });
   todosGrupo(g: any) { return g.lineas.every((l: any) => this.sel().has(l.viaje)); }
   alternarGrupo(g: any) {
     const s = new Set(this.sel()); const todos = this.todosGrupo(g);

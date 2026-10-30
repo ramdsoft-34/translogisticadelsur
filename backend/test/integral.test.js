@@ -1042,7 +1042,30 @@ test('Gestión: relaciones, soporte interno MC/RC y remesas Dulces', async () =>
   assert.equal(otra.mc, si.body.mc, 'el número no cambia');
   const pdf = await s.manif.get(`/api/gestion/soportes/viajes/${v.body._id}/pdf`);
   assert.equal(pdf.headers['content-type'], 'application/pdf');
-  // Remesas Dulces: importar la base y generar las remesas
+  // Cumplir, anular el cumplido, anular y generar uno nuevo; el QR del anulado ya no es válido
+  const vid = v.body._id;
+  const enEstado = async (estado) => (await s.manif.get(`/api/viajes?soporte=1&soporteEstado=${estado}&limite=200`)).body.viajes.some(x => x._id === vid);
+  assert.ok(await enEstado('vigente'));
+  const cu = await s.manif.post(`/api/gestion/soportes/viajes/${vid}/cumplir`, { llegada: '2026-11-14', cantidad: 800, observaciones: 'Entregado' });
+  assert.equal(cu.status, 200, JSON.stringify(cu.body));
+  assert.equal(cu.body.estado, 'cumplido');
+  assert.ok(await enEstado('cumplido'));
+  assert.equal((await s.manif.post(`/api/gestion/soportes/viajes/${vid}/cumplir`, {})).status, 409, 'no se cumple dos veces');
+  assert.equal((await s.manif.post(`/api/gestion/soportes/viajes/${vid}/anular`, { motivo: 'x' })).status, 400, 'el motivo es obligatorio');
+  assert.equal((await s.manif.post(`/api/gestion/soportes/viajes/${vid}/anular`, { motivo: 'Se cumplió por error', soloCumplido: true })).body.estado, '');
+  assert.ok(await enEstado('vigente'));
+  const an = await s.manif.post(`/api/gestion/soportes/viajes/${vid}/anular`, { motivo: 'Placa equivocada' });
+  assert.equal(an.body.estado, 'anulado');
+  assert.equal((await s.manif.post(`/api/gestion/soportes/viajes/${vid}/cumplir`, {})).status, 409, 'anulado no se cumple');
+  const verAnulado = (await api().get(`/api/publico/soportes/${si.body.codigo}`)).body;
+  assert.equal(verAnulado.valido, false); assert.match(verAnulado.motivo, /anulado/);
+  const nuevo = (await s.manif.post(`/api/gestion/soportes/viajes/${vid}`, { reemplazar: true })).body;
+  assert.notEqual(nuevo.mc, si.body.mc, 'se numera un soporte nuevo');
+  assert.equal(nuevo.estado, '');
+  const verViejo = (await api().get(`/api/publico/soportes/${si.body.codigo}`)).body;
+  assert.equal(verViejo.valido, false); assert.match(verViejo.motivo, new RegExp(`reemplazado por el ${nuevo.mc}`));
+  assert.equal((await api().get(`/api/publico/soportes/${nuevo.codigo}`)).body.valido, true);
+  // Remesas: importar la base y generar las remesas
   const ExcelJS = (await import('exceljs')).default;
   const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('BASE');
   ws.addRow(['VPL', 'FECHA', 'ZONA', 'PESO', 'MANIFIESTO', 'CONDUCTOR', 'PLACA', 'REMESA', 'COSTO']);

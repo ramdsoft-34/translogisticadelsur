@@ -2,7 +2,8 @@ import { P } from './modelos';
 
 // Mapa de la aplicación: módulos y sus páginas (menú lateral).
 // Es la única fuente de la navegación: la usan el menú lateral y el buscador (Ctrl + K).
-export interface Pagina { ruta: string; texto: string; icono: string; permisos: string[]; descripcion: string; claves?: string }
+// `ocultarCon`: la página no se muestra a quien tiene ese permiso (la ve dentro de otra página)
+export interface Pagina { ruta: string; texto: string; icono: string; permisos: string[]; descripcion: string; claves?: string; ocultarCon?: string }
 export interface Modulo { id: string; nombre: string; icono: string; paginas: Pagina[] }
 
 export const MODULOS: Modulo[] = [
@@ -15,9 +16,10 @@ export const MODULOS: Modulo[] = [
     { ruta: '/monitoreo', texto: 'Monitoreo', icono: 'ubicacion', permisos: [P.VIAJES_VER], descripcion: 'Rastreo GPS en vivo e historial de recorridos', claves: 'rastreo gps sur track mapa' },
   ] },
   { id: 'documentos', nombre: 'Documentos', icono: 'documento', paginas: [
-    { ruta: '/manifiestos', texto: 'Manifiestos', icono: 'documento', permisos: [P.RNDC_OPERAR], descripcion: 'Expedir, cumplir y anular remesas y manifiestos', claves: 'remesa expedir cumplido anular rndc' },
-    { ruta: '/soporte-interno', texto: 'Soporte interno', icono: 'documento', permisos: [P.VIAJES_VER], descripcion: 'Viajes sin manifiesto con su soporte MC/RC y QR', claves: 'mc rc qr' },
-    { ruta: '/remesas-dulces', texto: 'Remesas Dulces', icono: 'documento', permisos: [P.VIAJES_REGISTRAR], descripcion: 'Remesas de Dulces & Dulces desde su base en Excel' },
+    { ruta: '/manifiestos', texto: 'Manifiestos', icono: 'documento', permisos: [P.RNDC_OPERAR], descripcion: 'Expedir, cumplir y anular remesas y manifiestos, y el soporte interno', claves: 'remesa expedir cumplido anular rndc soporte interno mc rc' },
+    // Quien opera manifiestos lo tiene como pestaña dentro de «Manifiestos»
+    { ruta: '/soporte-interno', texto: 'Soporte interno', icono: 'documento', permisos: [P.VIAJES_VER], descripcion: 'Viajes sin manifiesto con su soporte MC/RC y QR', claves: 'mc rc qr', ocultarCon: P.RNDC_OPERAR },
+    { ruta: '/remesas-dulces', texto: 'Remesas', icono: 'documento', permisos: [P.VIAJES_REGISTRAR], descripcion: 'Remesas desde la base de viajes en Excel (VPL), dos por hoja', claves: 'vpl remesas imprimir' },
   ] },
   { id: 'finanzas', nombre: 'Finanzas', icono: 'dinero', paginas: [
     { ruta: '/liquidaciones', texto: 'Facturación a clientes', icono: 'dinero', permisos: [P.LIQUIDACION_VER], descripcion: 'Liquidar los viajes de cada cliente para facturar', claves: 'liquidacion fletes cobro' },

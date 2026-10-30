@@ -115,12 +115,12 @@ export class CierreMes {
   }
 }
 
-// ── Remesas Dulces & Dulces ──
+// ── Remesas (base VPL en Excel) ──
 @Component({
   selector: 'app-remesas-dulces',
   imports: [FormsModule, Icono, VisorPdf, ...FORMATOS],
   template: `
-    <div class="pagina-cab"><div><h1>Remesas Dulces & Dulces</h1>
+    <div class="pagina-cab"><div><h1>Remesas</h1>
       <p class="sutil">Cargue la base de viajes (Excel con las columnas VPL, FECHA, ZONA, PESO, MANIFIESTO, CONDUCTOR, PLACA, REMESA y COSTO),
         elija los VPL e imprima las remesas, dos por hoja. Las cédulas que falten se toman del registro de conductores.</p></div>
       <div class="acciones">
@@ -166,7 +166,7 @@ export class RemesasDulces {
     catch (e) { this.avisos.error(e); } finally { input.value = ''; }
   }
   async imprimir() {
-    await this.visor().ver('/gestion/remesas-dulces/pdf', 'Remesas Dulces & Dulces', undefined, { vpls: [...this.sel()] });
+    await this.visor().ver('/gestion/remesas-dulces/pdf', 'Remesas', undefined, { vpls: [...this.sel()] });
     this.cargar();
   }
 }

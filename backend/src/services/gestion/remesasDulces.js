@@ -50,7 +50,7 @@ export async function cedulaDe(empresaId, x) {
 
 // Remesas en PDF, dos por hoja carta
 export async function remesasPdf(empresa, lista) {
-  const doc = new PDFDocument({ size: 'LETTER', margin: 30, info: { Title: 'Remesas Dulces & Dulces' } });
+  const doc = new PDFDocument({ size: 'LETTER', margin: 30, info: { Title: 'Remesas' } });
   const ancho = doc.page.width - 60;
   const alto = (doc.page.height - 60 - 20) / 2;
   const $ = (n) => `$ ${Math.round(Number(n) || 0).toLocaleString('es-CO')}`;

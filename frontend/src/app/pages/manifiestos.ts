@@ -54,6 +54,10 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
               <app-icono nombre="correo" />Aprobar correos ({{ seleccion().size }})</button>
           }
         }
+        @if (pestana() === 'soporte' && seleccion().size) {
+          <button type="button" (click)="abrirCorreoManual(true)" [disabled]="trabajando()" title="Correo con los soportes internos elegidos y archivos adjuntos">
+            <app-icono nombre="correo" />Correo con {{ seleccion().size }} soporte(s)</button>
+        }
         @if (puedeCrear && !vista()) { <button class="primario" (click)="nuevoManifiesto()"><app-icono nombre="mas" />Nuevo manifiesto</button> }
       </div>
     </div>
@@ -71,6 +75,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       <button [class.activa]="pestana() === 'manifestados'" (click)="ir('manifestados')">Manifestados</button>
       <button [class.activa]="pestana() === 'cumplidos'" (click)="ir('cumplidos')">Cumplidos</button>
       <button [class.activa]="pestana() === 'anulados'" (click)="ir('anulados')" title="Viajes con la remesa o el manifiesto anulados en el RNDC">Anulados</button>
+      <button [class.activa]="pestana() === 'soporte'" (click)="ir('soporte')" title="Viajes que no van al RNDC: soporte interno MC/RC">Soporte interno</button>
     </div>
     }
     <section class="barra" aria-label="Filtros">
@@ -111,7 +116,14 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       </div>
     }
     @if (pestana() === 'soporte') {
-      <p class="sutil" style="margin:-6px 0 12px">Viajes que no van al RNDC. Cada uno lleva su soporte interno (MC/RC) con un código QR que se puede escanear para comprobar que existe y es válido.</p>
+      <div class="filtros soporte-filtros">
+        <p class="sutil">Viajes que no van al RNDC. Cada uno lleva su soporte interno (MC/RC) con un código QR que cualquiera puede escanear para comprobar que es válido. Se cumplen, se anulan y se envían por correo igual que los manifiestos.</p>
+        <div class="segmentos">
+          @for (e of estadosSoporte; track e[0]) {
+            <button type="button" [class.activo]="soporteEstado() === e[0]" (click)="soporteEstado.set(e[0]); cargar()">{{ e[1] }}</button>
+          }
+        </div>
+      </div>
     }
     @if (pestana() === 'anulados') {
       <p class="sutil" style="margin:-6px 0 12px">Viajes con la remesa o el manifiesto anulados. Si el manifiesto se anuló para reemplazarlo, expida aquí el nuevo.</p>
@@ -167,7 +179,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                 <td data-etiqueta="Placa"><strong>{{ v.placa }}</strong></td><td data-etiqueta="Conductor">{{ v.conductorNombre }}</td><td data-etiqueta="Flete" class="num">{{ v.flete | pesos }}</td>
                 @if (pestana() === 'soporte') {
                 <td data-etiqueta="Remesa">@if ($any(v).soporteInterno?.rc) { {{ $any(v).soporteInterno.rc }}<br /><span class="chip ok sin-punto">interna</span> } @else { <span class="chip alerta sin-punto">sin soporte</span> }</td>
-                <td data-etiqueta="Manifiesto">@if ($any(v).soporteInterno?.mc) { {{ $any(v).soporteInterno.mc }}<br /><span class="sutil">Cód. {{ $any(v).soporteInterno.codigo }}</span> }</td>
+                <td data-etiqueta="Manifiesto">@if ($any(v).soporteInterno?.mc) { {{ $any(v).soporteInterno.mc }}<br /><span class="chip" [class]="chipSoporte($any(v))">{{ textoSoporte($any(v)) }}</span>
+                  @if ($any(v).soporteInterno.estado === 'anulado' && $any(v).soporteInterno.anulado?.motivo) { <br /><span class="sutil" [title]="$any(v).soporteInterno.anulado.motivo">{{ $any(v).soporteInterno.anulado.motivo }}</span> }
+                  @else { <br /><span class="sutil">Cód. {{ $any(v).soporteInterno.codigo }}</span> } }</td>
                 } @else {
                 <td data-etiqueta="Remesa">@if (v.remesa.numero) { {{ v.remesa.numero }}<br /><span class="chip" [class]="chip(v.remesa.estado)">{{ v.remesa.estado || 'sin enviar' }}</span> }</td>
                 <td data-etiqueta="Manifiesto">@if (v.manifiesto.numero) { {{ v.manifiesto.numero }}<br /><span class="chip" [class]="chip(v.manifiesto.estado)">{{ v.manifiesto.estado || 'sin enviar' }}</span> }
@@ -209,8 +223,28 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                         </div>
                       }
                       @case ('soporte') {
-                        <button class="pequeno" [class.primario]="!$any(v).soporteInterno?.mc" (click)="verSoporte(v)" [disabled]="trabajando()" title="Manifiesto y remesa internos con QR de verificación">
-                          <app-icono nombre="ojo" [tam]="15" />{{ $any(v).soporteInterno?.mc ? 'Ver soporte' : 'Generar soporte' }}</button>
+                        @let si = $any(v).soporteInterno;
+                        @if (!si?.mc) {
+                          <button class="pequeno primario" (click)="verSoporte(v)" [disabled]="trabajando()" title="Numera el MC/RC y muestra el soporte"><app-icono nombre="documento" [tam]="15" />Generar soporte</button>
+                        } @else if (si.estado === 'anulado') {
+                          <button class="pequeno" (click)="verSoporte(v)" title="Ver el soporte anulado"><app-icono nombre="ojo" [tam]="15" />Ver</button>
+                          <button class="pequeno primario" confirmar="Clic otra vez: se numera un MC/RC nuevo" (confirmado)="reemplazarSoporte(v)" [disabled]="trabajando()">Generar nuevo</button>
+                        } @else {
+                          <div class="pila-acciones">
+                            <div class="fila-acciones">
+                              <button class="pequeno" (click)="verSoporte(v)" title="Ver el soporte en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver</button>
+                              <button class="pequeno" (click)="correoSoporte(v)" title="Enviar el soporte por correo"><app-icono nombre="correo" [tam]="15" />Correo</button>
+                            </div>
+                            <div class="fila-acciones">
+                              @if (si.estado === 'cumplido') {
+                                <button class="pequeno peligro" (click)="abrirAnularSoporte(v, true)">Anular cumplido</button>
+                              } @else {
+                                <button class="pequeno primario" (click)="abrirCumplirSoporte(v)">Cumplir</button>
+                                <button class="pequeno peligro" (click)="abrirAnularSoporte(v, false)">Anular</button>
+                              }
+                            </div>
+                          </div>
+                        }
                       }
                       @case ('cumplidos') {
                         <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
@@ -247,16 +281,40 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       </div>
     }
 
+    <!-- Cumplido y anulación del soporte interno -->
+    <app-modal [titulo]="'Cumplir soporte interno ' + ($any(soporteCumplir()?.viaje)?.soporteInterno?.mc || '')" [abierto]="!!soporteCumplir()" (cerrar)="soporteCumplir.set(null)">
+      @if (soporteCumplir(); as c) {
+        <form id="form-cumplir-soporte" class="formulario" (ngSubmit)="cumplirSoporte()">
+          <p class="sutil" style="grid-column:1/-1">Viaje N° {{ c.viaje.numero }} · {{ c.viaje.placa }} · {{ c.viaje.destino }}. El soporte queda como entregado (no va al RNDC).</p>
+          <div class="campo"><label for="cs-lleg">Fecha de llegada</label><input id="cs-lleg" type="date" name="llegada" [(ngModel)]="c.llegada" required /></div>
+          <div class="campo"><label for="cs-cant">Cantidad entregada (kg)</label><input id="cs-cant" type="number" min="0" name="cantidad" [(ngModel)]="c.cantidad" /></div>
+          <div class="campo" style="grid-column:1/-1"><label for="cs-obs">Observaciones</label><input id="cs-obs" name="obs" maxlength="300" [(ngModel)]="c.observaciones" placeholder="Opcional" /></div>
+        </form>
+      }
+      <ng-container pie><button type="button" (click)="soporteCumplir.set(null)">Cancelar</button>
+        <button class="primario" type="submit" form="form-cumplir-soporte" [disabled]="trabajando()">Cumplir</button></ng-container>
+    </app-modal>
+    <app-modal [titulo]="(soporteAnular()?.soloCumplido ? 'Anular el cumplido del soporte ' : 'Anular soporte interno ') + ($any(soporteAnular()?.viaje)?.soporteInterno?.mc || '')" [abierto]="!!soporteAnular()" (cerrar)="soporteAnular.set(null)">
+      @if (soporteAnular(); as a) {
+        <form id="form-anular-soporte" class="formulario" style="grid-template-columns:1fr" (ngSubmit)="anularSoporte()">
+          <p class="sutil">@if (a.soloCumplido) { El soporte vuelve a quedar por cumplir. } @else { El soporte queda anulado: su QR mostrará que ya no es válido. Después puede generar uno nuevo para el mismo viaje. }</p>
+          <div class="campo"><label for="as-mot">Motivo</label><input id="as-mot" name="motivo" minlength="3" maxlength="300" required [(ngModel)]="a.motivo" placeholder="Ej.: placa equivocada, el viaje no se hizo…" /></div>
+        </form>
+      }
+      <ng-container pie><button type="button" (click)="soporteAnular.set(null)">Cancelar</button>
+        <button class="peligro" type="submit" form="form-anular-soporte" [disabled]="trabajando() || (soporteAnular()?.motivo || '').trim().length < 3">Anular</button></ng-container>
+    </app-modal>
+
     <!-- Correo manual: manifiestos elegidos (sueltos o en un solo PDF) y adjuntos -->
-    <app-modal titulo="Enviar manifiestos por correo" [abierto]="!!correoManual()" (cerrar)="correoManual.set(null)">
+    <app-modal [titulo]="correoManual()?.soportes ? 'Enviar soportes internos por correo' : 'Enviar manifiestos por correo'" [abierto]="!!correoManual()" (cerrar)="correoManual.set(null)">
       @if (correoManual(); as c) {
         <form id="form-correo-manual" class="formulario" style="grid-template-columns:1fr" (ngSubmit)="enviarCorreoManual()">
-          <p class="sutil">{{ c.viajes.length }} manifiesto(s) elegido(s).</p>
+          <p class="sutil">{{ c.viajes.length }} {{ c.soportes ? 'soporte(s) interno(s)' : 'manifiesto(s)' }} elegido(s).</p>
           <div class="campo"><label for="cm-para">Para</label><input id="cm-para" name="para" [(ngModel)]="c.para" placeholder="correo@cliente.com, otro@cliente.com" required /></div>
           <div class="campo"><label for="cm-cc">Copia</label><input id="cm-cc" name="cc" [(ngModel)]="c.cc" /></div>
           <div class="campo"><label for="cm-as">Asunto</label><input id="cm-as" name="asunto" [(ngModel)]="c.asunto" /></div>
           <div class="campo"><label for="cm-tx">Mensaje</label><textarea id="cm-tx" name="texto" rows="4" [(ngModel)]="c.texto" placeholder="Opcional: si lo deja vacío va un saludo con la firma de la empresa"></textarea></div>
-          <label class="casilla"><input type="checkbox" name="unir" [(ngModel)]="c.unir" />Unir los manifiestos en un solo PDF</label>
+          @if (c.viajes.length > 1) { <label class="casilla"><input type="checkbox" name="unir" [(ngModel)]="c.unir" />Unir {{ c.soportes ? 'los soportes' : 'los manifiestos' }} en un solo PDF</label> }
           <div class="campo"><label for="cm-adj">Adjuntar archivos (opcional)</label><input id="cm-adj" type="file" multiple (change)="leerAdjuntosManual($event, c)" />
             @if (c.adjuntos.length) { <small>{{ c.adjuntos.length }} archivo(s) adjunto(s)</small> }</div>
         </form>
@@ -409,6 +467,8 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       </ng-container>
     </app-modal>`,
   styles: [`
+    .soporte-filtros { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 18px; margin: -6px 0 12px; }
+    .soporte-filtros p { margin: 0; flex: 1 1 380px; }
     .pila-acciones { display: inline-flex; flex-direction: column; align-items: stretch; gap: 6px; }
     .fila-acciones { display: flex; gap: 8px; justify-content: flex-end; }
     label.sub { margin-top: 10px; }
@@ -486,7 +546,7 @@ export class Manifiestos {
   // Vista fija desde el menú (Soporte interno, Envíos al RNDC, Correos); vacía = Manifiestos con sus pestañas
   readonly vista = input<'' | 'soporte' | 'historial' | 'correos'>('');
   private static readonly VISTAS: Record<string, [string, string]> = {
-    '': ['Manifiestos', 'Expida las remesas y los manifiestos, cumpla y anule. Si el RNDC rechaza algo, corríjalo y reenvíe. Los viajes sin manifiesto están en «Soporte interno».'],
+    '': ['Manifiestos', 'Expida las remesas y los manifiestos, cumpla y anule. Si el RNDC rechaza algo, corríjalo y reenvíe. Los viajes sin manifiesto están en la pestaña «Soporte interno».'],
     soporte: ['Soporte interno', 'Viajes que no van al RNDC. Cada uno lleva su soporte interno (MC/RC) con un código QR que cualquiera puede escanear para comprobar que es válido.'],
     historial: ['Envíos al RNDC', 'Todo lo que la plataforma ha enviado al RNDC y lo que respondió: útil para revisar rechazos y radicados.'],
     correos: ['Correos de manifiestos', 'Envío de manifiestos y cartas de salida a los clientes: por aprobar, enviados y con error.'],
@@ -494,8 +554,11 @@ export class Manifiestos {
   readonly titulo = computed(() => Manifiestos.VISTAS[this.vista() || ''][0]);
   readonly descripcion = computed(() => Manifiestos.VISTAS[this.vista() || ''][1]);
 
+  // Pestaña inicial por la dirección (?abrir=soporte)
+  readonly abrir = input<string>('');
   ngOnInit() {
     if (this.vista()) this.pestana.set(this.vista() as Pestana);
+    else if (['pendientes', 'manifestados', 'cumplidos', 'anulados', 'soporte'].includes(this.abrir())) this.pestana.set(this.abrir() as Pestana);
     this.cargar();
   }
 
@@ -518,7 +581,7 @@ export class Manifiestos {
       }
       else {
         this.pagina = 1;
-        const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: 1, limite: 50, historico: 0, ...(this.pestana() === 'soporte' ? {} : { rndc: 1 }) });
+        const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: 1, limite: 50, historico: 0, ...this.filtroSoporte() });
         this.viajes.set(r.viajes); this.total.set(r.total);
         this.cargarCorreos(r.viajes);
       }
@@ -533,7 +596,7 @@ export class Manifiestos {
     if (['historial', 'correos'].includes(this.pestana()) || this.cargandoMas() || this.viajes().length >= this.total()) return;
     this.cargandoMas.set(true);
     try {
-      const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: this.pagina + 1, limite: 50, historico: 0, ...(this.pestana() === 'soporte' ? {} : { rndc: 1 }) });
+      const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: this.pagina + 1, limite: 50, historico: 0, ...this.filtroSoporte() });
       this.pagina += 1;
       this.viajes.update(l => [...l, ...r.viajes]);
       this.cargarCorreos(this.viajes());
@@ -607,23 +670,27 @@ export class Manifiestos {
   verCorreos(v: Viaje) { this.correosViaje.set(v); }
 
   // ── Aprobación de correos: nada sale al cliente sin confirmación ──
-  readonly conSeleccion = computed(() => this.pestana() === 'pendientes' || this.pestana() === 'manifestados');
+  readonly conSeleccion = computed(() => ['pendientes', 'manifestados', 'soporte'].includes(this.pestana()));
   tienePorAprobar(viajeId: string) { return (this.enviosPorViaje().get(viajeId) || []).some(e => e.estado === 'por_aprobar'); }
   readonly porAprobar = computed(() => this.viajes().filter(v => (this.enviosPorViaje().get(v._id) || []).some(e => e.estado === 'por_aprobar')).map(v => v._id));
   // ── Correo manual ──
   readonly correoManual = signal<any>(null);
-  abrirCorreoManual() {
-    const ids = [...this.seleccion()];
-    const cli = this.viajes().find(v => ids.includes(v._id))?.cliente as any;
+  abrirCorreoManual(soportes = false, ids = [...this.seleccion()]) {
+    const elegidos = this.viajes().filter(v => ids.includes(v._id));
+    if (soportes && elegidos.some(v => !(v as any).soporteInterno?.mc)) { this.avisos.mostrar('Genere primero el soporte de los viajes elegidos', 'error'); return; }
+    const cli = elegidos[0]?.cliente as any;
     const para = (cli?.envios?.destinatarios || cli?.correos || []).join(', ');
-    this.correoManual.set({ viajes: ids, para, cc: '', asunto: '', texto: '', unir: true, adjuntos: [] });
+    const cc = (cli?.envios?.cc || []).join(', ');
+    const asunto = soportes ? `Soporte interno ${elegidos.map(v => (v as any).soporteInterno?.mc).filter(Boolean).join(', ')} - ${cli?.nombre || ''}`.trim() : '';
+    this.correoManual.set({ viajes: ids, soportes, para, cc, asunto, texto: '', unir: true, adjuntos: [] });
   }
+  correoSoporte(v: Viaje) { this.abrirCorreoManual(true, [v._id]); }
   async leerAdjuntosManual(ev: Event, c: any) { c.adjuntos = await leerArchivos(ev, this.avisos); }
   async enviarCorreoManual() {
     const c = this.correoManual(); const lista = (t: string) => String(t || '').split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
     this.trabajando.set(true);
     try {
-      const r = await this.api.post<any>('/correo/manual', { para: lista(c.para), cc: lista(c.cc), asunto: c.asunto, texto: c.texto, viajes: c.viajes, unir: c.unir, adjuntos: c.adjuntos });
+      const r = await this.api.post<any>('/correo/manual', { para: lista(c.para), cc: lista(c.cc), asunto: c.asunto, texto: c.texto, ...(c.soportes ? { soportes: c.viajes } : { viajes: c.viajes }), unir: c.unir, adjuntos: c.adjuntos });
       if (r.estado === 'enviado') { this.avisos.ok(`Correo enviado: ${r.adjuntos?.length || 0} archivo(s)`); this.correoManual.set(null); }
       else this.avisos.mostrar(`No se envió: ${r.error}`, 'error');
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
@@ -729,6 +796,43 @@ export class Manifiestos {
 
   // Ver el PDF del manifiesto en pantalla (sin descargarlo). En el celular se abre en otra pestaña.
   readonly pdfVisto = signal<{ titulo: string; url: string; seguro: SafeResourceUrl } | null>(null);
+  // ── Soporte interno: estado, cumplido, anulación y reemplazo ──
+  readonly estadosSoporte: [string, string][] = [['', 'Todos'], ['vigente', 'Por cumplir'], ['cumplido', 'Cumplidos'], ['anulado', 'Anulados']];
+  readonly soporteEstado = signal('');
+  private filtroSoporte() {
+    if (this.pestana() !== 'soporte') return { rndc: 1 };
+    return this.soporteEstado() ? { soporteEstado: this.soporteEstado() } : {};
+  }
+  chipSoporte(v: any) { return ({ cumplido: 'ok', anulado: 'error' } as Record<string, string>)[v.soporteInterno?.estado] || 'alerta'; }
+  textoSoporte(v: any) { return ({ cumplido: 'cumplido', anulado: 'anulado' } as Record<string, string>)[v.soporteInterno?.estado] || 'por cumplir'; }
+  readonly soporteCumplir = signal<{ viaje: Viaje; llegada: string; cantidad: number | null; observaciones: string } | null>(null);
+  readonly soporteAnular = signal<{ viaje: Viaje; motivo: string; soloCumplido: boolean } | null>(null);
+  abrirCumplirSoporte(v: Viaje) { this.soporteCumplir.set({ viaje: v, llegada: hoyIso(), cantidad: (v as any).pesoKg ?? null, observaciones: '' }); }
+  abrirAnularSoporte(v: Viaje, soloCumplido: boolean) { this.soporteAnular.set({ viaje: v, motivo: '', soloCumplido }); }
+  async cumplirSoporte() {
+    const c = this.soporteCumplir(); if (!c) return;
+    this.trabajando.set(true);
+    try {
+      const s = await this.api.post<any>(`/gestion/soportes/viajes/${c.viaje._id}/cumplir`, { llegada: c.llegada, cantidad: c.cantidad, observaciones: c.observaciones });
+      this.avisos.ok(`Soporte ${s.mc} cumplido`); this.soporteCumplir.set(null); this.cargar();
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+  async anularSoporte() {
+    const a = this.soporteAnular(); if (!a) return;
+    this.trabajando.set(true);
+    try {
+      const s = await this.api.post<any>(`/gestion/soportes/viajes/${a.viaje._id}/anular`, { motivo: a.motivo, soloCumplido: a.soloCumplido });
+      this.avisos.ok(a.soloCumplido ? `Cumplido del soporte ${s.mc} anulado` : `Soporte ${s.mc} anulado`); this.soporteAnular.set(null); this.cargar();
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+  async reemplazarSoporte(v: Viaje) {
+    this.trabajando.set(true);
+    try {
+      const s = await this.api.post<any>(`/gestion/soportes/viajes/${v._id}`, { reemplazar: true });
+      this.avisos.ok(`Nuevo soporte ${s.mc} / ${s.rc}`); this.cargar();
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+
   // Soporte interno MC/RC: se numera si aún no lo tiene y se muestra en pantalla
   async verSoporte(v: Viaje) {
     this.trabajando.set(true);
