@@ -25,7 +25,7 @@ import { RouterLink } from '@angular/router';
 import { AutorizacionAdmin } from '../core/autorizacion.service';
 
 interface Formulario {
-  licencia?: string; conLicencia?: boolean; numeroManifiesto?: string;
+  licencia?: string; numeroManifiesto?: string;
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
   placa: string; remolque: string; conductor: string; titular: string;
   pesoKg: number | null; cantidad: number | null; conAuxiliar: boolean; diasAuxiliar: number | null; planilla: string;
@@ -154,10 +154,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         </div>
 
         <label for="v-lic">Licencia:</label>
-        <div class="con-casilla">
-          <input id="v-lic" name="licencia" [(ngModel)]="f.licencia" placeholder="Categoría-número" />
-          <input type="checkbox" name="conLicencia" [(ngModel)]="f.conLicencia" title="Guardar la licencia con el viaje (va en el reporte de WhatsApp)" aria-label="Guardar la licencia con el viaje" />
-        </div>
+        <input id="v-lic" name="licencia" [(ngModel)]="f.licencia" placeholder="Categoría-número" />
 
         <label for="v-placa">Placa:</label>
         <div>
@@ -213,6 +210,10 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
           <span>Retefuente 1% <strong>{{ ((f.flete || 0) * 0.01) | pesos }}</strong></span>
         </div>
 
+        @if (rastreoHabilitado() && !f._id) {
+          <span class="etq">Sur Track:</span>
+          <label class="casilla sur-track"><input type="checkbox" name="rastrear" [ngModel]="rastrear()" (ngModelChange)="rastrear.set($event)" />Registrar este viaje en Sur Track (rastreo GPS)</label>
+        }
         <label for="v-fecha">Fecha:</label>
         <input id="v-fecha" type="date" class="corto" name="fecha" [(ngModel)]="f.fecha" (ngModelChange)="fechaFormulario($event)" [disabled]="bloqueado()" required />
       </form>
@@ -263,10 +264,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             @for (p of waPlantillas(); track p._id) { <option [value]="p._id">{{ p.nombre }}{{ p.predeterminada ? ' (predeterminada)' : '' }}</option> }</select></div>
         <button type="button" (click)="plantillasAbierto.set(true)" style="margin-left:auto" [title]="'Editar las plantillas del mensaje'"><app-icono nombre="editar" [tam]="16" />Plantillas</button>
       </div>
-      <label class="casilla wa-unificar" title="Solo cambia el mensaje de WhatsApp: los valores guardados del viaje no se modifican">
-        <input type="checkbox" [(ngModel)]="waUnificar" (change)="cargarWhatsapp()" />
-        <span><strong>Unificar auxiliar</strong> <small class="sutil">— en el mensaje, el auxiliar se suma al flete y al anticipo y se escribe «Unificado». Los valores del viaje no cambian.</small></span>
-      </label>
+      <p class="wa-unificar sutil"><span><strong>Reportar</strong> elige los viajes del mensaje. <strong>Unificar aux.</strong> suma el auxiliar al flete y al anticipo de ese viaje y escribe «Unificado» (solo en el mensaje; los valores del viaje no cambian).</span></p>
 
       <div class="wa-columnas" [class.apilado]="enFormulario">
         <!-- Izquierda: los viajes de la fecha -->
@@ -274,7 +272,12 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
           <p class="sutil wa-conteo">{{ waViajes().length }} viaje(s) · {{ waPendientes() }} pendiente(s) · {{ waSeleccion().size }} elegido(s)</p>
           @for (x of waViajes(); track x._id) {
             <article class="wa-tarjeta" [class.elegida]="waSeleccion().has(x._id)" (click)="waAlternar(x._id)">
-              <input type="checkbox" [checked]="waSeleccion().has(x._id)" (click)="$event.stopPropagation()" (change)="waAlternar(x._id)" [attr.aria-label]="'Reportar viaje ' + x.numero" />
+              <div class="wa-checks" (click)="$event.stopPropagation()">
+                <label class="casilla" title="Incluir este viaje en el mensaje"><input type="checkbox" [checked]="waSeleccion().has(x._id)" (change)="waAlternar(x._id)" [attr.aria-label]="'Reportar viaje ' + x.numero" />Reportar</label>
+                @if (x.auxiliar) {
+                  <label class="casilla" title="Sumar el auxiliar al flete y al anticipo en el mensaje"><input type="checkbox" [checked]="waUnificados().has(x._id)" (change)="waAlternarUnificado(x._id)" [attr.aria-label]="'Unificar auxiliar del viaje ' + x.numero" />Unificar aux.</label>
+                }
+              </div>
               <div class="wa-cuerpo">
                 <div class="wa-fila1"><strong>N° {{ x.numero }}</strong> <span class="sutil">{{ x.cliente }}</span>
                   <span class="chip sin-punto" [class.ok]="x.reportado" [class.alerta]="!x.reportado">{{ x.reportado ? 'Reportado' : 'Pendiente' }}</span></div>
@@ -285,7 +288,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
                   <span>Anticipo <strong>{{ x.anticipo | pesos }}</strong></span>
                   @if (x.auxiliar) { <span>Aux. {{ x.diasAuxiliar }}d <strong>{{ x.auxiliar | pesos }}</strong></span> } @else { <span class="sutil">Sin auxiliar</span> }
                 </div>
-                @if (waUnificar && x.auxiliar && waSeleccion().has(x._id)) {
+                @if (waUnificados().has(x._id) && x.auxiliar && waSeleccion().has(x._id)) {
                   <div class="wa-unificado">En el mensaje: Flete {{ (x.flete + x.auxiliar) | pesos }} · Anticipo {{ (x.anticipo > 0 ? x.anticipo + x.auxiliar : 0) | pesos }} · Auxiliar unificado</div>
                 }
               </div>
@@ -349,7 +352,9 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     @media (max-width: 1100px) { .registro-columnas { grid-template-columns: 1fr; } .col-wa { position: static; max-height: none; } }
     .wa-barra { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
     .wa-barra .activo-filtro { background: var(--gris-8); color: var(--gris-0); border-color: var(--gris-8); }
-    .wa-unificar { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-0); }
+    .wa-checks { display: flex; flex-direction: column; gap: 4px; flex: none; } .wa-checks .casilla { font-size: 12.5px; white-space: nowrap; margin: 0; }
+    .sur-track { margin: 0; font-size: 13px; }
+    .wa-unificar { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0; padding: 8px 12px; font-size: 12.5px; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-0); }
     .wa-columnas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
     .wa-conteo { margin: 0 0 8px; }
     .wa-viajes { display: flex; flex-direction: column; gap: 10px; }
@@ -405,7 +410,15 @@ export class Viajes {
   readonly waMensajes = signal<any[]>([]);
   waFecha = hoyIso();
   waIncluir = false;
-  waUnificar = false;
+  // Viajes cuyo auxiliar se unifica en el mensaje (independiente de los que se reportan)
+  readonly waUnificados = signal<Set<string>>(new Set());
+  waAlternarUnificado(id: string) {
+    const u = new Set(this.waUnificados()); if (u.has(id)) u.delete(id); else u.add(id);
+    this.waUnificados.set(u);
+    // Unificar un viaje lo incluye en el reporte
+    if (u.has(id) && !this.waSeleccion().has(id)) { this.waAlternar(id); return; }
+    this.cargarWhatsapp();
+  }
   // Viajes de la fecha para elegir cuáles se reportan (ninguno marcado al abrir)
   readonly waViajes = signal<any[]>([]);
   readonly waSeleccion = signal(new Set<string>());
@@ -535,7 +548,7 @@ export class Viajes {
       titular: v.titular?._id || '', pesoKg: v.pesoKg, cantidad: v.cantidad, conAuxiliar: v.conAuxiliar, diasAuxiliar: v.diasAuxiliar || null, planilla: v.planilla || '', tarifa: v.tarifa,
       flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones, estado: v.estado, historico: !!v.historico,
       requiereManifiesto: v.requiereManifiesto !== false,
-      licencia: (v as any).licencia || '', conLicencia: !!(v as any).licencia, numeroManifiesto: (v as any).numerosManuales?.manifiesto || '',
+      licencia: (v as any).licencia || '', numeroManifiesto: (v as any).numerosManuales?.manifiesto || '',
     });
     this.preguntarManifiesto.set(false);
     this.habilitarRndc = false;
@@ -632,8 +645,8 @@ export class Viajes {
     if (!f._id) f.requiereManifiesto = !!requiere;
     if (!f.conductor && !this.bloqueado()) { this.avisos.mostrar('Seleccione el conductor', 'error'); return; }
     const cuerpo: any = { ...f, placa: f.placa.toUpperCase(), remolque: (f.remolque || '').toUpperCase(), tarifaRef: f.tarifaRef || null,
-      licencia: f.conLicencia ? (f.licencia || '').trim() : '', numeroManifiesto: (f.numeroManifiesto || '').trim().toUpperCase() };
-    delete cuerpo._id; delete cuerpo.estado; delete cuerpo.titular; delete cuerpo.conLicencia;
+      licencia: (f.licencia || '').trim(), numeroManifiesto: (f.numeroManifiesto || '').trim().toUpperCase() };
+    delete cuerpo._id; delete cuerpo.estado; delete cuerpo.titular;
     if (!cuerpo.numeroManifiesto && !f._id) delete cuerpo.numeroManifiesto;
     for (const k of ['pesoKg', 'cantidad', 'diasAuxiliar', 'tarifa', 'flete', 'anticipo']) if (cuerpo[k] === null || cuerpo[k] === '') delete cuerpo[k];
     delete cuerpo.historico;
@@ -719,10 +732,10 @@ export class Viajes {
 
   // reiniciar: al cambiar la fecha o el filtro se quita la selección
   async cargarWhatsapp(reiniciar = false) {
-    if (reiniciar) this.waSeleccion.set(new Set());
+    if (reiniciar) { this.waSeleccion.set(new Set()); this.waUnificados.set(new Set()); }
     try {
       const r = await this.api.get<{ mensajes: any[]; viajes: any[] }>('/viajes/reporte-whatsapp', { fecha: this.waFecha, incluirReportados: this.waIncluir ? 1 : 0,
-        plantilla: this.waPlantilla, seleccion: 1, viajes: [...this.waSeleccion()].join(','), unificarAuxiliar: this.waUnificar ? 1 : 0 });
+        plantilla: this.waPlantilla, seleccion: 1, viajes: [...this.waSeleccion()].join(','), unificar: [...this.waUnificados()].join(',') });
       this.waViajes.set(r.viajes);
       // Lo elegido que ya no está en la lista (p. ej. marcado como reportado) se quita de la selección
       const ids = new Set(r.viajes.map(x => x._id));

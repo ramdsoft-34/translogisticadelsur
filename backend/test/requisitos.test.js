@@ -129,6 +129,14 @@ test('RNF-01: TOTP según el vector de prueba del RFC 6238', () => {
   assert.equal(verificarTotp(secreto, '287082', { ahora: 59000, ultimoPaso: 1 }), -1, 'un código no se usa dos veces');
 });
 
+test('RF-WA-03b: «Unificar aux.» solo en los viajes elegidos para unificar', () => {
+  const base = { cliente: { _id: 'c1', nombre: 'Cliente' }, conductorNombre: 'Ana Ruiz', destino: 'Pasto', placa: 'AAA111', flete: 100000, anticipo: 100000, auxiliar: 50000, diasAuxiliar: 1 };
+  const [m] = mensajesPorCliente([{ ...base, _id: 'v1' }, { ...base, _id: 'v2', placa: 'BBB222' }], new Date(), new Date(), undefined, { unificarIds: new Set(['v2']) });
+  assert.match(m.texto, /Flete \$ 100\.000\. Anticipo \$ 100\.000\nPlaca AAA111/);
+  assert.match(m.texto, /Flete \$ 150\.000\. Anticipo \$ 150\.000\nPlaca BBB222/);
+  assert.equal((m.texto.match(/Unificado/g) || []).length, 1);
+});
+
 test('RF-WA-03: «Unificar auxiliar» suma el auxiliar al flete y al anticipo del reporte (solo en el mensaje)', () => {
   const v = { _id: 'v1', cliente: { _id: 'c', nombre: 'Corbeta' }, conductorNombre: 'Pedro Perez Gomez', destino: 'Ipiales', placa: 'SLF645', flete: 100000, anticipo: 100000, auxiliar: 50000, diasAuxiliar: 1 };
   const [aparte] = mensajesPorCliente([v], new Date(), new Date());

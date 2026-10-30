@@ -90,6 +90,8 @@ const kg = (n) => (Number(n) ? `${Math.round(Number(n)).toLocaleString('es-CO')}
 const auxDe = (v, unificar) => (unificar ? Number(v.auxiliar) || 0 : 0);
 const fleteDe = (v, unificar) => (Number(v.flete) || 0) + auxDe(v, unificar);
 const anticipoDe = (v, unificar) => (Number(v.anticipo) || 0) + (Number(v.anticipo) > 0 ? auxDe(v, unificar) : 0);
+// Con opciones.unificarIds solo se unifican esos viajes; sin la lista, unificarAuxiliar aplica a todos
+const unificaDe = (v, o = {}) => (o.unificarIds ? o.unificarIds.has(String(v._id)) : !!o.unificarAuxiliar);
 const dias = (v) => { const n = Number(v.diasAuxiliar) || 1; return `de ${n} día${n === 1 ? '' : 's'}`; };
 function datosViaje(v, { unificarAuxiliar = false } = {}) {
   const flete = fleteDe(v, unificarAuxiliar); const anticipo = anticipoDe(v, unificarAuxiliar);
@@ -129,13 +131,13 @@ export function mensajesPorCliente(viajes, fecha, ahora = new Date(), plantilla 
     grupos.get(id).viajes.push(v);
   }
   return [...grupos.values()].map(g => {
-    const totalFlete = g.viajes.reduce((a, v) => a + fleteDe(v, opciones.unificarAuxiliar), 0);
-    const totalAnticipo = g.viajes.reduce((a, v) => a + anticipoDe(v, opciones.unificarAuxiliar), 0);
+    const totalFlete = g.viajes.reduce((a, v) => a + fleteDe(v, unificaDe(v, opciones)), 0);
+    const totalAnticipo = g.viajes.reduce((a, v) => a + anticipoDe(v, unificaDe(v, opciones)), 0);
     const general = {
       saludo: saludo(ahora), fecha: fmtFecha(fecha), cliente: g.cliente, cantidad: String(g.viajes.length),
       total_flete: cop(totalFlete), total_anticipo: cop(totalAnticipo), total_saldo: cop(totalFlete - totalAnticipo),
     };
-    const lineas = g.viajes.map(v => aplicarPlantilla(p.linea, { ...general, ...datosViaje(v, opciones) })).filter(Boolean);
+    const lineas = g.viajes.map(v => aplicarPlantilla(p.linea, { ...general, ...datosViaje(v, { unificarAuxiliar: unificaDe(v, opciones) }) })).filter(Boolean);
     const partes = [aplicarPlantilla(p.encabezado, general), lineas.join(SEPARADORES[p.separador] || SEPARADORES.blanco), aplicarPlantilla(p.pie, general)];
     const texto = `${partes.filter(x => x.trim()).join('\n\n')}\n`;
     const numero = g.whatsapp ? (g.whatsapp.length === 10 ? `57${g.whatsapp}` : g.whatsapp) : '';

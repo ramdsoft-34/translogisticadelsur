@@ -245,7 +245,9 @@ r.get('/reporte-whatsapp', permitir(P.VIAJES_VER), async (req, res) => {
   const fecha = parseFecha(req.query.fecha) || hoyColombia();
   const plantilla = await plantillaDe(req, req.query.plantilla);
   const viajes = await viajesDelReporte(req, fecha, req.query.incluirReportados === '1');
+  // unificar=id1,id2: viajes cuyo auxiliar se unifica en el mensaje (unificarAuxiliar=1: todos)
   const opciones = { unificarAuxiliar: req.query.unificarAuxiliar === '1' };
+  if (req.query.unificar !== undefined) opciones.unificarIds = new Set(String(req.query.unificar).split(',').filter(Boolean));
   // Con seleccion=1 el mensaje lleva solo los viajes elegidos (ninguno si no se eligió nada)
   const elegidos = req.query.seleccion === '1'
     ? (() => { const ids = new Set(String(req.query.viajes || '').split(',').filter(Boolean)); return viajes.filter(v => ids.has(String(v._id))); })()
