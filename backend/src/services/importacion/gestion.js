@@ -66,6 +66,9 @@ export async function importarGestion(empresaId, wb, { aplicar = true } = {}) {
   for (const f of H('_CONT_FACTURAS').filter(x => txt(x[0]))) {
     const existente = await FacturaCont.findOne({ empresa: E, numero: txt(f[0]) }).select('cliente total').lean();
     const cli = clientePorNombre(f[2]);
+    // Ya importada antes con otro número (mismo cliente, periodo y total): se reconoce y no se repite
+    const yaImportada = cli && await FacturaCont.findOne({ empresa: E, cliente: cli._id, desde: fecha(f[4]), total: num(f[7]) || 0 }).select('numero').lean();
+    if (yaImportada) { if (yaImportada.numero !== txt(f[0])) renombrar.set(txt(f[0]), yaImportada.numero); continue; }
     if (existente && cli && (String(existente.cliente) !== String(cli._id) || Math.round(existente.total) !== Math.round(num(f[7]) || 0))) {
       ultimaFactura += 1;
       renombrar.set(txt(f[0]), `FV-${String(ultimaFactura).padStart(4, '0')}`);
