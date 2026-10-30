@@ -27,6 +27,8 @@ export const P = {
   LIQUIDACION_VER:    'liquidacion.ver',
   LIQUIDACION_GESTIONAR: 'liquidacion.gestionar',
   REPORTES_VER:       'reportes.ver',
+  CONTABILIDAD_VER:   'contabilidad.ver',         // libros, informes y plan de cuentas
+  CONTABILIDAD_GESTIONAR: 'contabilidad.gestionar', // facturar, cobrar, pagar, asientos, saldos iniciales y parámetros
 };
 
 const TODOS_EMPRESA = Object.values(P).filter(p => p !== P.EMPRESAS_GESTIONAR);
@@ -38,8 +40,8 @@ export const PERMISOS_POR_ROL = {
   manifiestos: [P.VIAJES_VER, P.VIAJES_REGISTRAR, P.VIAJES_EDITAR_TODOS, P.MAESTROS_VER, P.MAESTROS_EDITAR,
     P.RNDC_OPERAR, P.RNDC_CONSULTAR, P.REPORTES_VER],
   contabilidad: [P.VIAJES_VER, P.MAESTROS_VER, P.TARIFAS_EDITAR, P.LIQUIDACION_VER, P.LIQUIDACION_GESTIONAR,
-    P.REPORTES_VER, P.RNDC_CONSULTAR],
-  consulta: [P.VIAJES_VER, P.MAESTROS_VER, P.LIQUIDACION_VER, P.REPORTES_VER],
+    P.REPORTES_VER, P.RNDC_CONSULTAR, P.CONTABILIDAD_VER, P.CONTABILIDAD_GESTIONAR],
+  consulta: [P.VIAJES_VER, P.MAESTROS_VER, P.LIQUIDACION_VER, P.REPORTES_VER, P.CONTABILIDAD_VER],
 };
 
 export const ROLES_EMPRESA = Object.keys(ROLES).filter(r => r !== 'superadmin');
