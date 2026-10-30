@@ -538,6 +538,7 @@ const facturaContSchema = new Schema({
   cobrado: { type: Number, default: 0 },
   estado: { type: String, enum: ['PENDIENTE', 'COBRADA', 'ANULADA'], default: 'PENDIENTE' },
   asiento: str(),
+  observaciones: str(),   // p. ej. el número que tenía en la plantilla de Excel si se renumeró al importar
 }, { timestamps: true });
 facturaContSchema.plugin(tenantPlugin);
 facturaContSchema.index({ empresa: 1, numero: 1 }, { unique: true });
