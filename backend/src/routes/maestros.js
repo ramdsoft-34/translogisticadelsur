@@ -99,7 +99,11 @@ r.put('/tarifas/:id', editarTarifas, async (req, res) => {
   if (d.cliente) await clienteDeEmpresa(req, d.cliente);
   const antes = await Tarifa.findOne(deEmpresa(req, { _id: req.params.id })).lean();
   if (!antes) throw new ErrorHttp(404, 'Tarifa no encontrada');
-  if (d.pesoKg === 0 || (d.destino && d.pesoKg === undefined && !antes.pesoKg)) d.pesoKg = pesoPorTamano(d.destino || antes.destino, await reglasDe(req.empresaId)) || d.pesoKg;
+  // Sin peso: se toma de la capacidad escrita en el destino
+  if (d.pesoKg === 0 || (d.destino && d.pesoKg === undefined && !antes.pesoKg)) {
+    const kg = pesoPorTamano(d.destino || antes.destino, await reglasDe(req.empresaId));
+    if (kg) d.pesoKg = kg;
+  }
   const x = await Tarifa.findOneAndUpdate(deEmpresa(req, { _id: req.params.id }), { $set: d }, { new: true, runValidators: true });
   await auditar(req, 'editar_tarifa', { entidad: 'Tarifa', entidadId: x._id, detalle: { destino: x.destino, cambios: cambios(antes, x.toObject(), Object.keys(d)) } });
   res.json(x);

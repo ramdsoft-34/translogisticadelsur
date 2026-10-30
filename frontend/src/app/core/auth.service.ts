@@ -28,11 +28,16 @@ export class Auth {
     try { sessionStorage.setItem(LLAVE, JSON.stringify({ token, usuario })); } catch { /* almacenamiento no disponible */ }
   }
 
-  async ingresar(email: string, password: string) {
-    const r = await this.api.post<{ token: string; usuario: Usuario }>('/auth/login', { email, password });
+  // Con doble factor activo, la primera respuesta pide el código de la app (devuelve null)
+  async ingresar(email: string, password: string, codigo?: string): Promise<Usuario | null> {
+    const r = await this.api.post<{ token: string; usuario: Usuario; segundoFactor?: boolean }>('/auth/login', { email, password, ...(codigo ? { codigo } : {}) });
+    if (r.segundoFactor) return null;
     this.guardar(r.token, r.usuario);
     return r.usuario;
   }
+
+  // Tras activar el doble factor el servidor cierra las demás sesiones y entrega un token nuevo
+  sesion(token: string, usuario: Usuario) { this.guardar(token, usuario); }
 
   async refrescar() {
     const u = await this.api.get<Usuario>('/auth/yo');

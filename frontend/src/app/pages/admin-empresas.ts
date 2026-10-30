@@ -67,6 +67,7 @@ const empresaVacia = () => ({ nombre: '', nit: '', dv: '', direccion: '', telefo
           <div class="campo" style="justify-content:flex-end"><div class="acciones">
             <button type="button" class="pequeno" (click)="alternarAdmin(a)">{{ a.activo ? 'Desactivar' : 'Activar' }}</button>
             <button type="button" class="pequeno" (click)="restableciendo.set(!restableciendo())">Restablecer clave</button>
+            @if (a.totp?.activo) { <button type="button" class="pequeno" (click)="quitarDobleFactor(a)" title="Si perdió el celular: podrá activarlo de nuevo en Mi cuenta">Quitar doble factor</button> }
             <button class="primario pequeno" type="submit">Guardar</button></div></div>
         </form>
         @if (restableciendo()) {
@@ -147,6 +148,13 @@ export class AdminEmpresas {
 
   readonly restableciendo = signal(false);
   claveNueva = '';
+  async quitarDobleFactor(a: any) {
+    try {
+      await this.api.put(`/admin/administradores/${a._id}`, { quitarDobleFactor: true });
+      a.totp = { activo: false };
+      this.avisos.ok('Doble factor quitado; el administrador puede activarlo de nuevo en Mi cuenta');
+    } catch (x) { this.avisos.error(x); }
+  }
   async restablecer(a: any) {
     try {
       await this.api.put(`/admin/administradores/${a._id}`, { password: this.claveNueva });

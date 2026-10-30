@@ -59,11 +59,22 @@ import { Icono } from '../shared/icono';
             </div>
           </div>
 
+          @if (pideCodigo()) {
+            <div class="campo-acceso">
+              <label for="codigo">Código de la app autenticadora</label>
+              <div class="control">
+                <app-icono nombre="escudo" [tam]="18" class="lead" />
+                <input id="codigo" name="codigo" [(ngModel)]="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+                  placeholder="6 dígitos" required [attr.aria-invalid]="!!error()" />
+              </div>
+            </div>
+          }
+
           @if (error()) {
             <div class="error" role="alert"><app-icono nombre="alerta" [tam]="17" /><span>{{ error() }}</span></div>
           }
 
-          <button class="entrar" type="submit" [disabled]="cargando() || !email || !clave">
+          <button class="entrar" type="submit" [disabled]="cargando() || !email || !clave || (pideCodigo() && codigo.length < 6)">
             @if (cargando()) { <span class="giro" aria-hidden="true"></span>Ingresando… } @else { Ingresar }
           </button>
 
@@ -152,6 +163,8 @@ export class Ingresar {
   private router = inject(Router);
   email = '';
   clave = '';
+  codigo = '';
+  readonly pideCodigo = signal(false);
   readonly anio = new Date().getFullYear();
   readonly cargando = signal(false);
   readonly error = signal('');
@@ -172,8 +185,14 @@ export class Ingresar {
   async ingresar() {
     this.cargando.set(true); this.error.set('');
     try {
-      const u = await this.auth.ingresar(this.email.trim(), this.clave);
-      this.clave = '';
+      const u = await this.auth.ingresar(this.email.trim(), this.clave, this.pideCodigo() ? this.codigo.trim() : undefined);
+      if (!u) {
+        // Doble factor: falta el código de la app
+        this.pideCodigo.set(true);
+        setTimeout(() => document.getElementById('codigo')?.focus(), 30);
+        return;
+      }
+      this.clave = ''; this.codigo = '';
       this.router.navigateByUrl(u.debeCambiarClave ? '/mi-cuenta' : this.auth.inicio());
     } catch (e) {
       this.error.set(await mensajeError(e));

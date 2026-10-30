@@ -347,7 +347,7 @@ r.get('/contabilidad/informes/:tipo', verLiq, async (req, res) => {
   } else if (t === 'cartera') {
     datos = await cont.carteraPorEdades(req.empresaId, hasta); titulo = `Cartera por edades al ${fmtFecha(hasta)}`;
     columnas = ['Cliente', 'Facturas', ...cont.EDADES.map(e => e[1]), 'Total'];
-    filas = [...datos.filas.map(x => [x.cliente, x.facturas, x.d0_30, x.d31_60, x.d61_90, x.d90, x.total]),
+    filas = [...datos.filas.map(x => [x.cliente, String(x.facturas), x.d0_30, x.d31_60, x.d61_90, x.d90, x.total]),
       ['', '', datos.totales.d0_30, datos.totales.d31_60, datos.totales.d61_90, datos.totales.d90, datos.totales.total]];
   } else if (t === 'retenciones') {
     datos = await cont.retenciones(req.empresaId, desde, hasta); titulo = 'Retenciones';

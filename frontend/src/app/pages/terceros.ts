@@ -27,8 +27,17 @@ const ROLES: [string, string][] = [['conductor', 'Conductor'], ['titular', 'Titu
 const vacio = () => ({
   tipoId: 'C', numId: '', nombres: '', apellido1: '', apellido2: '', sede: { codigo: '', nombre: '' }, telefono: '', celular: '',
   direccion: '', codMunicipio: '', correo: '', licencia: { categoria: '', numero: '', vence: '' }, fechaNacimiento: '',
-  banco: { entidad: '', tipoCuenta: '', cuenta: '' }, roles: ['conductor'] as string[], activo: true,
+  banco: { entidad: '', tipoCuenta: '', cuenta: '' }, roles: ['conductor'] as string[], activo: true, placasTexto: '', placaPrincipal: '',
 });
+// Años cumplidos a hoy
+export function edadDe(nacimiento: string | null | undefined): number | null {
+  if (!nacimiento) return null;
+  const n = new Date(`${String(nacimiento).slice(0, 10)}T12:00:00`); const h = new Date();
+  let a = h.getFullYear() - n.getFullYear();
+  if (h.getMonth() < n.getMonth() || (h.getMonth() === n.getMonth() && h.getDate() < n.getDate())) a -= 1;
+  return a;
+}
+const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(/[,;\s]+/).map(x => x.replace(/-/g, '')).filter(Boolean))];
 
 @Component({
   selector: 'app-terceros',
@@ -68,7 +77,9 @@ const vacio = () => ({
         <tbody>
           @for (t of lista(); track t._id) {
             <tr [class.sutil]="!t.activo">
-              <td>{{ t.tipoId }} {{ t.numId }}</td><td><strong>{{ nombre(t) }}</strong>@if (!t.activo) { <span class="chip">inactivo</span> }</td>
+              <td>{{ t.tipoId }} {{ t.numId }}</td><td><strong>{{ nombre(t) }}</strong>@if (!t.activo) { <span class="chip">inactivo</span> }
+                @if (t.edad !== null && t.edad !== undefined) { <small class="sutil"> · {{ t.edad }} años</small> }
+                @if (t.placaPrincipal) { <small class="sutil"> · {{ t.placaPrincipal }}</small> }</td>
               @if (verSede()) {
                 <td>@if (t.sede?.codigo || t.sede?.nombre) { <div class="celda-doble"><span><span class="cod-sede">{{ t.sede.codigo || '—' }}</span> {{ t.sede.nombre || '(sin nombre)' }}</span>
                   @if (t.codMunicipio) { <small>Municipio {{ t.codMunicipio }}</small> }</div> } @else { <span class="sutil">—</span> }</td>
@@ -162,8 +173,18 @@ const vacio = () => ({
             <div class="campo" [hidden]="!ver('licencia.categoria')" [class.falta]="falta('licencia.categoria')"><label for="lc">Categoría</label><input id="lc" name="lcat" maxlength="3" [(ngModel)]="f.licencia.categoria" /></div>
             <div class="campo" [hidden]="!ver('licencia.numero')" [class.falta]="falta('licencia.numero')"><label for="ln">Número</label><input id="ln" name="lnum" [(ngModel)]="f.licencia.numero" /></div>
             <div class="campo" [hidden]="!ver('licencia.vence')" [class.falta]="falta('licencia.vence')"><label for="lv">Vence</label><input id="lv" type="date" name="lven" [(ngModel)]="f.licencia.vence" /></div>
-            <div class="campo" [hidden]="soloFaltantes()"><label for="fn">Fecha de nacimiento</label><input id="fn" type="date" name="fnac" [(ngModel)]="f.fechaNacimiento" /></div>
+            <div class="campo" [hidden]="soloFaltantes()"><label for="fn">Fecha de nacimiento</label><input id="fn" type="date" name="fnac" [(ngModel)]="f.fechaNacimiento" />
+              @if (edad(f.fechaNacimiento) !== null) { <small>{{ edad(f.fechaNacimiento) }} años</small> }</div>
           </div></fieldset>
+          @if (!soloFaltantes()) {
+            <fieldset style="margin-top:14px"><legend>Placas que maneja</legend><div class="formulario">
+              <div class="campo"><label for="tpl">Placas</label><input id="tpl" name="placas" [(ngModel)]="f.placasTexto" placeholder="ABC123, DEF456" style="text-transform:uppercase" />
+                <small>Separadas por coma. La principal se propone al registrar sus viajes.</small></div>
+              <div class="campo"><label for="tpp">Placa principal</label>
+                <select id="tpp" name="principal" [(ngModel)]="f.placaPrincipal"><option value="">Sin principal</option>
+                  @for (p of placasForm(f.placasTexto); track p) { <option [value]="p">{{ p }}</option> }</select></div>
+            </div></fieldset>
+          }
           @if (!soloFaltantes()) {
             <fieldset style="margin-top:14px"><legend>Cuenta para pagos</legend><div class="formulario">
               <div class="campo"><label for="be">Banco</label><input id="be" name="banco" [(ngModel)]="f.banco.entidad" /></div>
@@ -376,7 +397,8 @@ export class Terceros {
     }
     const b = vacio();
     this.form.set({ ...b, ...t, sede: { ...b.sede, ...t.sede }, banco: { ...b.banco, ...t.banco },
-      licencia: { ...b.licencia, ...t.licencia, vence: isoDia(t.licencia?.vence) }, fechaNacimiento: isoDia(t.fechaNacimiento) });
+      licencia: { ...b.licencia, ...t.licencia, vence: isoDia(t.licencia?.vence) }, fechaNacimiento: isoDia(t.fechaNacimiento),
+      placasTexto: (t.placas || []).join(', '), placaPrincipal: t.placaPrincipal || '' });
     this.abierto.set(true);
   }
   alternarRol(r: string) {
@@ -388,8 +410,10 @@ export class Terceros {
     return { tipoId: f.tipoId, numId: f.numId, nombres: f.nombres, apellido1: f.apellido1, apellido2: f.apellido2, sede: f.sede,
       telefono: f.telefono, celular: f.celular, direccion: f.direccion, codMunicipio: f.codMunicipio, correo: f.correo,
       licencia: { ...f.licencia, vence: f.licencia.vence || null }, fechaNacimiento: f.fechaNacimiento || null, banco: f.banco,
-      roles: f.roles, activo: f.activo };
+      roles: f.roles, activo: f.activo, placas: placasDe(f.placasTexto), placaPrincipal: placasDe(f.placasTexto).includes(f.placaPrincipal) ? f.placaPrincipal : '' };
   }
+  edad(n: string) { return edadDe(n); }
+  placasForm(t: string) { return placasDe(t); }
 
   async guardar() {
     const f = this.form();

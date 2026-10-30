@@ -18,6 +18,7 @@ import { SelectorMunicipio } from '../shared/municipio';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { Auth } from '../core/auth.service';
 import { P } from '../core/modelos';
+import { leerArchivos } from '../shared/adjuntos';
 
 type Pestana = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'soporte' | 'correos' | 'historial';
 type PestanaViajes = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'soporte';
@@ -45,6 +46,8 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         @if (pestana() === 'manifestados' && seleccion().size) {
           <button type="button" class="peligro" (click)="abrirAnularLote()" [disabled]="trabajando()">Anular ({{ seleccion().size }})</button>
           <button type="button" class="primario" (click)="abrirCumplidoLote()" [disabled]="trabajando()">Cumplir ({{ seleccion().size }})</button>
+          <button type="button" (click)="abrirCorreoManual()" [disabled]="trabajando()" title="Correo armado a mano con los manifiestos elegidos y archivos adjuntos">
+            <app-icono nombre="correo" />Correo con estos manifiestos</button>
           @if (conCorreo()) {
             <button type="button" confirmar="Clic otra vez para descartar" (confirmado)="descartarCorreos([...seleccion()])" [disabled]="trabajando()">Descartar correos</button>
             <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([...seleccion()])" [disabled]="trabajando()">
@@ -243,6 +246,24 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         </table>
       </div>
     }
+
+    <!-- Correo manual: manifiestos elegidos (sueltos o en un solo PDF) y adjuntos -->
+    <app-modal titulo="Enviar manifiestos por correo" [abierto]="!!correoManual()" (cerrar)="correoManual.set(null)">
+      @if (correoManual(); as c) {
+        <form id="form-correo-manual" class="formulario" style="grid-template-columns:1fr" (ngSubmit)="enviarCorreoManual()">
+          <p class="sutil">{{ c.viajes.length }} manifiesto(s) elegido(s).</p>
+          <div class="campo"><label for="cm-para">Para</label><input id="cm-para" name="para" [(ngModel)]="c.para" placeholder="correo@cliente.com, otro@cliente.com" required /></div>
+          <div class="campo"><label for="cm-cc">Copia</label><input id="cm-cc" name="cc" [(ngModel)]="c.cc" /></div>
+          <div class="campo"><label for="cm-as">Asunto</label><input id="cm-as" name="asunto" [(ngModel)]="c.asunto" /></div>
+          <div class="campo"><label for="cm-tx">Mensaje</label><textarea id="cm-tx" name="texto" rows="4" [(ngModel)]="c.texto" placeholder="Opcional: si lo deja vacío va un saludo con la firma de la empresa"></textarea></div>
+          <label class="casilla"><input type="checkbox" name="unir" [(ngModel)]="c.unir" />Unir los manifiestos en un solo PDF</label>
+          <div class="campo"><label for="cm-adj">Adjuntar archivos (opcional)</label><input id="cm-adj" type="file" multiple (change)="leerAdjuntosManual($event, c)" />
+            @if (c.adjuntos.length) { <small>{{ c.adjuntos.length }} archivo(s) adjunto(s)</small> }</div>
+        </form>
+      }
+      <ng-container pie><button type="button" (click)="correoManual.set(null)">Cancelar</button>
+        <button class="primario" type="submit" form="form-correo-manual" [disabled]="trabajando() || !correoManual()?.para">Enviar</button></ng-container>
+    </app-modal>
 
     <!-- Correos de un viaje -->
     <app-modal [titulo]="'Correos del viaje N° ' + (correosViaje()?.numero || '')" [abierto]="!!correosViaje()" (cerrar)="correosViaje.set(null)" [ancho]="true">
@@ -589,6 +610,25 @@ export class Manifiestos {
   readonly conSeleccion = computed(() => this.pestana() === 'pendientes' || this.pestana() === 'manifestados');
   tienePorAprobar(viajeId: string) { return (this.enviosPorViaje().get(viajeId) || []).some(e => e.estado === 'por_aprobar'); }
   readonly porAprobar = computed(() => this.viajes().filter(v => (this.enviosPorViaje().get(v._id) || []).some(e => e.estado === 'por_aprobar')).map(v => v._id));
+  // ── Correo manual ──
+  readonly correoManual = signal<any>(null);
+  abrirCorreoManual() {
+    const ids = [...this.seleccion()];
+    const cli = this.viajes().find(v => ids.includes(v._id))?.cliente as any;
+    const para = (cli?.envios?.destinatarios || cli?.correos || []).join(', ');
+    this.correoManual.set({ viajes: ids, para, cc: '', asunto: '', texto: '', unir: true, adjuntos: [] });
+  }
+  async leerAdjuntosManual(ev: Event, c: any) { c.adjuntos = await leerArchivos(ev, this.avisos); }
+  async enviarCorreoManual() {
+    const c = this.correoManual(); const lista = (t: string) => String(t || '').split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.post<any>('/correo/manual', { para: lista(c.para), cc: lista(c.cc), asunto: c.asunto, texto: c.texto, viajes: c.viajes, unir: c.unir, adjuntos: c.adjuntos });
+      if (r.estado === 'enviado') { this.avisos.ok(`Correo enviado: ${r.adjuntos?.length || 0} archivo(s)`); this.correoManual.set(null); }
+      else this.avisos.mostrar(`No se envió: ${r.error}`, 'error');
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+
   async aprobarCorreos(viajes: string[]) {
     if (!viajes.length) return;
     this.trabajando.set(true);

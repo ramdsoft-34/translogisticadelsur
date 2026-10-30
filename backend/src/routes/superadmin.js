@@ -79,7 +79,7 @@ r.get('/empresas/:id/resumen', async (req, res) => {
 
 r.get('/empresas/:id/administradores', async (req, res) => {
   const lista = await Usuario.find({ empresa: id(req.params.id), rol: 'admin' })
-    .select('nombre email activo ultimoAcceso createdAt').sort({ nombre: 1 }).lean();
+    .select('nombre email activo ultimoAcceso createdAt totp.activo').sort({ nombre: 1 }).lean();
   res.json(lista);
 });
 
