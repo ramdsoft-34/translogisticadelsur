@@ -64,7 +64,35 @@ type Pestana = 'rndc' | 'reglas' | 'correo' | 'logo' | 'rastreo' | 'usuarios' | 
                   </div>
                 }
                 <div class="campo"><label for="usu">Usuario web service RNDC</label><input id="usu" name="usu" [(ngModel)]="c.usuario" autocomplete="off" />
-                  <small>Lo asigna el Ministerio de Transporte. La contraseña se pide al enviar y no se guarda.</small></div>
+                  <small>Lo asigna el Ministerio de Transporte.</small></div>
+                <div class="campo ancho clave-guardada">
+                  <span class="etiqueta">Contraseña del RNDC</span>
+                  @if (claveRndc.estado(); as e) {
+                    <div class="estado-clave" [class.ok]="e.guardada" [class.error]="e.invalida">
+                      <app-icono [nombre]="e.guardada ? 'candado' : 'alerta'" [tam]="18" />
+                      <div class="crece">
+                        @if (e.guardada) {
+                          <strong>Guardada y cifrada en el servidor</strong>
+                          <small>Usuario {{ e.usuarioRndc }} · guardada por {{ e.guardadaPor }} el {{ e.guardadaEn | fechaHora }}{{ e.usos ? ' · usada ' + e.usos + ' vez(es)' : '' }}.
+                            Los envíos al RNDC ya no la piden. Nadie puede verla: solo el servidor la usa al enviar.</small>
+                        } @else if (e.invalida) {
+                          <strong>El RNDC rechazó la contraseña guardada</strong>
+                          <small>Se dejó de usar el {{ e.invalidaEn | fechaHora }} para no bloquear el usuario. Guarde la nueva contraseña.</small>
+                        } @else if (!e.disponible) {
+                          <strong>No se puede guardar todavía</strong><small>El servidor no tiene configurada la llave de cifrado de la contraseña del RNDC.</small>
+                        } @else {
+                          <strong>No está guardada</strong><small>Se pide al enviar al RNDC. Guárdela para no escribirla cada vez.</small>
+                        }
+                      </div>
+                      @if (e.disponible) {
+                        <button type="button" class="pequeno" [class.primario]="!e.guardada" (click)="abrirGuardarClave()">{{ e.guardada ? 'Cambiar' : 'Guardar contraseña' }}</button>
+                      }
+                      @if (e.guardada || e.invalida) {
+                        <button type="button" class="pequeno peligro" confirmar="Clic otra vez para quitarla" (confirmado)="quitarClaveRndc()">Quitar</button>
+                      }
+                    </div>
+                  }
+                </div>
                 <div class="campo"><label for="sr">Próximo consecutivo de remesa</label>
                   <input id="sr" name="sr" maxlength="15" [ngModel]="c.consecutivoRemesa" (ngModelChange)="c.consecutivoRemesa = limpiarConsecutivo($event)"
                     placeholder="R10063903" style="text-transform:uppercase" autocomplete="off" />
@@ -243,8 +271,33 @@ type Pestana = 'rndc' | 'reglas' | 'correo' | 'logo' | 'rastreo' | 'usuarios' | 
       </form>
       <ng-container pie><button type="button" (click)="abiertoUsuario.set(false)">Cancelar</button>
         <button class="primario" type="submit" form="form-usuario">Guardar</button></ng-container>
+    </app-modal>
+
+    <!-- Guardar la contraseña del RNDC: exige la contraseña del administrador y se comprueba en el RNDC -->
+    <app-modal titulo="Guardar la contraseña del RNDC" [abierto]="!!guardarClave()" (cerrar)="guardarClave.set(null)">
+      @if (guardarClave(); as g) {
+        <form id="form-clave-rndc" class="formulario" style="grid-template-columns:1fr" (ngSubmit)="guardarClaveRndc()" autocomplete="off">
+          <div class="mensaje info">Se guarda <strong>cifrada</strong> (AES-256-GCM con una llave exclusiva que no está en la base de datos) y nunca se vuelve a mostrar.
+            Antes de guardarla se comprueba en el RNDC. Si el RNDC la rechaza, se deja de usar y se vuelve a pedir.</div>
+          <div class="campo"><label for="gc-rndc">Contraseña del usuario {{ cfg()?.usuario || '' }} en el RNDC</label>
+            <input id="gc-rndc" name="rndc" type="password" autocomplete="new-password" required maxlength="100" [(ngModel)]="g.clave" /></div>
+          <div class="campo"><label for="gc-mia">Su contraseña de la plataforma (para confirmar que es usted)</label>
+            <input id="gc-mia" name="mia" type="password" autocomplete="current-password" required maxlength="100" [(ngModel)]="g.miClave" /></div>
+          @if (auth.usuario()?.dobleFactor) {
+            <div class="campo"><label for="gc-cod">Código de doble factor</label>
+              <input id="gc-cod" name="cod" inputmode="numeric" maxlength="6" autocomplete="one-time-code" [(ngModel)]="g.codigo" /></div>
+          }
+        </form>
+      }
+      <ng-container pie><button type="button" (click)="guardarClave.set(null)">Cancelar</button>
+        <button class="primario" type="submit" form="form-clave-rndc" [disabled]="trabajandoClave() || !guardarClave()?.clave || !guardarClave()?.miClave">
+          {{ trabajandoClave() ? 'Comprobando en el RNDC…' : 'Comprobar y guardar' }}</button></ng-container>
     </app-modal>`,
-  styles: [`.barra-guardar { position: sticky; top: calc(var(--alto-barra, 0px) + 4px); z-index: 4; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  styles: [`.clave-guardada .estado-clave { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: var(--radio-l); border: 1px solid var(--gris-2); background: var(--gris-1); }
+    .estado-clave .crece { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; } .estado-clave small { color: var(--gris-5); }
+    .estado-clave.ok { border-color: var(--verde); background: var(--verde-claro, #e8f7ee); } .estado-clave.ok app-icono { color: var(--verde); }
+    .estado-clave.error { border-color: var(--rojo); background: var(--rojo-claro); } .estado-clave.error app-icono { color: var(--rojo); }
+    .barra-guardar { position: sticky; top: calc(var(--alto-barra, 0px) + 4px); z-index: 4; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
       background: var(--gris-0); border: 1px solid var(--gris-2); border-radius: var(--radio); padding: 10px 14px; margin-bottom: 16px; box-shadow: var(--sombra); }
     .barra-guardar.pendiente { background: var(--primario-claro); border-color: var(--primario-borde); }`],
 })
@@ -253,6 +306,24 @@ export class Configuracion {
   readonly auth = inject(Auth);
   private avisos = inject(Avisos);
   private clave = inject(RndcClave);
+  readonly claveRndc = this.clave;
+  // Guardar la contraseña del RNDC (cifrada en el servidor)
+  readonly guardarClave = signal<{ clave: string; miClave: string; codigo: string } | null>(null);
+  readonly trabajandoClave = signal(false);
+  abrirGuardarClave() { this.guardarClave.set({ clave: '', miClave: '', codigo: '' }); }
+  async guardarClaveRndc() {
+    const g = this.guardarClave(); if (!g) return;
+    this.trabajandoClave.set(true);
+    try {
+      const e = await this.api.post<any>('/rndc/clave-guardada', g);
+      this.clave.olvidar(); this.clave.estado.set(e); await this.clave.cargarEstado(true);
+      this.guardarClave.set(null); this.avisos.ok('Contraseña del RNDC comprobada y guardada');
+    } catch (e) { this.avisos.error(e); } finally { this.trabajandoClave.set(false); }
+  }
+  async quitarClaveRndc() {
+    try { await this.api.delete('/rndc/clave-guardada'); this.clave.olvidar(); await this.clave.cargarEstado(true); this.avisos.ok('Contraseña del RNDC quitada'); }
+    catch (e) { this.avisos.error(e); }
+  }
   readonly P = P;
   readonly pestana = signal<Pestana>(this.auth.tiene(P.CONFIG_GESTIONAR) ? 'rndc' : 'usuarios');
   readonly cfg = signal<any>(null);
@@ -278,7 +349,7 @@ export class Configuracion {
 
   // Pestaña inicial desde el enlace (p. ej. Importar datos → ?tab=importar)
   readonly tab = input<Pestana | ''>('');
-  ngOnInit() { const t = this.tab(); this.ir(t && ['rndc', 'reglas', 'correo', 'logo', 'rastreo', 'usuarios', 'autorizaciones', 'importar', 'auditoria'].includes(t) ? t as Pestana : this.pestana()); }
+  ngOnInit() { this.clave.cargarEstado(true); const t = this.tab(); this.ir(t && ['rndc', 'reglas', 'correo', 'logo', 'rastreo', 'usuarios', 'autorizaciones', 'importar', 'auditoria'].includes(t) ? t as Pestana : this.pestana()); }
 
   constructor() {
     this.api.get<any>('/rndc/catalogos').then(c => this.naturaleza.set(Object.entries(c.naturaleza))).catch(() => {});

@@ -1,4 +1,8 @@
-// Autenticación (JWT Bearer) y autorización por permisos.
+// Autenticación (JWT en cookie HttpOnly o Bearer) y autorización por permisos.
+// La interfaz web usa la cookie «tls_sesion»: HttpOnly (JavaScript no la puede leer), Secure en producción y
+// SameSite=Strict, así que el navegador no guarda el token en localStorage ni sessionStorage. Con la cookie, las
+// peticiones que modifican datos deben traer la cabecera X-Cliente-Id (protección CSRF adicional).
+// El encabezado Authorization: Bearer sigue sirviendo para integraciones y pruebas.
 // En cada petición se recarga el usuario: si fue desactivado, cambió su clave
 // (tokenVersion) o su empresa fue desactivada, el token deja de servir.
 import jwt from 'jsonwebtoken';
@@ -16,10 +20,30 @@ export function firmarToken(usuario) {
     { expiresIn: env.jwtExpires, algorithm: 'HS256' });
 }
 
+export const COOKIE_SESION = 'tls_sesion';
+const opcionesCookie = () => ({ httpOnly: true, secure: env.nodeEnv === 'production', sameSite: 'strict', path: '/api' });
+// Entrega el token en la cookie de sesión (dura lo mismo que el token)
+export function ponerSesion(res, token) {
+  const exp = jwt.decode(token)?.exp;
+  res.cookie(COOKIE_SESION, token, { ...opcionesCookie(), ...(exp ? { maxAge: Math.max(0, exp * 1000 - Date.now()) } : {}) });
+  return token;
+}
+export const quitarSesion = (res) => res.clearCookie(COOKIE_SESION, opcionesCookie());
+function cookieSesion(req) {
+  for (const parte of String(req.headers.cookie || '').split(';')) {
+    const i = parte.indexOf('=');
+    if (i > 0 && parte.slice(0, i).trim() === COOKIE_SESION) return decodeURIComponent(parte.slice(i + 1).trim());
+  }
+  return '';
+}
+
 export async function autenticar(req, _res, next) {
   const h = req.headers.authorization || '';
-  const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+  const bearer = h.startsWith('Bearer ') ? h.slice(7) : '';
+  const token = bearer || cookieSesion(req);
   if (!token) throw new ErrorHttp(401, 'Debe iniciar sesión');
+  // CSRF: con la cookie, lo que modifica datos debe venir de la propia interfaz (cabecera que otro sitio no puede poner)
+  if (!bearer && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !req.get('X-Cliente-Id')) throw new ErrorHttp(403, 'Petición no permitida');
   let datos;
   try {
     datos = jwt.verify(token, env.jwtSecret, { algorithms: ['HS256'] });

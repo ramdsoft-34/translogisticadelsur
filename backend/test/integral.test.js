@@ -9,6 +9,7 @@ process.env.JWT_SECRET = crypto.randomBytes(32).toString('hex');
 process.env.MONGODB_URI = process.env.MONGODB_URI_TEST || 'mongodb://127.0.0.1:27017/translogisticadelsur_test';
 process.env.RNDC_PERMITIR_PRODUCCION = 'false';
 process.env.RNDC_PERMITIR_PRUEBAS = 'false';
+process.env.RNDC_LLAVE_MAESTRA = crypto.randomBytes(32).toString('base64');
 
 const { crearSimulador } = await import('../tools/rndcSimulador.js');
 const sim = crearSimulador();
@@ -1276,3 +1277,57 @@ test('Logo de la empresa: solo el administrador lo cambia, la vista previa no gu
   assert.equal((await s.adminA.get('/api/gestion/empresa/logo')).body.logo, '');
 });
 
+
+test('RNDC: contraseña guardada cifrada (solo el administrador, comprobada en el RNDC, nunca se devuelve)', async () => {
+  const G = '__clave_rndc_guardada__';
+  assert.equal((await s.manif.get('/api/rndc/clave-guardada')).body.guardada, false);
+  // Sin guardar, el marcador no sirve
+  assert.equal((await s.manif.post('/api/rndc/consultar', { clave: G, que: 'manifiesto', filtros: { NUMMANIFIESTOCARGA: 'M500' } })).status, 400);
+  // Solo el administrador la guarda, confirmando su contraseña de la plataforma; se comprueba en el RNDC
+  assert.equal((await s.manif.post('/api/rndc/clave-guardada', { clave: CLAVE_RNDC, miClave: CLAVE })).status, 403);
+  assert.equal((await s.adminA.post('/api/rndc/clave-guardada', { clave: CLAVE_RNDC, miClave: 'otra-clave' })).status, 400);
+  const mala = await s.adminA.post('/api/rndc/clave-guardada', { clave: 'clave-incorrecta', miClave: CLAVE });
+  assert.equal(mala.status, 400); assert.match(mala.body.error, /no aceptó esa contraseña/);
+  const ok = await s.adminA.post('/api/rndc/clave-guardada', { clave: CLAVE_RNDC, miClave: CLAVE });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.equal(ok.body.guardada, true);
+  assert.ok(!JSON.stringify(ok.body).includes(CLAVE_RNDC), 'la contraseña nunca se devuelve');
+  // En la base solo está cifrada (y ligada a la empresa)
+  const sec = await M.SecretoRndc.findOne({ empresa: s.empresaA }).select('+datos +sal +iv +tag +kid').lean();
+  assert.ok(sec.datos && !Buffer.from(sec.datos, 'base64').toString('utf8').includes(CLAVE_RNDC));
+  assert.equal(sec.sal.length, 44); assert.equal(sec.iv.length, 16);
+  // Se usa sola con el marcador
+  const q = await s.manif.post('/api/rndc/consultar', { clave: G, que: 'manifiesto', filtros: { NUMMANIFIESTOCARGA: 'M500' } });
+  assert.equal(q.status, 200, JSON.stringify(q.body));
+  assert.equal(q.body.documentos.length, 1);
+  assert.equal((await s.manif.get('/api/rndc/clave-guardada')).body.usos, 1);
+  // Si el RNDC la rechaza (p. ej. la cambiaron en el Ministerio), queda inválida y se deja de usar
+  const { guardar } = await import('../src/services/rndc/claveGuardada.js');
+  await guardar(s.empresaA, 'USUARIOWS@1', 'clave-incorrecta', { _id: null, nombre: 'prueba' });
+  const rech = await s.manif.post('/api/rndc/consultar', { clave: G, que: 'manifiesto', filtros: { NUMMANIFIESTOCARGA: 'M500' } });
+  assert.ok(rech.status !== 200 || rech.body.ok === false, JSON.stringify(rech.body));
+  await new Promise(r => setTimeout(r, 100));
+  const est = (await s.manif.get('/api/rndc/clave-guardada')).body;
+  assert.equal(est.guardada, false); assert.equal(est.invalida, true);
+  assert.equal((await s.manif.post('/api/rndc/consultar', { clave: G, que: 'manifiesto', filtros: { NUMMANIFIESTOCARGA: 'M500' } })).status, 400, 'no insiste');
+  // Quitarla
+  assert.equal((await s.adminA.del('/api/rndc/clave-guardada')).body.invalida, false);
+  assert.ok((await s.adminA.get('/api/reportes/auditoria?accion=guardar_clave_rndc')).body.length >= 1);
+});
+
+test('Sesión en cookie HttpOnly: no queda en el navegador y protege contra CSRF', async () => {
+  const r = await api().post('/api/auth/login').send({ email: 'admina@prueba.test', password: CLAVE });
+  assert.equal(r.status, 200);
+  const cookie = (r.headers['set-cookie'] || []).find(c => c.startsWith('tls_sesion='));
+  assert.ok(cookie, 'el servidor entrega la cookie de sesión');
+  assert.match(cookie, /HttpOnly/i); assert.match(cookie, /SameSite=Strict/i); assert.match(cookie, /Path=\/api/i);
+  const par = cookie.split(';')[0];
+  // Con la cookie se consulta; lo que modifica datos exige la cabecera de la interfaz
+  assert.equal((await api().get('/api/auth/yo').set('Cookie', par)).status, 200);
+  assert.equal((await api().post('/api/auth/salir').set('Cookie', par)).status, 403, 'sin X-Cliente-Id no se acepta (CSRF)');
+  const salir = await api().post('/api/auth/salir').set('Cookie', par).set('X-Cliente-Id', 'pestana-prueba');
+  assert.equal(salir.status, 200);
+  assert.ok((salir.headers['set-cookie'] || []).some(c => /^tls_sesion=;/.test(c)), 'al salir se borra la cookie');
+  assert.equal((await api().get('/api/auth/yo').set('Cookie', par)).status, 401, 'la sesión cerrada ya no sirve');
+  s.adminA = con(await login('admina@prueba.test'));
+});

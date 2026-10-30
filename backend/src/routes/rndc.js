@@ -1,8 +1,10 @@
 // Integración con el RNDC (Registro Nacional de Despachos de Carga).
 import { Router } from 'express';
+import bcrypt from 'bcryptjs';
+import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import mongoose from 'mongoose';
-import { Empresa, Tercero, Vehiculo, Viaje, TransaccionRndc, proximo, Contador } from '../models/index.js';
+import { Empresa, Tercero, Vehiculo, Viaje, TransaccionRndc, Usuario, proximo, Contador } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P, tienePermiso } from '../config/permisos.js';
 import { auditar, cambios } from '../services/auditoria.js';
@@ -16,9 +18,68 @@ import * as masiva from '../services/rndc/actualizacionVehiculos.js';
 import { programarEnvios, enviarPendientes } from '../services/correo.js';
 import { estadoLimitador } from '../services/rndc/limitador.js';
 import { verificarViaje, verificarConsecutivos, verificacionVigente } from '../services/rndc/verificacion.js';
+import * as claveRndc from '../services/rndc/claveGuardada.js';
+import { verificarTotp } from '../services/totp.js';
+import { descifrar } from '../utils/cifrado.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
+
+// ── Contraseña del RNDC guardada ──
+// La interfaz envía el marcador CLAVE_GUARDADA en lugar de la contraseña: aquí se cambia por la guardada
+// (descifrada solo en memoria). Si el RNDC la rechaza, queda marcada como inválida y se deja de usar.
+const RECHAZO_CLAVE = /usuario o (la )?contrase|contrase[ñn]a (no |inv|incorrect)|password|autentic|usuario (no |inv)/i;
+r.use(async (req, res, next) => {
+  if (req.body?.clave !== claveRndc.CLAVE_GUARDADA || req.path === '/clave-guardada') return next();
+  try {
+    if (![P.RNDC_OPERAR, P.RNDC_CONSULTAR, P.CONFIG_GESTIONAR].some(p => tienePermiso(req.usuario.rol, p))) throw new ErrorHttp(403, 'Sin permiso');
+    const e = await Empresa.findById(req.empresaId).select('rndc.usuario').lean();
+    req.body.clave = await claveRndc.usar(req.empresaId, e?.rndc?.usuario);
+    const json = res.json.bind(res);
+    res.json = (cuerpo) => {
+      if (RECHAZO_CLAVE.test(JSON.stringify(cuerpo ?? '').slice(0, 20000))) {
+        claveRndc.invalidar(req.empresaId).then(x => x.modifiedCount && auditar(req, 'clave_rndc_rechazada')).catch(() => {});
+      }
+      return json(cuerpo);
+    };
+    next();
+  } catch (e) { next(e); }
+});
+
+r.get('/clave-guardada', permitir(P.RNDC_OPERAR, P.RNDC_CONSULTAR, P.CONFIG_GESTIONAR), async (req, res) => res.json(await claveRndc.estado(req.empresaId)));
+
+// Guardar exige la contraseña de la plataforma del administrador (y su doble factor) y se comprueba en el RNDC
+const limiteClave = rateLimit({ windowMs: 15 * 60 * 1000, limit: 6, standardHeaders: 'draft-7', legacyHeaders: false,
+  keyGenerator: (req) => String(req.usuario?._id || 'anonimo'), message: { error: 'Demasiados intentos. Espere unos minutos.' } });
+r.post('/clave-guardada', permitir(P.CONFIG_GESTIONAR), limiteClave, async (req, res) => {
+  const d = z.object({ clave, miClave: z.string().min(1, 'Escriba su contraseña de la plataforma').max(100), codigo: z.string().trim().max(10).optional().default('') }).parse(req.body);
+  if (d.clave === claveRndc.CLAVE_GUARDADA) throw new ErrorHttp(400, 'Escriba la contraseña del RNDC');
+  const u = await Usuario.findById(req.usuario._id).select('+passwordHash +totp.secreto +totp.ultimoPaso');
+  if (!u || !(await bcrypt.compare(d.miClave, u.passwordHash))) {
+    await auditar(req, 'guardar_clave_rndc', { resultado: 'denegado', detalle: { motivo: 'contraseña de la plataforma incorrecta' } });
+    throw new ErrorHttp(400, 'Su contraseña de la plataforma no es correcta');
+  }
+  if (u.totp?.activo) {
+    const paso = verificarTotp(descifrar(u.totp.secreto), d.codigo, { ultimoPaso: u.totp.ultimoPaso || 0 });
+    if (!paso) throw new ErrorHttp(400, 'El código de doble factor no es correcto');
+    u.totp.ultimoPaso = paso; await u.save();
+  }
+  const empresa = await Empresa.findById(req.empresaId).select('rndc.usuario').lean();
+  if (!empresa?.rndc?.usuario) throw new ErrorHttp(400, 'Configure primero el usuario del web service del RNDC');
+  if (!claveRndc.disponible()) throw new ErrorHttp(503, 'El servidor no tiene configurada la llave para guardar la contraseña del RNDC');
+  // Comprobación en el RNDC con una consulta inofensiva (una placa que no existe)
+  const q = await op.consultar(req.empresaId, d.clave, req.usuario._id, { que: 'vehiculo', filtros: { NUMPLACA: 'ZZZ999' } });
+  if (!q.ok && RECHAZO_CLAVE.test(q.mensaje || '')) throw new ErrorHttp(400, `El RNDC no aceptó esa contraseña: ${q.mensaje}`);
+  if (!q.ok && /conexi|tiempo|timeout|ECONN|ENOTFOUND/i.test(q.mensaje || '')) throw new ErrorHttp(502, `No se pudo comprobar la contraseña en el RNDC: ${q.mensaje}`);
+  await claveRndc.guardar(req.empresaId, empresa.rndc.usuario, d.clave, req.usuario);
+  await auditar(req, 'guardar_clave_rndc', { detalle: { usuarioRndc: empresa.rndc.usuario } });
+  res.json(await claveRndc.estado(req.empresaId));
+});
+r.delete('/clave-guardada', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  await claveRndc.quitar(req.empresaId);
+  await auditar(req, 'quitar_clave_rndc');
+  res.json(await claveRndc.estado(req.empresaId));
+});
 
 const operar = permitir(P.RNDC_OPERAR);
 const clave = z.string().min(1, 'Escriba la contraseña del RNDC').max(100);

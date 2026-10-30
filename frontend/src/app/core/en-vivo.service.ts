@@ -27,7 +27,7 @@ export class EnVivo {
   }
 
   iniciar() {
-    if (this.control || !this.auth.token()) return;
+    if (this.control || !this.auth.usuario()) return;
     this.conectar();
     this.vigilarVersion();
   }
@@ -37,7 +37,7 @@ export class EnVivo {
   private async conectar() {
     const control = this.control = new AbortController();
     try {
-      const r = await fetch(`${environment.apiUrl}/eventos`, { headers: { Authorization: `Bearer ${this.auth.token()}` }, signal: control.signal, cache: 'no-store' });
+      const r = await fetch(`${environment.apiUrl}/eventos`, { credentials: 'include', signal: control.signal, cache: 'no-store' });
       if (r.status === 401 || r.status === 403) { this.control = null; return; }
       if (!r.ok || !r.body) throw new Error(String(r.status));
       this.espera = 1000;
@@ -60,7 +60,7 @@ export class EnVivo {
     if (this.control !== control || control.signal.aborted) return;
     // Reconexión con espera creciente (máx. 30 s)
     this.control = null;
-    setTimeout(() => { if (this.auth.token()) this.conectar(); }, this.espera);
+    setTimeout(() => { if (this.auth.usuario()) this.conectar(); }, this.espera);
     this.espera = Math.min(this.espera * 2, 30000);
   }
 

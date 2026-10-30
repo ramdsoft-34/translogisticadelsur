@@ -4,7 +4,7 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { Usuario, Empresa, Auditoria } from '../models/index.js';
 import { env } from '../config/env.js';
-import { autenticar, firmarToken, ErrorHttp } from '../middleware/auth.js';
+import { autenticar, firmarToken, ponerSesion, quitarSesion, ErrorHttp } from '../middleware/auth.js';
 import { ROLES, permisosDe } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
 import QRCode from 'qrcode';
@@ -81,7 +81,7 @@ r.post('/login', limiteLogin, async (req, res) => {
   await u.save();
   req.usuario = u; req.empresaId = u.empresa;
   await auditar(req, 'login');
-  res.json({ token: firmarToken(u), usuario: await perfil(u) });
+  res.json({ token: ponerSesion(res, firmarToken(u)), usuario: await perfil(u) });
 });
 
 r.get('/yo', autenticar, async (req, res) => {
@@ -97,7 +97,7 @@ r.post('/cambiar-clave', autenticar, async (req, res) => {
   u.debeCambiarClave = false;
   await u.save();
   await auditar(req, 'cambiar_clave');
-  res.json({ token: firmarToken(u), usuario: await perfil(u) });
+  res.json({ token: ponerSesion(res, firmarToken(u)), usuario: await perfil(u) });
 });
 
 // Datos de la cuenta del propio usuario: perfil, empresa, seguridad y su actividad reciente.
@@ -150,7 +150,7 @@ r.post('/doble-factor/activar', autenticar, async (req, res) => {
   u.tokenVersion += 1;          // cierra las demás sesiones
   await u.save();
   await auditar(req, 'activar_doble_factor');
-  res.json({ token: firmarToken(u), usuario: await perfil(u) });
+  res.json({ token: ponerSesion(res, firmarToken(u)), usuario: await perfil(u) });
 });
 r.post('/doble-factor/desactivar', autenticar, async (req, res) => {
   const { clave, codigo } = z.object({ clave: z.string().min(1).max(100), codigo: z.string().max(10) }).parse(req.body);
@@ -167,6 +167,7 @@ r.post('/doble-factor/desactivar', autenticar, async (req, res) => {
 r.post('/salir', autenticar, async (req, res) => {
   await Usuario.updateOne({ _id: req.usuario._id }, { $inc: { tokenVersion: 1 } });
   await auditar(req, 'logout');
+  quitarSesion(res);
   res.json({ ok: true });
 });
 

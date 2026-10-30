@@ -575,6 +575,20 @@ export const RemesaDulces = modelo('RemesaDulces', remesaDulcesSchema);
 export const RecorridoRastreo = modelo('RecorridoRastreo', recorridoRastreoSchema);
 export const Autorizacion = modelo('Autorizacion', autorizacionSchema);
 
+// ── Contraseña del RNDC guardada (cifrada; ver services/rndc/claveGuardada.js) ──
+// Una por empresa. Las partes del cifrado nunca se leen salvo al enviar al RNDC (select: false).
+const oculto = { type: String, default: '', select: false };
+const secretoRndcSchema = new Schema({
+  empresa: { type: Schema.Types.ObjectId, ref: 'Empresa', required: true, unique: true },
+  version: { type: Number, select: false }, kid: oculto, sal: oculto, iv: oculto, tag: oculto, datos: oculto,
+  usuarioRndc: str(),
+  guardadaEn: fecha, guardadaPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null }, guardadaPorNombre: str(),
+  invalida: { type: Boolean, default: false }, invalidaEn: fecha,
+  usos: { type: Number, default: 0 }, ultimoUso: fecha,
+}, { timestamps: true });
+secretoRndcSchema.plugin(tenantPlugin);
+export const SecretoRndc = modelo('SecretoRndc', secretoRndcSchema);
+
 // Siguiente valor de un contador de la empresa (atómico). `minimo` permite
 // continuar una numeración existente (ej. último manifiesto expedido).
 export async function siguiente(empresa, clave, minimo = 0) {

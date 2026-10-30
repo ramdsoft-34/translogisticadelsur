@@ -40,3 +40,22 @@ Este documento muestra cómo la plataforma aplica controles del **Anexo A de ISO
 
 - **Auditoría y base de datos:** quien tenga acceso directo a la base de datos puede borrar la colección completa. La cadena detecta alteraciones y huecos, pero no impide ese borrado. Para mayor garantía, exporte periódicamente los hashes, o envíe los registros a un almacenamiento WORM o a un SIEM externo.
 - **Doble factor (MFA):** no está implementado. Se recomienda agregarlo antes de exponer la plataforma a internet con roles administrativos.
+
+## Contraseña del RNDC guardada
+
+- Se guarda solo si el administrador lo decide (Configuración → Conexión RNDC), confirmando su contraseña de la
+  plataforma (y su doble factor) y después de comprobarla con una consulta al RNDC.
+- Cifrado propio, separado del resto: AES-256-GCM con una llave derivada (HKDF-SHA512, sal aleatoria por guardado)
+  de una **llave maestra exclusiva** que vive en un archivo del servidor (`RNDC_LLAVE_ARCHIVO`, permisos 400), nunca
+  en la base de datos ni en el repositorio. El cifrado queda atado a la empresa y al usuario del RNDC.
+- Ninguna ruta la devuelve: la interfaz envía un marcador y el servidor la descifra en memoria solo para el envío.
+- Si el RNDC la rechaza, queda inválida y se deja de usar (para no bloquear el usuario del RNDC).
+- Guardarla, quitarla y su rechazo quedan en la auditoría. Para rotar la llave maestra: quitar la contraseña,
+  cambiar el archivo y guardarla de nuevo.
+
+## Sesión en cookie
+
+- El token de sesión va en la cookie `tls_sesion` (HttpOnly, Secure, SameSite=Strict, ruta `/api`): el navegador no lo
+  guarda en localStorage ni sessionStorage y JavaScript no lo puede leer. Lo que modifica datos exige además la
+  cabecera `X-Cliente-Id` de la interfaz (protección CSRF). En el navegador solo quedan preferencias sin datos
+  personales (tema, menú fijo/suelto, opciones de exportación).

@@ -16,15 +16,15 @@ function reintentable(e: unknown, metodo: string) {
   return (e.status === 0 || e.status === 504) && (metodo === 'GET' || metodo === 'HEAD');
 }
 
-// Agrega el token, reintenta los cortes breves del servidor y cierra la sesión si el servidor la rechaza.
+// Envía la cookie de sesión y el id de la pestaña (que también protege contra CSRF), reintenta los cortes breves
+// del servidor y cierra la sesión si el servidor la rechaza.
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const auth = inject(Auth);
-  const token = auth.token();
-  const r = req.clone({ setHeaders: { 'X-Cliente-Id': ID_PESTANA, ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+  const r = req.clone({ withCredentials: true, setHeaders: { 'X-Cliente-Id': ID_PESTANA } });
   return next(r).pipe(
     retry({ count: ESPERAS.length, delay: (e, intento) => (reintentable(e, req.method) ? timer(ESPERAS[intento - 1]) : throwError(() => e)) }),
     catchError((e: HttpErrorResponse) => {
-      if (e.status === 401 && token && !req.url.endsWith('/auth/login')) auth.salir(false);
+      if (e.status === 401 && auth.usuario() && !req.url.endsWith('/auth/login')) auth.salir(false);
       return throwError(() => e);
     }),
   );

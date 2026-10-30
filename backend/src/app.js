@@ -30,6 +30,8 @@ export function crearApp() {
     origin: (origin, cb) => cb(null, !origin || env.corsOrigins.includes(origin)
       || (env.nodeEnv !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin))),
     exposedHeaders: ['Content-Disposition'],
+    // La sesión va en una cookie: solo los orígenes permitidos pueden enviarla
+    credentials: true,
   }));
   // Los correos con archivos adjuntos traen su propio límite (12 MB) en la ruta
   const json = express.json({ limit: '1mb' });

@@ -2,14 +2,15 @@ import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
 import { Auth } from './auth.service';
 
-export const conSesion: CanActivateFn = () => {
-  const auth = inject(Auth);
-  return auth.usuario() ? true : inject(Router).parseUrl('/ingresar');
+// La sesión vive en una cookie HttpOnly: si la página se recargó, se recupera preguntando al servidor
+export const conSesion: CanActivateFn = async () => {
+  const auth = inject(Auth); const router = inject(Router);
+  return (await auth.restaurar()) ? true : router.parseUrl('/ingresar');
 };
 
-export const sinSesion: CanActivateFn = () => {
-  const auth = inject(Auth);
-  return auth.usuario() ? inject(Router).parseUrl(auth.inicio()) : true;
+export const sinSesion: CanActivateFn = async () => {
+  const auth = inject(Auth); const router = inject(Router);
+  return (await auth.restaurar()) ? router.parseUrl(auth.inicio()) : true;
 };
 
 // Exige alguno de los permisos indicados en `data.permisos` de la ruta.
