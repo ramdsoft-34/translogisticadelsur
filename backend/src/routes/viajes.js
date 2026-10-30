@@ -3,7 +3,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { Viaje, Cliente, Tarifa, Tercero, Vehiculo, PlantillaWhatsapp, siguiente, pob } from '../models/index.js';
+import { Viaje, Cliente, Tarifa, Tercero, Vehiculo, PlantillaWhatsapp, siguiente, proximo, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P, tienePermiso } from '../config/permisos.js';
 import { auditar, cambios } from '../services/auditoria.js';
@@ -43,6 +43,9 @@ const viajeSchema = z.object({
   diasAuxiliar: z.coerce.number().int().min(0).max(5, 'el auxiliar va de 1 a 5 días').optional(), planilla: z.string().trim().max(30).optional(),
   tarifa: dinero.optional(), flete: dinero.optional(), anticipo: dinero.optional(),
   observaciones: z.string().trim().max(500).optional(),
+  licencia: z.string().trim().max(40).optional(),
+  // N° de manifiesto escrito a mano (opcional): se usa al expedir en el RNDC
+  numeroManifiesto: z.string().trim().toUpperCase().max(15).optional(),
   historico: z.boolean().optional(),
   requiereManifiesto: z.boolean().optional(),
   origen: z.enum(['viajes', 'manifiesto']).optional(),
@@ -54,7 +57,12 @@ export async function titularDePlaca(empresaId, placa) {
   return v?.titularHabitual || null;
 }
 // Después de expedir documentos en el RNDC solo se pueden cambiar datos internos.
-const CAMPOS_INTERNOS = ['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa', 'historico'];
+const CAMPOS_INTERNOS = ['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa', 'historico', 'licencia'];
+// «Manifiesto» del formulario → número manual del manifiesto para el RNDC
+function numeroManifiestoA(d) {
+  if (d.numeroManifiesto === undefined) return;
+  d['numerosManuales.manifiesto'] = d.numeroManifiesto; delete d.numeroManifiesto;
+}
 
 const POBLAR = (req) => [
   pob(req.empresaId, 'cliente', 'nombre nit dv tipoId'),
@@ -115,17 +123,29 @@ r.get('/', permitir(P.VIAJES_VER), async (req, res) => {
   // En la agregación los identificadores no se convierten solos
   const filtroAgg = { ...filtro, empresa: new mongoose.Types.ObjectId(String(req.empresaId)) };
   if (typeof filtroAgg.cliente === 'string') filtroAgg.cliente = new mongoose.Types.ObjectId(filtroAgg.cliente);
-  const [total, lista, sumas] = await Promise.all([
+  const [total, listaSinAux, sumas] = await Promise.all([
     Viaje.countDocuments(filtro),
     Viaje.find(filtro).sort({ fecha: -1, numero: -1 }).skip((pagina - 1) * limite).limit(limite).populate(POBLAR(req)).lean(),
     // Totales de TODO el filtro (no solo de la página cargada)
     pagina === 1 ? Viaje.aggregate([{ $match: filtroAgg }, { $group: { _id: null, flete: { $sum: '$flete' }, anticipo: { $sum: '$anticipo' }, tarifa: { $sum: '$tarifa' } } }]) : null,
   ]);
+  const lista = await conAuxiliar(req, listaSinAux);
   // Sin coincidencias la agregación no devuelve grupo: las sumas son cero
   const s = sumas ? (sumas[0] || { flete: 0, anticipo: 0, tarifa: 0 }) : null;
   res.json({ total, pagina, limite, viajes: lista.map(presentar),
     ...(s ? { sumas: { flete: s.flete, anticipo: s.anticipo, tarifa: s.tarifa, saldo: s.flete - s.anticipo, ...(await sumasConductor(req, filtro)) } } : {}) });
 });
+
+// Auxiliar pagado al conductor de cada viaje de la página (columna «Auxiliar» de la lista)
+async function conAuxiliar(req, viajes) {
+  if (!viajes.length) return viajes;
+  const tarifas = await Tarifa.find(deEmpresa(req, { cliente: { $in: [...new Set(viajes.map(v => String(v.cliente?._id || v.cliente)))] } })).lean();
+  const porId = new Map(tarifas.map(t => [String(t._id), t])); const respaldo = respaldosAuxiliar(tarifas);
+  return viajes.map(v => ({ ...v, auxiliar: lineaLiquidacion(v, porId.get(String(v.tarifaRef?._id || v.tarifaRef)), { respaldo: respaldo.get(String(v.cliente?._id || v.cliente)) }).totalAuxiliarPagado }));
+}
+
+// Próximo N° de registro (sin consumirlo), para mostrarlo en el formulario
+r.get('/siguiente-numero', permitir(P.VIAJES_VER), async (req, res) => res.json({ numero: await proximo(req.empresaId, 'viaje') }));
 
 // Auxiliar pagado, retefuente y FOPAT de todos los viajes del filtro (mismas reglas de la liquidación del conductor)
 async function sumasConductor(req, filtro) {
@@ -294,6 +314,8 @@ r.post('/', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const rastrear = req.body?.rastrear === true;
   const autorizacion = autorizacionSchema.parse(req.body?.autorizacion);
   const d = viajeSchema.parse(req.body);
+  if (d.numeroManifiesto) d.numerosManuales = { remesa: '', manifiesto: d.numeroManifiesto };
+  delete d.numeroManifiesto;
   await validarReferencias(req, d);
   // Mes cerrado y documentos del viaje (licencia, SOAT y tecnomecánica vencidos no dejan registrar sin autorización del administrador)
   await asegurarMesAbierto(req.empresaId, d.fecha);
@@ -347,6 +369,8 @@ async function viajeEditable(req) {
 r.put('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const v = await viajeEditable(req);
   let d = viajeSchema.partial().parse(req.body);
+  if (d.numeroManifiesto !== undefined && v.manifiesto?.estado === 'aceptado') delete d.numeroManifiesto;
+  numeroManifiestoA(d);
   if (d.fecha) await asegurarMesAbierto(req.empresaId, d.fecha);
   if (v.estado !== 'registrado') {
     const bloqueados = Object.keys(d).filter(k => !CAMPOS_INTERNOS.includes(k));

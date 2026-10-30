@@ -25,6 +25,7 @@ import { RouterLink } from '@angular/router';
 import { AutorizacionAdmin } from '../core/autorizacion.service';
 
 interface Formulario {
+  licencia?: string; conLicencia?: boolean; numeroManifiesto?: string;
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
   placa: string; remolque: string; conductor: string; titular: string;
   pesoKg: number | null; cantidad: number | null; conAuxiliar: boolean; diasAuxiliar: number | null; planilla: string;
@@ -92,14 +93,14 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     <div class="tabla-caja">
       <table class="tabla-movil">
         <thead><tr><th>N°</th><th>Fecha</th><th>Cliente / destino</th><th>Placa</th><th>Conductor</th>
-          <th class="num">Flete</th><th class="num">Anticipo</th><th class="num">Saldo</th><th>Estado</th></tr></thead>
+          <th class="num">Flete</th><th class="num">Anticipo</th><th class="num">Auxiliar</th><th class="num">Saldo</th><th>Estado</th></tr></thead>
         <tbody>
           @for (v of viajes(); track v._id) {
             <tr class="seleccionable" (click)="editar(v)" tabindex="0" (keydown.enter)="editar(v)">
               <td data-etiqueta="N°" class="sutil">{{ v.numero }}</td><td data-etiqueta="Fecha">{{ v.fecha | dia }}</td>
               <td data-etiqueta="Cliente"><span class="celda-doble"><span>{{ v.cliente?.nombre }}</span><small>{{ v.destino }}</small></span></td>
               <td data-etiqueta="Placa"><span class="placa">{{ v.placa }}</span></td><td data-etiqueta="Conductor">{{ v.conductorNombre }}</td>
-              <td data-etiqueta="Flete" class="num">{{ v.flete | pesos }}</td><td data-etiqueta="Anticipo" class="num">{{ v.anticipo | pesos }}</td><td data-etiqueta="Saldo" class="num"><strong>{{ v.saldo | pesos }}</strong></td>
+              <td data-etiqueta="Flete" class="num">{{ v.flete | pesos }}</td><td data-etiqueta="Anticipo" class="num">{{ v.anticipo | pesos }}</td><td data-etiqueta="Auxiliar" class="num">{{ $any(v).auxiliar ? ($any(v).auxiliar | pesos) : '—' }}</td><td data-etiqueta="Saldo" class="num"><strong>{{ v.saldo | pesos }}</strong></td>
               <td data-etiqueta="Estado"><span class="estados">
                 <span class="chip" [class]="claseEstado(v.estado)">{{ estadoTexto(v.estado) }}</span>
                 @if (v.manifiesto.estado === 'aceptado') { <small class="sutil">{{ v.manifiesto.numero }}</small> }
@@ -113,9 +114,9 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             </tr>
           } @empty {
             @if (cargando()) {
-              @for (i of [1, 2, 3, 4]; track i) { <tr><td colspan="9"><span class="esqueleto"></span></td></tr> }
+              @for (i of [1, 2, 3, 4]; track i) { <tr><td colspan="10"><span class="esqueleto"></span></td></tr> }
             } @else {
-              <tr><td colspan="9" class="vacio"><strong>{{ periodo() === 'hoy' ? 'Aún no hay viajes hoy' : 'No hay viajes con estos filtros' }}</strong>
+              <tr><td colspan="10" class="vacio"><strong>{{ periodo() === 'hoy' ? 'Aún no hay viajes hoy' : 'No hay viajes con estos filtros' }}</strong>
                 {{ periodo() === 'hoy' ? 'Registre el primer despacho del día o revise otro periodo.' : 'Cambie el periodo o los filtros.' }}
                 @if (puedeRegistrar && periodo() === 'hoy') { <div style="margin-top:12px"><button class="primario" (click)="nuevo()"><app-icono nombre="mas" [tam]="16" />Registrar viaje</button></div> }
               </td></tr>
@@ -130,109 +131,90 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       <div class="registro-columnas">
       <div class="col-form">
       @let f = form();
-      @if (!f._id && registradosTanda().length) {
-        <div class="tanda" role="status">
-          <strong>{{ registradosTanda().length }} registrado(s):</strong>
-          @for (r of registradosTanda(); track r.numero) { <span class="chip ok sin-punto">N° {{ r.numero }} · {{ r.placa }}{{ r.sinManifiesto ? ' · sin manifiesto' : '' }}</span> }
-          <small class="sutil">Se conservan el cliente y la fecha; escriba el destino, la placa y el conductor del siguiente.</small>
-        </div>
+      @if (bloqueado()) { <div class="mensaje info compacto-msj">Este viaje ya tiene documentos en el RNDC: solo puede cambiar observaciones, auxiliar, tarifa y licencia.</div> }
+      @if (f.historico && puedeEditarTodos) {
+        <label class="casilla compacto-msj"><input type="checkbox" name="habilitar" [(ngModel)]="habilitarRndc" />Viaje histórico del Excel: habilitarlo para expedir en el RNDC</label>
       }
-      @if (bloqueado()) {
-        <div class="mensaje info" style="margin-bottom:14px">Este viaje ya tiene documentos en el RNDC: solo puede cambiar observaciones, cantidad, auxiliar y tarifa.</div>
-      }
-      <form id="form-viaje" (ngSubmit)="guardar()" class="secciones">
-        @if (f._id) {
-        <label class="casilla requiere">
-          <input type="checkbox" name="requiere" [(ngModel)]="f.requiereManifiesto" [disabled]="bloqueado() || !!f.historico" />
-          <span><strong>Requiere manifiesto de carga</strong><small>Desmárquelo si este viaje no debe expedir remesa ni manifiesto en el RNDC; no aparecerá en «Manifiestos RNDC».</small></span>
-        </label>
-        }
-        @if (f.historico) {
-          <div class="mensaje info">Viaje histórico importado del Excel: no aparece en «Manifiestos RNDC».
-            @if (puedeEditarTodos) { <label class="casilla" style="margin-top:6px"><input type="checkbox" name="habilitar" [(ngModel)]="habilitarRndc" />Habilitarlo para expedir sus documentos en el RNDC</label> }</div>
-        }
+      <form id="form-viaje" (ngSubmit)="guardar()" class="registro" autocomplete="off">
+        <label for="v-cli">Empresa:</label>
+        <select id="v-cli" name="cliente" [(ngModel)]="f.cliente" (ngModelChange)="cambiarCliente($event)" [disabled]="bloqueado()" required>
+          <option value="">Seleccione…</option>
+          @for (c of clientesActivos(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }
+        </select>
 
-        <fieldset><legend>Cliente y ruta</legend>
-          <div class="rejilla">
-            <div class="campo"><label for="v-fecha">Fecha</label><input id="v-fecha" type="date" name="fecha" [(ngModel)]="f.fecha" (ngModelChange)="fechaFormulario($event)" [disabled]="bloqueado()" required /></div>
-            <div class="campo"><label for="v-cli">Cliente</label>
-              <select id="v-cli" name="cliente" [(ngModel)]="f.cliente" (ngModelChange)="cambiarCliente($event)" [disabled]="bloqueado()" required>
-                <option value="">Seleccione…</option>
-                @for (c of clientesActivos(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }
-              </select></div>
-            <div class="campo"><label for="v-dest">Destino</label>
-              <input id="v-dest" name="destino" list="lista-destinos" [ngModel]="f.destino" (ngModelChange)="escribirDestino($event)"
-                [disabled]="bloqueado() || !f.cliente" [placeholder]="f.cliente ? 'Escriba para buscar el destino' : 'Primero elija el cliente'" autocomplete="off" required />
-              <datalist id="lista-destinos">@for (t of tarifasCliente(); track t._id) { <option [value]="t.destino"></option> }</datalist></div>
-            @if (f.destino && !f.tarifaRef) {
-              <app-municipio etiqueta="Municipio de destino (destino nuevo)" [(codigo)]="f.codDestino" />
-            }
-          </div>
-          <p class="nota">Escriba y elija un destino de la lista: se llenan la tarifa, el flete y el anticipo. Si no está, escriba el nombre y elija el municipio.</p>
-        </fieldset>
-
-        <fieldset><legend>Vehículo y conductor</legend>
-          <div class="rejilla">
-            <app-buscar-tercero etiqueta="Conductor" rol="conductor" [conPlacas]="true" [(valor)]="f.conductor" (elegido)="elegirConductor($event)"
-              [deshabilitado]="bloqueado()" placeholder="Nombre, apellido o cédula" />
-            <div class="campo"><label for="v-placa">Placa</label>
-              <input id="v-placa" name="placa" list="lista-placas" [(ngModel)]="f.placa" (input)="buscarPlacas(f.placa)" (change)="sugerirPorPlaca(); revisarDocumentos()"
-                [disabled]="bloqueado()" required autocomplete="off" style="text-transform:uppercase" placeholder="ABC123" />
-              <datalist id="lista-placas">@for (x of placas(); track x._id) { <option [value]="x.placa"></option> }</datalist>
-              @if (placasConductor().length > 1 && !bloqueado()) {
-                <div class="placas-conductor" role="group" aria-label="Placas del conductor">
-                  @for (p of placasConductor(); track p) { <button type="button" class="pequeno" [class.primario]="f.placa === p" (click)="usarPlaca(p)">{{ p }}</button> }
-                </div>
-              }</div>
-            <div class="campo"><label for="v-rem">Remolque</label><input id="v-rem" name="remolque" [(ngModel)]="f.remolque" [disabled]="bloqueado()" style="text-transform:uppercase" placeholder="Opcional" /></div>
-            <div class="campo"><label for="v-peso">Peso (kg)</label><input id="v-peso" type="number" min="0" name="pesoKg" [(ngModel)]="f.pesoKg" [disabled]="bloqueado()" /></div>
-            <div class="campo"><label for="v-cant">Cantidad</label><input id="v-cant" type="number" min="0" name="cantidad" [(ngModel)]="f.cantidad" title="Viajes o unidades (tarifa por unidad)" /></div>
-          </div>
+        <span class="etq">Conductor:</span>
+        <div>
+          <app-buscar-tercero etiqueta="" rol="conductor" [conPlacas]="true" [(valor)]="f.conductor" (elegido)="elegirConductor($event)"
+            [deshabilitado]="bloqueado()" placeholder="Nombre, apellido o cédula" />
           @if (documentos(); as dc) {
-            @if (dc.vencidos.length) { <div class="mensaje error"><strong>Documentos vencidos:</strong><ul>@for (x of dc.vencidos; track x) { <li>{{ x }}</li> }</ul>
-              Al guardar se pedirá la autorización del administrador.</div> }
-            @if (dc.avisos.length) { <div class="mensaje alerta"><strong>Por vencer:</strong><ul>@for (x of dc.avisos; track x) { <li>{{ x }}</li> }</ul></div> }
+            @if (dc.vencidos.length) { <span class="chip error sin-punto" [title]="dc.vencidos.join('; ')">Documentos vencidos: se pedirá autorización</span> }
+            @else if (dc.avisos.length) { <span class="chip alerta sin-punto" [title]="dc.avisos.join('; ')">Documentos por vencer</span> }
+            @else if (f.conductor) { <span class="chip ok sin-punto">Documentos al día</span> }
           }
-          <p class="nota">Elija primero el conductor: se pone sola la placa de su vehículo habitual o la de su último viaje (si tiene varias, elija una). El titular del manifiesto se toma del vehículo; si no tiene, es el conductor.</p>
-        </fieldset>
+        </div>
 
-        <fieldset><legend>Valores en pesos colombianos (COP)</legend>
-          <div class="rejilla">
-            <div class="campo"><label for="v-tar">Tarifa al cliente</label><div class="moneda"><input id="v-tar" moneda name="tarifa" [(ngModel)]="f.tarifa" /></div></div>
-            <div class="campo"><label for="v-flete">Flete al conductor</label><div class="moneda"><input id="v-flete" moneda name="flete" [(ngModel)]="f.flete" [disabled]="bloqueado()" /></div></div>
-            <div class="campo"><label for="v-ant">Anticipo</label><div class="moneda"><input id="v-ant" moneda name="anticipo" [(ngModel)]="f.anticipo" [disabled]="bloqueado()" /></div></div>
-            <div class="campo"><span class="etiqueta">Saldo al conductor</span><div class="lectura">{{ ((f.flete || 0) - (f.anticipo || 0)) | pesos }} <small>COP</small></div></div>
-            <div class="campo"><span class="etiqueta">Auxiliar</span><label class="casilla caja"><input type="checkbox" name="aux" [(ngModel)]="f.conAuxiliar" />El viaje lleva auxiliar</label></div>
-            @if (f.conAuxiliar) { <div class="campo"><label for="v-diasaux">Días de auxiliar</label><input id="v-diasaux" type="number" min="1" max="5" step="1" name="diasAux" placeholder="1 a 5" [(ngModel)]="f.diasAuxiliar" />
-              <small>De 1 a 5. Si el destino no tiene tarifa de auxiliar se usa la primera del cliente.</small></div> }
-            <div class="campo"><label for="v-planilla">N° de planilla</label><input id="v-planilla" name="planilla" maxlength="30" placeholder="Opcional" [(ngModel)]="f.planilla" /></div>
-          </div>
-        </fieldset>
+        <label for="v-lic">Licencia:</label>
+        <div class="con-casilla">
+          <input id="v-lic" name="licencia" [(ngModel)]="f.licencia" placeholder="Categoría-número" />
+          <input type="checkbox" name="conLicencia" [(ngModel)]="f.conLicencia" title="Guardar la licencia con el viaje (va en el reporte de WhatsApp)" aria-label="Guardar la licencia con el viaje" />
+        </div>
 
-        @if (rastreoHabilitado()) {
-          @if (!f._id) {
-            <label class="casilla requiere">
-              <input type="checkbox" name="rastrear" [checked]="rastrear()" (change)="rastrear.set(!rastrear())" />
-              <span><strong>Rastrear este viaje con Sur Track</strong><small>Al guardar elige la modalidad (solo destino o con clientes); el conductor lo ve en Sur Track y se sigue en Monitoreo.</small></span>
-            </label>
-          } @else {
-            <div class="rastreo-viaje">
-              <app-icono nombre="ubicacion" [tam]="18" />
-              @if (rastreoForm()?.activo) {
-                <span><strong>Rastreo activo</strong> · {{ textoRastreo(rastreoForm().estado) }} · {{ rastreoForm().modalidad === 'clientes' ? 'Con ' + (rastreoForm().clientes?.length || 0) + ' cliente(s)' : 'Destino: ' + (rastreoForm().destino?.nombre || f.destino) }} · Sur Track {{ rastreoForm().codigoExterno }}</span>
-                <a class="boton pequeno" [routerLink]="['/monitoreo']" [queryParams]="{ viaje: f._id }">Ver en el mapa</a>
-                <button type="button" class="pequeno" (click)="checklist().abrir(f._id!)">Checklist</button>
-                @if (puedeRegistrar && rastreoForm().estado === 'esperando' && rastreoForm().origen === 'translogistica') {
-                  <button type="button" class="pequeno" (click)="abrirActivar(true)">Cambiar destino o clientes</button> }
-                @if (puedeRegistrar) { <button type="button" class="pequeno peligro" confirmar="Clic otra vez para terminar" (confirmado)="terminarRastreo()">Terminar rastreo</button> }
-              } @else {
-                <span>Este viaje no se está rastreando.</span>
-                @if (puedeRegistrar && f.estado !== 'anulado') { <button type="button" class="pequeno" (click)="activarRastreo()" [disabled]="guardando()">Activar rastreo</button> }
-              }
+        <label for="v-placa">Placa:</label>
+        <div>
+          <input id="v-placa" name="placa" list="lista-placas" [(ngModel)]="f.placa" (input)="buscarPlacas(f.placa)" (change)="sugerirPorPlaca(); revisarDocumentos()"
+            [disabled]="bloqueado()" required style="text-transform:uppercase" placeholder="ABC123" />
+          <datalist id="lista-placas">@for (x of placas(); track x._id) { <option [value]="x.placa"></option> }</datalist>
+          @if (placasConductor().length > 1 && !bloqueado()) {
+            <div class="placas-conductor" role="group" aria-label="Placas del conductor">
+              @for (p of placasConductor(); track p) { <button type="button" class="pequeno" [class.primario]="f.placa === p" (click)="usarPlaca(p)">{{ p }}</button> }
             </div>
           }
-        }
-        <div class="campo"><label for="v-obs">Observaciones (van en el manifiesto)</label><textarea id="v-obs" name="obs" maxlength="200" rows="3" [(ngModel)]="f.observaciones"></textarea></div>
+        </div>
+
+        <label for="v-dest">Destino:</label>
+        <div>
+          <input id="v-dest" name="destino" list="lista-destinos" [ngModel]="f.destino" (ngModelChange)="escribirDestino($event)"
+            [disabled]="bloqueado() || !f.cliente" [placeholder]="f.cliente ? 'Escriba para buscar el destino' : 'Primero elija la empresa'" required />
+          <datalist id="lista-destinos">@for (t of tarifasCliente(); track t._id) { <option [value]="t.destino"></option> }</datalist>
+          @if (f.destino && !f.tarifaRef) { <app-municipio etiqueta="Municipio del destino nuevo" [(codigo)]="f.codDestino" /> }
+        </div>
+
+        <label for="v-peso">Peso Kg:</label>
+        <input id="v-peso" type="number" min="0" name="pesoKg" [(ngModel)]="f.pesoKg" [disabled]="bloqueado()" />
+
+        <label for="v-tar">Tarifa:</label>
+        <div class="moneda"><input id="v-tar" moneda name="tarifa" [(ngModel)]="f.tarifa" /></div>
+
+        <label for="v-flete">Flete:</label>
+        <div class="moneda"><input id="v-flete" moneda name="flete" [(ngModel)]="f.flete" [disabled]="bloqueado()" /></div>
+
+        <label for="v-ant">Anticipo:</label>
+        <div class="moneda"><input id="v-ant" moneda name="anticipo" [(ngModel)]="f.anticipo" [disabled]="bloqueado()" /></div>
+
+        <label for="v-aux">Auxiliar:</label>
+        <select id="v-aux" name="diasAux" class="corto" [ngModel]="f.conAuxiliar ? (f.diasAuxiliar || 1) : 0" (ngModelChange)="ponerAuxiliar($event)">
+          <option [ngValue]="0">—</option>
+          @for (d of [1, 2, 3, 4, 5]; track d) { <option [ngValue]="d">{{ d }} {{ d === 1 ? 'día' : 'días' }}</option> }
+        </select>
+
+        <span class="etq">Aux. Valor:</span>
+        <div class="lectura-fila">{{ f.conAuxiliar ? (valorAuxiliar() | pesos) : '' }}</div>
+
+        <label for="v-obs">Observaciones:</label>
+        <input id="v-obs" name="obs" maxlength="200" [(ngModel)]="f.observaciones" placeholder="Escribe [NO FACTURAR] para excluirlo de la factura" />
+
+        <label for="v-man">Manifiesto:</label>
+        <input id="v-man" name="manifiesto" maxlength="15" [(ngModel)]="f.numeroManifiesto" placeholder="Opcional" style="text-transform:uppercase" [disabled]="bloqueado()" />
+
+        <div class="resumen-registro">
+          <span><strong>N° de registro: {{ f._id ? numeroEditado() : (siguienteNumero() || '…') }}</strong></span>
+          <span>Saldo <strong>{{ ((f.flete || 0) - (f.anticipo || 0)) | pesos }}</strong></span>
+          <span>Utilidad <strong>{{ ((f.tarifa || 0) - (f.tarifa || 0) * 0.01 - (f.flete || 0)) | pesos }}</strong></span>
+          <span>Retefuente 1% <strong>{{ ((f.flete || 0) * 0.01) | pesos }}</strong></span>
+        </div>
+
+        <label for="v-fecha">Fecha:</label>
+        <input id="v-fecha" type="date" class="corto" name="fecha" [(ngModel)]="f.fecha" (ngModelChange)="fechaFormulario($event)" [disabled]="bloqueado()" required />
       </form>
       </div>
       <aside class="col-wa" aria-label="Reporte por WhatsApp">
@@ -242,22 +224,21 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       </div>
       <ng-container pie>
         @if (form()._id && !bloqueado() && puedeRegistrar) { <button class="peligro" type="button" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()" style="margin-right:auto">Eliminar</button> }
-        @if (form()._id && form().requiereManifiesto === false && puedeRegistrar) {
-          <button type="button" (click)="soporteInterno()" title="Manifiesto y remesa internos (MC/RC) para viajes que no van al RNDC"><app-icono nombre="ojo" [tam]="15" />Soporte interno</button>
+        @if (form()._id && rastreoHabilitado() && puedeRegistrar) {
+          <button type="button" (click)="rastreoForm()?.activo ? null : activarRastreo()" [disabled]="guardando() || rastreoForm()?.activo"
+            [title]="rastreoForm()?.activo ? 'El viaje ya se está rastreando' : 'Rastrear este viaje con Sur Track'"><app-icono nombre="ubicacion" [tam]="15" />{{ rastreoForm()?.activo ? 'Rastreo activo' : 'Rastrear' }}</button>
         }
-        @if (!form()._id && puedeRegistrar) {
-          <label class="casilla seguir" title="Después de guardar, el formulario queda listo para el siguiente viaje del mismo cliente">
-            <input type="checkbox" [checked]="seguirRegistrando()" (change)="alternarSeguir()" />Registrar otro del mismo cliente</label>
-        }
-        <button type="button" (click)="cerrarFormulario()">{{ registradosTanda().length ? 'Terminar' : 'Cancelar' }}</button>
+        <button type="button" (click)="cerrarFormulario()">Cerrar</button>
         @if (puedeRegistrar) {
           @if (form()._id) {
-            <button class="primario" type="submit" form="form-viaje" [disabled]="guardando()">{{ guardando() ? 'Guardando…' : 'Guardar viaje' }}</button>
+            <button class="primario" type="submit" form="form-viaje" [disabled]="guardando()">{{ guardando() ? 'Guardando…' : 'Guardar' }}</button>
+          } @else if (!preguntarManifiesto()) {
+            <button class="primario" type="button" (click)="preguntarManifiesto.set(true)" [disabled]="guardando()">{{ guardando() ? 'Guardando…' : 'Guardar' }}</button>
           } @else {
             <div class="pregunta-manifiesto" role="group" aria-label="¿Requiere manifiesto de carga?">
               <span>¿Requiere manifiesto?</span>
-              <button type="button" class="primario" (click)="guardar(true)" [disabled]="guardando()">{{ guardando() ? 'Guardando…' : 'Sí, guardar' }}</button>
-              <button type="button" (click)="guardar(false)" [disabled]="guardando()">No, guardar</button>
+              <button type="button" class="primario" (click)="guardar(true)" [disabled]="guardando()">Sí</button>
+              <button type="button" (click)="guardar(false)" [disabled]="guardando()">No</button>
             </div>
           }
         }
@@ -348,9 +329,19 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .rastreo-viaje { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-1); }
     a.chip.gps { text-decoration: none; }
     .placas-conductor { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-    .registro-columnas { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; align-items: start; }
-    .registro-columnas .rejilla { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .col-wa { position: sticky; top: 0; padding: 14px; border: 1px solid var(--gris-2); border-radius: var(--radio-l); background: var(--gris-1); max-height: calc(100dvh - 190px); overflow: auto; }
+    .registro-columnas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 16px; align-items: start; }
+    .col-form { padding: 12px 14px; border: 1px solid var(--gris-2); border-radius: var(--radio-l); background: var(--gris-0); }
+    .registro { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 6px 10px; align-items: center; font-size: 13.5px; }
+    .registro > label, .registro > .etq { font-weight: 700; white-space: nowrap; }
+    .registro input, .registro select, .registro .moneda input { min-height: 34px; height: 34px; padding-top: 4px; padding-bottom: 4px; font-size: 13.5px; }
+    .registro .corto { max-width: 170px; }
+    .registro .con-casilla { display: flex; gap: 8px; align-items: center; } .registro .con-casilla input[type=text], .registro .con-casilla input:not([type]) { flex: 1; }
+    .registro .con-casilla input[type=checkbox] { width: 20px; height: 20px; min-height: 0; flex: none; }
+    .registro .lectura-fila { min-height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 10px; border: 1px dashed var(--gris-3); background: var(--gris-1); font-weight: 700; font-variant-numeric: tabular-nums; }
+    .registro .chip { margin-top: 4px; }
+    .resumen-registro { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 0 2px; font-size: 13px; font-variant-numeric: tabular-nums; }
+    .compacto-msj { margin-bottom: 8px; font-size: 12.5px; }
+    .col-wa { position: sticky; top: 0; padding: 12px; border: 1px solid var(--gris-2); border-radius: var(--radio-l); background: var(--gris-1); max-height: calc(100dvh - 190px); overflow: auto; }
     .col-wa h3 { margin: 0 0 10px; font-size: 15px; }
     .wa-columnas.apilado { grid-template-columns: 1fr; }
     .wa-columnas.apilado .wa-mensajes { position: static; }
@@ -518,9 +509,21 @@ export class Viajes {
   estadoTexto(e: string) { return ESTADOS_VIAJE[e] || e; }
   claseEstado(e: string) { return ({ manifestado: 'marca', cumplido: 'ok', anulado: 'error', remesa: 'alerta' } as Record<string, string>)[e] || ''; }
 
-  nuevo() { this.rastreoSrv.cargar(); this.rastreoForm.set(null); this.viajeRastreo = null; this.rastrear.set(false); this.form.set(vacio()); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.reporteDelFormulario(this.form().fecha); this.abierto.set(true); }
+  nuevo() { this.rastreoSrv.cargar(); this.rastreoForm.set(null); this.viajeRastreo = null; this.rastrear.set(false); this.form.set(vacio()); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.preguntarManifiesto.set(false); this.cargarSiguienteNumero(); this.reporteDelFormulario(this.form().fecha); this.abierto.set(true); }
 
   // El reporte de la columna derecha es el de la fecha del formulario
+  // Valor del auxiliar: auxiliar pagado del destino × días (sin tarifa de auxiliar en el destino, la primera del cliente)
+  readonly preguntarManifiesto = signal(false);
+  readonly siguienteNumero = signal<number | null>(null);
+  private cargarSiguienteNumero() { this.api.get<any>('/viajes/siguiente-numero').then(r => this.siguienteNumero.set(r.numero)).catch(() => {}); }
+  valorAuxiliar() {
+    const f = this.form(); if (!f.conAuxiliar) return 0;
+    const ts = this.tarifasCliente();
+    const t = ts.find(x => x._id === f.tarifaRef);
+    const unidad = Number(t?.auxiliarPagado) || Number(ts.find(x => Number(x.auxiliarPagado) > 0)?.auxiliarPagado) || 0;
+    return unidad * (Number(f.diasAuxiliar) || 1);
+  }
+  ponerAuxiliar(dias: number) { this.form.update(f => ({ ...f, conAuxiliar: dias > 0, diasAuxiliar: dias > 0 ? dias : null })); }
   fechaFormulario(fecha: string) { if (fecha && fecha !== this.waFecha) { this.waFecha = fecha; this.cargarWhatsapp(true); } }
   private reporteDelFormulario(fecha: string) { this.waFecha = fecha || hoyIso(); this.cargarPlantillas().then(() => this.cargarWhatsapp(true)); }
 
@@ -532,7 +535,9 @@ export class Viajes {
       titular: v.titular?._id || '', pesoKg: v.pesoKg, cantidad: v.cantidad, conAuxiliar: v.conAuxiliar, diasAuxiliar: v.diasAuxiliar || null, planilla: v.planilla || '', tarifa: v.tarifa,
       flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones, estado: v.estado, historico: !!v.historico,
       requiereManifiesto: v.requiereManifiesto !== false,
+      licencia: (v as any).licencia || '', conLicencia: !!(v as any).licencia, numeroManifiesto: (v as any).numerosManuales?.manifiesto || '',
     });
+    this.preguntarManifiesto.set(false);
     this.habilitarRndc = false;
     this.rastreoForm.set((v as any).rastreo || null);
     this.viajeRastreo = v;
@@ -571,6 +576,8 @@ export class Viajes {
   // Al elegir el conductor se pone su placa (vehículo habitual o último viaje) y su remolque
   readonly placasConductor = signal<string[]>([]);
   elegirConductor(t: any) {
+    const lic = t?.licencia?.numero ? [t.licencia.categoria, t.licencia.numero].filter(Boolean).join('-') : '';
+    if (lic) this.form.update(f => ({ ...f, licencia: lic }));
     const placas: string[] = t?.placas || [];
     this.placasConductor.set(placas);
     if (!placas.length) return;
@@ -624,17 +631,26 @@ export class Viajes {
     if (!f._id && requiere === undefined) { this.avisos.mostrar('Elija «Sí, guardar» o «No, guardar» según si el viaje requiere manifiesto', 'info'); return; }
     if (!f._id) f.requiereManifiesto = !!requiere;
     if (!f.conductor && !this.bloqueado()) { this.avisos.mostrar('Seleccione el conductor', 'error'); return; }
-    const cuerpo: any = { ...f, placa: f.placa.toUpperCase(), remolque: (f.remolque || '').toUpperCase(), tarifaRef: f.tarifaRef || null };
-    delete cuerpo._id; delete cuerpo.estado; delete cuerpo.titular;
+    const cuerpo: any = { ...f, placa: f.placa.toUpperCase(), remolque: (f.remolque || '').toUpperCase(), tarifaRef: f.tarifaRef || null,
+      licencia: f.conLicencia ? (f.licencia || '').trim() : '', numeroManifiesto: (f.numeroManifiesto || '').trim().toUpperCase() };
+    delete cuerpo._id; delete cuerpo.estado; delete cuerpo.titular; delete cuerpo.conLicencia;
+    if (!cuerpo.numeroManifiesto && !f._id) delete cuerpo.numeroManifiesto;
     for (const k of ['pesoKg', 'cantidad', 'diasAuxiliar', 'tarifa', 'flete', 'anticipo']) if (cuerpo[k] === null || cuerpo[k] === '') delete cuerpo[k];
     delete cuerpo.historico;
     if (this.bloqueado()) {
-      for (const k of Object.keys(cuerpo)) if (!['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa'].includes(k)) delete cuerpo[k];
+      for (const k of Object.keys(cuerpo)) if (!['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa', 'licencia'].includes(k)) delete cuerpo[k];
     }
     if (f.historico && this.habilitarRndc) cuerpo.historico = false;
     this.guardando.set(true);
     try {
-      if (f._id) await this.api.put(`/viajes/${f._id}`, cuerpo);
+      if (f._id) {
+        // Al editar, el viaje se actualiza y la ventana sigue abierta (se cierra con «Cerrar»)
+        await this.api.put(`/viajes/${f._id}`, cuerpo);
+        this.avisos.ok(`Viaje N° ${this.numeroEditado()} actualizado`);
+        this.cargarWhatsapp();
+        this.registradosTanda.update(l => l.length ? l : [{ numero: this.numeroEditado(), placa: f.placa, sinManifiesto: f.requiereManifiesto === false }]);
+        return;
+      }
       else {
         let v: Viaje;
         try { v = await this.api.post<Viaje>('/viajes', cuerpo); }
@@ -660,7 +676,7 @@ export class Viajes {
           // La ventana sigue abierta con el reporte; el formulario queda vacío para el siguiente viaje de la fecha
           this.registradosTanda.update(l => [...l, { numero: v.numero, placa: v.placa, sinManifiesto: !requiere }]);
           this.form.set({ ...vacio(), fecha: f.fecha });
-          this.placasConductor.set([]); this.rastrear.set(false);
+          this.placasConductor.set([]); this.rastrear.set(false); this.preguntarManifiesto.set(false); this.cargarSiguienteNumero();
           return;
         }
         if (this.seguirRegistrando()) {
@@ -669,7 +685,7 @@ export class Viajes {
           // El destino (y sus valores) cambian en cada viaje: se dejan vacíos
           this.form.set({ ...f, tarifaRef: '', destino: '', codDestino: '', tarifa: null, flete: null, anticipo: null, pesoKg: null, cantidad: 1,
             conAuxiliar: false, diasAuxiliar: null, planilla: '', placa: '', remolque: '', conductor: '', titular: '', observaciones: '', requiereManifiesto: true });
-          this.placasConductor.set([]);
+          this.placasConductor.set([]); this.preguntarManifiesto.set(false); this.cargarSiguienteNumero();
           setTimeout(() => document.getElementById('v-dest')?.focus(), 50);
           return;
         }

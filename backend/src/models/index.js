@@ -293,6 +293,8 @@ const viajeSchema = new Schema({
   anuladoBase: { remesa: str(), manifiesto: str() },
   // Pago al conductor (liquidación del conductor) y soporte interno MC/RC para viajes sin RNDC
   liquidacionConductor: { type: Schema.Types.ObjectId, ref: 'LiquidacionConductor', default: null },
+  // Licencia del conductor guardada con el viaje («categoría-número»; va en el reporte de WhatsApp), como en la plantilla
+  licencia: str(),
   // Estado del soporte: '' vigente, 'cumplido' (entregado) o 'anulado'. Al reemplazar uno anulado el anterior queda en «anteriores».
   soporteInterno: {
     mc: str(), rc: str(), codigo: str(), fecha,

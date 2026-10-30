@@ -9,8 +9,9 @@
 //   {cliente}
 //
 //   {conductor}. {destino}. Flete {flete}. Anticipo {anticipo}
-//   Auxiliar {auxiliar}            (solo si el viaje lleva auxiliar; con «Unificar auxiliar»: «de N día(s) Unificado»)
 //   Placa {placa}
+//   Licencia {licencia}            (solo si se guardó con el viaje)
+//   Auxiliar {auxiliar}            (solo si el viaje lleva auxiliar; con «Unificar auxiliar»: «de N día(s) Unificado»)
 //   {observaciones}
 //
 // Reglas de formato:
@@ -67,7 +68,7 @@ export const MARCADORES = {
     numero: 'N° del viaje', conductor: 'Nombre del conductor', cedula: 'Cédula del conductor', celular: 'Celular del conductor',
     destino: 'Destino', placa: 'Placa', remolque: 'Remolque', peso: 'Peso (kg)', flete: 'Flete (con el auxiliar si se unifica)', auxiliar: 'Auxiliar («Unificado» si se unifica)',
     anticipo: 'Anticipo (con el auxiliar si se unifica)', saldo: 'Saldo',
-    remesa: 'N° de remesa', manifiesto: 'N° de manifiesto', observaciones: 'Observaciones',
+    licencia: 'Licencia del conductor (si se guardó con el viaje)', remesa: 'N° de remesa', manifiesto: 'N° de manifiesto', observaciones: 'Observaciones',
   },
 };
 
@@ -75,7 +76,7 @@ export const MARCADORES = {
 export const PLANTILLA_BASE = Object.freeze({
   nombre: 'Formato de la plantilla de Excel',
   encabezado: '{saludo},\n\nReporte de vehículos - {fecha}\n\n{cliente}',
-  linea: '{conductor}. {destino}. Flete {flete}. Anticipo {anticipo}\nAuxiliar {auxiliar}\nPlaca {placa}\n{observaciones}',
+  linea: '{conductor}. {destino}. Flete {flete}. Anticipo {anticipo}\nPlaca {placa}\nLicencia {licencia}\nAuxiliar {auxiliar}\n{observaciones}',
   separador: 'blanco',
   pie: '',
 });
@@ -99,7 +100,7 @@ function datosViaje(v, { unificarAuxiliar = false } = {}) {
     destino: destinoRepiteConductor(v.destino, v.conductorNombre) ? '' : txt(v.destino),
     placa: txt(v.placa), remolque: txt(v.remolque), peso: kg(v.pesoKg),
     flete: cop(flete), anticipo: cop(anticipo), saldo: cop(flete - anticipo),
-    remesa: txt(v.remesa?.numero), manifiesto: txt(v.manifiesto?.numero), observaciones: txt(v.observaciones),
+    licencia: txt(v.licencia), remesa: txt(v.remesa?.numero), manifiesto: txt(v.manifiesto?.numero), observaciones: txt(v.observaciones),
   };
 }
 

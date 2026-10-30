@@ -140,7 +140,9 @@ test('RF-WA-03: «Unificar auxiliar» suma el auxiliar al flete y al anticipo de
   assert.equal(unido.totalFlete, 150000); assert.equal(unido.totalAnticipo, 150000);
   assert.equal(v.flete, 100000, 'el viaje no cambia'); assert.equal(v.anticipo, 100000);
   // Sin anticipo, el anticipo sigue en cero
-  assert.match(mensajesPorCliente([{ ...v, anticipo: 0, diasAuxiliar: 2 }], new Date(), new Date(), undefined, { unificarAuxiliar: true })[0].texto, /Anticipo \$ 0\nAuxiliar de 2 días Unificado/);
+  assert.match(mensajesPorCliente([{ ...v, anticipo: 0, diasAuxiliar: 2 }], new Date(), new Date(), undefined, { unificarAuxiliar: true })[0].texto, /Anticipo \$ 0\nPlaca SLF645\nAuxiliar de 2 días Unificado/);
+  // La licencia guardada con el viaje va después de la placa
+  assert.match(mensajesPorCliente([{ ...v, licencia: 'C1-1085250528' }], new Date(), new Date())[0].texto, /Placa SLF645\nLicencia C1-1085250528\nAuxiliar/);
   // Sin auxiliar la línea no aparece
   assert.doesNotMatch(mensajesPorCliente([{ ...v, auxiliar: 0 }], new Date(), new Date())[0].texto, /Auxiliar/);
 });
