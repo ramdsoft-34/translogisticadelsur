@@ -1,6 +1,7 @@
 import { Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
+import { NgTemplateOutlet } from '@angular/common';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
 import { Avisos } from '../core/avisos.service';
@@ -44,7 +45,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
+  imports: [FormsModule, NgTemplateOutlet, Modal, Icono, MenuAcciones, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
@@ -126,6 +127,8 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     </div>
 
     <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : (registradosTanda().length ? 'Registrar otro viaje' : 'Registrar viaje')" [abierto]="abierto()" (cerrar)="cerrarFormulario()" [ancho]="true">
+      <div class="registro-columnas">
+      <div class="col-form">
       @let f = form();
       @if (!f._id && registradosTanda().length) {
         <div class="tanda" role="status">
@@ -151,7 +154,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
         <fieldset><legend>Cliente y ruta</legend>
           <div class="rejilla">
-            <div class="campo"><label for="v-fecha">Fecha</label><input id="v-fecha" type="date" name="fecha" [(ngModel)]="f.fecha" [disabled]="bloqueado()" required /></div>
+            <div class="campo"><label for="v-fecha">Fecha</label><input id="v-fecha" type="date" name="fecha" [(ngModel)]="f.fecha" (ngModelChange)="fechaFormulario($event)" [disabled]="bloqueado()" required /></div>
             <div class="campo"><label for="v-cli">Cliente</label>
               <select id="v-cli" name="cliente" [(ngModel)]="f.cliente" (ngModelChange)="cambiarCliente($event)" [disabled]="bloqueado()" required>
                 <option value="">Seleccione…</option>
@@ -231,6 +234,12 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         }
         <div class="campo"><label for="v-obs">Observaciones (van en el manifiesto)</label><textarea id="v-obs" name="obs" maxlength="200" rows="3" [(ngModel)]="f.observaciones"></textarea></div>
       </form>
+      </div>
+      <aside class="col-wa" aria-label="Reporte por WhatsApp">
+        <h3>Reporte por WhatsApp</h3>
+        <ng-container [ngTemplateOutlet]="panelWa" [ngTemplateOutletContext]="{ enFormulario: true }" />
+      </aside>
+      </div>
       <ng-container pie>
         @if (form()._id && !bloqueado() && puedeRegistrar) { <button class="peligro" type="button" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()" style="margin-right:auto">Eliminar</button> }
         @if (form()._id && form().requiereManifiesto === false && puedeRegistrar) {
@@ -256,22 +265,29 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     </app-modal>
 
     <app-modal titulo="Reporte de vehículos por WhatsApp" [abierto]="waAbierto()" (cerrar)="waAbierto.set(false)" [ancho]="true">
+      <ng-container [ngTemplateOutlet]="panelWa" [ngTemplateOutletContext]="{ enFormulario: false }" />
+      <ng-container pie><button type="button" (click)="waAbierto.set(false)">Cerrar</button></ng-container>
+    </app-modal>
+
+    <!-- Reporte de WhatsApp: en su propia ventana y como columna derecha de «Registrar viaje» -->
+    <ng-template #panelWa let-enFormulario="enFormulario">
       <div class="wa-barra">
-        <div class="campo"><label for="wa-fecha">Fecha</label><input id="wa-fecha" type="date" [(ngModel)]="waFecha" (change)="cargarWhatsapp(true)" /></div>
+        @if (!enFormulario) { <div class="campo"><label for="wa-fecha">Fecha</label><input id="wa-fecha" type="date" [(ngModel)]="waFecha" (change)="cargarWhatsapp(true)" /></div> }
+        @else { <span class="wa-fecha-form">Viajes del {{ waFecha | dia }}</span> }
         <button type="button" (click)="waAlternarTodos()" [disabled]="!waViajes().length">{{ waTodos() ? 'Desmarcar todos' : 'Marcar todos' }}</button>
         <button type="button" [class.activo-filtro]="!waIncluir" (click)="waIncluir = !waIncluir; cargarWhatsapp(true)"
           [title]="waIncluir ? 'Mostrar solo los que faltan por reportar' : 'Mostrar también los ya reportados'">{{ waIncluir ? 'Solo pendientes' : 'Ver todos' }}</button>
         <div class="campo"><label for="wa-pl">Plantilla</label>
           <select id="wa-pl" [(ngModel)]="waPlantilla" (change)="cargarWhatsapp()">
             @for (p of waPlantillas(); track p._id) { <option [value]="p._id">{{ p.nombre }}{{ p.predeterminada ? ' (predeterminada)' : '' }}</option> }</select></div>
-        <button type="button" (click)="plantillasAbierto.set(true)" style="margin-left:auto"><app-icono nombre="editar" [tam]="16" />Plantillas</button>
+        <button type="button" (click)="plantillasAbierto.set(true)" style="margin-left:auto" [title]="'Editar las plantillas del mensaje'"><app-icono nombre="editar" [tam]="16" />Plantillas</button>
       </div>
       <label class="casilla wa-unificar" title="Solo cambia el mensaje de WhatsApp: los valores guardados del viaje no se modifican">
         <input type="checkbox" [(ngModel)]="waUnificar" (change)="cargarWhatsapp()" />
         <span><strong>Unificar auxiliar</strong> <small class="sutil">— en el mensaje, el auxiliar se suma al flete y al anticipo y se escribe «Unificado». Los valores del viaje no cambian.</small></span>
       </label>
 
-      <div class="wa-columnas">
+      <div class="wa-columnas" [class.apilado]="enFormulario">
         <!-- Izquierda: los viajes de la fecha -->
         <section class="wa-viajes" aria-label="Viajes de la fecha">
           <p class="sutil wa-conteo">{{ waViajes().length }} viaje(s) · {{ waPendientes() }} pendiente(s) · {{ waSeleccion().size }} elegido(s)</p>
@@ -315,8 +331,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
           }
         </section>
       </div>
-      <ng-container pie><button type="button" (click)="waAbierto.set(false)">Cerrar</button></ng-container>
-    </app-modal>
+    </ng-template>
     <app-visor-pdf />
     <app-activar-rastreo (listo)="rastreoListo($event)" />
     <app-checklist-conductor />
@@ -333,6 +348,14 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .rastreo-viaje { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-1); }
     a.chip.gps { text-decoration: none; }
     .placas-conductor { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .registro-columnas { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+    .registro-columnas .rejilla { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .col-wa { position: sticky; top: 0; padding: 14px; border: 1px solid var(--gris-2); border-radius: var(--radio-l); background: var(--gris-1); max-height: calc(100dvh - 190px); overflow: auto; }
+    .col-wa h3 { margin: 0 0 10px; font-size: 15px; }
+    .wa-columnas.apilado { grid-template-columns: 1fr; }
+    .wa-columnas.apilado .wa-mensajes { position: static; }
+    .wa-fecha-form { align-self: center; font-weight: 700; font-size: 13.5px; }
+    @media (max-width: 1100px) { .registro-columnas { grid-template-columns: 1fr; } .col-wa { position: static; max-height: none; } }
     .wa-barra { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
     .wa-barra .activo-filtro { background: var(--gris-8); color: var(--gris-0); border-color: var(--gris-8); }
     .wa-unificar { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-0); }
@@ -495,7 +518,11 @@ export class Viajes {
   estadoTexto(e: string) { return ESTADOS_VIAJE[e] || e; }
   claseEstado(e: string) { return ({ manifestado: 'marca', cumplido: 'ok', anulado: 'error', remesa: 'alerta' } as Record<string, string>)[e] || ''; }
 
-  nuevo() { this.rastreoSrv.cargar(); this.rastreoForm.set(null); this.viajeRastreo = null; this.rastrear.set(false); this.form.set(vacio()); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.abierto.set(true); }
+  nuevo() { this.rastreoSrv.cargar(); this.rastreoForm.set(null); this.viajeRastreo = null; this.rastrear.set(false); this.form.set(vacio()); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.reporteDelFormulario(this.form().fecha); this.abierto.set(true); }
+
+  // El reporte de la columna derecha es el de la fecha del formulario
+  fechaFormulario(fecha: string) { if (fecha && fecha !== this.waFecha) { this.waFecha = fecha; this.cargarWhatsapp(true); } }
+  private reporteDelFormulario(fecha: string) { this.waFecha = fecha || hoyIso(); this.cargarPlantillas().then(() => this.cargarWhatsapp(true)); }
 
   editar(v: Viaje) {
     this.numeroEditado.set(v.numero);
@@ -510,6 +537,7 @@ export class Viajes {
     this.rastreoForm.set((v as any).rastreo || null);
     this.viajeRastreo = v;
     this.bloqueado.set(v.estado !== 'registrado' || !!v.liquidacion);
+    if (!this.waAbierto()) this.reporteDelFormulario(isoDia(v.fecha));
     this.abierto.set(true);
   }
 
@@ -625,6 +653,16 @@ export class Viajes {
         // «Rastrear este viaje»: se abre el asistente para elegir destino o clientes
         if (this.rastreoHabilitado() && this.rastrear()) { this.viajeRastreo = v; setTimeout(() => this.activador().abrir(v), 0); }
         this.documentos.set(null);
+        // El viaje queda elegido en el reporte de WhatsApp de la columna derecha
+        this.waSeleccion.update(sel => new Set([...sel, v._id]));
+        this.cargarWhatsapp();
+        if (!this.seguirRegistrando()) {
+          // La ventana sigue abierta con el reporte; el formulario queda vacío para el siguiente viaje de la fecha
+          this.registradosTanda.update(l => [...l, { numero: v.numero, placa: v.placa, sinManifiesto: !requiere }]);
+          this.form.set({ ...vacio(), fecha: f.fecha });
+          this.placasConductor.set([]); this.rastrear.set(false);
+          return;
+        }
         if (this.seguirRegistrando()) {
           // Listo para el siguiente: mismo cliente, destino, fecha y valores; vehículo y conductor nuevos
           this.registradosTanda.update(l => [...l, { numero: v.numero, placa: v.placa, sinManifiesto: !requiere }]);
