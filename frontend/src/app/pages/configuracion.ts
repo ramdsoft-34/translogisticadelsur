@@ -1,7 +1,7 @@
 import { input, Component, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
-import { Api } from '../core/api.service';
+import { Api, mensajeError } from '../core/api.service';
 import { Auth } from '../core/auth.service';
 import { Avisos } from '../core/avisos.service';
 import { P } from '../core/modelos';
@@ -276,13 +276,25 @@ type Pestana = 'rndc' | 'reglas' | 'correo' | 'logo' | 'rastreo' | 'usuarios' | 
     <!-- Guardar la contraseña del RNDC: exige la contraseña del administrador y se comprueba en el RNDC -->
     <app-modal titulo="Guardar la contraseña del RNDC" [abierto]="!!guardarClave()" (cerrar)="guardarClave.set(null)">
       @if (guardarClave(); as g) {
-        <form id="form-clave-rndc" class="formulario" style="grid-template-columns:1fr" (ngSubmit)="guardarClaveRndc()" autocomplete="off">
+        <form id="form-guardar-clave-rndc" class="formulario" style="grid-template-columns:1fr" (ngSubmit)="guardarClaveRndc()" autocomplete="off">
           <div class="mensaje info">Se guarda <strong>cifrada</strong> (AES-256-GCM con una llave exclusiva que no está en la base de datos) y nunca se vuelve a mostrar.
             Antes de guardarla se comprueba en el RNDC. Si el RNDC la rechaza, se deja de usar y se vuelve a pedir.</div>
-          <div class="campo"><label for="gc-rndc">Contraseña del usuario {{ cfg()?.usuario || '' }} en el RNDC</label>
-            <input id="gc-rndc" name="rndc" type="password" autocomplete="new-password" required maxlength="100" [(ngModel)]="g.clave" /></div>
-          <div class="campo"><label for="gc-mia">Su contraseña de la plataforma (para confirmar que es usted)</label>
-            <input id="gc-mia" name="mia" type="password" autocomplete="current-password" required maxlength="100" [(ngModel)]="g.miClave" /></div>
+          @if (errorClave(); as err) { <div class="mensaje error" role="alert">{{ err }}</div> }
+          <!-- Usuario de la plataforma (oculto): así el navegador sabe a qué cuenta pertenece la contraseña de la plataforma -->
+          <input type="email" name="usuario-plataforma" autocomplete="username" [value]="auth.usuario()?.email || ''" hidden readonly />
+          <div class="campo"><label for="gc-rndc">1. Contraseña del usuario <strong>{{ cfg()?.usuario || '' }}</strong> en el RNDC (Ministerio de Transporte)</label>
+            <div class="con-ojo">
+              <!-- No es una contraseña de esta plataforma: el navegador no debe autocompletarla -->
+              <input id="gc-rndc" name="rndc-ws" [type]="verRndc() ? 'text' : 'password'" autocomplete="off" data-lpignore="true" data-1p-ignore spellcheck="false"
+                required maxlength="100" [(ngModel)]="g.clave" (ngModelChange)="errorClave.set('')" />
+              <button type="button" class="ojo" (click)="verRndc.set(!verRndc())" [attr.aria-label]="verRndc() ? 'Ocultar' : 'Mostrar lo escrito'"><app-icono nombre="ojo" [tam]="17" /></button>
+            </div></div>
+          <div class="campo"><label for="gc-mia">2. Su contraseña de la plataforma (la misma con la que ingresó, {{ auth.usuario()?.email }})</label>
+            <div class="con-ojo">
+              <input id="gc-mia" name="mia" [type]="verMia() ? 'text' : 'password'" autocomplete="current-password" required maxlength="100" [(ngModel)]="g.miClave" (ngModelChange)="errorClave.set('')" />
+              <button type="button" class="ojo" (click)="verMia.set(!verMia())" [attr.aria-label]="verMia() ? 'Ocultar' : 'Mostrar lo escrito'"><app-icono nombre="ojo" [tam]="17" /></button>
+            </div>
+            <small>Si el navegador la llenó solo, revise con el ojo que sea la correcta.</small></div>
           @if (auth.usuario()?.dobleFactor) {
             <div class="campo"><label for="gc-cod">Código de doble factor</label>
               <input id="gc-cod" name="cod" inputmode="numeric" maxlength="6" autocomplete="one-time-code" [(ngModel)]="g.codigo" /></div>
@@ -290,10 +302,12 @@ type Pestana = 'rndc' | 'reglas' | 'correo' | 'logo' | 'rastreo' | 'usuarios' | 
         </form>
       }
       <ng-container pie><button type="button" (click)="guardarClave.set(null)">Cancelar</button>
-        <button class="primario" type="submit" form="form-clave-rndc" [disabled]="trabajandoClave() || !guardarClave()?.clave || !guardarClave()?.miClave">
+        <button class="primario" type="submit" form="form-guardar-clave-rndc" [disabled]="trabajandoClave() || !guardarClave()?.clave || !guardarClave()?.miClave">
           {{ trabajandoClave() ? 'Comprobando en el RNDC…' : 'Comprobar y guardar' }}</button></ng-container>
     </app-modal>`,
-  styles: [`.clave-guardada .estado-clave { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: var(--radio-l); border: 1px solid var(--gris-2); background: var(--gris-1); }
+  styles: [`.con-ojo { position: relative; } .con-ojo input { padding-right: 44px; }
+    .con-ojo .ojo { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); min-height: 0; width: 34px; height: 34px; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--gris-5); }
+    .clave-guardada .estado-clave { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: var(--radio-l); border: 1px solid var(--gris-2); background: var(--gris-1); }
     .estado-clave .crece { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; } .estado-clave small { color: var(--gris-5); }
     .estado-clave.ok { border-color: var(--verde); background: var(--verde-claro, #e8f7ee); } .estado-clave.ok app-icono { color: var(--verde); }
     .estado-clave.error { border-color: var(--rojo); background: var(--rojo-claro); } .estado-clave.error app-icono { color: var(--rojo); }
@@ -310,7 +324,9 @@ export class Configuracion {
   // Guardar la contraseña del RNDC (cifrada en el servidor)
   readonly guardarClave = signal<{ clave: string; miClave: string; codigo: string } | null>(null);
   readonly trabajandoClave = signal(false);
-  abrirGuardarClave() { this.guardarClave.set({ clave: '', miClave: '', codigo: '' }); }
+  readonly errorClave = signal('');
+  readonly verRndc = signal(false); readonly verMia = signal(false);
+  abrirGuardarClave() { this.errorClave.set(''); this.verRndc.set(false); this.verMia.set(false); this.guardarClave.set({ clave: '', miClave: '', codigo: '' }); }
   async guardarClaveRndc() {
     const g = this.guardarClave(); if (!g) return;
     this.trabajandoClave.set(true);
@@ -318,7 +334,7 @@ export class Configuracion {
       const e = await this.api.post<any>('/rndc/clave-guardada', g);
       this.clave.olvidar(); this.clave.estado.set(e); await this.clave.cargarEstado(true);
       this.guardarClave.set(null); this.avisos.ok('Contraseña del RNDC comprobada y guardada');
-    } catch (e) { this.avisos.error(e); } finally { this.trabajandoClave.set(false); }
+    } catch (e) { this.errorClave.set(await mensajeError(e)); } finally { this.trabajandoClave.set(false); }
   }
   async quitarClaveRndc() {
     try { await this.api.delete('/rndc/clave-guardada'); this.clave.olvidar(); await this.clave.cargarEstado(true); this.avisos.ok('Contraseña del RNDC quitada'); }

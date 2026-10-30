@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, ElementRef, effect, inject, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Avisos } from '../core/avisos.service';
 import { RndcClave } from '../core/rndc-clave.service';
@@ -10,7 +10,8 @@ import { Modal } from './modal';
   selector: 'app-globales',
   imports: [FormsModule, Modal],
   template: `
-    <div class="avisos" role="status" aria-live="polite">
+    <!-- En la capa superior (popover): los avisos se ven también encima de las ventanas abiertas -->
+    <div #capa class="avisos" popover="manual" role="status" aria-live="polite">
       @for (a of avisos.lista(); track a.id) {
         <div class="aviso" [class]="'aviso ' + a.tipo" (click)="avisos.cerrar(a.id)" title="Clic para cerrar">
           <span class="marca-aviso">{{ a.tipo === 'ok' ? '✓' : a.tipo === 'error' ? '!' : 'i' }}</span><span class="texto-aviso">{{ a.texto }}</span></div>
@@ -49,7 +50,9 @@ import { Modal } from './modal';
       </ng-container>
     </app-modal>`,
   styles: [`
-    .avisos { position: fixed; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 1000; width: min(400px, calc(100vw - 32px)); }
+    .avisos { position: fixed; inset: auto 20px 20px auto; margin: 0; padding: 0; border: 0; background: transparent; overflow: visible;
+      display: flex; flex-direction: column; gap: 10px; z-index: 1000; width: min(400px, calc(100vw - 32px)); }
+    @supports selector(:popover-open) { .avisos:not(:popover-open) { display: none; } }
     .aviso { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; color: var(--gris-8); background: var(--gris-0);
       border: 1px solid var(--gris-2); box-shadow: var(--sombra-menu); cursor: pointer; font-size: 14px; line-height: 1.45; animation: subir .2s ease-out; }
     @keyframes subir { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -62,6 +65,15 @@ import { Modal } from './modal';
 })
 export class Globales {
   readonly avisos = inject(Avisos);
+  private capa = viewChild<ElementRef<HTMLElement>>('capa');
+  constructor() {
+    // Cada aviso nuevo vuelve a poner la capa encima de todo (también de una ventana abierta después)
+    effect(() => {
+      const hay = this.avisos.lista().length > 0; const el = this.capa()?.nativeElement as any;
+      if (!el?.showPopover) return;
+      try { if (el.matches(':popover-open')) el.hidePopover(); if (hay) el.showPopover(); } catch { /* sin soporte de popover */ }
+    });
+  }
   readonly clave = inject(RndcClave);
   readonly aut = inject(AutorizacionAdmin);
   d = { email: '', clave: '', codigo: '', motivo: '' };
