@@ -10,7 +10,7 @@ import { Viaje, Vehiculo, Tarifa, Cliente, LiquidacionConductor, siguiente, pob 
 import { ErrorHttp } from '../../middleware/auth.js';
 import { normalizar } from '../../utils/texto.js';
 import { lineaLiquidacion, respaldosAuxiliar } from '../calculos.js';
-import { postear } from './contabilidad.js';
+import { postear, parametros, asegurarPuc } from './contabilidad.js';
 import { asegurarMesAbierto } from './cierre.js';
 import { cuotaPendiente, pendienteTotal, descontar, revertirDescuentos } from './prestamos.js';
 import { REGLAS_BASE, reglasDe, destinoEn } from './reglas.js';
@@ -89,6 +89,8 @@ export async function liquidar(empresaId, { viajes: ids, desde, hasta, descontar
     }
   } else if (cedulas.size > 1) throw new ErrorHttp(400, 'Liquide un conductor a la vez (los viajes elegidos son de varios conductores)');
   await asegurarMesAbierto(empresaId, new Date());
+  await asegurarPuc(empresaId);   // las cuentas del asiento existen antes de crear la liquidación
+  const { modeloIngresos: modelo } = await parametros(empresaId);
   const t = totalesLineas(elegidas);
   const base = t.saldo;
   const cedula = cedulas.size === 1 ? [...cedulas][0] : '';
@@ -117,9 +119,12 @@ export async function liquidar(empresaId, { viajes: ids, desde, hasta, descontar
     descuentoPrestamos: desc.aplicado, interesPrestamos: desc.interes, neto, agrupacion,
     empresas: [...new Set(elegidas.map(x => x.empresa))].join(', '), creadoPor: usuario });
   await Viaje.updateMany({ empresa: empresaId, _id: { $in: l.viajes } }, { $set: { liquidacionConductor: l._id } });
-  // Asiento: costo del flete y el auxiliar contra anticipo reconocido, retenciones, préstamo (capital e interés) y cuenta por pagar
+  // Asiento: flete y auxiliar contra anticipo reconocido, retenciones, préstamo (capital e interés) y cuenta por pagar.
+  // Modelo bruto: el flete y el auxiliar son costo (6155). Modelo de ingresos para terceros: se cancela el pasivo
+  // 2815 que se creó al facturar al cliente (281505 fletes, 281510 auxiliares).
+  const debitos = modelo === 'terceros' ? [['281505', t.flete], ['281510', t.auxiliar]] : [['6155', t.flete + t.auxiliar]];
   await postear(empresaId, { fecha: l.fecha, documento: numero, concepto: `Liquidacion ${numero} - ${l.conductorNombre}`, origen: 'LIQ',
-    terceroDoc: cedula, tercero: l.conductorNombre, usuario, lineas: [['6155', t.flete + t.auxiliar], ['1110', -t.anticipoReconocido], ['2365', -t.retefuente], ['2380', -t.fopat],
+    terceroDoc: cedula, tercero: l.conductorNombre, usuario, lineas: [...debitos, ['1110', -t.anticipoReconocido], ['2365', -t.retefuente], ['2380', -t.fopat],
       ['1385', -(desc.aplicado - desc.interes)], ['4210', -desc.interes], ['2205', -neto]] });
   return { liquidacion: l, detallePrestamos };
 }
