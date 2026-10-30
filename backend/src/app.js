@@ -31,7 +31,9 @@ export function crearApp() {
       || (env.nodeEnv !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin))),
     exposedHeaders: ['Content-Disposition'],
   }));
-  app.use(express.json({ limit: '1mb' }));
+  // Los correos con archivos adjuntos traen su propio límite (12 MB) en la ruta
+  const json = express.json({ limit: '1mb' });
+  app.use((req, res, next) => (/^\/api\/correo\/(relaciones|manual)$/.test(req.path) ? next() : json(req, res, next)));
   app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false }));
 
   app.get('/api/salud', (_req, res) => res.json({ ok: true }));

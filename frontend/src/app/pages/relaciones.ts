@@ -14,6 +14,8 @@ import { Confirmar } from '../shared/confirmar';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { VisorPdf } from '../shared/visor-pdf';
 import { ExportarViajes, rangoPeriodo } from '../shared/exportar-viajes';
+import { leerArchivos } from '../shared/adjuntos';
+import { AutorizacionAdmin } from '../core/autorizacion.service';
 
 type Periodo = 'hoy' | 'semana' | 'quincena' | 'mes' | 'otro';
 const finQuincena = () => rangoPeriodo('quincena')!.hasta;
@@ -33,6 +35,7 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
           <button (click)="exportador().abrir({ cliente: f.cliente })"><app-icono nombre="descargar" [tam]="16" />Relación en Excel o PDF<small>Viajes por empresa o por placa</small></button>
           <button (click)="informe('pdf')"><app-icono nombre="ojo" [tam]="16" />Informe de utilidad<small>Ver en pantalla (PDF)</small></button>
           <button (click)="informe('xlsx')"><app-icono nombre="descargar" [tam]="16" />Informe de utilidad en Excel</button>
+          <button (click)="abrirCorreo()"><app-icono nombre="enviar" [tam]="16" />Enviar relación por correo<small>A los destinatarios de relaciones de la empresa</small></button>
           <hr />
           <a routerLink="/pago-conductores"><app-icono nombre="dinero" [tam]="16" />Ir a Pago a conductores</a>
         </app-menu-acciones>
@@ -101,6 +104,25 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
       </div>
     }
 
+    <!-- Relación por correo -->
+    <app-modal titulo="Enviar relación por correo" [abierto]="!!correo()" (cerrar)="correo.set(null)">
+      @if (correo(); as c) {
+        <form id="form-rel-correo" class="formulario" style="grid-template-columns:1fr" (ngSubmit)="enviarCorreo()">
+          <div class="campo"><label for="rc-cli">Empresa</label>
+            <select id="rc-cli" name="cli" [(ngModel)]="c.cliente" (change)="destinatariosDe(c)" required><option value="">Seleccione…</option>
+              @for (x of clientes(); track x._id) { <option [value]="x._id">{{ x.nombre }}</option> }</select></div>
+          <p class="sutil">Periodo: {{ f.desde | dia }} al {{ f.hasta | dia }}. Va la relación en PDF y Excel (sin los viajes «[NO FACTURAR]»).</p>
+          <div class="campo"><label for="rc-para">Para</label><input id="rc-para" name="para" [(ngModel)]="c.para" placeholder="correo@empresa.com, otro@empresa.com" required />
+            <small>Por defecto, los destinatarios de relaciones de la empresa (Configuración → Correo).</small></div>
+          <div class="campo"><label for="rc-cc">Copia</label><input id="rc-cc" name="cc" [(ngModel)]="c.cc" /></div>
+          <div class="campo"><label for="rc-adj">Adjuntar archivos (opcional)</label><input id="rc-adj" type="file" multiple (change)="leerAdjuntos($event, c)" />
+            @if (c.adjuntos.length) { <small>{{ c.adjuntos.length }} archivo(s): {{ nombresAdjuntos(c) }}</small> }</div>
+        </form>
+      }
+      <ng-container pie><button type="button" (click)="correo.set(null)">Cancelar</button>
+        <button class="primario" type="submit" form="form-rel-correo" [disabled]="ocupado() || !correo()?.cliente || !correo()?.para">Enviar</button></ng-container>
+    </app-modal>
+
     <!-- Registro masivo -->
     <app-modal titulo="Registro masivo de viajes" [abierto]="masivoAbierto()" (cerrar)="masivoAbierto.set(false)" [ancho]="true">
       <p class="sutil" style="margin-top:0">Registra un viaje por cada día hábil del rango para el mismo vehículo. Salta domingos, festivos de Colombia,
@@ -124,7 +146,7 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
           <label class="casilla"><input type="checkbox" [(ngModel)]="m.incluirSabados" (change)="previa.set(null)" />Incluir sábados</label>
           <label class="casilla"><input type="checkbox" [(ngModel)]="m.conAuxiliar" />Lleva auxiliar</label>
           <label class="casilla"><input type="checkbox" [(ngModel)]="m.requiereManifiesto" />Requiere manifiesto RNDC</label></div>
-        @if (m.conAuxiliar) { <div class="campo"><label for="m-da">Días / auxiliares</label><input id="m-da" type="number" min="0" placeholder="Igual a la cantidad" [(ngModel)]="m.diasAuxiliar" /></div> }
+        @if (m.conAuxiliar) { <div class="campo"><label for="m-da">Días de auxiliar</label><input id="m-da" type="number" min="1" max="5" step="1" placeholder="1 a 5" [(ngModel)]="m.diasAuxiliar" /></div> }
       </div>
 
       @if (previa(); as pv) {
@@ -230,6 +252,25 @@ export class Relaciones {
     else this.api.descargar('/gestion/relaciones/informe', p, 'informe_utilidad.xlsx').catch(e => this.avisos.error(e));
   }
 
+  // ── Relación por correo ──
+  private autorizacion = inject(AutorizacionAdmin);
+  readonly correo = signal<any>(null);
+  abrirCorreo() { const c = { cliente: this.f.cliente, para: '', cc: '', adjuntos: [] as any[] }; this.destinatariosDe(c); this.correo.set(c); }
+  destinatariosDe(c: any) {
+    const cli = this.clientes().find(x => x._id === c.cliente);
+    c.para = (cli?.enviosRelaciones?.destinatarios || []).join(', '); c.cc = (cli?.enviosRelaciones?.cc || []).join(', ');
+  }
+  nombresAdjuntos(c: any) { return c.adjuntos.map((a: any) => a.nombre).join(', '); }
+  async leerAdjuntos(ev: Event, c: any) { c.adjuntos = await leerArchivos(ev, this.avisos); }
+  async enviarCorreo() {
+    const c = this.correo(); const lista = (t: string) => String(t || '').split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
+    this.ocupado.set(true);
+    try {
+      const r = await this.api.post<any>('/correo/relaciones', { cliente: c.cliente, desde: this.f.desde, hasta: this.f.hasta, destinatarios: lista(c.para), cc: lista(c.cc), adjuntos: c.adjuntos });
+      if (r.estado === 'enviado') { this.avisos.ok('Relación enviada'); this.correo.set(null); } else this.avisos.mostrar(`No se envió: ${r.error}`, 'error');
+    } catch (e) { this.avisos.error(e); } finally { this.ocupado.set(false); }
+  }
+
   // ── Registro masivo ──
   readonly masivoAbierto = signal(false);
   readonly ocupado = signal(false);
@@ -280,7 +321,17 @@ export class Relaciones {
   async registrarMasivo() {
     this.ocupado.set(true);
     try {
-      const r = await this.api.post<any>('/gestion/relaciones/masivo', { ...this.cuerpo(), dias: [...this.elegidos()] });
+      const cuerpo = { ...this.cuerpo(), dias: [...this.elegidos()] };
+      let r: any;
+      try { r = await this.api.post<any>('/gestion/relaciones/masivo', cuerpo); }
+      catch (e) {
+        // Documentos vencidos: solo con la autorización del administrador
+        const vencidos = AutorizacionAdmin.vencidosDe(e);
+        if (!vencidos) throw e;
+        const aut = await this.autorizacion.pedir(vencidos);
+        if (!aut) return;
+        r = await this.api.post<any>('/gestion/relaciones/masivo', { ...cuerpo, autorizacion: aut });
+      }
       this.avisos.ok(`${r.creados.length} viaje(s) registrados: N° ${r.creados[0]}${r.creados.length > 1 ? ` a ${r.creados[r.creados.length - 1]}` : ''}`);
       this.masivoAbierto.set(false);
       this.f = { ...this.f, cliente: this.m.cliente, placa: this.m.placa };

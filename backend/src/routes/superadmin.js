@@ -79,7 +79,7 @@ r.get('/empresas/:id/resumen', async (req, res) => {
 
 r.get('/empresas/:id/administradores', async (req, res) => {
   const lista = await Usuario.find({ empresa: id(req.params.id), rol: 'admin' })
-    .select('nombre email activo ultimoAcceso createdAt').sort({ nombre: 1 }).lean();
+    .select('nombre email activo ultimoAcceso createdAt totp.activo').sort({ nombre: 1 }).lean();
   res.json(lista);
 });
 
@@ -100,7 +100,7 @@ r.post('/empresas/:id/administradores', async (req, res) => {
 // Edita el nombre o el correo (p. ej. cuando cambia la persona encargada), restablece la clave o activa/desactiva al administrador.
 r.put('/administradores/:id', async (req, res) => {
   const datos = z.object({ activo: z.boolean().optional(), password: claveSegura.optional(), nombre: z.string().trim().min(2).max(120).optional(),
-    email: z.string().trim().toLowerCase().email().optional() }).parse(req.body);
+    email: z.string().trim().toLowerCase().email().optional(), quitarDobleFactor: z.boolean().optional() }).parse(req.body);
   const u = await Usuario.findOne({ _id: id(req.params.id), rol: 'admin' });
   if (!u) throw new ErrorHttp(404, 'Administrador no encontrado');
   if (datos.nombre) u.nombre = datos.nombre;
@@ -113,9 +113,11 @@ r.put('/administradores/:id', async (req, res) => {
     u.passwordHash = await bcrypt.hash(datos.password, 12);
     u.debeCambiarClave = true; u.tokenVersion += 1; u.bloqueadoHasta = null; u.intentosFallidos = 0;
   }
+  // Si perdió el celular: el SuperAdmin quita el doble factor y el administrador lo vuelve a activar
+  if (datos.quitarDobleFactor) { u.totp = { activo: false, secreto: '', pendiente: '', ultimoPaso: 0 }; u.tokenVersion += 1; }
   await u.save();
   await auditar(req, 'editar_administrador', { empresa: null, entidad: 'Usuario', entidadId: u._id,
-    detalle: { activo: datos.activo, claveRestablecida: !!datos.password, nombre: datos.nombre, email: datos.email } });
+    detalle: { activo: datos.activo, claveRestablecida: !!datos.password, nombre: datos.nombre, email: datos.email, dobleFactorQuitado: !!datos.quitarDobleFactor } });
   res.json({ id: u._id, nombre: u.nombre, email: u.email, activo: u.activo });
 });
 

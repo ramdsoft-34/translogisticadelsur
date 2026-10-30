@@ -30,3 +30,9 @@ pm2 restart tls-api
 ## Copias de seguridad
 `/etc/cron.d/tls-backup` ejecuta `mongodump` cada noche a `/var/backups/translogisticadelsur`
 (se conservan 14 días). Restaurar: `mongorestore --gzip --archive=ARCHIVO --nsInclude='translogisticadelsur.*'`.
+
+Además, cada empresa tiene su archivo en `ARCHIVO_DIR` (por defecto `backend/archivo`, fuera de git):
+al **cerrar un mes** se guardan la copia completa de sus datos (`<aaaa-mm>/respaldo-<aaaa-mm>.json.gz`,
+líneas JSON en EJSON canónico), los informes de viajes por empresa y los PDF de manifiestos. El administrador
+descarga un respaldo completo en cualquier momento (Contabilidad → Cierre de mes). Incluya `ARCHIVO_DIR`
+en la copia nocturna del servidor.

@@ -92,7 +92,32 @@ const ACCIONES: Record<string, string> = {
               <div><dt>Último cambio de contraseña</dt><dd>{{ d.seguridad.ultimoCambioClave ? (d.seguridad.ultimoCambioClave | fechaHora) : 'Sin registro' }}</dd></div>
               <div><dt>Intentos fallidos (30 días)</dt><dd [class.alerta]="d.seguridad.intentosFallidos30Dias > 0">{{ d.seguridad.intentosFallidos30Dias }}</dd></div>
               <div><dt>Duración de la sesión</dt><dd>{{ duracion(d.seguridad.sesionExpira) }} · se cierra tras {{ inactividad }} min sin uso</dd></div>
+              <div><dt>Doble factor</dt><dd [class.alerta]="!d.seguridad.dobleFactor && d.seguridad.dobleFactorRecomendado">{{ d.seguridad.dobleFactor ? 'Activo' : 'Inactivo' }}</dd></div>
             </dl>
+          </section>
+
+          <section class="tarjeta">
+            <h2>Doble factor</h2>
+            @if (d.seguridad.dobleFactor) {
+              <p class="sutil">Al ingresar se pide el código de 6 dígitos de su app autenticadora. Para desactivarlo escriba su contraseña y un código.</p>
+              <form (ngSubmit)="desactivar2fa()" class="formulario" style="grid-template-columns:1fr 1fr">
+                <div class="campo"><label for="d2-c">Contraseña</label><input id="d2-c" type="password" name="d2c" [(ngModel)]="clave2fa" autocomplete="current-password" /></div>
+                <div class="campo"><label for="d2-k">Código</label><input id="d2-k" name="d2k" inputmode="numeric" maxlength="6" [(ngModel)]="codigo2fa" autocomplete="one-time-code" /></div>
+                <div><button type="submit" class="peligro" [disabled]="!clave2fa || codigo2fa.length < 6">Desactivar doble factor</button></div>
+              </form>
+            } @else if (alta2fa(); as a) {
+              <p class="sutil">1. Escanee el código con Google Authenticator, Microsoft Authenticator u otra app. 2. Escriba el código de 6 dígitos que muestra la app.</p>
+              <img [src]="a.qr" alt="Código QR para la app autenticadora" width="180" height="180" />
+              <p class="sutil">Si no puede escanear, escriba esta clave en la app: <code>{{ a.secreto }}</code></p>
+              <form (ngSubmit)="activar2fa()" class="formulario" style="grid-template-columns:1fr auto">
+                <div class="campo"><label for="a2-k">Código de la app</label><input id="a2-k" name="a2k" inputmode="numeric" maxlength="6" [(ngModel)]="codigo2fa" autocomplete="one-time-code" /></div>
+                <div class="campo"><span class="etiqueta">&nbsp;</span><button type="submit" class="primario" [disabled]="codigo2fa.length < 6">Activar</button></div>
+              </form>
+            } @else {
+              <p class="sutil">Además de la contraseña, pide un código de una app en su celular al ingresar.
+                @if (d.seguridad.dobleFactorRecomendado) { <strong>Recomendado para administradores.</strong> }</p>
+              <button (click)="iniciar2fa()">Activar doble factor</button>
+            }
           </section>
 
           <section class="tarjeta">
@@ -161,6 +186,8 @@ export class MiCuenta {
   readonly inactividad = environment.inactividadMin;
   nombre = '';
   actual = ''; nueva = ''; repetir = '';
+  readonly alta2fa = signal<{ qr: string; secreto: string } | null>(null);
+  codigo2fa = ''; clave2fa = '';
 
   constructor() { this.cargar(); }
 
@@ -190,6 +217,28 @@ export class MiCuenta {
       await this.api.put('/auth/mi-cuenta', { nombre: this.nombre.trim() });
       await this.auth.refrescar();
       this.avisos.ok('Nombre actualizado');
+      this.cargar();
+    } catch (e) { this.avisos.error(e); }
+  }
+
+  async iniciar2fa() {
+    try { this.alta2fa.set(await this.api.post('/auth/doble-factor/iniciar', {})); this.codigo2fa = ''; } catch (e) { this.avisos.error(e); }
+  }
+  async activar2fa() {
+    try {
+      const r = await this.api.post<any>('/auth/doble-factor/activar', { codigo: this.codigo2fa.trim() });
+      this.auth.sesion(r.token, r.usuario);
+      this.alta2fa.set(null); this.codigo2fa = '';
+      this.avisos.ok('Doble factor activado: desde ahora el ingreso pide el código de la app');
+      this.cargar();
+    } catch (e) { this.avisos.error(e); }
+  }
+  async desactivar2fa() {
+    try {
+      await this.api.post('/auth/doble-factor/desactivar', { clave: this.clave2fa, codigo: this.codigo2fa.trim() });
+      this.clave2fa = ''; this.codigo2fa = '';
+      await this.auth.refrescar();
+      this.avisos.ok('Doble factor desactivado');
       this.cargar();
     } catch (e) { this.avisos.error(e); }
   }

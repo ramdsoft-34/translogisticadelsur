@@ -13,7 +13,11 @@ import { ImportarExcel } from '../shared/importar-excel';
 import { Moneda } from '../shared/moneda';
 import { filtrar } from '../shared/filtro';
 
-const clienteVacio = () => ({ nombre: '', tipoId: 'N', nit: '', dv: '', razonSocial: '', sedeRemitente: '', correos: '', whatsapp: '', activo: true });
+const clienteVacio = () => ({ nombre: '', tipoId: 'N', nit: '', dv: '', razonSocial: '', sedeRemitente: '', correos: '', whatsapp: '', activo: true,
+  siglas: '', politicaAuxiliar: 'registrado', valorAuxiliarSinAnticipo: 30000 });
+// Cómo se le cobra el auxiliar al cliente (RN-15)
+const POLITICAS: [string, string][] = [['registrado', 'Se cobra lo registrado en el viaje'], ['sin', 'Sin auxiliar (no se cobra)'],
+  ['incluido', 'Incluido en la tarifa (no se cobra aparte)'], ['sin_anticipo', 'Valor fijo por viaje sin anticipo']];
 const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', tarifaCliente: 0, tarifaAuxiliar: 0, fleteConductor: 0,
   auxiliarPagado: 0, anticipoHabitual: 0, pesoKg: 0, operacion: '', destinatario: { tipoId: '', numId: '', sede: '' }, activo: true });
 
@@ -82,6 +86,13 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
             <input id="cs" name="sede" maxlength="6" [(ngModel)]="f.sedeRemitente" />
             <small>Código de la sede del cliente en el RNDC. Las sedes aparecen en lista cuando el NIT está en Conductores y terceros.</small>
           }</div>
+        <div class="campo"><label for="csig">Siglas</label><input id="csig" name="siglas" maxlength="6" [(ngModel)]="f.siglas" style="text-transform:uppercase" placeholder="COR" />
+          <small>Numeran las liquidaciones de conductores de este cliente (COR-0001).</small></div>
+        <div class="campo"><label for="cpol">Auxiliar en la factura</label>
+          <select id="cpol" name="pol" [(ngModel)]="f.politicaAuxiliar">@for (x of politicas; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
+        @if (f.politicaAuxiliar === 'sin_anticipo') {
+          <div class="campo"><label for="cvaux">Valor por viaje sin anticipo</label><div class="moneda"><input id="cvaux" moneda name="vaux" [(ngModel)]="f.valorAuxiliarSinAnticipo" /></div></div>
+        }
         @if (f._id) { <label class="casilla"><input type="checkbox" name="activo" [(ngModel)]="f.activo" />Activo</label> }
       </form>
       <ng-container pie><button type="button" (click)="abiertoCliente.set(false)">Cancelar</button>
@@ -158,6 +169,7 @@ export class Clientes {
     } catch (e) { this.avisos.error(e); }
   }
 
+  readonly politicas = POLITICAS;
   nuevoCliente() { this.clienteForm.set(clienteVacio()); this.abiertoCliente.set(true); }
   editarCliente(c: any) { this.clienteForm.set({ ...clienteVacio(), ...c, correos: (c.correos || []).join(', ') }); this.abiertoCliente.set(true); }
 
@@ -184,7 +196,8 @@ export class Clientes {
   async guardarCliente() {
     const f = this.clienteForm();
     const cuerpo = { nombre: f.nombre, tipoId: f.tipoId, nit: f.nit, dv: f.dv, razonSocial: f.razonSocial, sedeRemitente: f.sedeRemitente,
-      correos: String(f.correos || '').split(',').map((s: string) => s.trim()).filter(Boolean), whatsapp: f.whatsapp || '', activo: f.activo };
+      correos: String(f.correos || '').split(',').map((s: string) => s.trim()).filter(Boolean), whatsapp: f.whatsapp || '', activo: f.activo,
+      siglas: String(f.siglas || '').toUpperCase(), politicaAuxiliar: f.politicaAuxiliar || 'registrado', valorAuxiliarSinAnticipo: Number(f.valorAuxiliarSinAnticipo) || 0 };
     try {
       const r: any = f._id ? await this.api.put(`/maestros/clientes/${f._id}`, cuerpo) : await this.api.post('/maestros/clientes', cuerpo);
       this.avisos.ok('Cliente guardado'); this.abiertoCliente.set(false);

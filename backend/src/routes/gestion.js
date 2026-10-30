@@ -4,13 +4,14 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import express from 'express';
-import { Empresa, Viaje, Tarifa, Cliente, LiquidacionConductor, Prestamo, CuentaContable, Asiento, FacturaCont, RemesaDulces, Tercero, Vehiculo, pob } from '../models/index.js';
+import { Empresa, Viaje, Tarifa, Cliente, LiquidacionConductor, Prestamo, CuentaContable, Asiento, FacturaCont, RemesaDulces, Tercero, Vehiculo, Autorizacion, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
 import { parseFecha, fmtFecha, txt, normalizar } from '../utils/texto.js';
 import { libroExcel, nuevoPdf, encabezadoPdf, tablaPdf, numerarPaginas, pdfABuffer } from '../services/reportes/comun.js';
-import { lineaLiquidacion } from '../services/calculos.js';
+import { lineaLiquidacion, respaldosAuxiliar } from '../services/calculos.js';
+import { reglasDe } from '../services/gestion/reglas.js';
 import * as liq from '../services/gestion/liquidacionConductor.js';
 import * as pre from '../services/gestion/prestamos.js';
 import * as cont from '../services/gestion/contabilidad.js';
@@ -56,17 +57,19 @@ r.post('/liq-conductores/calcular', verLiq, async (req, res) => {
   const desde = parseFecha(d.desde); const hasta = parseFecha(d.hasta);
   if (!desde || !hasta) throw new ErrorHttp(400, 'Fechas inválidas');
   const c = await liq.calcular(req.empresaId, { ...d, desde, hasta: finDia(hasta) });
-  // Cuotas de préstamos vencidas al corte, por cédula (se descuentan al liquidar)
+  // Cuotas de préstamos vencidas al corte, por cédula (se descuentan al liquidar) y todo lo pendiente (tope del descuento escogido)
   const prestamos = {};
   for (const ced of new Set(c.lineas.map(l => l.cedula).filter(Boolean))) {
     const p = await pre.cuotaPendiente(req.empresaId, ced, finDia(hasta));
-    if (p.total) prestamos[ced] = p;
+    const pendiente = await pre.pendienteTotal(req.empresaId, ced);
+    if (p.total || pendiente) prestamos[ced] = { ...p, pendiente };
   }
   res.json({ ...c, prestamos });
 });
 
 r.post('/liq-conductores', gestionar, async (req, res) => {
-  const d = z.object({ viajes: z.array(id).min(1).max(500), desde: z.string(), hasta: z.string(), descontarPrestamos: z.boolean().optional().default(true) }).parse(req.body);
+  const d = z.object({ viajes: z.array(id).min(1).max(500), desde: z.string(), hasta: z.string(), descontarPrestamos: z.boolean().optional().default(true),
+    descuentoPrestamos: z.coerce.number().min(0).nullable().optional(), agrupacion: z.enum(['conductor', 'placa_empresa']).optional().default('conductor') }).parse(req.body);
   const r1 = await liq.liquidar(req.empresaId, { ...d, desde: parseFecha(d.desde), hasta: finDia(parseFecha(d.hasta)), usuario: req.usuario._id });
   await auditar(req, 'liquidar_conductor', { entidad: 'LiquidacionConductor', entidadId: r1.liquidacion._id, detalle: { numero: r1.liquidacion.numero, neto: r1.liquidacion.neto } });
   res.status(201).json(r1);
@@ -85,21 +88,26 @@ r.post('/liq-conductores/:numero/anular', gestionar, async (req, res) => {
 });
 
 const COL_LC = [{ titulo: 'Fecha', peso: 1 }, { titulo: 'Placa', peso: 0.8 }, { titulo: 'Empresa', peso: 1.4 }, { titulo: 'Destino', peso: 1.6 },
-  { titulo: 'Manifiesto', peso: 1 }, { titulo: 'Flete', peso: 1, alin: 'right' }, { titulo: 'Anticipo', peso: 1, alin: 'right' },
-  { titulo: 'Retefuente', peso: 1, alin: 'right' }, { titulo: 'FOPAT', peso: 0.8, alin: 'right' }, { titulo: 'Saldo', peso: 1, alin: 'right' }];
+  { titulo: 'Manifiesto', peso: 1 }, { titulo: 'Flete', peso: 1, alin: 'right' }, { titulo: 'Auxiliar', peso: 0.9, alin: 'right' }, { titulo: 'Anticipo', peso: 1, alin: 'right' },
+  { titulo: 'Anticipo rec.', peso: 1, alin: 'right' }, { titulo: 'Retefuente', peso: 1, alin: 'right' }, { titulo: 'FOPAT', peso: 0.8, alin: 'right' }, { titulo: 'Saldo', peso: 1, alin: 'right' }];
+// Líneas antiguas (antes del auxiliar y del anticipo reconocido) se muestran con sus valores originales
+const filaLc = (x) => [fmtFecha(x.fecha), x.placa, x.empresa, x.destino, x.manifiesto, $(x.flete), $(x.auxiliar), $(x.anticipo),
+  $(x.anticipoReconocido ?? x.anticipo), $(x.retefuente), $(x.fopat), $(x.saldo)];
+const totalLc = (l) => ['TOTAL', '', '', '', '', $(l.flete), $(l.auxiliar), $(l.anticipo), $(l.anticipoReconocido ?? l.anticipo), $(l.retefuente), $(l.fopat),
+  $(l.flete + (l.auxiliar || 0) - (l.anticipoReconocido ?? l.anticipo) - l.retefuente - l.fopat)];
 r.get('/liq-conductores/:numero/:formato', verLiq, async (req, res) => {
   if (!['pdf', 'xlsx'].includes(req.params.formato)) throw new ErrorHttp(404, 'Formato no disponible');
   const l = await LiquidacionConductor.findOne(deEmpresa(req, { numero: req.params.numero })).lean();
   if (!l) throw new ErrorHttp(404, 'Liquidación no encontrada');
-  const filas = l.lineas.map(x => [fmtFecha(x.fecha), x.placa, x.empresa, x.destino, x.manifiesto, $(x.flete), $(x.anticipo), $(x.retefuente), $(x.fopat), $(x.saldo)]);
-  const total = ['TOTAL', '', '', '', '', $(l.flete), $(l.anticipo), $(l.retefuente), $(l.fopat), $(l.flete - l.anticipo - l.retefuente - l.fopat)];
+  const filas = l.lineas.map(filaLc);
+  const total = totalLc(l);
   const titulo = `Liquidación ${l.numero} - ${l.conductorNombre}`;
   const subtitulo = `C.C. ${l.cedula} · Placa ${l.placa} · Del ${fmtFecha(l.desde)} al ${fmtFecha(l.hasta)}${l.estado === 'ANULADA' ? ' · ANULADA' : ''}`;
+  const vacio = Array(COL_LC.length - 1).fill('');
   if (req.params.formato === 'xlsx') {
-    const fmt = (x) => x.toLocaleString('es-CO');
     return archivo(res, await libroExcel({ empresa: await empresaDe(req), titulo, subtitulo,
       columnas: COL_LC.map((c, i) => ({ ...c, ancho: i > 4 ? 14 : 16, formato: i > 4 ? PESOS : undefined })),
-      filas: [...filas, [], ['Descuento préstamos', '', '', '', '', '', '', '', '', -$(l.descuentoPrestamos)], ['NETO A PAGAR', '', '', '', '', '', '', '', '', $(l.neto)]], total }), `${l.numero}.xlsx`, XLSX);
+      filas: [...filas, [], ['Descuento préstamos', ...vacio.slice(1), -$(l.descuentoPrestamos)], ['NETO A PAGAR', ...vacio.slice(1), $(l.neto)]], total }), `${l.numero}.xlsx`, XLSX);
   }
   const buf = await pdfTabla(req, { titulo, subtitulo, columnas: COL_LC, filas: filas.map(f => f.map((v, i) => (i > 4 ? `$ ${v.toLocaleString('es-CO')}` : v))),
     total: total.map((v, i) => (i > 4 ? `$ ${v.toLocaleString('es-CO')}` : v)),
@@ -111,6 +119,76 @@ r.get('/liq-conductores/:numero/:formato', verLiq, async (req, res) => {
     } });
   archivo(res, buf, `${l.numero}.pdf`, 'application/pdf', req.query.ver === '1');
 });
+
+// Dos liquidaciones por hoja carta (media hoja cada una, con línea de corte). Una liquidación
+// con muchos viajes ocupa la hoja completa.
+r.get('/liq-conductores-lote/pdf', verLiq, async (req, res) => {
+  const numeros = String(req.query.numeros || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 200);
+  if (!numeros.length) throw new ErrorHttp(400, 'Elija al menos una liquidación');
+  const lista = await LiquidacionConductor.find(deEmpresa(req, { numero: { $in: numeros } })).lean();
+  if (!lista.length) throw new ErrorHttp(404, 'No se encontraron las liquidaciones');
+  lista.sort((a, b) => numeros.indexOf(a.numero) - numeros.indexOf(b.numero));
+  const empresa = await empresaDe(req);
+  archivo(res, await liquidacionesMediaHoja(empresa, lista), 'liquidaciones.pdf', 'application/pdf', req.query.ver === '1');
+});
+
+async function liquidacionesMediaHoja(empresa, lista) {
+  const doc = nuevoPdf('Liquidaciones de conductores', 'portrait');
+  // Sin márgenes del documento: cada media hoja maneja los suyos (si no, el texto cerca del borde abre otra página)
+  doc.options.margin = 0; doc.page.margins = { top: 0, bottom: 0, left: 0, right: 0 };
+  const W = doc.page.width; const H = doc.page.height; const M = 28; const mitad = H / 2;
+  const anchos = [44, 40, 70, 92, 46, 46, 40, 46, 46, 40, 32, 54];
+  const cab = ['Fecha', 'Placa', 'Empresa', 'Destino', 'Manif.', 'Flete', 'Aux.', 'Anticipo', 'Ant. rec.', 'Retef.', 'FOPAT', 'Saldo'];
+  const escala = (W - 2 * M) / anchos.reduce((a, b) => a + b, 0);
+  const cols = anchos.map(a => a * escala);
+  const pesos = (v) => `$ ${$(v).toLocaleString('es-CO')}`;
+  const FILA = 9.5; const CAB = 62; const PIE = 74;
+  const filasMedia = Math.floor((mitad - 2 * 14 - CAB - PIE) / FILA);
+  let y = 0; let enMitad = 0; // 0 = hoja vacía, 1 = mitad superior usada
+  const dibujar = (l, y0, alto) => {
+    let yy = y0 + 14;
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('black').text(empresa?.nombre || '', M, yy, { width: W - 2 * M - 160, lineBreak: false });
+    doc.text(`Liquidación ${l.numero}`, W - M - 160, yy, { width: 160, align: 'right', lineBreak: false });
+    yy += 14;
+    doc.font('Helvetica').fontSize(8).text(`Conductor: ${l.conductorNombre}${l.cedula ? ` · C.C. ${l.cedula}` : ''} · Placa ${l.placa}`, M, yy, { width: W - 2 * M, lineBreak: false });
+    yy += 11;
+    doc.text(`Periodo: ${fmtFecha(l.desde)} al ${fmtFecha(l.hasta)} · Empresa(s): ${l.empresas || ''} · Fecha ${fmtFecha(l.fecha)}${l.estado === 'ANULADA' ? ' · ANULADA' : ''}`,
+      M, yy, { width: W - 2 * M, lineBreak: false, ellipsis: true });
+    yy += 15;
+    const fila = (valores, negrita = false, fondo = null) => {
+      if (fondo) doc.rect(M, yy - 2, W - 2 * M, FILA).fill(fondo).fillColor('black');
+      let x = M;
+      doc.font(negrita ? 'Helvetica-Bold' : 'Helvetica').fontSize(6.5);
+      valores.forEach((v, i) => { doc.text(String(v ?? ''), x + 1.5, yy, { width: cols[i] - 3, align: i > 4 ? 'right' : 'left', lineBreak: false, ellipsis: true }); x += cols[i]; });
+      yy += FILA;
+    };
+    fila(cab, true, '#FFF3C4');
+    l.lineas.forEach((x, i) => fila(filaLc(x).map((v, k) => (k > 4 ? pesos(v) : v)), false, i % 2 ? '#FAFAF7' : null));
+    fila(totalLc(l).map((v, k) => (k > 4 ? pesos(v) : v)), true, '#EEEEEE');
+    yy += 4;
+    doc.font('Helvetica').fontSize(8).text(`Descuento préstamos: ${pesos(l.descuentoPrestamos)}`, M, yy, { width: W - 2 * M, align: 'right' });
+    yy += 11;
+    doc.font('Helvetica-Bold').fontSize(10).text(`NETO A PAGAR: ${pesos(l.neto)}`, M, yy, { width: W - 2 * M, align: 'right' });
+    const yf = y0 + alto - 26;
+    doc.font('Helvetica').fontSize(8).moveTo(M, yf).lineTo(M + 180, yf).stroke().moveTo(W - M - 180, yf).lineTo(W - M, yf).stroke();
+    doc.text('Firma conductor', M, yf + 3, { width: 180, align: 'center', lineBreak: false });
+    doc.text('Firma empresa', W - M - 180, yf + 3, { width: 180, align: 'center', lineBreak: false });
+  };
+  lista.forEach((l, i) => {
+    const completa = l.lineas.length > filasMedia;
+    if (i > 0 && (completa || enMitad === 0 || enMitad === 2)) { doc.addPage(); enMitad = 0; }
+    if (completa) { dibujar(l, 0, H); enMitad = 2; return; }
+    y = enMitad === 1 ? mitad : 0;
+    dibujar(l, y, mitad);
+    if (enMitad === 1) enMitad = 2;
+    else {
+      enMitad = 1;
+      // Línea de corte entre las dos mitades
+      doc.save().dash(4, { space: 3 }).strokeColor('#999999').moveTo(12, mitad).lineTo(W - 12, mitad).stroke().undash().restore();
+    }
+  });
+  return pdfABuffer(doc, { marca: 'pie' });
+}
 
 // ═════════════ Préstamos ═════════════
 r.get('/prestamos', verLiq, async (req, res) => {
@@ -194,10 +272,22 @@ r.post('/contabilidad/asientos/:numero/anular', gestionar, async (req, res) => {
 });
 r.get('/contabilidad/facturas', verLiq, async (req, res) => res.json(await FacturaCont.find(deEmpresa(req)).populate(pob(req.empresaId, 'cliente', 'nombre nit')).sort({ createdAt: -1 }).limit(300).lean()));
 r.post('/contabilidad/facturas', gestionar, async (req, res) => {
-  const d = z.object({ cliente: id, desde: z.string(), hasta: z.string(), retefuentePct: z.coerce.number().min(0).max(20).default(1), icaPct: z.coerce.number().min(0).max(5).default(0) }).parse(req.body);
+  const d = z.object({ cliente: id, desde: z.string(), hasta: z.string(), retefuentePct: z.coerce.number().min(0).max(20).optional(),
+    icaPct: z.coerce.number().min(0).max(5).default(0), permitirCruce: z.boolean().optional().default(false) }).parse(req.body);
+  if (d.retefuentePct === undefined) d.retefuentePct = (await reglasDe(req.empresaId)).retefuenteFacturaPct;
   const f = await cont.facturar(req.empresaId, { ...d, desde: parseFecha(d.desde), hasta: finDia(parseFecha(d.hasta)), usuario: req.usuario._id });
-  await auditar(req, 'factura_contable', { entidad: 'FacturaCont', entidadId: f._id, detalle: { numero: f.numero, neto: f.neto } });
+  await auditar(req, 'factura_contable', { entidad: 'FacturaCont', entidadId: f._id, detalle: { numero: f.numero, neto: f.neto, cruces: f.cruces } });
   res.status(201).json(f);
+});
+// Aviso previo: facturas del mismo cliente que se cruzan con el periodo
+r.get('/contabilidad/facturas/cruces', verLiq, async (req, res) => {
+  const desde = parseFecha(req.query.desde); const hasta = parseFecha(req.query.hasta);
+  if (!mongoose.isValidObjectId(req.query.cliente) || !desde || !hasta) return res.json([]);
+  res.json(await cont.facturasCruzadas(req.empresaId, { cliente: req.query.cliente, desde, hasta: finDia(hasta) }));
+});
+r.get('/contabilidad/resumen', verLiq, async (req, res) => {
+  const desde = fechaQ(req.query.desde, inicioMes()); const hasta = finDia(fechaQ(req.query.hasta, hoy()));
+  res.json({ desde, hasta, ...(await cont.resumenContable(req.empresaId, desde, hasta)) });
 });
 r.post('/contabilidad/facturas/:numero/anular', gestionar, async (req, res) => {
   const f = await FacturaCont.findOne(deEmpresa(req, { numero: req.params.numero }));
@@ -254,6 +344,11 @@ r.get('/contabilidad/informes/:tipo', verLiq, async (req, res) => {
     datos = await cont.cuentasPorPagar(req.empresaId); titulo = 'Cuentas por pagar a conductores';
     columnas = ['Liquidación', 'Fecha', 'Conductor', 'Placa', 'Neto', 'Pagado', 'Saldo'];
     filas = datos.map(l => [l.numero, fmtFecha(l.fecha), l.conductor, l.placa, l.neto, l.pagado, l.saldo]);
+  } else if (t === 'cartera') {
+    datos = await cont.carteraPorEdades(req.empresaId, hasta); titulo = `Cartera por edades al ${fmtFecha(hasta)}`;
+    columnas = ['Cliente', 'Facturas', ...cont.EDADES.map(e => e[1]), 'Total'];
+    filas = [...datos.filas.map(x => [x.cliente, String(x.facturas), x.d0_30, x.d31_60, x.d61_90, x.d90, x.total]),
+      ['', '', datos.totales.d0_30, datos.totales.d31_60, datos.totales.d61_90, datos.totales.d90, datos.totales.total]];
   } else if (t === 'retenciones') {
     datos = await cont.retenciones(req.empresaId, desde, hasta); titulo = 'Retenciones';
     columnas = ['Cuenta', 'Nombre', 'Débitos', 'Créditos', 'Saldo'];
@@ -265,7 +360,7 @@ r.get('/contabilidad/informes/:tipo', verLiq, async (req, res) => {
   } else throw new ErrorHttp(404, 'Informe no disponible');
   if (req.query.formato === 'xlsx') {
     return archivo(res, await libroExcel({ empresa: await empresaDe(req), titulo, subtitulo: `Del ${fmtFecha(desde)} al ${fmtFecha(hasta)} · información de apoyo; debe ser revisada por un contador`,
-      columnas: columnas.map(c => ({ titulo: c, ancho: 18, formato: /Débito|Crédito|Saldo|Valor|Neto|Cobrado|Pagado|Débitos|Créditos/.test(c) ? PESOS : undefined })), filas }), `${t}.xlsx`, XLSX);
+      columnas: columnas.map(c => ({ titulo: c, ancho: 18, formato: /Débito|Crédito|Saldo|Valor|Neto|Cobrado|Pagado|Débitos|Créditos|días|Total/.test(c) ? PESOS : undefined })), filas }), `${t}.xlsx`, XLSX);
   }
   res.json({ titulo, columnas, filas, datos });
 });
@@ -283,6 +378,40 @@ r.post('/cierres', admin, async (req, res) => {
   await auditar(req, 'cerrar_mes', { detalle: { mes, resumen } });
   res.status(201).json(resumen);
 });
+// ═════════════ Archivo y respaldos (solo el administrador) ═════════════
+// Respaldo completo de la empresa para descargar (líneas JSON comprimidas)
+r.get('/respaldo', admin, async (req, res) => {
+  const { respaldoComoFlujo } = await import('../services/gestion/archivo.js');
+  await auditar(req, 'descargar_respaldo');
+  const nombre = `respaldo-${new Date().toISOString().slice(0, 10)}.json.gz`;
+  res.setHeader('Content-Type', 'application/gzip');
+  res.setHeader('Content-Disposition', `attachment; filename="${nombre}"`);
+  respaldoComoFlujo(req.empresaId).on('error', () => res.destroy()).pipe(res);
+});
+r.get('/archivo', admin, async (req, res) => {
+  const { listarArchivos } = await import('../services/gestion/archivo.js');
+  const mes = /^\d{4}-\d{2}$/.test(String(req.query.mes || '')) ? req.query.mes : '';
+  res.json(await listarArchivos(req.empresaId, mes));
+});
+r.get('/archivo/descargar', admin, async (req, res) => {
+  const { leerArchivo } = await import('../services/gestion/archivo.js');
+  const ruta = String(req.query.ruta || '');
+  const flujo = await leerArchivo(req.empresaId, ruta);
+  const nombre = ruta.split('/').pop();
+  const tipo = /\.pdf$/i.test(nombre) ? 'application/pdf' : /\.xlsx$/i.test(nombre) ? XLSX : 'application/gzip';
+  res.setHeader('Content-Type', tipo);
+  res.setHeader('Content-Disposition', `${req.query.ver === '1' && tipo === 'application/pdf' ? 'inline' : 'attachment'}; filename="${nombre.replace(/[^\w.-]/g, '_')}"`);
+  flujo.pipe(res);
+});
+// Guarda ahora los PDF de manifiestos e informes de un mes (sin cerrarlo)
+r.post('/archivo/:mes', admin, async (req, res) => {
+  if (!/^\d{4}-\d{2}$/.test(req.params.mes)) throw new ErrorHttp(400, 'Mes inválido (aaaa-mm)');
+  const { archivarManifiestos, informesMes } = await import('../services/gestion/archivo.js');
+  const m = await archivarManifiestos(req.empresaId, req.params.mes);
+  const informes = await informesMes(req.empresaId, req.params.mes);
+  await auditar(req, 'archivar_mes', { detalle: { mes: req.params.mes, manifiestos: m.archivos.length, informes: informes.length, errores: m.errores.length } });
+  res.json({ manifiestos: m.archivos.length, informes: informes.length, errores: m.errores });
+});
 r.post('/cierres/:mes/reabrir', admin, async (req, res) => {
   await cierre.reabrirMes(req.empresaId, req.params.mes);
   await auditar(req, 'reabrir_mes', { detalle: { mes: req.params.mes } });
@@ -296,16 +425,21 @@ async function viajesPeriodo(req, extra = {}) {
   const desde = fechaQ(req.query.desde, inicioMes()); const hasta = finDia(fechaQ(req.query.hasta, hoy()));
   const f = deEmpresa(req, { fecha: { $gte: desde, $lte: hasta }, estado: { $ne: 'anulado' }, ...extra });
   if (req.query.cliente && mongoose.isValidObjectId(req.query.cliente)) f.cliente = req.query.cliente;
-  const viajes = await Viaje.find(f).populate([pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId'), pob(req.empresaId, 'cliente', 'nombre')]).lean();
-  const tarifas = new Map((await Tarifa.find(deEmpresa(req)).lean()).map(t => [String(t._id), t]));
-  return { desde, hasta, viajes, tarifas };
+  const viajes = await Viaje.find(f).populate([pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId'),
+    pob(req.empresaId, 'cliente', 'nombre politicaAuxiliar valorAuxiliarSinAnticipo')]).lean();
+  const lista = await Tarifa.find(deEmpresa(req)).lean();
+  const tarifas = new Map(lista.map(t => [String(t._id), t]));
+  const respaldos = respaldosAuxiliar(lista);
+  // Línea de liquidación del viaje con su tarifa, la tarifa de auxiliar de respaldo y la política de auxiliar del cliente
+  const linea = (v) => lineaLiquidacion(v, tarifas.get(String(v.tarifaRef)), { respaldo: respaldos.get(String(v.cliente?._id)), cliente: v.cliente });
+  return { desde, hasta, viajes, tarifas, linea };
 }
 
 r.get('/relaciones/pago-conductores', verRep, async (req, res) => {
-  const { desde, hasta, viajes, tarifas } = await viajesPeriodo(req);
+  const { desde, hasta, viajes, linea } = await viajesPeriodo(req);
   const g = new Map();
   for (const v of viajes) {
-    const l = lineaLiquidacion(v, tarifas.get(String(v.tarifaRef)));
+    const l = linea(v);
     const k = nombreT(v.conductor) || v.conductorNombre || '(sin conductor)';
     const x = g.get(k) || { conductor: k, cedula: v.conductor?.numId || '', viajes: 0, flete: 0, auxiliar: 0 };
     x.viajes += 1; x.flete += Number(v.flete) || l.totalFlete; x.auxiliar += l.totalAuxiliarPagado; g.set(k, x);
@@ -331,8 +465,8 @@ r.get('/relaciones/viajes', verRep, async (req, res) => {
   const agrupar = Object.hasOwn(AGRUPAR, req.query.agrupar) ? req.query.agrupar : 'general';
   const extra = {};
   if (req.query.placa) extra.placa = txt(req.query.placa).toUpperCase().replace(/[\s-]/g, '');
-  const { desde, hasta, viajes, tarifas } = await viajesPeriodo(req, extra);
-  const filas = viajes.map(v => { const l = lineaLiquidacion(v, tarifas.get(String(v.tarifaRef)));
+  const { desde, hasta, viajes, linea } = await viajesPeriodo(req, extra);
+  const filas = viajes.map(v => { const l = linea(v);
     return { _id: v._id, estado: v.estado, numero: v.numero, fecha: v.fecha, cliente: v.cliente?.nombre || '', utilidad: l.utilidad, placa: v.placa, conductor: nombreT(v.conductor) || v.conductorNombre, destino: v.destino,
       planilla: v.planilla || '', manifiesto: v.manifiesto?.numero || v.soporteInterno?.mc || '', cantidad: l.cantidad,
       auxiliar: v.conAuxiliar ? (v.diasAuxiliar || l.cantidad) : 0, tarifa: l.totalCobrado, flete: Number(v.flete) || 0, anticipo: Number(v.anticipo) || 0,
@@ -367,15 +501,16 @@ r.get('/relaciones/viajes', verRep, async (req, res) => {
 // Informe de utilidad por empresa (como el de la plantilla): cobrado, pagado y utilidad; retefuente y FOPAT
 // del conductor se muestran aparte (informativo, no se restan de la utilidad de la empresa)
 r.get('/relaciones/informe', verRep, async (req, res) => {
-  const { desde, hasta, viajes, tarifas } = await viajesPeriodo(req);
+  const { desde, hasta, viajes, linea } = await viajesPeriodo(req);
+  const reglas = await reglasDe(req.empresaId);
   const pbv = new Map((await Vehiculo.find(deEmpresa(req, { placa: { $in: [...new Set(viajes.map(v => v.placa))] } })).select('placa pbv').lean()).map(v => [v.placa, v.pbv]));
   const g = new Map();
   for (const v of viajes) {
-    const l = lineaLiquidacion(v, tarifas.get(String(v.tarifaRef)));
+    const l = linea(v);
     const k = v.cliente?.nombre || '(sin empresa)';
     const x = g.get(k) || { empresa: k, viajes: 0, cobrado: 0, flete: 0, auxiliarPagado: 0, utilidad: 0, retefuente: 0, fopat: 0 };
     x.viajes += 1; x.cobrado += l.totalCobrado; x.flete += l.totalFlete; x.auxiliarPagado += l.totalAuxiliarPagado; x.utilidad += l.utilidad;
-    x.retefuente += liq.retefuente(l.totalFlete); x.fopat += liq.fopat(l.totalFlete, pbv.get(v.placa), v.destino);
+    x.retefuente += liq.retefuente(l.totalFlete, reglas); x.fopat += liq.fopat(l.totalFlete, pbv.get(v.placa), v.destino, reglas);
     g.set(k, x);
   }
   const filas = [...g.values()].sort((a, b) => b.utilidad - a.utilidad).map(x => ({ ...x, margen: x.cobrado ? x.utilidad / x.cobrado : 0 }));
@@ -400,7 +535,7 @@ r.get('/relaciones/informe', verRep, async (req, res) => {
 // Días laborales del rango: salta domingos, festivos de Colombia, sábados (si se pide) y los días en que la placa ya tiene viaje.
 const masivoSchema = z.object({ cliente: id, tarifaRef: id.optional(), destino: z.string().trim().min(1).max(120), placa: z.string().trim().min(5).max(7),
   conductor: id, desde: z.string(), hasta: z.string(), incluirSabados: z.boolean().optional().default(true), cantidad: z.coerce.number().min(0).default(1),
-  conAuxiliar: z.boolean().optional().default(false), diasAuxiliar: z.coerce.number().min(0).max(366).optional().default(0), planilla: z.string().max(30).optional().default(''),
+  conAuxiliar: z.boolean().optional().default(false), diasAuxiliar: z.coerce.number().int().min(0).max(5, 'el auxiliar va de 1 a 5 días').optional().default(0), planilla: z.string().max(30).optional().default(''),
   requiereManifiesto: z.boolean().optional().default(false), dias: z.array(z.string()).optional() });
 async function diasMasivo(req, d) {
   const desde = parseFecha(d.desde); const hasta = parseFecha(d.hasta);
@@ -425,9 +560,11 @@ r.post('/relaciones/masivo', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const elegidos = new Set(d.dias || dias.filter(x => x.registrar).map(x => x.fecha));
   const aRegistrar = dias.filter(x => elegidos.has(x.fecha) && x.motivo !== 'ya tiene viaje');
   if (!aRegistrar.length) throw new ErrorHttp(400, 'No hay días para registrar');
-  const { exigirDocumentosVigentes } = await import('../services/gestion/documentos.js');
+  const { exigirDocumentosVigentes, registrarAutorizacion } = await import('../services/gestion/documentos.js');
   const { asegurarMesAbierto } = await import('../services/gestion/cierre.js');
-  await exigirDocumentosVigentes(req.empresaId, { conductor: d.conductor, placa });
+  const { autorizacionSchema } = await import('./viajes.js');
+  const { autorizado } = await exigirDocumentosVigentes(req.empresaId, { conductor: d.conductor, placa }, autorizacionSchema.parse(req.body?.autorizacion));
+  if (d.conAuxiliar && !d.diasAuxiliar) d.diasAuxiliar = 1;
   await asegurarMesAbierto(req.empresaId, ...aRegistrar.map(x => parseFecha(x.fecha)));
   const t = d.tarifaRef ? await Tarifa.findOne(deEmpresa(req, { _id: d.tarifaRef })).lean() : null;
   const cond = await Tercero.findOne(deEmpresa(req, { _id: d.conductor })).select('nombres apellido1 apellido2').lean();
@@ -445,10 +582,14 @@ r.post('/relaciones/masivo', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
       diasAuxiliar: d.diasAuxiliar, planilla: d.planilla, tarifa: sug.tarifa || 0, flete: sug.flete || 0, anticipo: sug.anticipo || 0, pesoKg: sug.pesoKg || 0,
       requiereManifiesto: d.requiereManifiesto, creadoPor: req.usuario._id, actualizadoPor: req.usuario._id });
     await asegurarSoporte(req.empresaId, v._id);
-    creados.push(v.numero);
+    creados.push(v);
   }
-  await auditar(req, 'registro_masivo', { detalle: { placa, viajes: creados } });
-  res.status(201).json({ creados, omitidos: dias.length - creados.length });
+  if (autorizado) {
+    await registrarAutorizacion(req.empresaId, autorizado, creados, req.usuario);
+    await auditar(req, 'autorizar_documentos_vencidos', { detalle: { viajes: creados.map(v => v.numero), administrador: autorizado.admin.email, motivo: autorizado.motivo } });
+  }
+  await auditar(req, 'registro_masivo', { detalle: { placa, viajes: creados.map(v => v.numero) } });
+  res.status(201).json({ creados: creados.map(v => v.numero), omitidos: dias.length - creados.length });
 });
 
 // Copiar un viaje a otra fecha (mismos datos, sin documentos del RNDC)
@@ -541,6 +682,38 @@ r.post('/remesas-dulces/pdf', remDulces, async (req, res) => {
   const buf = await dulces.remesasPdf(empresa, lista);
   if (marcar) await RemesaDulces.updateMany(deEmpresa(req, { vpl: { $in: lista.map(x => x.vpl) } }), { $set: { impreso: new Date() } });
   archivo(res, buf, 'remesas_dulces.pdf', 'application/pdf', true);
+});
+
+// ═════════════ Reglas de negocio configurables ═════════════
+const ciudades = z.array(z.string().trim().min(2).max(40)).max(30);
+const reglasSchema = z.object({
+  retefuenteConductorPct: z.coerce.number().min(0).max(10), fopatPct: z.coerce.number().min(0).max(5), pbvFopat: z.coerce.number().int().min(0).max(100000),
+  ciudadesSinFopat: ciudades, ciudadesAnticipoCero: ciudades, diasAvisoDocumentos: z.coerce.number().int().min(1).max(90),
+  retefuenteFacturaPct: z.coerce.number().min(0).max(20), siglasLiquidacion: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{1,6}$/, 'siglas de 1 a 6 letras o números'),
+  pesosPorTamano: z.array(z.object({ tamano: z.string().trim().regex(/^\d+([.,]\d+)?$/, 'tamaño como 1.0, 3.0').transform(v => v.replace(',', '.')),
+    kg: z.coerce.number().min(0).max(100000) })).max(20),
+}).partial();
+r.get('/reglas', permitir(P.VIAJES_VER), async (req, res) => {
+  const { reglasDe, REGLAS_BASE } = await import('../services/gestion/reglas.js');
+  res.json({ reglas: await reglasDe(req.empresaId), base: REGLAS_BASE });
+});
+r.put('/reglas', admin, async (req, res) => {
+  const d = reglasSchema.parse(req.body);
+  const { reglasDe } = await import('../services/gestion/reglas.js');
+  const antes = await reglasDe(req.empresaId);
+  await Empresa.updateOne({ _id: req.empresaId }, { $set: Object.fromEntries(Object.entries(d).map(([k, v]) => [`reglas.${k}`, v])) });
+  const despues = await reglasDe(req.empresaId);
+  await auditar(req, 'editar_reglas', { detalle: { cambios: Object.keys(d).filter(k => JSON.stringify(antes[k]) !== JSON.stringify(despues[k]))
+    .map(k => ({ campo: k, antes: antes[k], despues: despues[k] })) } });
+  res.json(despues);
+});
+
+// ═════════════ Autorizaciones del administrador (viajes con documentos vencidos) ═════════════
+r.get('/autorizaciones', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const f = deEmpresa(req);
+  const desde = parseFecha(req.query.desde); const hasta = parseFecha(req.query.hasta);
+  if (desde || hasta) f.createdAt = { ...(desde ? { $gte: desde } : {}), ...(hasta ? { $lte: finDia(hasta) } : {}) };
+  res.json(await Autorizacion.find(f).sort({ createdAt: -1 }).limit(500).lean());
 });
 
 // ═════════════ Documentos vencidos (aviso al elegir el conductor y la placa) ═════════════

@@ -12,6 +12,8 @@ import { fmtFecha } from '../utils/texto.js';
 import { datosManifiesto, manifiestoPdf, nombreArchivo } from './reportes/manifiesto.js';
 import { aplicarPlantilla, saludo } from './whatsapp.js';
 import { descifrar } from '../utils/cifrado.js';
+import { unirPdf } from './reportes/unirPdf.js';
+import { relacionCliente } from './reportes/relacion.js';
 import { txt } from '../utils/texto.js';
 
 const REINTENTO_AUTOMATICO_MS = 60 * 1000;
@@ -202,6 +204,11 @@ async function mensajeGrupo(empresa, smtp, envios) {
   }
   const cliente = await Cliente.findOne({ empresa: empresa._id, _id: envios[0].cliente }).select('nombre').lean();
   const nombre = txt(cliente?.nombre).toUpperCase();
+  // Opción de la empresa: todos los manifiestos del correo en un solo PDF
+  if (smtp.unirPdf && adjuntos.length > 1) {
+    const unido = await unirPdf(adjuntos.map(a => a.content));
+    adjuntos.splice(0, adjuntos.length, { filename: `Manifiestos_${nombre.replace(/[^\w]+/g, '_')}_${fmtFecha(new Date()).replace(/\//g, '-')}.pdf`, content: unido, contentType: 'application/pdf' });
+  }
   const texto = [`${saludo()},`, '', `MANIFIESTOS ${nombre}`, '', ...lineas, '',
     `Adjuntamos ${envios.length === 1 ? 'el manifiesto de carga' : `los ${envios.length} manifiestos de carga`} expedidos en el RNDC.`, '',
     'Muchas gracias.', '',
@@ -267,4 +274,62 @@ export function iniciarAgrupador() {
     } catch (err) { console.error('Agrupador de correos:', err.message); }
   }, 60 * 1000);
   temporizadorAgrupador.unref?.();
+}
+
+// ── Relaciones de viajes por cliente y envíos manuales ───────────────────────
+// Adjuntos escogidos a mano: [{ nombre, tipo, base64 }]
+const adjuntosManuales = (lista = []) => lista.map(a => ({ filename: txt(a.nombre).replace(/[\\/]/g, '_').slice(0, 120) || 'adjunto',
+  content: Buffer.from(a.base64, 'base64'), contentType: a.tipo || 'application/octet-stream' }));
+
+async function enviarYRegistrar(empresaId, { tipo, cliente = null, viajes = [], documento = '', mensaje: m, usuario }) {
+  const { empresa, smtp } = await cuentaCorreo(empresaId);
+  const grupo = new mongoose.Types.ObjectId();
+  const base = { empresa: empresaId, cliente, tipo, documento, destinatarios: [].concat(m.to), cc: m.cc || [], asunto: m.subject, origen: 'manual', usuario,
+    adjuntos: (m.attachments || []).map(a => a.filename), grupo, intentos: 1, estado: 'enviando' };
+  const registros = await EnvioCorreo.insertMany((viajes.length ? viajes : [null]).map(viaje => ({ ...base, viaje })));
+  const ids = registros.map(x => x._id);
+  try {
+    const r = await transporte(smtp).sendMail({ from: { name: smtp.remitenteNombre || empresa.nombre, address: smtp.remitenteCorreo }, replyTo: smtp.responderA || undefined, ...m });
+    const set = { estado: 'enviado', error: '', idMensaje: r.messageId || '', respuesta: txt(r.response).slice(0, 300), enviadoEn: new Date() };
+    await EnvioCorreo.updateMany({ empresa: empresaId, _id: { $in: ids } }, { $set: set });
+    return { estado: 'enviado', asunto: m.subject, adjuntos: base.adjuntos };
+  } catch (e) {
+    const error = `${e.code ? `${e.code}: ` : ''}${e.message}`.slice(0, 500);
+    await EnvioCorreo.updateMany({ empresa: empresaId, _id: { $in: ids } }, { $set: { estado: 'error', error } });
+    return { estado: 'error', error, asunto: m.subject };
+  }
+}
+
+// Relación de viajes de un cliente por correo (PDF y Excel), a los destinatarios de relaciones del cliente
+export async function enviarRelacion(empresaId, { cliente, desde, hasta, destinatarios, cc, adjuntos = [], usuario = null }) {
+  await cuentaCorreo(empresaId);
+  const rel = await relacionCliente(empresaId, cliente, desde, hasta);
+  if (!rel.viajes) { const e = new Error('No hay viajes para relacionar de ese cliente en el periodo'); e.status = 400; throw e; }
+  const para = destinatarios?.length ? destinatarios : rel.cliente.enviosRelaciones?.destinatarios || [];
+  if (!para.length) { const e = new Error('El cliente no tiene destinatarios de relaciones (Configuración → Correo)'); e.status = 400; throw e; }
+  const nombre = txt(rel.cliente.nombre);
+  const archivo = `Relacion_${nombre.replace(/[^\w]+/g, '_')}_${fmtFecha(desde).replace(/\//g, '-')}_${fmtFecha(hasta).replace(/\//g, '-')}`;
+  const texto = [`${saludo()},`, '', `Adjuntamos la relación de viajes de ${nombre} ${rel.subtitulo.toLowerCase()}.`,
+    `Total: $ ${Math.round(rel.total).toLocaleString('es-CO')}.`, '', 'Muchas gracias.', '', 'Cordialmente,', txt(rel.empresa.nombre).toUpperCase()].join('\n');
+  return enviarYRegistrar(empresaId, { tipo: 'relacion', cliente, documento: `${fmtFecha(desde)} - ${fmtFecha(hasta)}`, usuario, mensaje: {
+    to: para, cc: (cc?.length ? cc : rel.cliente.enviosRelaciones?.cc || []), subject: `RELACIÓN DE VIAJES ${nombre.toUpperCase()} - ${fmtFecha(desde)} al ${fmtFecha(hasta)}`,
+    text: texto, html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(texto)}</div>`,
+    attachments: [{ filename: `${archivo}.pdf`, content: rel.pdf, contentType: 'application/pdf' },
+      { filename: `${archivo}.xlsx`, content: rel.xlsx, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, ...adjuntosManuales(adjuntos)] } });
+}
+
+// Correo armado a mano: manifiestos escogidos (sueltos o unidos en un PDF) y archivos adjuntos
+export async function enviarManual(empresaId, { para, cc = [], asunto, texto, viajes = [], unir = false, adjuntos = [], usuario = null }) {
+  const { empresa } = await cuentaCorreo(empresaId);
+  const pdfs = [];
+  for (const id of viajes) { const d = await datosManifiesto(empresa, id); pdfs.push({ filename: nombreArchivo(d), content: await manifiestoPdf(d), contentType: 'application/pdf', numero: d.numero }); }
+  const docs = unir && pdfs.length > 1
+    ? [{ filename: `Manifiestos_${fmtFecha(new Date()).replace(/\//g, '-')}.pdf`, content: await unirPdf(pdfs.map(p => p.content)), contentType: 'application/pdf' }]
+    : pdfs.map(({ numero, ...p }) => p);
+  const cuerpo = txt(texto) || [`${saludo()},`, '', 'Adjuntamos los documentos.', '', 'Cordialmente,', txt(empresa.nombre).toUpperCase()].join('\n');
+  const v1 = viajes.length ? await Viaje.findOne({ empresa: empresaId, _id: viajes[0] }).select('cliente').lean() : null;
+  return enviarYRegistrar(empresaId, { tipo: 'manual', cliente: v1?.cliente || null, viajes, documento: pdfs.map(p => p.numero).join(', '), usuario, mensaje: {
+    to: para, cc, subject: txt(asunto) || `Documentos - ${empresa.nombre}`, text: cuerpo,
+    html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(cuerpo)}</div>`,
+    attachments: [...docs, ...adjuntosManuales(adjuntos)] } });
 }

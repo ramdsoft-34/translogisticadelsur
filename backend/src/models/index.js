@@ -10,6 +10,14 @@ const modelo = (n, s) => mongoose.models[n] || mongoose.model(n, s);
 const str = (extra = {}) => ({ type: String, trim: true, default: '', ...extra });
 const fecha = { type: Date, default: null };
 const idTercero = () => ({ tipoId: str({ uppercase: true }), numId: str() });
+// Años cumplidos a hoy (null sin fecha)
+export function edad(nacimiento, hoy = new Date()) {
+  if (!nacimiento) return null;
+  const n = new Date(nacimiento);
+  let a = hoy.getUTCFullYear() - n.getUTCFullYear();
+  if (hoy.getUTCMonth() < n.getUTCMonth() || (hoy.getUTCMonth() === n.getUTCMonth() && hoy.getUTCDate() < n.getUTCDate())) a -= 1;
+  return a;
+}
 
 // Estado de sincronización de un maestro (tercero o vehículo) con el RNDC.
 // `hash` es la huella de los datos enviados: si no cambian, no se reenvían
@@ -68,7 +76,22 @@ const empresaSchema = new Schema({
     velocidadMaxima: { type: Number, default: 80 },     // km/h: por encima se marca alerta
     minutosSinSenal: { type: Number, default: 10 },     // sin posición nueva por más tiempo → «Sin señal»
   },
-  cierres: { type: [{ mes: String, fecha: Date, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario' }, resumen: Object, _id: false }], default: [] },
+  cierres: { type: [{ mes: String, fecha: Date, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario' }, resumen: Object, archivos: [String], _id: false }], default: [] },
+  // Reglas de negocio configurables sin programar (liquidación, avisos y pesos)
+  reglas: {
+    retefuenteConductorPct: { type: Number, default: 1 },      // % del flete
+    fopatPct: { type: Number, default: 0.1 },                   // % del flete
+    pbvFopat: { type: Number, default: 10500 },                 // kg: el FOPAT aplica si el PBV supera este valor
+    ciudadesSinFopat: { type: [String], default: ['Pasto'] },
+    // RN-05: si el anticipo es mayor o igual al flete en estos destinos, el anticipo reconocido es 0
+    ciudadesAnticipoCero: { type: [String], default: ['Pasto', 'Mayorista', 'Popayán'] },
+    diasAvisoDocumentos: { type: Number, default: 10 },
+    retefuenteFacturaPct: { type: Number, default: 1 },
+    siglasLiquidacion: str({ default: 'LC', uppercase: true }),  // cuando la liquidación mezcla empresas o la empresa no tiene siglas
+    // Peso por la capacidad escrita en el destino (1.0 → 800 kg…)
+    pesosPorTamano: { type: [{ tamano: String, kg: Number, _id: false }],
+      default: () => [{ tamano: '1.0', kg: 800 }, { tamano: '3.0', kg: 1500 }, { tamano: '5.0', kg: 2500 }, { tamano: '6.0', kg: 5000 }] },
+  },
   smtp: {
     activo: { type: Boolean, default: false },
     host: str(), puerto: { type: Number, default: 587 },
@@ -77,6 +100,7 @@ const empresaSchema = new Schema({
     remitenteNombre: str(), remitenteCorreo: str({ lowercase: true }), responderA: str({ lowercase: true }),
     // Minutos sin manifiestos nuevos de un cliente antes de enviarle todos juntos en un solo correo
     agruparMinutos: { type: Number, default: 15 },
+    unirPdf: { type: Boolean, default: false },   // los manifiestos de un correo van en un solo PDF
   },
 }, { timestamps: true });
 empresaSchema.index({ nit: 1 }, { unique: true });
@@ -94,6 +118,9 @@ const usuarioSchema = new Schema({
   bloqueadoHasta: fecha,
   ultimoAcceso: fecha,
   debeCambiarClave: { type: Boolean, default: false },
+  // Doble factor (TOTP, app autenticadora) — secreto cifrado con AES-256-GCM
+  totp: { activo: { type: Boolean, default: false }, secreto: { type: String, default: '', select: false }, pendiente: { type: String, default: '', select: false },
+    ultimoPaso: { type: Number, default: 0, select: false } },
 }, { timestamps: true });
 usuarioSchema.index({ email: 1 }, { unique: true });
 // Un único SuperAdmin y un único Administrador por empresa (lo garantiza la base de datos).
@@ -122,6 +149,12 @@ const clienteSchema = new Schema({
   sedeRemitente: str(),
   correos: { type: [String], default: [] },
   whatsapp: str(),                       // número para el reporte de vehículos (opcional)
+  siglas: str({ uppercase: true, maxlength: 6 }),   // numeración de las liquidaciones de conductores (COR-0001)
+  // RN-15: cómo se factura el auxiliar a este cliente
+  //   registrado: lo registrado en el viaje · sin: nunca se cobra · incluido: va dentro de la tarifa
+  //   sin_anticipo: se cobra un valor fijo por viaje sin anticipo
+  politicaAuxiliar: { type: String, enum: ['registrado', 'sin', 'incluido', 'sin_anticipo'], default: 'registrado' },
+  valorAuxiliarSinAnticipo: { type: Number, default: 30000, min: 0 },
   activo: { type: Boolean, default: true },
   // Envío de documentos por correo cuando el RNDC acepta remesa y manifiesto
   envios: {
@@ -134,6 +167,8 @@ const clienteSchema = new Schema({
     },
     salida: { asunto: str(), cuerpo: str({ maxlength: 3000 }) },
   },
+  // Correos de relaciones de viajes (aparte de los de manifiestos)
+  enviosRelaciones: { destinatarios: { type: [String], default: [] }, cc: { type: [String], default: [] } },
 }, { timestamps: true });
 clienteSchema.plugin(tenantPlugin);
 clienteSchema.index({ empresa: 1, nombre: 1 }, { unique: true, collation: { locale: 'es', strength: 1 } });
@@ -168,6 +203,8 @@ const terceroSchema = new Schema({
   correo: str({ lowercase: true }),
   licencia: { categoria: str(), numero: str(), vence: fecha },
   fechaNacimiento: fecha,
+  // Placas que maneja el conductor; la principal se propone al registrar viajes
+  placas: { type: [String], default: [] }, placaPrincipal: str({ uppercase: true }),
   banco: { entidad: str(), tipoCuenta: str(), cuenta: str() },
   roles: { type: [String], default: [] },
   activo: { type: Boolean, default: true },
@@ -185,6 +222,7 @@ terceroSchema.pre('save', async function () {
 terceroSchema.virtual('nombreCompleto').get(function () {
   return [this.nombres, this.apellido1, this.apellido2].filter(Boolean).join(' ');
 });
+terceroSchema.virtual('edad').get(function () { return edad(this.fechaNacimiento); });
 
 // ── Vehículo / remolque ─────────────────────────────────────────────────────
 const vehiculoSchema = new Schema({
@@ -326,9 +364,10 @@ plantillaWhatsappSchema.index({ empresa: 1, nombre: 1 }, { unique: true, collati
 
 // ── Envíos de documentos por correo (trazabilidad y reintentos) ─────────────
 const envioCorreoSchema = new Schema({
-  viaje: { type: Schema.Types.ObjectId, ref: 'Viaje', required: true },
+  viaje: { type: Schema.Types.ObjectId, ref: 'Viaje', default: null },   // vacío en las relaciones (varios viajes)
   cliente: { type: Schema.Types.ObjectId, ref: 'Cliente', default: null },
-  tipo: { type: String, enum: ['manifiesto', 'salida'], required: true },
+  tipo: { type: String, enum: ['manifiesto', 'salida', 'relacion', 'manual'], required: true },
+  adjuntos: { type: [String], default: [] },      // nombres de los archivos adjuntos (relaciones y envíos manuales)
   documento: str(),                         // n.° del manifiesto
   destinatarios: { type: [String], default: [] }, cc: { type: [String], default: [] },
   asunto: str(),
@@ -432,15 +471,16 @@ prestamoSchema.index({ empresa: 1, numero: 1 }, { unique: true });
 
 // ── Liquidación del conductor (pago por placa y periodo) ────────────────────
 const liquidacionConductorSchema = new Schema({
-  numero: { type: String, required: true },             // LC-0001
+  numero: { type: String, required: true },             // siglas del cliente: COR-0001 (LC-0001 si mezcla clientes)
   fecha: { type: Date, required: true },
   placa: str({ uppercase: true }), conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },
   conductorNombre: str(), cedula: str(),
   desde: Date, hasta: Date,
   viajes: [{ type: Schema.Types.ObjectId, ref: 'Viaje' }],
   lineas: { type: Array, default: [] },
-  flete: Number, anticipo: Number, retefuente: Number, fopat: Number, descuentoPrestamos: Number, interesPrestamos: Number, neto: Number,
-  empresas: str(),
+  flete: Number, auxiliar: { type: Number, default: 0 }, anticipo: Number, anticipoReconocido: Number,
+  retefuente: Number, fopat: Number, descuentoPrestamos: Number, interesPrestamos: Number, neto: Number,
+  empresas: str(), agrupacion: { type: String, enum: ['conductor', 'placa_empresa'], default: 'conductor' },
   pagado: { type: Number, default: 0 },
   estado: { type: String, enum: ['VIGENTE', 'ANULADA'], default: 'VIGENTE' },
   creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
@@ -469,6 +509,17 @@ const asientoSchema = new Schema({
 asientoSchema.plugin(tenantPlugin);
 asientoSchema.index({ empresa: 1, numero: 1 }, { unique: true });
 asientoSchema.index({ empresa: 1, fecha: 1 });
+
+// ── Autorizaciones de administrador (viajes con documentos vencidos, CA-06) ──
+const autorizacionSchema = new Schema({
+  tipo: str({ default: 'documentos_vencidos' }),
+  viaje: { type: Schema.Types.ObjectId, ref: 'Viaje', default: null }, viajeNumero: Number, placa: str(), conductorNombre: str(),
+  vencidos: { type: [String], default: [] }, motivo: str({ required: true, maxlength: 300 }),
+  admin: { type: Schema.Types.ObjectId, ref: 'Usuario', required: true }, adminNombre: str(),
+  solicitante: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null }, solicitanteNombre: str(),
+}, { timestamps: true });
+autorizacionSchema.plugin(tenantPlugin);
+autorizacionSchema.index({ empresa: 1, createdAt: -1 });
 
 const facturaContSchema = new Schema({
   numero: { type: String, required: true },             // FV-0001
@@ -513,6 +564,7 @@ export const Asiento = modelo('Asiento', asientoSchema);
 export const FacturaCont = modelo('FacturaCont', facturaContSchema);
 export const RemesaDulces = modelo('RemesaDulces', remesaDulcesSchema);
 export const RecorridoRastreo = modelo('RecorridoRastreo', recorridoRastreoSchema);
+export const Autorizacion = modelo('Autorizacion', autorizacionSchema);
 
 // Siguiente valor de un contador de la empresa (atómico). `minimo` permite
 // continuar una numeración existente (ej. último manifiesto expedido).

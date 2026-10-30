@@ -3,7 +3,7 @@
 import { CuentaContable, Asiento, FacturaCont, LiquidacionConductor, Viaje, Cliente, Tarifa, siguiente, pob } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { asegurarMesAbierto } from './cierre.js';
-import { lineaLiquidacion } from '../calculos.js';
+import { lineaLiquidacion, respaldosAuxiliar, NO_FACTURAR } from '../calculos.js';
 
 // Plan de cuentas de la plantilla (_CONT_PUC)
 export const PUC_BASE = [
@@ -55,22 +55,37 @@ export async function anularAsiento(empresaId, numero) {
 }
 
 // ── Documentos ───────────────────────────────────────────────────────────────
-// Factura a una empresa (cliente): suma la tarifa (y auxiliares) de los viajes del rango. Sin IVA.
-export async function facturar(empresaId, { cliente, desde, hasta, retefuentePct = 1, icaPct = 0, fecha = new Date(), usuario }) {
+// Facturas vigentes del mismo cliente cuyo periodo se cruza con el indicado
+export async function facturasCruzadas(empresaId, { cliente, desde, hasta }) {
+  return FacturaCont.find({ empresa: empresaId, cliente, estado: { $ne: 'ANULADA' }, desde: { $lte: hasta }, hasta: { $gte: desde } })
+    .select('numero fecha desde hasta neto').sort({ desde: 1 }).lean();
+}
+
+// Factura a una empresa (cliente): suma la tarifa y el auxiliar (según la política del cliente, RN-15) de los
+// viajes del rango, sin los marcados «[NO FACTURAR]». Sin IVA. Si el periodo se cruza con otra factura del
+// mismo cliente se avisa y solo se factura con `permitirCruce`.
+export async function facturar(empresaId, { cliente, desde, hasta, retefuentePct = 1, icaPct = 0, fecha = new Date(), usuario, permitirCruce = false }) {
   const cli = await Cliente.findOne({ empresa: empresaId, _id: cliente }).lean();
   if (!cli) throw new ErrorHttp(400, 'Cliente no encontrado');
-  const viajes = await Viaje.find({ empresa: empresaId, cliente, fecha: { $gte: desde, $lte: hasta }, estado: { $ne: 'anulado' } }).lean();
-  if (!viajes.length) throw new ErrorHttp(400, 'No hay viajes de ese cliente en el rango');
+  const cruces = await facturasCruzadas(empresaId, { cliente, desde, hasta });
+  if (cruces.length && !permitirCruce) {
+    throw new ErrorHttp(409, `El periodo se cruza con ${cruces.length === 1 ? 'la factura' : 'las facturas'} ${cruces.map(f => f.numero).join(', ')} del mismo cliente`,
+      cruces.map(f => `${f.numero}: ${f.desde?.toISOString().slice(0, 10)} a ${f.hasta?.toISOString().slice(0, 10)}`));
+  }
+  const viajes = await Viaje.find({ empresa: empresaId, cliente, fecha: { $gte: desde, $lte: hasta }, estado: { $ne: 'anulado' }, observaciones: { $not: NO_FACTURAR } }).lean();
+  if (!viajes.length) throw new ErrorHttp(400, 'No hay viajes para facturar de ese cliente en el rango');
   const tarifas = await Tarifa.find({ empresa: empresaId, cliente }).lean();
   const porId = new Map(tarifas.map(t => [String(t._id), t]));
-  const total = viajes.reduce((a, v) => a + lineaLiquidacion(v, porId.get(String(v.tarifaRef))).totalCobrado, 0);
+  const respaldo = respaldosAuxiliar(tarifas).get(String(cliente));
+  const total = viajes.reduce((a, v) => a + lineaLiquidacion(v, porId.get(String(v.tarifaRef)), { respaldo, cliente: cli }).totalCobrado, 0);
   const retefuente = Math.round(total * retefuentePct / 100);
   const ica = Math.round(total * icaPct / 100);
   const neto = total - retefuente - ica;
   const numero = `FV-${String(await siguiente(empresaId, 'factura')).padStart(4, '0')}`;
   const a = await postear(empresaId, { fecha, documento: numero, concepto: `Factura ${numero} - ${cli.nombre}`, origen: 'FAC',
     terceroDoc: cli.nit, tercero: cli.nombre, usuario, lineas: [['1305', neto], ['1355', retefuente], ['1356', ica], ['4135', -total]] });
-  return FacturaCont.create({ empresa: empresaId, numero, fecha, cliente, desde, hasta, viajes: viajes.length, total, retefuentePct, retefuente, icaPct, ica, neto, asiento: a.numero });
+  const f = await FacturaCont.create({ empresa: empresaId, numero, fecha, cliente, desde, hasta, viajes: viajes.length, total, retefuentePct, retefuente, icaPct, ica, neto, asiento: a.numero });
+  return Object.assign(f.toObject(), { cruces: cruces.map(c => c.numero) });
 }
 
 export async function cobrar(empresaId, { factura, valor, fecha = new Date(), cuenta = '1110', usuario }) {
@@ -156,6 +171,43 @@ export async function cuentasPorPagar(empresaId) {
   return (await LiquidacionConductor.find({ empresa: empresaId, estado: 'VIGENTE' }).sort({ fecha: 1 }).lean())
     .filter(l => l.neto - (l.pagado || 0) > 0)
     .map(l => ({ numero: l.numero, fecha: l.fecha, conductor: l.conductorNombre, placa: l.placa, neto: l.neto, pagado: l.pagado || 0, saldo: l.neto - (l.pagado || 0) }));
+}
+
+// Cartera por edades: saldo de las facturas pendientes por cliente según los días desde la factura
+export const EDADES = [['d0_30', '0 a 30 días', 0, 30], ['d31_60', '31 a 60 días', 31, 60], ['d61_90', '61 a 90 días', 61, 90], ['d90', 'Más de 90 días', 91, Infinity]];
+export async function carteraPorEdades(empresaId, corte = new Date()) {
+  const g = new Map();
+  for (const f of await cuentasPorCobrar(empresaId)) {
+    const dias = Math.max(0, Math.floor((corte - new Date(f.fecha)) / 86400000));
+    const x = g.get(f.cliente) || { cliente: f.cliente || '(sin cliente)', facturas: 0, d0_30: 0, d31_60: 0, d61_90: 0, d90: 0, total: 0 };
+    const [k] = EDADES.find(([, , a, b]) => dias >= a && dias <= b);
+    x[k] += f.saldo; x.total += f.saldo; x.facturas += 1;
+    g.set(f.cliente, x);
+  }
+  const filas = [...g.values()].sort((a, b) => b.total - a.total);
+  const totales = filas.reduce((a, x) => { for (const k of ['facturas', 'd0_30', 'd31_60', 'd61_90', 'd90', 'total']) a[k] += x[k]; return a; },
+    { facturas: 0, d0_30: 0, d31_60: 0, d61_90: 0, d90: 0, total: 0 });
+  return { filas, totales };
+}
+
+// Panel de resumen contable del mes: por cobrar, por pagar, facturado, cobrado, gastos y excedente
+export async function resumenContable(empresaId, desde, hasta) {
+  const [cxc, cxp, facturas, asientos, res] = await Promise.all([
+    cuentasPorCobrar(empresaId), cuentasPorPagar(empresaId),
+    FacturaCont.find({ empresa: empresaId, fecha: { $gte: desde, $lte: hasta }, estado: { $ne: 'ANULADA' } }).select('total neto').lean(),
+    Asiento.find({ empresa: empresaId, estado: 'ACTIVO', fecha: { $gte: desde, $lte: hasta }, origen: { $in: ['COB', 'PAG', 'GAS'] } }).lean(),
+    resultados(empresaId, desde, hasta),
+  ]);
+  const suma = (l, k) => l.reduce((a, x) => a + (Number(x[k]) || 0), 0);
+  const deOrigen = (o, f) => asientos.filter(a => a.origen === o).reduce((a, x) => a + x.lineas.filter(f).reduce((b, l) => b + l.debito, 0), 0);
+  const cartera = await carteraPorEdades(empresaId);
+  return {
+    porCobrar: suma(cxc, 'saldo'), facturasPendientes: cxc.length, porPagar: suma(cxp, 'saldo'), liquidacionesPendientes: cxp.length,
+    facturado: suma(facturas, 'total'), facturas: facturas.length,
+    cobrado: deOrigen('COB', l => /^11/.test(l.cuenta)), pagadoConductores: deOrigen('PAG', l => l.cuenta === '2205'),
+    gastos: res.totalGastos, costos: res.totalCostos, ingresos: res.totalIngresos, excedente: res.utilidad,
+    carteraVencida: cartera.totales.d31_60 + cartera.totales.d61_90 + cartera.totales.d90,
+  };
 }
 
 export async function retenciones(empresaId, desde, hasta) {

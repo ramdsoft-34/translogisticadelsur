@@ -59,6 +59,7 @@ const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/)
           <input id="sm-agr" type="number" min="0" max="240" name="agr" [(ngModel)]="c.agruparMinutos" />
           <span>minutos después del último manifiesto expedido (0 = en el siguiente minuto).</span>
         </div>
+        <label class="casilla" style="margin:8px 0 14px"><input type="checkbox" name="unir" [(ngModel)]="c.unirPdf" />Unir los manifiestos del correo en un solo PDF</label>
 
         <div class="paso"><span class="num">3</span><strong>Guarde y reciba un correo de prueba</strong></div>
         <div class="acciones">
@@ -152,6 +153,14 @@ const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/)
               <small>Separe los correos con coma o en líneas distintas.</small></div>
             <div class="campo"><label for="ec-cc">Con copia (CC)</label><textarea id="ec-cc" name="cc" rows="2" [(ngModel)]="f.ccTexto"></textarea></div>
           </div>
+          <fieldset style="margin-top:14px"><legend>Relaciones de viajes</legend>
+            <p class="sutil" style="margin-top:0">A quién se envía la relación de viajes del periodo (Programación por placa → Informes → Enviar relación por correo). Puede ser distinto de los manifiestos.</p>
+            <div class="rejilla">
+              <div class="campo ancho2"><label for="ec-rpara">Destinatarios de relaciones</label>
+                <textarea id="ec-rpara" name="rpara" rows="2" [(ngModel)]="f.relParaTexto" placeholder="facturacion@cliente.com"></textarea></div>
+              <div class="campo"><label for="ec-rcc">Con copia (CC)</label><textarea id="ec-rcc" name="rcc" rows="2" [(ngModel)]="f.relCcTexto"></textarea></div>
+            </div>
+          </fieldset>
           <fieldset style="margin-top:14px"><legend>Documentos</legend>
             <label class="casilla"><input type="checkbox" name="dman" [(ngModel)]="f.documentos.manifiesto" />PDF del manifiesto de carga</label>
             <label class="casilla" style="margin-top:8px"><input type="checkbox" name="dsal" [(ngModel)]="f.documentos.salida" />Correo de autorización de salida (carta)</label>
@@ -305,7 +314,7 @@ export class ConfigCorreo {
       const correo = String(c.remitenteCorreo || '').trim().toLowerCase();
       await this.api.put('/correo/config', { activo: activar ?? !!c.activo, host: c.host || '', puerto: Number(c.puerto) || 587, seguridad: c.seguridad,
         usuario: (c.usuario || '').trim() || correo, remitenteNombre: c.remitenteNombre || '', remitenteCorreo: correo, responderA: c.responderA || '',
-        agruparMinutos: Math.max(0, Math.min(240, Number(c.agruparMinutos ?? 15) || 0)),
+        agruparMinutos: Math.max(0, Math.min(240, Number(c.agruparMinutos ?? 15) || 0)), unirPdf: !!c.unirPdf,
         // Las contraseñas de aplicación de Gmail/Microsoft se muestran con espacios: se quitan
         ...(this.clave ? { clave: ['gmail', 'microsoft'].includes(this.proveedor()) ? this.clave.replace(/\s+/g, '') : this.clave } : {}) });
       this.clave = '';
@@ -325,7 +334,8 @@ export class ConfigCorreo {
     this.form.set({ _id: cl._id, nombre: cl.nombre, activo: !!e.activo,
       destinatariosTexto: (e.destinatarios?.length ? e.destinatarios : cl.correos || []).join(', '), ccTexto: (e.cc || []).join(', '),
       documentos: { manifiesto: e.documentos?.manifiesto ?? true, salida: !!e.documentos?.salida },
-      salida: { asunto: e.salida?.asunto || this.salidaBase.asunto, cuerpo: e.salida?.cuerpo || this.salidaBase.cuerpo } });
+      salida: { asunto: e.salida?.asunto || this.salidaBase.asunto, cuerpo: e.salida?.cuerpo || this.salidaBase.cuerpo },
+      relParaTexto: (cl.enviosRelaciones?.destinatarios || []).join(', '), relCcTexto: (cl.enviosRelaciones?.cc || []).join(', ') });
     this.vista.set(null); this.previa();
   }
 
@@ -356,6 +366,7 @@ export class ConfigCorreo {
     try {
       await this.api.put(`/correo/clientes/${f._id}`, { activo: f.activo, destinatarios: listaCorreos(f.destinatariosTexto), cc: listaCorreos(f.ccTexto),
         documentos: f.documentos, salida: f.salida });
+      await this.api.put(`/correo/clientes/${f._id}/relaciones`, { destinatarios: listaCorreos(f.relParaTexto), cc: listaCorreos(f.relCcTexto) });
       this.avisos.ok(`Envío de documentos de ${f.nombre} guardado`);
       this.form.set(null); this.cargar();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }

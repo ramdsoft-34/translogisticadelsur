@@ -9,6 +9,7 @@
 //   {cliente}
 //
 //   {conductor}. {destino}. Flete {flete}. Anticipo {anticipo}
+//   Auxiliar {auxiliar}            (solo si el viaje lleva auxiliar; con «Unificar auxiliar» va sumado al flete)
 //   Placa {placa}
 //   {observaciones}
 //
@@ -64,7 +65,8 @@ export const MARCADORES = {
   },
   viaje: {
     numero: 'N° del viaje', conductor: 'Nombre del conductor', cedula: 'Cédula del conductor', celular: 'Celular del conductor',
-    destino: 'Destino', placa: 'Placa', remolque: 'Remolque', peso: 'Peso (kg)', flete: 'Flete', anticipo: 'Anticipo', saldo: 'Saldo',
+    destino: 'Destino', placa: 'Placa', remolque: 'Remolque', peso: 'Peso (kg)', flete: 'Flete (con el auxiliar si se unifica)', auxiliar: 'Auxiliar (vacío si se unifica)',
+    anticipo: 'Anticipo', saldo: 'Saldo',
     remesa: 'N° de remesa', manifiesto: 'N° de manifiesto', observaciones: 'Observaciones',
   },
 };
@@ -73,7 +75,7 @@ export const MARCADORES = {
 export const PLANTILLA_BASE = Object.freeze({
   nombre: 'Formato de la plantilla de Excel',
   encabezado: '{saludo},\n\nReporte de vehículos - {fecha}\n\n{cliente}',
-  linea: '{conductor}. {destino}. Flete {flete}. Anticipo {anticipo}\nPlaca {placa}\n{observaciones}',
+  linea: '{conductor}. {destino}. Flete {flete}. Anticipo {anticipo}\nAuxiliar {auxiliar}\nPlaca {placa}\n{observaciones}',
   separador: 'blanco',
   pie: '',
 });
@@ -81,9 +83,12 @@ const SEPARADORES = { blanco: '\n\n', linea: '\n', guiones: '\n----------\n' };
 
 const kg = (n) => (Number(n) ? `${Math.round(Number(n)).toLocaleString('es-CO')} kg` : '');
 
-function datosViaje(v) {
-  const flete = Number(v.flete) || 0; const anticipo = Number(v.anticipo) || 0;
+// «Unificar auxiliar»: el auxiliar se suma al flete y no se muestra aparte
+const fleteDe = (v, unificar) => (Number(v.flete) || 0) + (unificar ? Number(v.auxiliar) || 0 : 0);
+function datosViaje(v, { unificarAuxiliar = false } = {}) {
+  const flete = fleteDe(v, unificarAuxiliar); const anticipo = Number(v.anticipo) || 0;
   return {
+    auxiliar: !unificarAuxiliar && Number(v.auxiliar) > 0 ? cop(v.auxiliar) : '',
     numero: txt(v.numero), conductor: nombreCorto(v.conductor, v.conductorNombre), cedula: txt(v.conductor?.numId), celular: txt(v.conductor?.celular),
     destino: destinoRepiteConductor(v.destino, v.conductorNombre) ? '' : txt(v.destino),
     placa: txt(v.placa), remolque: txt(v.remolque), peso: kg(v.pesoKg),
@@ -108,7 +113,7 @@ export function aplicarPlantilla(texto, datos) {
 }
 
 // viajes: con cliente y conductor poblados. Agrupa por cliente en el orden de aparición.
-export function mensajesPorCliente(viajes, fecha, ahora = new Date(), plantilla = PLANTILLA_BASE) {
+export function mensajesPorCliente(viajes, fecha, ahora = new Date(), plantilla = PLANTILLA_BASE, opciones = {}) {
   const p = { ...PLANTILLA_BASE, ...(plantilla || {}) };
   const grupos = new Map();
   for (const v of viajes) {
@@ -117,13 +122,13 @@ export function mensajesPorCliente(viajes, fecha, ahora = new Date(), plantilla 
     grupos.get(id).viajes.push(v);
   }
   return [...grupos.values()].map(g => {
-    const totalFlete = g.viajes.reduce((a, v) => a + (Number(v.flete) || 0), 0);
+    const totalFlete = g.viajes.reduce((a, v) => a + fleteDe(v, opciones.unificarAuxiliar), 0);
     const totalAnticipo = g.viajes.reduce((a, v) => a + (Number(v.anticipo) || 0), 0);
     const general = {
       saludo: saludo(ahora), fecha: fmtFecha(fecha), cliente: g.cliente, cantidad: String(g.viajes.length),
       total_flete: cop(totalFlete), total_anticipo: cop(totalAnticipo), total_saldo: cop(totalFlete - totalAnticipo),
     };
-    const lineas = g.viajes.map(v => aplicarPlantilla(p.linea, { ...general, ...datosViaje(v) })).filter(Boolean);
+    const lineas = g.viajes.map(v => aplicarPlantilla(p.linea, { ...general, ...datosViaje(v, opciones) })).filter(Boolean);
     const partes = [aplicarPlantilla(p.encabezado, general), lineas.join(SEPARADORES[p.separador] || SEPARADORES.blanco), aplicarPlantilla(p.pie, general)];
     const texto = `${partes.filter(x => x.trim()).join('\n\n')}\n`;
     const numero = g.whatsapp ? (g.whatsapp.length === 10 ? `57${g.whatsapp}` : g.whatsapp) : '';

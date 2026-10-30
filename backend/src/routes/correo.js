@@ -7,6 +7,9 @@ import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../midd
 import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
 import { cifrar } from '../utils/cifrado.js';
+import express from 'express';
+import { enviarRelacion, enviarManual } from '../services/correo.js';
+import { parseFecha } from '../utils/texto.js';
 import { enviarPrueba, programarEnvios, procesarEnvio, enviarPendientes, aprobarEnvios, descartarEnvios, enviarGrupoCliente, cartaSalida, datosCorreo, SALIDA_BASE, MARCADORES_SALIDA } from '../services/correo.js';
 
 const r = Router();
@@ -30,7 +33,7 @@ r.put('/config', gestionar, async (req, res) => {
     puerto: z.coerce.number().int().min(1).max(65535), seguridad: z.enum(['starttls', 'tls']),
     usuario: z.string().trim().max(120), clave: z.string().max(200).optional(),
     remitenteNombre: z.string().trim().max(80), remitenteCorreo: correo.or(z.literal('')), responderA: correo.or(z.literal('')).optional().default(''),
-    agruparMinutos: z.coerce.number().int().min(0).max(240).optional(),
+    agruparMinutos: z.coerce.number().int().min(0).max(240).optional(), unirPdf: z.boolean().optional(),
   }).parse(req.body);
   if (d.activo && (!d.host || !d.remitenteCorreo)) throw new ErrorHttp(400, 'Para activar el envío indique el servidor y el correo remitente');
   const set = Object.fromEntries(Object.entries(d).filter(([k, v]) => k !== 'clave' && v !== undefined).map(([k, v]) => [`smtp.${k}`, v]));
@@ -54,7 +57,7 @@ r.post('/config/probar', gestionar, async (req, res) => {
 
 // ── Envío por cliente ───────────────────────────────────────────────────────
 r.get('/clientes', gestionar, async (req, res) => {
-  const lista = await Cliente.find(deEmpresa(req)).select('nombre activo envios correos').sort({ nombre: 1 }).lean();
+  const lista = await Cliente.find(deEmpresa(req)).select('nombre activo envios enviosRelaciones correos').sort({ nombre: 1 }).lean();
   res.json({ clientes: lista, salidaBase: SALIDA_BASE, marcadores: MARCADORES_SALIDA });
 });
 
@@ -74,6 +77,43 @@ r.put('/clientes/:id', gestionar, async (req, res) => {
   await auditar(req, 'editar_envios_cliente', { entidad: 'Cliente', entidadId: c._id,
     detalle: { cliente: c.nombre, activo: d.activo, destinatarios: d.destinatarios, cc: d.cc, documentos: d.documentos } });
   res.json(c);
+});
+
+// Destinatarios de las relaciones de viajes del cliente (aparte de los de manifiestos)
+r.put('/clientes/:id/relaciones', gestionar, async (req, res) => {
+  const d = z.object({ destinatarios: z.array(correo).max(30), cc: z.array(correo).max(30).optional().default([]) }).parse(req.body);
+  const c = await Cliente.findOneAndUpdate(deEmpresa(req, { _id: id(req.params.id) }), { $set: { enviosRelaciones: d } }, { new: true }).lean();
+  if (!c) throw new ErrorHttp(404, 'Cliente no encontrado');
+  await auditar(req, 'editar_envios_relaciones', { entidad: 'Cliente', entidadId: c._id, detalle: { cliente: c.nombre, ...d } });
+  res.json(c);
+});
+
+// Adjuntos escogidos a mano (hasta 5, 8 MB en total)
+const adjuntos = z.array(z.object({ nombre: z.string().trim().min(1).max(120), tipo: z.string().max(100).optional().default(''),
+  base64: z.string().regex(/^[A-Za-z0-9+/=]*$/, 'archivo inválido') })).max(5).optional().default([])
+  .refine(l => l.reduce((a, x) => a + x.base64.length * 0.75, 0) <= 8 * 1024 * 1024, 'Los adjuntos superan 8 MB');
+const conAdjuntos = express.json({ limit: '12mb' });
+
+// Envía la relación de viajes de un cliente en el periodo (PDF y Excel)
+r.post('/relaciones', permitir(P.REPORTES_VER, P.LIQUIDACION_VER), conAdjuntos, async (req, res) => {
+  const d = z.object({ cliente: z.string().refine(v => mongoose.isValidObjectId(v), 'cliente inválido'), desde: z.string(), hasta: z.string(),
+    destinatarios: z.array(correo).max(30).optional(), cc: z.array(correo).max(30).optional(), adjuntos }).parse(req.body);
+  const desde = parseFecha(d.desde); const hasta = parseFecha(d.hasta);
+  if (!desde || !hasta) throw new ErrorHttp(400, 'Fechas inválidas');
+  const x = await enviarRelacion(req.empresaId, { ...d, desde, hasta: new Date(hasta.getTime() + 86399000), usuario: req.usuario._id });
+  await auditar(req, 'enviar_relacion_correo', { entidad: 'Cliente', entidadId: d.cliente, detalle: { desde: d.desde, hasta: d.hasta, estado: x.estado, error: x.error } });
+  res.json(x);
+});
+
+// Correo armado a mano con los manifiestos escogidos (sueltos o en un solo PDF) y archivos adjuntos
+r.post('/manual', operar, conAdjuntos, async (req, res) => {
+  const d = z.object({ para: z.array(correo).min(1).max(30), cc: z.array(correo).max(30).optional().default([]), asunto: z.string().trim().max(200).optional().default(''),
+    texto: z.string().max(5000).optional().default(''), viajes: z.array(z.string().refine(v => mongoose.isValidObjectId(v), 'viaje inválido')).max(100).optional().default([]),
+    unir: z.boolean().optional().default(false), adjuntos }).parse(req.body);
+  if (!d.viajes.length && !d.adjuntos.length) throw new ErrorHttp(400, 'Escoja manifiestos o adjunte al menos un archivo');
+  const x = await enviarManual(req.empresaId, { ...d, usuario: req.usuario._id });
+  await auditar(req, 'enviar_correo_manual', { detalle: { para: d.para, viajes: d.viajes.length, adjuntos: d.adjuntos.map(a => a.nombre), unir: d.unir, estado: x.estado } });
+  res.json(x);
 });
 
 // Vista previa de la carta de salida con el último viaje manifestado del cliente (o datos de ejemplo).

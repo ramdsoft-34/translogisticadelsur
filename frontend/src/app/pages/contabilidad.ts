@@ -13,8 +13,8 @@ import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
 import { Confirmar } from '../shared/confirmar';
 import { filtrar } from '../shared/filtro';
 
-type Pestana = 'diario' | 'facturas' | 'pagos' | 'informes' | 'plan' | 'cierre';
-const INFORMES: [string, string][] = [['balance', 'Balance general'], ['resultados', 'Estado de resultados'], ['cxc', 'Cuentas por cobrar'],
+type Pestana = 'resumen' | 'diario' | 'facturas' | 'pagos' | 'informes' | 'plan' | 'cierre';
+const INFORMES: [string, string][] = [['balance', 'Balance general'], ['resultados', 'Estado de resultados'], ['cxc', 'Cuentas por cobrar'], ['cartera', 'Cartera por edades'],
   ['cxp', 'Cuentas por pagar'], ['retenciones', 'Retenciones'], ['diario', 'Libro diario']];
 
 // Contabilidad simplificada (apoyo administrativo; un contador debe revisarla).
@@ -47,6 +47,21 @@ import { CierreMes } from './gestion-varios';
     </section>
 
     @switch (pestana()) {
+      @case ('resumen') {
+        @if (resumen(); as r) {
+          <div class="panel-resumen">
+            <div><span>Por cobrar</span><strong>{{ r.porCobrar | pesos }}</strong><small>{{ r.facturasPendientes }} factura(s) pendientes</small></div>
+            <div><span>Por pagar a conductores</span><strong>{{ r.porPagar | pesos }}</strong><small>{{ r.liquidacionesPendientes }} liquidación(es)</small></div>
+            <div><span>Facturado en el periodo</span><strong>{{ r.facturado | pesos }}</strong><small>{{ r.facturas }} factura(s)</small></div>
+            <div><span>Cobrado en el periodo</span><strong>{{ r.cobrado | pesos }}</strong></div>
+            <div><span>Pagado a conductores</span><strong>{{ r.pagadoConductores | pesos }}</strong></div>
+            <div><span>Gastos</span><strong>{{ r.gastos | pesos }}</strong><small>Costos {{ r.costos | pesos }}</small></div>
+            <div><span>Excedente del periodo</span><strong [class.negativo]="r.excedente < 0">{{ r.excedente | pesos }}</strong><small>Ingresos {{ r.ingresos | pesos }}</small></div>
+            <div><span>Cartera vencida (+30 días)</span><strong [class.negativo]="r.carteraVencida > 0">{{ r.carteraVencida | pesos }}</strong>
+              <small><button class="texto pequeno" (click)="tipoInforme.set('cartera'); ir('informes')">Ver cartera por edades</button></small></div>
+          </div>
+        }
+      }
       @case ('diario') {
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th>Asiento</th><th>Fecha</th><th>Documento</th><th>Concepto</th><th>Cuenta</th><th class="num">Débito</th><th class="num">Crédito</th><th>Estado</th><th></th></tr></thead>
@@ -119,13 +134,18 @@ import { CierreMes } from './gestion-varios';
         <form id="form-cont" class="formulario" style="grid-template-columns:1fr" (ngSubmit)="guardar()">
           @switch (fm.tipo) {
             @case ('factura') {
-              <div class="campo"><label for="ff-c">Cliente</label><select id="ff-c" name="c" [(ngModel)]="fm.cliente" required><option value="">Seleccione…</option>
+              <div class="campo"><label for="ff-c">Cliente</label><select id="ff-c" name="c" [(ngModel)]="fm.cliente" (change)="revisarCruces()" required><option value="">Seleccione…</option>
                 @for (c of clientes(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }</select></div>
-              <div class="campo"><label for="ff-d">Desde</label><input id="ff-d" type="date" name="d" [(ngModel)]="fm.desde" required /></div>
-              <div class="campo"><label for="ff-h">Hasta</label><input id="ff-h" type="date" name="h" [(ngModel)]="fm.hasta" required /></div>
+              <div class="campo"><label for="ff-d">Desde</label><input id="ff-d" type="date" name="d" [(ngModel)]="fm.desde" (change)="revisarCruces()" required /></div>
+              <div class="campo"><label for="ff-h">Hasta</label><input id="ff-h" type="date" name="h" [(ngModel)]="fm.hasta" (change)="revisarCruces()" required /></div>
+              @if (cruces().length) {
+                <div class="mensaje alerta"><strong>El periodo se cruza con otras facturas de este cliente:</strong>
+                  <ul>@for (x of cruces(); track x.numero) { <li>{{ x.numero }}: {{ x.desde | dia }} a {{ x.hasta | dia }} ({{ x.neto | pesos }})</li> }</ul>
+                  <label class="casilla"><input type="checkbox" name="pc" [(ngModel)]="fm.permitirCruce" />Facturar de todos modos</label></div>
+              }
               <div class="campo"><label for="ff-r">% Retefuente</label><input id="ff-r" type="number" step="0.01" name="r" [(ngModel)]="fm.retefuentePct" /><small>1 = lo normal; aplica a todos los viajes.</small></div>
               <div class="campo"><label for="ff-i">% ReteICA (opcional)</label><input id="ff-i" type="number" step="0.001" name="i" [(ngModel)]="fm.icaPct" /></div>
-              <p class="sutil">Suma la tarifa (y auxiliares) de los viajes del cliente en el rango. Sin IVA.</p>
+              <p class="sutil">Suma la tarifa y el auxiliar de los viajes del cliente en el rango, según su política de auxiliar. Los viajes con «[NO FACTURAR]» en las observaciones no entran. Sin IVA.</p>
             }
             @case ('cobro') {
               <div class="campo"><label for="fc-v">Valor cobrado ({{ fm.factura }})</label><div class="moneda"><input id="fc-v" moneda name="v" [(ngModel)]="fm.valor" required /></div></div>
@@ -168,6 +188,10 @@ import { CierreMes } from './gestion-varios';
   styles: [`
     tr.anulado td { color: var(--gris-5); text-decoration: line-through; }
     tr.total td { font-weight: 700; background: var(--gris-1); }
+    .panel-resumen { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+    .panel-resumen > div { padding: 14px 16px; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-0); display: flex; flex-direction: column; gap: 4px; }
+    .panel-resumen span { font-size: 12.5px; color: var(--gris-5); } .panel-resumen strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+    .panel-resumen small { color: var(--gris-5); } .negativo { color: var(--rojo); }
   `],
 })
 export class Contabilidad {
@@ -175,9 +199,12 @@ export class Contabilidad {
   private auth = inject(Auth);
   private avisos = inject(Avisos);
   readonly puedeGestionar = this.auth.tiene(P.LIQUIDACION_GESTIONAR);
-  readonly pestanas: [Pestana, string][] = [['diario', 'Libro diario'], ['facturas', 'Facturas y cobros'], ['pagos', 'Cuentas por pagar'], ['informes', 'Informes'], ['plan', 'Plan de cuentas'], ['cierre', 'Cierre de mes']];
+  readonly pestanas: [Pestana, string][] = [['resumen', 'Resumen'], ['diario', 'Libro diario'], ['facturas', 'Facturas y cobros'], ['pagos', 'Cuentas por pagar'], ['informes', 'Informes'], ['plan', 'Plan de cuentas'], ['cierre', 'Cierre de mes']];
   readonly informes = INFORMES;
-  readonly pestana = signal<Pestana>('diario');
+  readonly pestana = signal<Pestana>('resumen');
+  readonly resumen = signal<any>(null);
+  readonly cruces = signal<any[]>([]);
+  private retefuenteFactura = 1;
   readonly trabajando = signal(false);
   desde = inicioMesIso(); hasta = hoyIso();
   readonly q = signal('');
@@ -204,11 +231,13 @@ export class Contabilidad {
   constructor() {
     this.api.get<any[]>('/gestion/contabilidad/cuentas').then(c => this.cuentas.set(c)).catch(() => {});
     this.api.get<any[]>('/maestros/clientes').then(c => this.clientes.set(c)).catch(() => {});
+    this.api.get<any>('/gestion/reglas').then(r => { this.retefuenteFactura = r.reglas.retefuenteFacturaPct; }).catch(() => {});
   }
   ir(p: Pestana) { this.pestana.set(p); this.cargar(); }
   async cargar() {
     const per = { desde: this.desde, hasta: this.hasta };
     try {
+      if (this.pestana() === 'resumen') this.resumen.set(await this.api.get('/gestion/contabilidad/resumen', per));
       if (this.pestana() === 'diario') this.asientos.set(await this.api.get('/gestion/contabilidad/asientos', per));
       if (this.pestana() === 'facturas') this.facturas.set(await this.api.get('/gestion/contabilidad/facturas'));
       if (this.pestana() === 'pagos') this.informe.set(await this.api.get('/gestion/contabilidad/informes/cxp'));
@@ -226,13 +255,14 @@ export class Contabilidad {
     return ({ factura: 'Facturar a un cliente', cobro: 'Registrar cobro', pago: 'Registrar pago al conductor', gasto: 'Registrar gasto', manual: 'Asiento manual', cuenta: 'Agregar cuenta' } as Record<string, string>)[this.form()?.tipo] || '';
   }
   abrir(tipo: string, extra: any = {}) {
-    this.form.set({ tipo, fecha: hoyIso(), desde: this.desde, hasta: this.hasta, retefuentePct: 1, icaPct: 0, cuenta: tipo === 'gasto' ? '5195' : '1110',
+    this.cruces.set([]);
+    this.form.set({ tipo, fecha: hoyIso(), desde: this.desde, hasta: this.hasta, retefuentePct: this.retefuenteFactura, icaPct: 0, permitirCruce: false, cuenta: tipo === 'gasto' ? '5195' : '1110',
       formaPago: '1110', debito: '', credito: '', valor: null, concepto: '', tercero: '', centroCosto: '', cliente: '', tipoCuenta: 'GASTO', naturaleza: 'D', ...extra });
   }
   async guardar() {
     const f = this.form();
     const rutas: Record<string, [string, any]> = {
-      factura: ['/gestion/contabilidad/facturas', { cliente: f.cliente, desde: f.desde, hasta: f.hasta, retefuentePct: f.retefuentePct, icaPct: f.icaPct }],
+      factura: ['/gestion/contabilidad/facturas', { cliente: f.cliente, desde: f.desde, hasta: f.hasta, retefuentePct: f.retefuentePct, icaPct: f.icaPct, permitirCruce: !!f.permitirCruce }],
       cobro: ['/gestion/contabilidad/cobros', { factura: f.factura, valor: f.valor, fecha: f.fecha, cuenta: f.cuenta }],
       pago: ['/gestion/contabilidad/pagos', { liquidacion: f.liquidacion, valor: f.valor, fecha: f.fecha, cuenta: f.cuenta }],
       gasto: ['/gestion/contabilidad/gastos', { fecha: f.fecha, cuenta: f.cuenta, concepto: f.concepto, valor: f.valor, tercero: f.tercero, formaPago: f.formaPago }],
@@ -247,6 +277,12 @@ export class Contabilidad {
       if (f.tipo === 'cuenta') this.cuentas.set(await this.api.get('/gestion/contabilidad/cuentas'));
       this.cargar();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+  // Aviso antes de facturar: otras facturas del cliente con fechas que se cruzan
+  async revisarCruces() {
+    const f = this.form();
+    if (!f?.cliente || !f.desde || !f.hasta) { this.cruces.set([]); return; }
+    try { this.cruces.set(await this.api.get('/gestion/contabilidad/facturas/cruces', { cliente: f.cliente, desde: f.desde, hasta: f.hasta })); } catch { this.cruces.set([]); }
   }
   async anularAsiento(a: any) { try { await this.api.post(`/gestion/contabilidad/asientos/${a.numero}/anular`, {}); this.avisos.ok(`Asiento ${a.numero} anulado`); this.cargar(); } catch (e) { this.avisos.error(e); } }
   async anularFactura(f: any) { try { await this.api.post(`/gestion/contabilidad/facturas/${f.numero}/anular`, {}); this.avisos.ok(`Factura ${f.numero} anulada`); this.cargar(); } catch (e) { this.avisos.error(e); } }

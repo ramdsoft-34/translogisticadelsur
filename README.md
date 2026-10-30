@@ -22,11 +22,14 @@ translogisticadelsur/
 | Inicio | Resumen del día y del mes, pendientes por manifestar y documentos por vencer (licencias, SOAT, tecnomecánica) |
 | Viajes | Bitácora con filtros. Al escoger cliente y destino se llenan tarifa, flete, anticipo, peso y municipio. La placa sugiere el conductor habitual. Exporta a Excel y PDF. **Reporte de vehículos por WhatsApp** con la misma estructura de la plantilla (un mensaje por cliente, valores en COP, marca de reportado). |
 | Manifiestos RNDC | **Por enviar**: revisión previa, envío individual o por lote. **Manifestados**: PDF con QR, cumplir y anular. **Cumplidos**. **Historial** de cada envío. |
-| Liquidación de fletes | Relación por cliente y periodo con cobro, flete, auxiliares y utilidad. Un viaje liquidado no se vuelve a cobrar. Exporta a Excel y PDF. |
+| Liquidación de fletes | Relación por cliente y periodo con cobro, flete, auxiliares y utilidad. Un viaje liquidado no se vuelve a cobrar. El auxiliar se cobra según la **política de auxiliar del cliente** (lo registrado, sin auxiliar, incluido en la tarifa o un valor fijo si el viaje no tiene anticipo) y los viajes con «[NO FACTURAR]» no entran. Exporta a Excel y PDF. |
+| Pago a conductores | Liquidación por conductor o por **placa y empresa**, por quincena, **semana (lunes a domingo)** o mes. Neto = flete + auxiliar − anticipo reconocido − retefuente − FOPAT − préstamos. El anticipo es 0 si es igual o mayor al flete en Pasto, Mayorista o Popayán. Numeración con las **siglas del cliente** (COR-0001). Descuento de préstamos escogido (máximo lo pendiente). **Dos liquidaciones por hoja** al imprimir. |
+| Contabilidad | Resumen del periodo (por cobrar, por pagar, facturado, cobrado, gastos y excedente), facturas con aviso de **periodos que se cruzan**, cobros, pagos, gastos, informes y **cartera por edades** (0–30, 31–60, 61–90, más de 90 días). |
+| Cierre de mes | Antes de cerrar guarda en el servidor la **copia completa** de los datos, los **informes de viajes por empresa** y los **PDF de manifiestos** del mes (carpeta `ARCHIVO_DIR`). El administrador descarga el respaldo completo desde la plataforma. |
 | Conductores y terceros, Vehículos | Datos que exige el RNDC, con su estado de sincronización (solo se reenvía lo que cambió). **Importar Excel** (plantilla descargable, revisión previa con errores por fila) y **Traer del RNDC** (consulta oficial del web service). |
 | Clientes y tarifas | Generadores de carga y sus destinos, con tarifa, flete, anticipo, auxiliar, destinatario y número de WhatsApp. Importación desde Excel. |
 | Consultas RNDC | Consultas oficiales de manifiestos, remesas, cumplidos, vehículos y terceros |
-| Configuración | Conexión RNDC y valores por defecto, usuarios, **importación de la plantilla de viajes completa** y auditoría (filtros, verificación de integridad y exportación) |
+| Configuración | Conexión RNDC y valores por defecto, **reglas** (retenciones, PBV del FOPAT, destinos del anticipo reconocido, días de aviso de documentos, siglas y pesos por capacidad), correo (relaciones por cliente, manifiestos en un solo PDF), usuarios, **autorizaciones del administrador**, **importación de la plantilla de viajes completa** y auditoría (filtros, verificación de integridad y exportación) |
 | Empresas / Auditoría | Solo el SuperAdmin |
 
 ## Roles
@@ -56,6 +59,12 @@ translogisticadelsur/
 - Bloqueo de 15 minutos tras 5 intentos fallidos.
 - Límite de peticiones por IP en el login y en la API.
 - Cambio de clave obligatorio en el primer ingreso.
+- **Doble factor** con app autenticadora (TOTP), recomendado para administradores: se activa en «Mi cuenta». Si el administrador pierde el celular, el SuperAdmin se lo quita.
+
+**Documentos vencidos**
+
+- Un viaje con licencia, SOAT o tecnomecánica vencidos solo se guarda si el **Administrador** lo autoriza con su correo, su contraseña (y su código de doble factor) y un motivo.
+- Cada autorización queda en el historial (Configuración → Autorizaciones) y en la auditoría.
 
 **Validación**
 

@@ -1,6 +1,6 @@
 export interface Usuario {
   id: string; nombre: string; email: string; rol: string; rolNombre: string;
-  permisos: string[]; debeCambiarClave: boolean;
+  permisos: string[]; debeCambiarClave: boolean; dobleFactor?: boolean;
   empresa: { id: string; nombre: string; nit: string; dv: string; ambienteRndc: string } | null;
 }
 

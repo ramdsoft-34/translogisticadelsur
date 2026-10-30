@@ -111,6 +111,12 @@ export async function cuotaPendiente(empresaId, cedula, corte) {
   return { total, detalle };
 }
 
+// Todo lo pendiente (vencido o no) de los préstamos vigentes de esa cédula: tope del descuento que se escoja
+export async function pendienteTotal(empresaId, cedula) {
+  const prestamos = await Prestamo.find({ empresa: empresaId, cedula, estado: 'VIGENTE' }).lean();
+  return prestamos.reduce((a, p) => a + resumenPrestamo(p).pendiente, 0);
+}
+
 // Descuenta en una liquidación hasta `valor`, en orden de préstamo. Devuelve { aplicado, interes }.
 export async function descontar(empresaId, cedula, valor, numeroLiq, usuario) {
   let resto = valor; let aplicado = 0; let interes = 0;

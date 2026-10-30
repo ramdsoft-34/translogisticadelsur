@@ -21,6 +21,7 @@ import { ESTADOS_RASTREO, Rastreo } from '../core/rastreo.service';
 import { ActivarRastreo } from '../shared/activar-rastreo';
 import { ChecklistConductor } from '../shared/checklist-conductor';
 import { RouterLink } from '@angular/router';
+import { AutorizacionAdmin } from '../core/autorizacion.service';
 
 interface Formulario {
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
@@ -82,6 +83,9 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       <div><span>Fletes</span><strong>{{ sumas().flete | pesos }}</strong></div>
       <div><span>Anticipos</span><strong>{{ sumas().anticipo | pesos }}</strong></div>
       <div><span>Saldo por pagar</span><strong>{{ sumas().saldo | pesos }}</strong></div>
+      <div><span>Auxiliar</span><strong>{{ sumas().auxiliar | pesos }}</strong></div>
+      <div><span>Retefuente</span><strong>{{ sumas().retefuente | pesos }}</strong></div>
+      <div><span>FOPAT</span><strong>{{ sumas().fopat | pesos }}</strong></div>
     </div>
 
     <div class="tabla-caja">
@@ -182,7 +186,8 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             <div class="campo"><label for="v-cant">Cantidad</label><input id="v-cant" type="number" min="0" name="cantidad" [(ngModel)]="f.cantidad" title="Viajes o unidades (tarifa por unidad)" /></div>
           </div>
           @if (documentos(); as dc) {
-            @if (dc.vencidos.length) { <div class="mensaje error"><strong>No se puede registrar el viaje:</strong><ul>@for (x of dc.vencidos; track x) { <li>{{ x }}</li> }</ul></div> }
+            @if (dc.vencidos.length) { <div class="mensaje error"><strong>Documentos vencidos:</strong><ul>@for (x of dc.vencidos; track x) { <li>{{ x }}</li> }</ul>
+              Al guardar se pedirá la autorización del administrador.</div> }
             @if (dc.avisos.length) { <div class="mensaje alerta"><strong>Por vencer:</strong><ul>@for (x of dc.avisos; track x) { <li>{{ x }}</li> }</ul></div> }
           }
           <p class="nota">Elija primero el conductor: se pone sola la placa de su vehículo habitual o la de su último viaje (si tiene varias, elija una). El titular del manifiesto se toma del vehículo; si no tiene, es el conductor.</p>
@@ -195,7 +200,8 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             <div class="campo"><label for="v-ant">Anticipo</label><div class="moneda"><input id="v-ant" moneda name="anticipo" [(ngModel)]="f.anticipo" [disabled]="bloqueado()" /></div></div>
             <div class="campo"><span class="etiqueta">Saldo al conductor</span><div class="lectura">{{ ((f.flete || 0) - (f.anticipo || 0)) | pesos }} <small>COP</small></div></div>
             <div class="campo"><span class="etiqueta">Auxiliar</span><label class="casilla caja"><input type="checkbox" name="aux" [(ngModel)]="f.conAuxiliar" />El viaje lleva auxiliar</label></div>
-            @if (f.conAuxiliar) { <div class="campo"><label for="v-diasaux">Días / auxiliares</label><input id="v-diasaux" type="number" min="0" name="diasAux" placeholder="Igual a la cantidad" [(ngModel)]="f.diasAuxiliar" /></div> }
+            @if (f.conAuxiliar) { <div class="campo"><label for="v-diasaux">Días de auxiliar</label><input id="v-diasaux" type="number" min="1" max="5" step="1" name="diasAux" placeholder="1 a 5" [(ngModel)]="f.diasAuxiliar" />
+              <small>De 1 a 5. Si el destino no tiene tarifa de auxiliar se usa la primera del cliente.</small></div> }
             <div class="campo"><label for="v-planilla">N° de planilla</label><input id="v-planilla" name="planilla" maxlength="30" placeholder="Opcional" [(ngModel)]="f.planilla" /></div>
           </div>
         </fieldset>
@@ -256,6 +262,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
           <select id="wa-pl" [(ngModel)]="waPlantilla" (change)="cargarWhatsapp()">
             @for (p of waPlantillas(); track p._id) { <option [value]="p._id">{{ p.nombre }}{{ p.predeterminada ? ' (predeterminada)' : '' }}</option> }</select></div>
         <label class="casilla"><input type="checkbox" [(ngModel)]="waIncluir" (change)="cargarWhatsapp(true)" />Incluir los ya reportados</label>
+        <label class="casilla" title="El auxiliar se suma al flete y no se muestra aparte"><input type="checkbox" [(ngModel)]="waUnificar" (change)="cargarWhatsapp()" />Unificar auxiliar</label>
         <button type="button" (click)="plantillasAbierto.set(true)" style="margin-left:auto"><app-icono nombre="editar" [tam]="16" />Plantillas</button>
       </div>
       <p class="sutil">Marque los viajes que va a reportar: se arma un mensaje por cliente solo con esos viajes, con el formato de la plantilla elegida.
@@ -300,7 +307,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     <app-exportar-viajes [clientes]="clientes()" />
     <app-plantillas-whatsapp [abierto]="plantillasAbierto()" [fecha]="waFecha" (cerrar)="plantillasAbierto.set(false)" (cambiadas)="cargarPlantillas()" />`,
   styles: [`
-    .resumen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--gris-2); border: 1px solid var(--gris-2);
+    .resumen { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--gris-2); border: 1px solid var(--gris-2);
       border-radius: var(--radio-l); overflow: hidden; margin-bottom: 14px; }
     .resumen > div { background: var(--gris-0); padding: 12px 16px; display: flex; flex-direction: column; gap: 2px; }
     .resumen span { font-size: 12.5px; color: var(--gris-5); }
@@ -350,6 +357,7 @@ export class Viajes {
   readonly waMensajes = signal<any[]>([]);
   waFecha = hoyIso();
   waIncluir = false;
+  waUnificar = false;
   // Viajes de la fecha para elegir cuáles se reportan (ninguno marcado al abrir)
   readonly waViajes = signal<any[]>([]);
   readonly waSeleccion = signal(new Set<string>());
@@ -365,7 +373,8 @@ export class Viajes {
   readonly estados = Object.entries(ESTADOS_VIAJE);
   readonly viajes = signal<Viaje[]>([]);
   readonly total = signal(0);
-  readonly sumas = signal({ flete: 0, anticipo: 0, saldo: 0 });
+  readonly sumas = signal({ flete: 0, anticipo: 0, saldo: 0, auxiliar: 0, retefuente: 0, fopat: 0 });
+  private autorizacion = inject(AutorizacionAdmin);
   readonly cargando = signal(false);
   readonly cargandoMas = signal(false);
   private pagina = 1;
@@ -494,6 +503,7 @@ export class Viajes {
     const placas: string[] = t?.placas || [];
     this.placasConductor.set(placas);
     if (!placas.length) return;
+    // La primera es la placa principal del conductor (si la tiene)
     this.form.update(f => ({ ...f, placa: placas[0], remolque: f.remolque || t.remolque || '' }));
     setTimeout(() => document.getElementById('v-peso')?.focus(), 30);
     this.revisarDocumentos();
@@ -555,7 +565,17 @@ export class Viajes {
     try {
       if (f._id) await this.api.put(`/viajes/${f._id}`, cuerpo);
       else {
-        const v = await this.api.post<Viaje>('/viajes', cuerpo);
+        let v: Viaje;
+        try { v = await this.api.post<Viaje>('/viajes', cuerpo); }
+        catch (e) {
+          // Documentos vencidos: solo con la autorización del administrador (CA-06)
+          const vencidos = AutorizacionAdmin.vencidosDe(e);
+          if (!vencidos) throw e;
+          const aut = await this.autorizacion.pedir(vencidos);
+          if (!aut) return;
+          v = await this.api.post<Viaje>('/viajes', { ...cuerpo, autorizacion: aut });
+          this.avisos.ok('Viaje autorizado por el administrador');
+        }
         this.avisos.ok(`Viaje N° ${v.numero} registrado${requiere ? '' : ' (sin manifiesto)'}`);
         const avisosDoc: string[] = (v as any).avisosDocumentos || [];
         if (avisosDoc.length) this.avisos.mostrar(`Por vencer: ${avisosDoc.join('; ')}`, 'info');
@@ -605,7 +625,7 @@ export class Viajes {
     if (reiniciar) this.waSeleccion.set(new Set());
     try {
       const r = await this.api.get<{ mensajes: any[]; viajes: any[] }>('/viajes/reporte-whatsapp', { fecha: this.waFecha, incluirReportados: this.waIncluir ? 1 : 0,
-        plantilla: this.waPlantilla, seleccion: 1, viajes: [...this.waSeleccion()].join(',') });
+        plantilla: this.waPlantilla, seleccion: 1, viajes: [...this.waSeleccion()].join(','), unificarAuxiliar: this.waUnificar ? 1 : 0 });
       this.waViajes.set(r.viajes);
       // Lo elegido que ya no está en la lista (p. ej. marcado como reportado) se quita de la selección
       const ids = new Set(r.viajes.map(x => x._id));
