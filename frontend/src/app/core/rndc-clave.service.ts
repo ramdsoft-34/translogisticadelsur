@@ -1,10 +1,11 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { Api } from './api.service';
 import { Auth } from './auth.service';
+import { Avisos } from './avisos.service';
 import { P } from './modelos';
 
-// Marcador que reemplaza a la contraseña cuando la empresa la tiene guardada: el servidor la cambia por la
-// guardada (cifrada) y la contraseña nunca llega al navegador.
+// Marcador que reemplaza a la contraseña: el servidor la cambia por la registrada (cifrada) de la empresa,
+// así que la contraseña nunca llega al navegador.
 export const CLAVE_GUARDADA = '__clave_rndc_guardada__';
 
 export interface EstadoClaveRndc {
@@ -12,20 +13,18 @@ export interface EstadoClaveRndc {
   usuarioRndc: string; guardadaEn: string | null; guardadaPor: string; usos: number; ultimoUso: string | null;
 }
 
-// Contraseña del usuario web service del RNDC.
-// - Si la empresa la tiene guardada (Configuración → Conexión RNDC), se usa sola: no se pregunta.
-// - Si no, se pide cuando se necesita y, si se quiere, se recuerda solo en memoria mientras la pestaña está abierta.
+// Contraseña del usuario web service del RNDC: la registra el administrador de la empresa (Configuración →
+// Conexión RNDC) y queda en el servidor para todos los usuarios y equipos. Nadie la escribe al enviar: si la
+// empresa no la tiene registrada (o el RNDC la rechazó), solo se muestra un aviso.
 @Injectable({ providedIn: 'root' })
 export class RndcClave {
   private api = inject(Api);
   private auth = inject(Auth);
-  readonly visible = signal(false);
+  private avisos = inject(Avisos);
   readonly estado = signal<EstadoClaveRndc | null>(null);
-  private clave = '';
-  private resolver: ((v: string | null) => void) | null = null;
   private consulta: Promise<EstadoClaveRndc | null> | null = null;
 
-  // Estado de la contraseña guardada (se consulta una vez y al cambiar)
+  // Estado de la contraseña registrada (se consulta una vez y al cambiar)
   cargarEstado(forzar = false): Promise<EstadoClaveRndc | null> {
     if (!this.auth.tiene(P.RNDC_OPERAR, P.RNDC_CONSULTAR, P.CONFIG_GESTIONAR)) return Promise.resolve(null);
     if (!this.consulta || forzar) {
@@ -34,23 +33,18 @@ export class RndcClave {
     return this.consulta;
   }
 
+  // Devuelve el marcador de la contraseña registrada, o null (con un aviso) si la empresa no la tiene
   async obtener(): Promise<string | null> {
-    if (this.clave) return this.clave;
-    const e = await this.cargarEstado();
+    const e = await this.cargarEstado(true);
     if (e?.guardada) return CLAVE_GUARDADA;
-    this.visible.set(true);
-    return new Promise(res => { this.resolver = res; });
+    const admin = this.auth.tiene(P.CONFIG_GESTIONAR);
+    const motivo = e?.invalida ? 'El RNDC rechazó la contraseña registrada de la empresa' : 'La empresa no tiene registrada la contraseña del RNDC';
+    this.avisos.mostrar(admin ? `${motivo}. Regístrela en Configuración → Conexión RNDC → «Guardar contraseña».`
+      : `${motivo}. Pídale al administrador de la empresa que la registre.`, 'error', 9000);
+    return null;
   }
 
-  responder(valor: string | null, recordar: boolean) {
-    if (valor && recordar) this.clave = valor;
-    this.visible.set(false);
-    this.resolver?.(valor);
-    this.resolver = null;
-  }
-
-  // Se olvida si el RNDC la rechaza o al cerrar sesión; si era la guardada, el servidor la marcó como inválida
-  // y se vuelve a consultar su estado la próxima vez.
-  olvidar() { this.clave = ''; this.consulta = null; this.estado.set(null); }
-  get recordada() { return !!this.clave || !!this.estado()?.guardada; }
+  // Si el RNDC la rechaza, el servidor la marca como inválida: se vuelve a consultar su estado
+  olvidar() { this.consulta = null; this.estado.set(null); }
+  get recordada() { return !!this.estado()?.guardada; }
 }

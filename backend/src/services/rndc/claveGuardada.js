@@ -106,3 +106,6 @@ export async function usar(empresaId, usuarioRndc) {
 }
 
 export const invalidar = (empresaId) => SecretoRndc.updateOne({ empresa: empresaId, invalida: false }, { $set: { invalida: true, invalidaEn: new Date() } });
+
+// ¿La empresa tiene contraseña registrada (aunque el RNDC la haya rechazado)?
+export const registrada = async (empresaId) => !!(await SecretoRndc.exists({ empresa: empresaId }));

@@ -1292,6 +1292,9 @@ test('RNDC: contraseña guardada cifrada (solo el administrador, comprobada en e
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
   assert.equal(ok.body.guardada, true);
   assert.ok(!JSON.stringify(ok.body).includes(CLAVE_RNDC), 'la contraseña nunca se devuelve');
+  // Con la contraseña registrada, los demás roles no pueden escribir otra a mano (solo el administrador)
+  assert.equal((await s.manif.post('/api/rndc/consultar', { clave: CLAVE_RNDC, que: 'manifiesto', filtros: { NUMMANIFIESTOCARGA: 'M500' } })).status, 403);
+  assert.equal((await s.adminA.post('/api/rndc/consultar', { clave: CLAVE_RNDC, que: 'manifiesto', filtros: { NUMMANIFIESTOCARGA: 'M500' } })).status, 200);
   // En la base solo está cifrada (y ligada a la empresa)
   const sec = await M.SecretoRndc.findOne({ empresa: s.empresaA }).select('+datos +sal +iv +tag +kid').lean();
   assert.ok(sec.datos && !Buffer.from(sec.datos, 'base64').toString('utf8').includes(CLAVE_RNDC));
@@ -1301,6 +1304,14 @@ test('RNDC: contraseña guardada cifrada (solo el administrador, comprobada en e
   assert.equal(q.status, 200, JSON.stringify(q.body));
   assert.equal(q.body.documentos.length, 1);
   assert.equal((await s.manif.get('/api/rndc/clave-guardada')).body.usos, 1);
+  // Un envío normal (su respuesta trae el XML con <password>*****</password>) no la invalida
+  const vg = await s.manif.post('/api/viajes', { fecha: '2026-10-12', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const dg = await s.manif.post(`/api/rndc/viajes/${vg.body._id}/despachar`, { clave: G });
+  assert.ok(vg.body._id, JSON.stringify(vg.body));
+  assert.equal(dg.status, 200, JSON.stringify(dg.body));
+  assert.equal((await s.manif.get(`/api/rndc/transacciones?viaje=${vg.body._id}`)).status, 200);
+  await new Promise(r => setTimeout(r, 100));
+  assert.equal((await s.manif.get('/api/rndc/clave-guardada')).body.guardada, true, 'sigue guardada');
   // Si el RNDC la rechaza (p. ej. la cambiaron en el Ministerio), queda inválida y se deja de usar
   const { guardar } = await import('../src/services/rndc/claveGuardada.js');
   await guardar(s.empresaA, 'USUARIOWS@1', 'clave-incorrecta', { _id: null, nombre: 'prueba' });

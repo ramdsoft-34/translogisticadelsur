@@ -28,16 +28,33 @@ r.use(autenticar, soloEmpresa);
 // ── Contraseña del RNDC guardada ──
 // La interfaz envía el marcador CLAVE_GUARDADA en lugar de la contraseña: aquí se cambia por la guardada
 // (descifrada solo en memoria). Si el RNDC la rechaza, queda marcada como inválida y se deja de usar.
-const RECHAZO_CLAVE = /usuario o (la )?contrase|contrase[ñn]a (no |inv|incorrect)|password|autentic|usuario (no |inv)/i;
+const RECHAZO_CLAVE = /usuario o (la )?contrase|contrase[ñn]a (no |inv|incorrect)|password (no |inv|incorrect)|autentic|usuario (no |inv)/i;
+// Solo los mensajes de error y de respuesta del RNDC (no el resto: p. ej. el XML enviado lleva <password>*****</password>)
+function mensajesDeError(cuerpo, salida = [], hondo = 0) {
+  if (!cuerpo || typeof cuerpo !== 'object' || hondo > 6 || salida.length > 200) return salida;
+  for (const [k, v] of Object.entries(cuerpo)) {
+    if (typeof v === 'string' && /^(error|mensaje|motivo)$/i.test(k)) salida.push(v);
+    else if (v && typeof v === 'object' && !/^(solicitud|respuesta|xml)$/i.test(k)) mensajesDeError(v, salida, hondo + 1);
+  }
+  return salida;
+}
 r.use(async (req, res, next) => {
-  if (req.body?.clave !== claveRndc.CLAVE_GUARDADA || req.path === '/clave-guardada') return next();
+  if (req.path === '/clave-guardada') return next();
+  // Con la contraseña registrada en la empresa, solo el administrador puede escribir otra a mano
+  if (typeof req.body?.clave === 'string' && req.body.clave !== claveRndc.CLAVE_GUARDADA) {
+    if (!tienePermiso(req.usuario.rol, P.CONFIG_GESTIONAR) && await claveRndc.registrada(req.empresaId)) {
+      return next(new ErrorHttp(403, 'Se usa la contraseña del RNDC registrada por la empresa: no se escribe a mano'));
+    }
+    return next();
+  }
+  if (req.body?.clave !== claveRndc.CLAVE_GUARDADA) return next();
   try {
     if (![P.RNDC_OPERAR, P.RNDC_CONSULTAR, P.CONFIG_GESTIONAR].some(p => tienePermiso(req.usuario.rol, p))) throw new ErrorHttp(403, 'Sin permiso');
     const e = await Empresa.findById(req.empresaId).select('rndc.usuario').lean();
     req.body.clave = await claveRndc.usar(req.empresaId, e?.rndc?.usuario);
     const json = res.json.bind(res);
     res.json = (cuerpo) => {
-      if (RECHAZO_CLAVE.test(JSON.stringify(cuerpo ?? '').slice(0, 20000))) {
+      if (mensajesDeError(cuerpo).some(m => RECHAZO_CLAVE.test(m))) {
         claveRndc.invalidar(req.empresaId).then(x => x.modifiedCount && auditar(req, 'clave_rndc_rechazada')).catch(() => {});
       }
       return json(cuerpo);

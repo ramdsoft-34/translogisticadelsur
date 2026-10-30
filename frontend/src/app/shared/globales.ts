@@ -1,11 +1,10 @@
 import { Component, ElementRef, effect, inject, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Avisos } from '../core/avisos.service';
-import { RndcClave } from '../core/rndc-clave.service';
 import { AutorizacionAdmin } from '../core/autorizacion.service';
 import { Modal } from './modal';
 
-// Avisos flotantes y diálogo de la contraseña del RNDC (uno para toda la app).
+// Avisos flotantes y autorización del administrador (uno para toda la app).
 @Component({
   selector: 'app-globales',
   imports: [FormsModule, Modal],
@@ -17,23 +16,6 @@ import { Modal } from './modal';
           <span class="marca-aviso">{{ a.tipo === 'ok' ? '✓' : a.tipo === 'error' ? '!' : 'i' }}</span><span class="texto-aviso">{{ a.texto }}</span></div>
       }
     </div>
-    <app-modal titulo="Contraseña del RNDC" [abierto]="clave.visible()" (cerrar)="cancelar()">
-      <form (ngSubmit)="aceptar()" id="form-clave-rndc">
-        <p class="sutil">Es la contraseña del usuario web service que el Ministerio de Transporte asignó a la empresa.
-          No se guarda en la plataforma.</p>
-        <div class="campo">
-          <label for="clave-rndc">Contraseña</label>
-          <input id="clave-rndc" type="password" name="clave" [(ngModel)]="valor" autocomplete="off" required />
-        </div>
-        <label class="casilla" style="margin-top:10px">
-          <input type="checkbox" name="recordar" [(ngModel)]="recordar" /> Recordarla mientras esta pestaña esté abierta
-        </label>
-      </form>
-      <ng-container pie>
-        <button type="button" (click)="cancelar()">Cancelar</button>
-        <button type="submit" form="form-clave-rndc" class="primario" [disabled]="!valor">Continuar</button>
-      </ng-container>
-    </app-modal>
     <app-modal titulo="Autorización del administrador" [abierto]="aut.visible()" (cerrar)="cancelarAut()">
       <form (ngSubmit)="autorizar()" id="form-aut-admin" class="formulario" style="grid-template-columns:1fr">
         <div class="mensaje error"><strong>Documentos vencidos:</strong><ul>@for (x of aut.vencidos(); track x) { <li>{{ x }}</li> }</ul></div>
@@ -74,7 +56,6 @@ export class Globales {
       try { if (el.matches(':popover-open')) el.hidePopover(); if (hay) el.showPopover(); } catch { /* sin soporte de popover */ }
     });
   }
-  readonly clave = inject(RndcClave);
   readonly aut = inject(AutorizacionAdmin);
   d = { email: '', clave: '', codigo: '', motivo: '' };
   autorizar() {
@@ -86,18 +67,5 @@ export class Globales {
     if (!this.aut.visible()) return;
     this.aut.responder(null);
     this.d = { email: '', clave: '', codigo: '', motivo: '' };
-  }
-  valor = '';
-  recordar = false;
-
-  aceptar() {
-    if (!this.valor) return;
-    this.clave.responder(this.valor, this.recordar);
-    this.valor = '';
-  }
-  cancelar() {
-    if (!this.clave.visible()) return;
-    this.clave.responder(null, false);
-    this.valor = '';
   }
 }
