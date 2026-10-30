@@ -24,7 +24,7 @@ export const MODULOS: Modulo[] = [
   { id: 'finanzas', nombre: 'Finanzas', icono: 'dinero', paginas: [
     { ruta: '/liquidaciones', texto: 'Facturación a clientes', icono: 'dinero', permisos: [P.LIQUIDACION_VER], descripcion: 'Liquidar los viajes de cada cliente para facturar', claves: 'liquidacion fletes cobro' },
     { ruta: '/pago-conductores', texto: 'Pago a conductores', icono: 'personas', permisos: [P.LIQUIDACION_VER], descripcion: 'Liquidaciones, préstamos, descuentos y relación de pago', claves: 'prestamo descuento abono' },
-    { ruta: '/contabilidad', texto: 'Contabilidad', icono: 'lista', permisos: [P.LIQUIDACION_VER], descripcion: 'Libro diario, facturas, cuentas por pagar, informes y cierre de mes', claves: 'factura asiento cierre balance' },
+    { ruta: '/contabilidad', texto: 'Contabilidad', icono: 'lista', permisos: [P.CONTABILIDAD_VER], descripcion: 'Facturas, cobros, pagos, libros, auxiliares, saldos iniciales y cierre de mes', claves: 'factura asiento cierre balance' },
   ] },
   { id: 'datos', nombre: 'Datos', icono: 'edificio', paginas: [
     { ruta: '/clientes', texto: 'Clientes y tarifas', icono: 'edificio', permisos: [P.MAESTROS_VER], descripcion: 'Clientes, destinos, tarifas y sedes de descargue', claves: 'destino tarifa sede' },

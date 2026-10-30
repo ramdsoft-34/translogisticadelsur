@@ -20,6 +20,8 @@ export const P = {
   LIQUIDACION_VER: 'liquidacion.ver',
   LIQUIDACION_GESTIONAR: 'liquidacion.gestionar',
   REPORTES_VER: 'reportes.ver',
+  CONTABILIDAD_VER: 'contabilidad.ver',
+  CONTABILIDAD_GESTIONAR: 'contabilidad.gestionar',
 } as const;
 
 export interface DocRndc { numero: string; radicado: string; qr?: string; fecha: string | null; estado: '' | 'aceptado' | 'rechazado' | 'anulado'; mensaje: string }
