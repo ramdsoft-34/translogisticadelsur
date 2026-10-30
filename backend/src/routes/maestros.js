@@ -9,6 +9,7 @@ import { auditar, cambios } from '../services/auditoria.js';
 import { normalizar, escaparRegex, quitarTildes } from '../utils/texto.js';
 import { clienteSchema, tarifaSchema, terceroSchema, vehiculoSchema } from '../validaciones/maestros.js';
 import { variablesTercero, variablesVehiculo, huella } from '../services/rndc/documentos.js';
+import { reglasDe, pesoPorTamano } from '../services/gestion/reglas.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -87,6 +88,8 @@ r.get('/tarifas', ver, async (req, res) => {
 r.post('/tarifas', editarTarifas, async (req, res) => {
   const d = tarifaSchema.parse(req.body);
   await clienteDeEmpresa(req, d.cliente);
+  // Sin peso: se toma de la capacidad escrita en el destino (1.0 → 800 kg, 3.0 → 1.500 kg…)
+  if (!d.pesoKg) d.pesoKg = pesoPorTamano(d.destino, await reglasDe(req.empresaId));
   const x = await Tarifa.create({ ...d, empresa: req.empresaId });
   await auditar(req, 'crear_tarifa', { entidad: 'Tarifa', entidadId: x._id, detalle: { destino: x.destino } });
   res.status(201).json(x);
@@ -96,6 +99,7 @@ r.put('/tarifas/:id', editarTarifas, async (req, res) => {
   if (d.cliente) await clienteDeEmpresa(req, d.cliente);
   const antes = await Tarifa.findOne(deEmpresa(req, { _id: req.params.id })).lean();
   if (!antes) throw new ErrorHttp(404, 'Tarifa no encontrada');
+  if (d.pesoKg === 0 || (d.destino && d.pesoKg === undefined && !antes.pesoKg)) d.pesoKg = pesoPorTamano(d.destino || antes.destino, await reglasDe(req.empresaId)) || d.pesoKg;
   const x = await Tarifa.findOneAndUpdate(deEmpresa(req, { _id: req.params.id }), { $set: d }, { new: true, runValidators: true });
   await auditar(req, 'editar_tarifa', { entidad: 'Tarifa', entidadId: x._id, detalle: { destino: x.destino, cambios: cambios(antes, x.toObject(), Object.keys(d)) } });
   res.json(x);
@@ -142,7 +146,8 @@ async function conductoresConPlacas(req, filtro, recientes) {
   ]);
   return lista.map(t => {
     const id = String(t._id);
-    const placas = [...new Set([...habituales.filter(v => String(v.conductorHabitual) === id).map(v => v.placa),
+    // La placa principal primero, luego las suyas, la del vehículo habitual y la del último viaje
+    const placas = [...new Set([t.placaPrincipal, ...(t.placas || []), ...habituales.filter(v => String(v.conductorHabitual) === id).map(v => v.placa),
       ...ultimos.filter(u => String(u._id) === id).map(u => u.placa)].filter(Boolean))];
     const ultimo = ultimos.find(u => String(u._id) === id);
     return { ...t.toJSON(), placas, remolque: ultimo?.remolque || '' };
@@ -262,7 +267,7 @@ r.get('/alertas', ver, async (req, res) => {
 // ── Revisión de datos: lo que puede causar rechazos del RNDC o un manifiesto incompleto ──
 const nombreT = (t) => [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ');
 r.get('/revision', ver, async (req, res) => {
-  const dias = 15;
+  const dias = Number((await reglasDe(req.empresaId)).diasAvisoDocumentos) || 10;
   const pronto = new Date(Date.now() + dias * 86400000);
   const hoy = new Date();
   const items = [];

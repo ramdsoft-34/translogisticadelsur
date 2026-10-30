@@ -43,14 +43,21 @@ export async function resumenMes(empresaId, mes) {
   return { mes, viajes, pendientesRndc, sinFacturar, sinLiquidarConductor, liquidaciones, liqConductores, facturas, avisos };
 }
 
+// Antes de cerrar se guarda en el archivo del servidor la copia completa de los datos, los informes
+// por empresa (cliente) y los PDF de manifiestos del mes. Si no se pueden guardar, el mes no se cierra.
 export async function cerrarMes(empresaId, mes, usuario) {
   if (!/^\d{4}-\d{2}$/.test(mes)) throw new ErrorHttp(400, 'Mes inválido (aaaa-mm)');
   if (mes >= mesDe(new Date())) throw new ErrorHttp(409, 'Solo se pueden cerrar meses ya terminados');
   const cerrados = await mesesCerrados(empresaId);
   if (cerrados.has(mes)) throw new ErrorHttp(409, `El mes ${mes} ya está cerrado`);
   const resumen = await resumenMes(empresaId, mes);
-  await Empresa.updateOne({ _id: empresaId }, { $push: { cierres: { mes, fecha: new Date(), usuario, resumen } } });
-  return resumen;
+  const { archivarMes } = await import('./archivo.js');
+  let archivo;
+  try { archivo = await archivarMes(empresaId, mes); }
+  catch (e) { throw new ErrorHttp(500, `No se pudo guardar la copia del mes; el mes no se cerró: ${e.message}`); }
+  if (archivo.errores.length) resumen.avisos.push(`${archivo.errores.length} manifiesto(s) no se pudieron archivar en PDF`);
+  await Empresa.updateOne({ _id: empresaId }, { $push: { cierres: { mes, fecha: new Date(), usuario, resumen, archivos: archivo.archivos } } });
+  return { ...resumen, archivos: archivo.archivos, erroresArchivo: archivo.errores };
 }
 
 export async function reabrirMes(empresaId, mes) {

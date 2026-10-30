@@ -8,7 +8,7 @@ import { Liquidacion, Viaje, Tarifa, Cliente, siguiente, pob } from '../models/i
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
-import { lineaLiquidacion, totalesLiquidacion } from '../services/calculos.js';
+import { lineaLiquidacion, totalesLiquidacion, respaldosAuxiliar, NO_FACTURAR } from '../services/calculos.js';
 import { parseFecha, fmtFecha } from '../utils/texto.js';
 
 const r = Router();
@@ -22,17 +22,20 @@ const periodo = z.object({
 });
 
 // Calcula las líneas de los viajes no liquidados del cliente en el periodo.
+// Los viajes con «[NO FACTURAR]» en las observaciones no se cobran (RF-REG-16).
 async function calcular(req, { cliente, desde, hasta, viajes: ids }) {
   if (desde > hasta) throw new ErrorHttp(400, 'La fecha inicial es posterior a la final');
-  if (!(await Cliente.exists(deEmpresa(req, { _id: cliente })))) throw new ErrorHttp(400, 'Cliente no encontrado');
-  const filtro = deEmpresa(req, { cliente, fecha: { $gte: desde, $lte: hasta }, estado: { $ne: 'anulado' }, liquidacion: null });
+  const cli = await Cliente.findOne(deEmpresa(req, { _id: cliente })).select('nombre politicaAuxiliar valorAuxiliarSinAnticipo').lean();
+  if (!cli) throw new ErrorHttp(400, 'Cliente no encontrado');
+  const filtro = deEmpresa(req, { cliente, fecha: { $gte: desde, $lte: hasta }, estado: { $ne: 'anulado' }, liquidacion: null, observaciones: { $not: NO_FACTURAR } });
   if (ids?.length) filtro._id = { $in: ids };
   const viajes = await Viaje.find(filtro).sort({ fecha: 1, placa: 1 }).populate(pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2')).lean();
   const tarifas = await Tarifa.find(deEmpresa(req, { cliente })).lean();
   const porId = new Map(tarifas.map(t => [String(t._id), t]));
   const porDestino = new Map(tarifas.map(t => [t.destino.toLowerCase(), t]));
+  const respaldo = respaldosAuxiliar(tarifas).get(String(cliente));
   const lineas = viajes.map(v => lineaLiquidacion({ ...v, conductorNombre: nombre(v.conductor) },
-    porId.get(String(v.tarifaRef)) || porDestino.get(String(v.destino).toLowerCase())));
+    porId.get(String(v.tarifaRef)) || porDestino.get(String(v.destino).toLowerCase()), { respaldo, cliente: cli }));
   return { viajes, lineas, totales: totalesLiquidacion(lineas) };
 }
 

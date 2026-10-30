@@ -9,9 +9,15 @@ import { P, tienePermiso } from '../config/permisos.js';
 import { auditar, cambios } from '../services/auditoria.js';
 import { mensajesPorCliente, PLANTILLA_BASE, MARCADORES } from '../services/whatsapp.js';
 import { asegurarMesAbierto } from '../services/gestion/cierre.js';
-import { exigirDocumentosVigentes } from '../services/gestion/documentos.js';
+import { exigirDocumentosVigentes, registrarAutorizacion } from '../services/gestion/documentos.js';
+import { reglasDe, pesoPorTamano } from '../services/gestion/reglas.js';
+import { lineaLiquidacion, respaldosAuxiliar } from '../services/calculos.js';
+import * as liq from '../services/gestion/liquidacionConductor.js';
 import { parseFecha, hoyColombia, escaparRegex } from '../utils/texto.js';
 import { saldoViaje, utilidadViaje, valoresDesdeTarifa } from '../services/calculos.js';
+// Autorización del administrador para registrar con documentos vencidos (CA-06)
+export const autorizacionSchema = z.object({ email: z.string().trim().max(120), clave: z.string().max(100), codigo: z.string().max(10).optional().default(''),
+  motivo: z.string().trim().max(300) }).optional();
 import * as rastreo from '../services/rastreo/surtrack.js';
 import { asegurarSoporte } from '../services/gestion/soporteInterno.js';
 
@@ -34,7 +40,7 @@ const viajeSchema = z.object({
   destinatario: z.object({ tipoId: z.string().trim().max(1).optional().default(''), numId: z.string().trim().max(15).optional().default(''),
     sede: z.string().trim().max(6).optional().default('') }).optional(),
   pesoKg: dinero.optional(), cantidad: dinero.optional(), conAuxiliar: z.boolean().optional(),
-  diasAuxiliar: z.coerce.number().min(0).max(366).optional(), planilla: z.string().trim().max(30).optional(),
+  diasAuxiliar: z.coerce.number().int().min(0).max(5, 'el auxiliar va de 1 a 5 días').optional(), planilla: z.string().trim().max(30).optional(),
   tarifa: dinero.optional(), flete: dinero.optional(), anticipo: dinero.optional(),
   observaciones: z.string().trim().max(500).optional(),
   historico: z.boolean().optional(),
@@ -116,8 +122,26 @@ r.get('/', permitir(P.VIAJES_VER), async (req, res) => {
   // Sin coincidencias la agregación no devuelve grupo: las sumas son cero
   const s = sumas ? (sumas[0] || { flete: 0, anticipo: 0, tarifa: 0 }) : null;
   res.json({ total, pagina, limite, viajes: lista.map(presentar),
-    ...(s ? { sumas: { flete: s.flete, anticipo: s.anticipo, tarifa: s.tarifa, saldo: s.flete - s.anticipo } } : {}) });
+    ...(s ? { sumas: { flete: s.flete, anticipo: s.anticipo, tarifa: s.tarifa, saldo: s.flete - s.anticipo, ...(await sumasConductor(req, filtro)) } } : {}) });
 });
+
+// Auxiliar pagado, retefuente y FOPAT de todos los viajes del filtro (mismas reglas de la liquidación del conductor)
+async function sumasConductor(req, filtro) {
+  const viajes = await Viaje.find(filtro).select('flete anticipo destino placa cliente tarifaRef conAuxiliar diasAuxiliar cantidad').limit(20000).lean();
+  if (!viajes.length) return { auxiliar: 0, retefuente: 0, fopat: 0 };
+  const [reglas, tarifas, vehiculos] = await Promise.all([reglasDe(req.empresaId),
+    Tarifa.find(deEmpresa(req, { cliente: { $in: [...new Set(viajes.map(v => String(v.cliente)))] } })).lean(),
+    Vehiculo.find(deEmpresa(req, { placa: { $in: [...new Set(viajes.map(v => v.placa))] } })).select('placa pbv').lean()]);
+  const porId = new Map(tarifas.map(t => [String(t._id), t])); const respaldo = respaldosAuxiliar(tarifas);
+  const pbv = new Map(vehiculos.map(v => [v.placa, v.pbv]));
+  const t = { auxiliar: 0, retefuente: 0, fopat: 0 };
+  for (const v of viajes) {
+    const flete = Number(v.flete) || 0;
+    t.auxiliar += lineaLiquidacion(v, porId.get(String(v.tarifaRef)), { respaldo: respaldo.get(String(v.cliente)) }).totalAuxiliarPagado;
+    t.retefuente += liq.retefuente(flete, reglas); t.fopat += liq.fopat(flete, pbv.get(v.placa), v.destino, reglas);
+  }
+  return t;
+}
 
 r.get('/resumen', permitir(P.VIAJES_VER), async (req, res) => {
   const hoy = hoyColombia();
@@ -177,8 +201,12 @@ const plantillaSchema = z.object({
 async function viajesDelReporte(req, fecha, incluirReportados) {
   const filtro = deEmpresa(req, { fecha, estado: { $ne: 'anulado' } });
   if (!incluirReportados) filtro['reporteWhatsapp.fecha'] = null;
-  return (await Viaje.find(filtro).sort({ numero: 1 }).populate(POBLAR(req))
+  const viajes = (await Viaje.find(filtro).sort({ numero: 1 }).populate(POBLAR(req))
     .populate(pob(req.empresaId, 'cliente', 'nombre whatsapp')).lean()).map(presentar);
+  // Auxiliar pagado al conductor de cada viaje (para el reporte y la opción «Unificar auxiliar»)
+  const tarifas = viajes.length ? await Tarifa.find(deEmpresa(req, { cliente: { $in: [...new Set(viajes.map(v => String(v.cliente?._id)))] } })).lean() : [];
+  const porId = new Map(tarifas.map(t => [String(t._id), t])); const respaldo = respaldosAuxiliar(tarifas);
+  return viajes.map(v => ({ ...v, auxiliar: lineaLiquidacion(v, porId.get(String(v.tarifaRef)), { respaldo: respaldo.get(String(v.cliente?._id)) }).totalAuxiliarPagado }));
 }
 
 // Plantilla pedida, la predeterminada de la empresa o la de la plataforma.
@@ -195,6 +223,7 @@ r.get('/reporte-whatsapp', permitir(P.VIAJES_VER), async (req, res) => {
   const fecha = parseFecha(req.query.fecha) || hoyColombia();
   const plantilla = await plantillaDe(req, req.query.plantilla);
   const viajes = await viajesDelReporte(req, fecha, req.query.incluirReportados === '1');
+  const opciones = { unificarAuxiliar: req.query.unificarAuxiliar === '1' };
   // Con seleccion=1 el mensaje lleva solo los viajes elegidos (ninguno si no se eligió nada)
   const elegidos = req.query.seleccion === '1'
     ? (() => { const ids = new Set(String(req.query.viajes || '').split(',').filter(Boolean)); return viajes.filter(v => ids.has(String(v._id))); })()
@@ -203,16 +232,16 @@ r.get('/reporte-whatsapp', permitir(P.VIAJES_VER), async (req, res) => {
     fecha, plantilla: plantilla._id,
     viajes: viajes.map(v => ({ _id: v._id, numero: v.numero, placa: v.placa, conductor: v.conductorNombre, destino: v.destino,
       cliente: v.cliente?.nombre || '', reportado: !!v.reporteWhatsapp?.fecha })),
-    mensajes: mensajesPorCliente(elegidos, fecha, new Date(), plantilla),
+    mensajes: mensajesPorCliente(elegidos, fecha, new Date(), plantilla, opciones),
   });
 });
 
 // Vista previa de una plantilla en edición con los viajes de la fecha (no guarda nada).
 r.post('/reporte-whatsapp/vista-previa', permitir(P.VIAJES_VER), async (req, res) => {
-  const d = z.object({ fecha: z.string().optional(), plantilla: plantillaSchema.partial({ nombre: true }) }).parse(req.body);
+  const d = z.object({ fecha: z.string().optional(), plantilla: plantillaSchema.partial({ nombre: true }), unificarAuxiliar: z.boolean().optional().default(false) }).parse(req.body);
   const fecha = parseFecha(d.fecha) || hoyColombia();
   const viajes = await viajesDelReporte(req, fecha, true);
-  res.json({ fecha, mensajes: mensajesPorCliente(viajes, fecha, new Date(), d.plantilla) });
+  res.json({ fecha, mensajes: mensajesPorCliente(viajes, fecha, new Date(), d.plantilla, { unificarAuxiliar: d.unificarAuxiliar }) });
 });
 
 r.get('/plantillas-whatsapp', permitir(P.VIAJES_VER), async (req, res) => {
@@ -259,11 +288,14 @@ r.get('/:id', permitir(P.VIAJES_VER), async (req, res) => {
 
 r.post('/', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const rastrear = req.body?.rastrear === true;
+  const autorizacion = autorizacionSchema.parse(req.body?.autorizacion);
   const d = viajeSchema.parse(req.body);
   await validarReferencias(req, d);
-  // Mes cerrado y documentos del viaje (licencia, SOAT y tecnomecánica vencidos no dejan registrar)
+  // Mes cerrado y documentos del viaje (licencia, SOAT y tecnomecánica vencidos no dejan registrar sin autorización del administrador)
   await asegurarMesAbierto(req.empresaId, d.fecha);
-  const avisosDocumentos = await exigirDocumentosVigentes(req.empresaId, { conductor: d.conductor, placa: d.placa });
+  const { avisos: avisosDocumentos, autorizado } = await exigirDocumentosVigentes(req.empresaId, { conductor: d.conductor, placa: d.placa }, autorizacion);
+  // Con auxiliar: de 1 a 5 días (sin indicar, 1)
+  if (d.conAuxiliar && !d.diasAuxiliar) d.diasAuxiliar = 1;
   // Valores sugeridos por la tarifa del destino cuando no se escriben
   if (d.tarifaRef) {
     const t = await Tarifa.findOne(deEmpresa(req, { _id: d.tarifaRef })).lean();
@@ -281,6 +313,11 @@ r.post('/', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   // Sin manifiesto del RNDC: el soporte interno es obligatorio y se numera al registrar
   await asegurarSoporte(req.empresaId, v._id);
   await auditar(req, 'crear_viaje', { entidad: 'Viaje', entidadId: v._id, detalle: { numero, placa: v.placa, destino: v.destino } });
+  if (autorizado) {
+    await registrarAutorizacion(req.empresaId, autorizado, [v], req.usuario);
+    await auditar(req, 'autorizar_documentos_vencidos', { entidad: 'Viaje', entidadId: v._id,
+      detalle: { numero, administrador: autorizado.admin.email, motivo: autorizado.motivo, vencidos: autorizado.vencidos } });
+  }
   // «Rastrear este viaje con Sur Track»: si falla, el viaje queda registrado igual y se avisa
   let errorRastreo = '';
   if (rastrear) {
@@ -341,6 +378,15 @@ r.delete('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   await Viaje.deleteOne(deEmpresa(req, { _id: v._id }));
   await auditar(req, 'eliminar_viaje', { entidad: 'Viaje', entidadId: v._id, detalle: { numero: v.numero, placa: v.placa, destino: v.destino } });
   res.json({ ok: true });
+});
+
+// Placa principal del conductor (o la de su último viaje) para proponerla al registrar
+r.get('/sugerencias/conductor/:id', permitir(P.VIAJES_VER), async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ErrorHttp(400, 'Identificador inválido');
+  const t = await Tercero.findOne(deEmpresa(req, { _id: req.params.id })).select('placas placaPrincipal').lean();
+  if (!t) throw new ErrorHttp(404, 'Conductor no encontrado');
+  const ultimo = await Viaje.findOne(deEmpresa(req, { conductor: t._id })).sort({ fecha: -1, numero: -1 }).select('placa remolque').lean();
+  res.json({ placa: t.placaPrincipal || t.placas?.[0] || ultimo?.placa || '', placas: t.placas || [], placaPrincipal: t.placaPrincipal || '', remolque: ultimo?.remolque || '' });
 });
 
 // Datos sugeridos para el formulario: tarifa del destino y conductor habitual de la placa.

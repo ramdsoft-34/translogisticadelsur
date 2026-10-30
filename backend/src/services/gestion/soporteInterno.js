@@ -9,6 +9,7 @@ import { fmtFecha, txt, soloDigitos } from '../../utils/texto.js';
 import { lugarRndc } from '../../utils/lugares.js';
 import { idCliente } from '../rndc/documentos.js';
 import { fopat, retefuente } from './liquidacionConductor.js';
+import { reglasDe } from './reglas.js';
 
 const NUMERO_INICIAL = 100000;          // la plantilla empezó en MC100000
 const nombre = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : '');
@@ -41,7 +42,8 @@ export async function soporteInterno(empresa, viajeId, { asignar = true } = {}) 
   const tit = v.titular || (veh?.tenedor?.numId ? await Tercero.findOne({ empresa: empresa._id, numId: veh.tenedor.numId }).lean() : null) || v.conductor;
   const cond = v.conductor;
   const flete = Math.round(v.flete || 0); const anticipo = Math.round(v.anticipo || 0);
-  const rete = retefuente(flete); const fp = fopat(flete, veh?.pbv, v.destino);
+  const reglas = await reglasDe(empresa._id);
+  const rete = retefuente(flete, reglas); const fp = fopat(flete, veh?.pbv, v.destino, reglas);
   const neto = flete - rete - fp;
   const origen = (await lugar(v.codOrigen || empresa.rndc?.codOrigen)) || 'PASTO NARINO';
   const destino = (await lugar(v.codDestino)) || txt(v.destino).replace(/\s+\d+([.,]\d+)?$/, '').toUpperCase();

@@ -21,6 +21,11 @@ export const clienteSchema = z.object({
   dv: t(1), razonSocial: t(150), sedeRemitente: t(6),
   correos: z.array(z.string().trim().toLowerCase().email()).max(20).optional().default([]),
   whatsapp: z.string().trim().optional().default('').transform(soloDigitos).pipe(z.string().max(13, 'número de WhatsApp inválido')),
+  siglas: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{0,6}$/, 'siglas de hasta 6 letras o números').optional().default(''),
+  politicaAuxiliar: z.enum(['registrado', 'sin', 'incluido', 'sin_anticipo']).optional().default('registrado'),
+  valorAuxiliarSinAnticipo: z.coerce.number().min(0).max(10000000).optional().default(30000),
+  enviosRelaciones: z.object({ destinatarios: z.array(z.string().trim().toLowerCase().email()).max(20).optional().default([]),
+    cc: z.array(z.string().trim().toLowerCase().email()).max(20).optional().default([]) }).optional(),
   activo: z.boolean().optional(),
 });
 
@@ -36,6 +41,7 @@ export const tarifaSchema = z.object({
   activo: z.boolean().optional(),
 });
 
+const placaLibre = z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^[A-Z0-9]{5,6}$/, 'placa inválida'));
 export const ROLES_TERCERO = ['conductor', 'propietario', 'tenedor', 'titular', 'remitente', 'destinatario'];
 export const terceroSchema = z.object({
   tipoId,
@@ -48,12 +54,17 @@ export const terceroSchema = z.object({
   correo: z.string().trim().toLowerCase().email().or(z.literal('')).optional().default(''),
   licencia: z.object({ categoria: t(3), numero: t(15), vence: fechaOpc }).optional(),
   fechaNacimiento: fechaOpc,
+  placas: z.array(placaLibre).max(20).optional().default([]),
+  placaPrincipal: z.union([placaLibre, z.literal('')]).optional().default(''),
   banco: z.object({ entidad: t(60), tipoCuenta: t(20), cuenta: t(30) }).optional(),
   roles: z.array(z.enum(ROLES_TERCERO)).optional().default([]),
   activo: z.boolean().optional(),
 }).superRefine((d, ctx) => {
   if (d.tipoId === 'N' && d.numId.length > 10) ctx.addIssue({ path: ['numId'], code: 'custom', message: 'NIT de máximo 10 dígitos (incluye dígito de verificación)' });
   if (d.tipoId !== 'N' && !d.apellido1) ctx.addIssue({ path: ['apellido1'], code: 'custom', message: 'obligatorio para personas naturales' });
+  // La placa principal es una de sus placas (si no está en la lista, se agrega)
+  if (d.placaPrincipal && !d.placas.includes(d.placaPrincipal)) d.placas.unshift(d.placaPrincipal);
+  d.placas = [...new Set(d.placas)];
   if (d.roles.includes('conductor') && !TIPOS_ID_CONDUCTOR.includes(d.tipoId)) {
     ctx.addIssue({ path: ['tipoId'], code: 'custom', message: 'un conductor debe tener cédula de ciudadanía, de extranjería o NUIP' });
   }
