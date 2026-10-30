@@ -232,8 +232,10 @@ r.get('/reporte-whatsapp', permitir(P.VIAJES_VER), async (req, res) => {
     : viajes;
   res.json({
     fecha, plantilla: plantilla._id,
+    // Valores originales del viaje (la unificación del auxiliar solo cambia el texto del mensaje)
     viajes: viajes.map(v => ({ _id: v._id, numero: v.numero, placa: v.placa, conductor: v.conductorNombre, destino: v.destino,
-      cliente: v.cliente?.nombre || '', reportado: !!v.reporteWhatsapp?.fecha })),
+      cliente: v.cliente?.nombre || '', reportado: !!v.reporteWhatsapp?.fecha, reportadoEn: v.reporteWhatsapp?.fecha || null,
+      flete: Number(v.flete) || 0, anticipo: Number(v.anticipo) || 0, auxiliar: Number(v.auxiliar) || 0, diasAuxiliar: v.auxiliar ? (Number(v.diasAuxiliar) || 1) : 0 })),
     mensajes: mensajesPorCliente(elegidos, fecha, new Date(), plantilla, opciones),
   });
 });

@@ -129,14 +129,18 @@ test('RNF-01: TOTP según el vector de prueba del RFC 6238', () => {
   assert.equal(verificarTotp(secreto, '287082', { ahora: 59000, ultimoPaso: 1 }), -1, 'un código no se usa dos veces');
 });
 
-test('RF-WA-03: «Unificar auxiliar» suma el auxiliar al flete del reporte', () => {
-  const v = { _id: 'v1', cliente: { _id: 'c', nombre: 'Corbeta' }, conductorNombre: 'Pedro Perez Gomez', destino: 'Ipiales', placa: 'SLF645', flete: 500000, anticipo: 100000, auxiliar: 30000 };
+test('RF-WA-03: «Unificar auxiliar» suma el auxiliar al flete y al anticipo del reporte (solo en el mensaje)', () => {
+  const v = { _id: 'v1', cliente: { _id: 'c', nombre: 'Corbeta' }, conductorNombre: 'Pedro Perez Gomez', destino: 'Ipiales', placa: 'SLF645', flete: 100000, anticipo: 100000, auxiliar: 50000, diasAuxiliar: 1 };
   const [aparte] = mensajesPorCliente([v], new Date(), new Date());
-  assert.match(aparte.texto, /Flete \$ 500\.000/);
-  assert.match(aparte.texto, /Auxiliar \$ 30\.000/);
+  assert.match(aparte.texto, /Flete \$ 100\.000\. Anticipo \$ 100\.000/);
+  assert.match(aparte.texto, /Auxiliar \$ 50\.000/);
   const [unido] = mensajesPorCliente([v], new Date(), new Date(), undefined, { unificarAuxiliar: true });
-  assert.match(unido.texto, /Flete \$ 530\.000/);
-  assert.doesNotMatch(unido.texto, /Auxiliar/);
+  assert.match(unido.texto, /Flete \$ 150\.000\. Anticipo \$ 150\.000/);
+  assert.match(unido.texto, /Auxiliar de 1 día Unificado/);
+  assert.equal(unido.totalFlete, 150000); assert.equal(unido.totalAnticipo, 150000);
+  assert.equal(v.flete, 100000, 'el viaje no cambia'); assert.equal(v.anticipo, 100000);
+  // Sin anticipo, el anticipo sigue en cero
+  assert.match(mensajesPorCliente([{ ...v, anticipo: 0, diasAuxiliar: 2 }], new Date(), new Date(), undefined, { unificarAuxiliar: true })[0].texto, /Anticipo \$ 0\nAuxiliar de 2 días Unificado/);
   // Sin auxiliar la línea no aparece
   assert.doesNotMatch(mensajesPorCliente([{ ...v, auxiliar: 0 }], new Date(), new Date())[0].texto, /Auxiliar/);
 });

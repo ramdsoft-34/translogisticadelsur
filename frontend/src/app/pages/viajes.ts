@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal, viewChild } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -256,49 +256,65 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     </app-modal>
 
     <app-modal titulo="Reporte de vehículos por WhatsApp" [abierto]="waAbierto()" (cerrar)="waAbierto.set(false)" [ancho]="true">
-      <div class="filtros">
+      <div class="wa-barra">
         <div class="campo"><label for="wa-fecha">Fecha</label><input id="wa-fecha" type="date" [(ngModel)]="waFecha" (change)="cargarWhatsapp(true)" /></div>
+        <button type="button" (click)="waAlternarTodos()" [disabled]="!waViajes().length">{{ waTodos() ? 'Desmarcar todos' : 'Marcar todos' }}</button>
+        <button type="button" [class.activo-filtro]="!waIncluir" (click)="waIncluir = !waIncluir; cargarWhatsapp(true)"
+          [title]="waIncluir ? 'Mostrar solo los que faltan por reportar' : 'Mostrar también los ya reportados'">{{ waIncluir ? 'Solo pendientes' : 'Ver todos' }}</button>
         <div class="campo"><label for="wa-pl">Plantilla</label>
           <select id="wa-pl" [(ngModel)]="waPlantilla" (change)="cargarWhatsapp()">
             @for (p of waPlantillas(); track p._id) { <option [value]="p._id">{{ p.nombre }}{{ p.predeterminada ? ' (predeterminada)' : '' }}</option> }</select></div>
-        <label class="casilla"><input type="checkbox" [(ngModel)]="waIncluir" (change)="cargarWhatsapp(true)" />Incluir los ya reportados</label>
-        <label class="casilla" title="El auxiliar se suma al flete y no se muestra aparte"><input type="checkbox" [(ngModel)]="waUnificar" (change)="cargarWhatsapp()" />Unificar auxiliar</label>
         <button type="button" (click)="plantillasAbierto.set(true)" style="margin-left:auto"><app-icono nombre="editar" [tam]="16" />Plantillas</button>
       </div>
-      <p class="sutil">Marque los viajes que va a reportar: se arma un mensaje por cliente solo con esos viajes, con el formato de la plantilla elegida.
-        «Abrir WhatsApp» abre el chat con el texto escrito: elija el contacto o grupo y presione Enviar. Después marque el mensaje como reportado.</p>
-      <div class="wa-lista">
-        <div class="wa-cab">
-          <label class="casilla"><input type="checkbox" [checked]="waTodos()" [disabled]="!waViajes().length" (change)="waAlternarTodos()" />
-            <strong>{{ waSeleccion().size }} de {{ waViajes().length }} viaje(s) seleccionados</strong></label>
-          @if (waSeleccion().size) { <button type="button" class="pequeno texto" (click)="waLimpiar()">Quitar selección</button> }
-        </div>
-        <div class="tabla-caja" style="box-shadow:none"><table class="tabla-movil">
-          <thead><tr><th></th><th>N°</th><th>Cliente</th><th>Placa</th><th>Conductor</th><th>Destino</th><th></th></tr></thead>
-          <tbody>@for (x of waViajes(); track x._id) {
-            <tr class="seleccionable" (click)="waAlternar(x._id)">
-              <td data-etiqueta="Enviar"><input type="checkbox" [checked]="waSeleccion().has(x._id)" (click)="$event.stopPropagation()" (change)="waAlternar(x._id)"
-                [attr.aria-label]="'Reportar viaje ' + x.numero" /></td>
-              <td data-etiqueta="N°">{{ x.numero }}</td><td data-etiqueta="Cliente">{{ x.cliente }}</td><td data-etiqueta="Placa"><strong>{{ x.placa }}</strong></td>
-              <td data-etiqueta="Conductor">{{ x.conductor }}</td><td data-etiqueta="Destino">{{ x.destino }}</td>
-              <td data-etiqueta="">@if (x.reportado) { <span class="chip ok sin-punto">Ya reportado</span> }</td>
-            </tr>
-          } @empty { <tr><td colspan="7" class="vacio">No hay vehículos por reportar en esa fecha.</td></tr> }</tbody>
-        </table></div>
+      <label class="casilla wa-unificar" title="Solo cambia el mensaje de WhatsApp: los valores guardados del viaje no se modifican">
+        <input type="checkbox" [(ngModel)]="waUnificar" (change)="cargarWhatsapp()" />
+        <span><strong>Unificar auxiliar</strong> <small class="sutil">— en el mensaje, el auxiliar se suma al flete y al anticipo y se escribe «Unificado». Los valores del viaje no cambian.</small></span>
+      </label>
+
+      <div class="wa-columnas">
+        <!-- Izquierda: los viajes de la fecha -->
+        <section class="wa-viajes" aria-label="Viajes de la fecha">
+          <p class="sutil wa-conteo">{{ waViajes().length }} viaje(s) · {{ waPendientes() }} pendiente(s) · {{ waSeleccion().size }} elegido(s)</p>
+          @for (x of waViajes(); track x._id) {
+            <article class="wa-tarjeta" [class.elegida]="waSeleccion().has(x._id)" (click)="waAlternar(x._id)">
+              <input type="checkbox" [checked]="waSeleccion().has(x._id)" (click)="$event.stopPropagation()" (change)="waAlternar(x._id)" [attr.aria-label]="'Reportar viaje ' + x.numero" />
+              <div class="wa-cuerpo">
+                <div class="wa-fila1"><strong>N° {{ x.numero }}</strong> <span class="sutil">{{ x.cliente }}</span>
+                  <span class="chip sin-punto" [class.ok]="x.reportado" [class.alerta]="!x.reportado">{{ x.reportado ? 'Reportado' : 'Pendiente' }}</span></div>
+                <div>{{ x.conductor }} · <strong>{{ x.placa }}</strong></div>
+                <div class="sutil wa-destino">{{ x.destino }}</div>
+                <div class="wa-valores">
+                  <span>Flete <strong>{{ x.flete | pesos }}</strong></span>
+                  <span>Anticipo <strong>{{ x.anticipo | pesos }}</strong></span>
+                  @if (x.auxiliar) { <span>Aux. {{ x.diasAuxiliar }}d <strong>{{ x.auxiliar | pesos }}</strong></span> } @else { <span class="sutil">Sin auxiliar</span> }
+                </div>
+                @if (waUnificar && x.auxiliar && waSeleccion().has(x._id)) {
+                  <div class="wa-unificado">En el mensaje: Flete {{ (x.flete + x.auxiliar) | pesos }} · Anticipo {{ (x.anticipo > 0 ? x.anticipo + x.auxiliar : 0) | pesos }} · Auxiliar unificado</div>
+                }
+              </div>
+              @if (puedeRegistrar) { <button type="button" class="pequeno" (click)="$event.stopPropagation(); editarDesdeWa(x._id)">Editar</button> }
+            </article>
+          } @empty { <p class="vacio">No hay vehículos {{ waIncluir ? '' : 'pendientes ' }}por reportar en esa fecha.</p> }
+        </section>
+
+        <!-- Derecha: un mensaje por cliente -->
+        <section class="wa-mensajes" aria-label="Mensajes">
+          @for (m of waMensajes(); track m.cliente; let k = $index) {
+            <div class="wa-mensaje">
+              <div class="wa-mcab"><strong>{{ k + 1 }}/{{ waMensajes().length }} · {{ m.cliente }}</strong>
+                <span class="sutil">{{ m.cantidad }} vehículo(s) · Flete {{ m.totalFlete | pesos }} · Anticipo {{ m.totalAnticipo | pesos }}</span></div>
+              <pre class="wa-texto">{{ m.texto }}</pre>
+              <div class="acciones">
+                <button class="pequeno" (click)="copiar(m.texto)">Copiar</button>
+                <a class="boton pequeno wa" [href]="m.enlace" target="_blank" rel="noopener noreferrer"><app-icono nombre="enviar" [tam]="15" />Abrir en WhatsApp</a>
+                @if (puedeRegistrar) { <button class="pequeno" (click)="marcarReportado(m)">Marcar como reportado</button> }
+              </div>
+            </div>
+          } @empty {
+            <p class="vacio">{{ waViajes().length ? 'Marque los viajes que va a reportar: aquí se arma un mensaje por cliente.' : 'Sin mensajes.' }}</p>
+          }
+        </section>
       </div>
-      @if (waViajes().length && !waSeleccion().size) { <p class="vacio">Seleccione los viajes que va a reportar para armar el mensaje.</p> }
-      @for (m of waMensajes(); track m.cliente) {
-        <div class="tarjeta" style="margin-top:12px">
-          <div class="pagina-cab" style="margin-bottom:8px"><div><h3 style="margin:0">{{ m.cliente }}</h3>
-            <span class="sutil">{{ m.cantidad }} vehículo(s) · Flete {{ m.totalFlete | pesos }} · Anticipo {{ m.totalAnticipo | pesos }}</span></div>
-            <div class="acciones">
-              <button class="pequeno" (click)="copiar(m.texto)">Copiar</button>
-              <a class="boton pequeno wa" [href]="m.enlace" target="_blank" rel="noopener noreferrer"><app-icono nombre="enviar" [tam]="15" />Abrir WhatsApp</a>
-              @if (puedeRegistrar) { <button class="pequeno primario" (click)="marcarReportado(m)">Marcar reportado</button> }
-            </div></div>
-          <pre class="wa-texto">{{ m.texto }}</pre>
-        </div>
-      }
       <ng-container pie><button type="button" (click)="waAbierto.set(false)">Cerrar</button></ng-container>
     </app-modal>
     <app-visor-pdf />
@@ -317,8 +333,26 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .rastreo-viaje { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-1); }
     a.chip.gps { text-decoration: none; }
     .placas-conductor { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-    .wa-lista { margin: 10px 0 4px; }
-    .wa-cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+    .wa-barra { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+    .wa-barra .activo-filtro { background: var(--gris-8); color: var(--gris-0); border-color: var(--gris-8); }
+    .wa-unificar { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-0); }
+    .wa-columnas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    .wa-conteo { margin: 0 0 8px; }
+    .wa-viajes { display: flex; flex-direction: column; gap: 10px; }
+    .wa-tarjeta { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--gris-2); border-radius: var(--radio-l); background: var(--gris-0); cursor: pointer;
+      transition: border-color var(--transicion), box-shadow var(--transicion); }
+    .wa-tarjeta:hover { border-color: var(--gris-4); }
+    .wa-tarjeta.elegida { border-color: var(--azul, #2f6bff); box-shadow: 0 0 0 3px rgba(47, 107, 255, .12); }
+    .wa-tarjeta > input { margin-top: 3px; }
+    .wa-cuerpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .wa-fila1 { display: flex; align-items: center; gap: 8px; } .wa-fila1 .chip { margin-left: auto; }
+    .wa-destino { font-size: 12.5px; }
+    .wa-valores { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; font-size: 14px; font-variant-numeric: tabular-nums; }
+    .wa-unificado { margin-top: 4px; font-size: 12.5px; color: var(--verde); font-weight: 600; }
+    .wa-mensajes { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 0; }
+    .wa-mensaje { padding: 12px 14px; border: 1px solid var(--gris-2); border-radius: var(--radio-l); background: var(--gris-0); display: flex; flex-direction: column; gap: 8px; }
+    .wa-mcab { display: flex; flex-direction: column; gap: 2px; }
+    @media (max-width: 900px) { .wa-columnas { grid-template-columns: 1fr; } .wa-mensajes { position: static; } }
     /* Formulario del viaje: rejilla fija de 3 columnas, etiquetas en una línea e inputs de igual alto */
     .rejilla { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
     .rejilla .campo > label, .rejilla .campo > .etiqueta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -362,6 +396,15 @@ export class Viajes {
   readonly waViajes = signal<any[]>([]);
   readonly waSeleccion = signal(new Set<string>());
   readonly waTodos = computed(() => this.waViajes().length > 0 && this.waViajes().every(x => this.waSeleccion().has(x._id)));
+  readonly waPendientes = computed(() => this.waViajes().filter(x => !x.reportado).length);
+  // Editar un viaje desde el reporte; al cerrar el formulario, el reporte se actualiza con los valores nuevos
+  async editarDesdeWa(id: string) {
+    try { this.editar(await this.api.get<Viaje>(`/viajes/${id}`)); this.waRefrescarAlCerrar = true; } catch (e) { this.avisos.error(e); }
+  }
+  private waRefrescarAlCerrar = false;
+  private waRefresco = effect(() => {
+    if (!this.abierto() && untracked(() => this.waAbierto()) && this.waRefrescarAlCerrar) { this.waRefrescarAlCerrar = false; untracked(() => this.cargarWhatsapp()); }
+  });
   waAlternar(id: string) {
     const s = new Set(this.waSeleccion());
     if (s.has(id)) s.delete(id); else s.add(id);

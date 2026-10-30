@@ -9,7 +9,7 @@
 //   {cliente}
 //
 //   {conductor}. {destino}. Flete {flete}. Anticipo {anticipo}
-//   Auxiliar {auxiliar}            (solo si el viaje lleva auxiliar; con «Unificar auxiliar» va sumado al flete)
+//   Auxiliar {auxiliar}            (solo si el viaje lleva auxiliar; con «Unificar auxiliar»: «de N día(s) Unificado»)
 //   Placa {placa}
 //   {observaciones}
 //
@@ -65,8 +65,8 @@ export const MARCADORES = {
   },
   viaje: {
     numero: 'N° del viaje', conductor: 'Nombre del conductor', cedula: 'Cédula del conductor', celular: 'Celular del conductor',
-    destino: 'Destino', placa: 'Placa', remolque: 'Remolque', peso: 'Peso (kg)', flete: 'Flete (con el auxiliar si se unifica)', auxiliar: 'Auxiliar (vacío si se unifica)',
-    anticipo: 'Anticipo', saldo: 'Saldo',
+    destino: 'Destino', placa: 'Placa', remolque: 'Remolque', peso: 'Peso (kg)', flete: 'Flete (con el auxiliar si se unifica)', auxiliar: 'Auxiliar («Unificado» si se unifica)',
+    anticipo: 'Anticipo (con el auxiliar si se unifica)', saldo: 'Saldo',
     remesa: 'N° de remesa', manifiesto: 'N° de manifiesto', observaciones: 'Observaciones',
   },
 };
@@ -83,12 +83,18 @@ const SEPARADORES = { blanco: '\n\n', linea: '\n', guiones: '\n----------\n' };
 
 const kg = (n) => (Number(n) ? `${Math.round(Number(n)).toLocaleString('es-CO')} kg` : '');
 
-// «Unificar auxiliar»: el auxiliar se suma al flete y no se muestra aparte
-const fleteDe = (v, unificar) => (Number(v.flete) || 0) + (unificar ? Number(v.auxiliar) || 0 : 0);
+// «Unificar auxiliar» (solo para el mensaje; los valores del viaje no cambian): el auxiliar se suma al flete y
+// al anticipo (si el viaje lleva anticipo) y en su línea se escribe «de N día(s) Unificado».
+// Ej.: flete 100.000, anticipo 100.000 y auxiliar 50.000 → Flete 150.000. Anticipo 150.000. Auxiliar de 1 día Unificado
+const auxDe = (v, unificar) => (unificar ? Number(v.auxiliar) || 0 : 0);
+const fleteDe = (v, unificar) => (Number(v.flete) || 0) + auxDe(v, unificar);
+const anticipoDe = (v, unificar) => (Number(v.anticipo) || 0) + (Number(v.anticipo) > 0 ? auxDe(v, unificar) : 0);
+const dias = (v) => { const n = Number(v.diasAuxiliar) || 1; return `de ${n} día${n === 1 ? '' : 's'}`; };
 function datosViaje(v, { unificarAuxiliar = false } = {}) {
-  const flete = fleteDe(v, unificarAuxiliar); const anticipo = Number(v.anticipo) || 0;
+  const flete = fleteDe(v, unificarAuxiliar); const anticipo = anticipoDe(v, unificarAuxiliar);
+  const conAux = Number(v.auxiliar) > 0;
   return {
-    auxiliar: !unificarAuxiliar && Number(v.auxiliar) > 0 ? cop(v.auxiliar) : '',
+    auxiliar: !conAux ? '' : unificarAuxiliar ? `${dias(v)} Unificado` : cop(v.auxiliar),
     numero: txt(v.numero), conductor: nombreCorto(v.conductor, v.conductorNombre), cedula: txt(v.conductor?.numId), celular: txt(v.conductor?.celular),
     destino: destinoRepiteConductor(v.destino, v.conductorNombre) ? '' : txt(v.destino),
     placa: txt(v.placa), remolque: txt(v.remolque), peso: kg(v.pesoKg),
@@ -123,7 +129,7 @@ export function mensajesPorCliente(viajes, fecha, ahora = new Date(), plantilla 
   }
   return [...grupos.values()].map(g => {
     const totalFlete = g.viajes.reduce((a, v) => a + fleteDe(v, opciones.unificarAuxiliar), 0);
-    const totalAnticipo = g.viajes.reduce((a, v) => a + (Number(v.anticipo) || 0), 0);
+    const totalAnticipo = g.viajes.reduce((a, v) => a + anticipoDe(v, opciones.unificarAuxiliar), 0);
     const general = {
       saludo: saludo(ahora), fecha: fmtFecha(fecha), cliente: g.cliente, cantidad: String(g.viajes.length),
       total_flete: cop(totalFlete), total_anticipo: cop(totalAnticipo), total_saldo: cop(totalFlete - totalAnticipo),
