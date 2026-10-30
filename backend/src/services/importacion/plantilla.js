@@ -19,6 +19,7 @@ import { ErrorHttp } from '../../middleware/auth.js';
 import { normalizar, nombrePropio, soloDigitos } from '../../utils/texto.js';
 import { leerLibro, filas, txt, entero, num, fecha, fechaHoraTexto, partirNombre, buscadorMunicipios, camposFaltantes } from './excel.js';
 import { variablesTercero, variablesVehiculo, huella } from '../rndc/documentos.js';
+import { importarGestion } from './gestion.js';
 
 const NIT_CORBETA = '8909009431';
 const telefonoValido = (t) => { const d = soloDigitos(t); return d && !/^0+$/.test(d) && !/^9+$/.test(d) ? d : ''; };
@@ -388,6 +389,9 @@ export async function importarPlantillaViajes(empresaId, buffer, { usuario = nul
       conAuxiliar: rel ? txt(rel[9]) !== 'No' : (num(f[11]) || 0) > 0, cantidad: rel ? num(rel[7]) || 1 : 1,
       observaciones: txt(f[14]).slice(0, 500), creadoPor: usuario, historico: true, estado: 'registrado',
       reporteWhatsapp: { fecha: fechaHoraTexto(f[12]), usuario: null },
+      // Con soporte interno (MC…) en la columna MANIFIESTO: el viaje no lleva manifiesto del RNDC
+      ...(/^MC\d+$/i.test(txt(f[2])) ? { requiereManifiesto: false } : {}),
+      ...(num(f[19]) >= 1 ? { conAuxiliar: true, diasAuxiliar: Math.min(5, Math.round(num(f[19]))) } : {}),
     };
     if (rv && cedula(rv[16]) && /OK/i.test(txt(rv[15]))) {
       const fAcept = fechaHoraTexto(rv[17]);
@@ -405,5 +409,7 @@ export async function importarPlantillaViajes(empresaId, buffer, { usuario = nul
   await fijarMinimo(E, 'viaje', maxNumero);
   res.viajes = { nuevos: nuevosVi.length, conManifiestoRndc: conRndc, historicos: nuevosVi.length - conRndc, sinConductorEnMaestro: sinConductor };
   if (sinConductor) res.avisos.push(`${sinConductor} viaje(s) sin conductor identificado en los maestros: conservan el nombre escrito en la bitácora.`);
+  // Préstamos, contabilidad, liquidaciones, soportes internos, correos, autorizaciones y registro del RNDC
+  res.gestion = await importarGestion(E, wb);
   return res;
 }
