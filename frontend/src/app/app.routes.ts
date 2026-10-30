@@ -21,7 +21,7 @@ export const routes: Routes = [
       { path: 'rndc/correos', ...pagina([P.RNDC_OPERAR], () => import('./pages/manifiestos').then(m => m.Manifiestos)), data: { permisos: [P.RNDC_OPERAR], vista: 'correos' } },
       { path: 'conductores', ...pagina([P.MAESTROS_VER], () => import('./pages/terceros').then(m => m.Terceros)) },
       { path: 'pago-conductores', ...pagina([P.LIQUIDACION_VER], () => import('./pages/pago-conductores').then(m => m.PagoConductores)) },
-      { path: 'contabilidad', ...pagina([P.LIQUIDACION_VER], () => import('./pages/contabilidad').then(m => m.Contabilidad)) },
+      { path: 'contabilidad', ...pagina([P.CONTABILIDAD_VER], () => import('./pages/contabilidad').then(m => m.Contabilidad)) },
       { path: 'viajes-empresa', redirectTo: 'viajes' },
       { path: 'monitoreo', ...pagina([P.VIAJES_VER], () => import('./pages/monitoreo').then(m => m.Monitoreo)) },
       { path: 'relaciones', ...pagina([P.VIAJES_VER], () => import('./pages/relaciones').then(m => m.Relaciones)) },
