@@ -29,6 +29,10 @@ export const P = {
   REPORTES_VER:       'reportes.ver',
   CONTABILIDAD_VER:   'contabilidad.ver',         // libros, informes y plan de cuentas
   CONTABILIDAD_GESTIONAR: 'contabilidad.gestionar', // facturar, cobrar, pagar, asientos, saldos iniciales y parámetros
+  // Nómina: datos personales y salarios de los empleados (Ley 1581 de 2012). Aparte de la contabilidad para que
+  // el rol de consulta, que ve los libros, no vea salarios, cuentas bancarias ni desprendibles.
+  NOMINA_VER:         'nomina.ver',
+  NOMINA_GESTIONAR:   'nomina.gestionar',
 };
 
 const TODOS_EMPRESA = Object.values(P).filter(p => p !== P.EMPRESAS_GESTIONAR);
@@ -40,7 +44,7 @@ export const PERMISOS_POR_ROL = {
   manifiestos: [P.VIAJES_VER, P.VIAJES_REGISTRAR, P.VIAJES_EDITAR_TODOS, P.MAESTROS_VER, P.MAESTROS_EDITAR,
     P.RNDC_OPERAR, P.RNDC_CONSULTAR, P.REPORTES_VER],
   contabilidad: [P.VIAJES_VER, P.MAESTROS_VER, P.TARIFAS_EDITAR, P.LIQUIDACION_VER, P.LIQUIDACION_GESTIONAR,
-    P.REPORTES_VER, P.RNDC_CONSULTAR, P.CONTABILIDAD_VER, P.CONTABILIDAD_GESTIONAR],
+    P.REPORTES_VER, P.RNDC_CONSULTAR, P.CONTABILIDAD_VER, P.CONTABILIDAD_GESTIONAR, P.NOMINA_VER, P.NOMINA_GESTIONAR],
   consulta: [P.VIAJES_VER, P.MAESTROS_VER, P.LIQUIDACION_VER, P.REPORTES_VER, P.CONTABILIDAD_VER],
 };
 
