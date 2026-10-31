@@ -1,0 +1,19 @@
+# Publica la rama csalcedo17 en https://dev.translogisticadelsur.com en cada push.
+# La llave (secreto DEV_SSH_KEY) solo puede ejecutar el script de publicación de pruebas en el servidor.
+name: Ambiente de pruebas
+on:
+  push:
+    branches: [csalcedo17]
+  workflow_dispatch:
+concurrency: { group: dev, cancel-in-progress: false }
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Publicar en dev.translogisticadelsur.com
+        env:
+          LLAVE: ${{ secrets.DEV_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null ~/llave && printf '%s\n' "$LLAVE" > ~/llave
+          ssh -i ~/llave -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 root@103.199.185.1
