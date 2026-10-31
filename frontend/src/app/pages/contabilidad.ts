@@ -13,22 +13,23 @@ import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
 import { Confirmar } from '../shared/confirmar';
 import { filtrar } from '../shared/filtro';
 
-type Pestana = 'resumen' | 'diario' | 'facturas' | 'pagos' | 'proveedores' | 'compras' | 'egresos' | 'conciliacion' | 'tributario' | 'informes' | 'plan' | 'saldos' | 'parametros' | 'cierre';
+type Pestana = 'resumen' | 'diario' | 'facturas' | 'pagos' | 'proveedores' | 'compras' | 'egresos' | 'conciliacion' | 'tributario' | 'nomina' | 'informes' | 'plan' | 'saldos' | 'parametros' | 'cierre';
 const INFORMES: [string, string][] = [['balance', 'Balance general'], ['resultados', 'Estado de resultados'], ['mayor', 'Libro mayor'], ['auxiliar', 'Auxiliar por cuenta'],
   ['cxc', 'Cuentas por cobrar'], ['cartera', 'Cartera por edades'], ['cxp', 'Por pagar a conductores'], ['cxpProv', 'Por pagar a proveedores'], ['retenciones', 'Retenciones'], ['diario', 'Libro diario']];
 // Orígenes de asiento que se pueden anular desde el libro diario (los de documentos se anulan desde su documento)
-const ANULABLES = ['MAN', 'GAS', 'COB', 'PAG', 'SI', 'IMP'];
+const ANULABLES = ['MAN', 'GAS', 'COB', 'PAG', 'SI', 'IMP', 'NPA'];
 
 // Contabilidad simplificada (apoyo administrativo; un contador debe revisarla).
 // Los asientos de liquidaciones, préstamos y abonos se hacen solos; aquí se facturan, cobran y pagan y se registran gastos.
 import { CierreMes } from './gestion-varios';
 import { ProveedoresCont, ComprasCont, ConciliacionCont, RetencionesCont } from './contabilidad-compras';
 import { TributarioCont } from './contabilidad-tributario';
+import { NominaCont } from './contabilidad-nomina';
 // Valor de una celda pegada de Excel: «1.234.567», «1234567,00» o «$ 1.234.567» → 1234567
 const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/[$\s]/g, '').replace(/,\d{1,2}$/, '').replace(/[.,]/g, ''); return Number(t) || 0; };
 @Component({
   selector: 'app-contabilidad',
-  imports: [FormsModule, Icono, MenuAcciones, Modal, Moneda, Confirmar, CierreMes, ProveedoresCont, ComprasCont, ConciliacionCont, RetencionesCont, TributarioCont, ...FORMATOS],
+  imports: [FormsModule, Icono, MenuAcciones, Modal, Moneda, Confirmar, CierreMes, ProveedoresCont, ComprasCont, ConciliacionCont, RetencionesCont, TributarioCont, NominaCont, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Contabilidad</h1>
       <p class="sutil">Partida doble: facturas a clientes, cobros, pagos a conductores, gastos, libros e informes.
@@ -109,11 +110,14 @@ const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/
               <td data-etiqueta="Periodo">{{ f.desde | dia }} – {{ f.hasta | dia }} ({{ f.viajes }} viajes)</td><td data-etiqueta="Total" class="num">{{ f.total | pesos }}
                 @if (f.modeloIngresos === 'terceros') { <small class="sutil" style="display:block">Terceros {{ f.terceros | pesos }} · propio {{ f.propio | pesos }}</small> }</td>
               <td data-etiqueta="Retenciones" class="num">{{ f.retefuente + f.ica | pesos }}</td><td data-etiqueta="Neto" class="num"><strong>{{ f.neto | pesos }}</strong></td>
-              <td data-etiqueta="Cobrado" class="num">{{ f.cobrado | pesos }}</td>
+              <td data-etiqueta="Cobrado" class="num">{{ f.cobrado | pesos }}
+                @for (n of f.notas || []; track n.numero) { <small class="sutil" style="display:block" [class.anulada]="n.estado === 'ANULADA'">{{ n.numero }} {{ n.neto | pesos }}
+                  @if (puedeGestionar && n.estado !== 'ANULADA') { <button class="texto pequeno" confirmar="Clic otra vez para anular la nota" (confirmado)="anularNota(f, n)">anular</button> }</small> }</td>
               <td data-etiqueta="Estado"><span class="chip" [class.ok]="f.estado === 'COBRADA'" [class.alerta]="f.estado === 'PENDIENTE'" [class.error]="f.estado === 'ANULADA'">{{ f.estado }}</span></td>
               <td class="celda-acciones"><div class="acciones" style="justify-content:flex-end">@if (puedeGestionar && f.estado === 'PENDIENTE') {
-                <button class="pequeno primario" (click)="abrir('cobro', { factura: f.numero, valor: f.neto - f.cobrado })">Registrar cobro</button>
-                @if (!f.cobrado) { <button class="pequeno peligro" confirmar="Clic otra vez para anular" (confirmado)="anularFactura(f)">Anular</button> }
+                <button class="pequeno primario" (click)="abrir('cobro', { factura: f.numero, valor: saldo(f) })">Registrar cobro</button>
+                <button class="pequeno" (click)="abrir('nota', { factura: f.numero, tipoNota: 'CREDITO', motivo: '' })">Nota</button>
+                @if (!f.cobrado && !notasVigentes(f)) { <button class="pequeno peligro" confirmar="Clic otra vez para anular" (confirmado)="anularFactura(f)">Anular</button> }
               }</div></td></tr>
           } @empty { <tr><td colspan="10" class="vacio">Sin facturas</td></tr> }</tbody></table></div>
       }
@@ -194,6 +198,7 @@ const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/
       @case ('egresos') { <app-cont-compras vista="egresos" /> }
       @case ('conciliacion') { <app-cont-conciliacion /> }
       @case ('tributario') { <app-cont-tributario /> }
+      @case ('nomina') { <app-cont-nomina /> }
       @case ('cierre') { <app-cierre-mes [embebido]="true" /> }
     }
 
@@ -227,6 +232,15 @@ const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/
               <div class="campo"><label for="ff-r">% Retefuente</label><input id="ff-r" type="number" step="0.01" name="r" [(ngModel)]="fm.retefuentePct" /><small>1 = lo normal; aplica a todos los viajes.</small></div>
               <div class="campo"><label for="ff-i">% ReteICA (opcional)</label><input id="ff-i" type="number" step="0.001" name="i" [(ngModel)]="fm.icaPct" /></div>
               <p class="sutil">Suma la tarifa y el auxiliar de los viajes del cliente en el rango (o de los escogidos), según su política de auxiliar. No entran los viajes con «[NO FACTURAR]» ni los ya facturados. Sin IVA.</p>
+            }
+            @case ('nota') {
+              <div class="campo"><label for="fn-t">Tipo de nota ({{ fm.factura }})</label><select id="fn-t" name="t" [(ngModel)]="fm.tipoNota">
+                <option value="CREDITO">Nota crédito (descuento, devolución, error en más)</option><option value="DEBITO">Nota débito (cobro adicional, error en menos)</option></select></div>
+              <div class="campo"><label for="fn-v">Valor (antes de retenciones)</label><div class="moneda"><input id="fn-v" moneda name="v" [(ngModel)]="fm.valor" required /></div></div>
+              <div class="campo"><label for="fn-m">Motivo</label><input id="fn-m" name="m" [(ngModel)]="fm.motivo" required /></div>
+              <div class="campo"><label for="fn-f">Fecha</label><input id="fn-f" type="date" name="f" [(ngModel)]="fm.fecha" /></div>
+              <div class="campo"><label for="fn-c">CUDE (cuando la DIAN la valide)</label><input id="fn-c" name="c" [(ngModel)]="fm.cude" /></div>
+              <p class="sutil">La nota toma el asiento de la factura en proporción (ingreso, terceros y retenciones) y ajusta el saldo por cobrar.</p>
             }
             @case ('cobro') {
               <div class="campo"><label for="fc-v">Valor cobrado ({{ fm.factura }})</label><div class="moneda"><input id="fc-v" moneda name="v" [(ngModel)]="fm.valor" required /></div></div>
@@ -267,7 +281,7 @@ const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/
       <ng-container pie><button type="button" (click)="form.set(null)">Cancelar</button><button class="primario" type="submit" form="form-cont" [disabled]="trabajando()">Guardar</button></ng-container>
     </app-modal>`,
   styles: [`
-    tr.anulado td { color: var(--gris-5); text-decoration: line-through; }
+    tr.anulado td { color: var(--gris-5); text-decoration: line-through; } small.anulada { text-decoration: line-through; }
     tr.total td { font-weight: 700; background: var(--gris-1); }
     .panel-resumen { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
     .panel-resumen > div { padding: 14px 16px; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-0); display: flex; flex-direction: column; gap: 4px; }
@@ -281,7 +295,7 @@ export class Contabilidad {
   private avisos = inject(Avisos);
   readonly puedeGestionar = this.auth.tiene(P.CONTABILIDAD_GESTIONAR);
   readonly anulables = ANULABLES;
-  readonly pestanas: [Pestana, string][] = [['resumen', 'Resumen'], ['diario', 'Libro diario'], ['facturas', 'Facturas y cobros'], ['pagos', 'Pagos a conductores'], ['proveedores', 'Proveedores'], ['compras', 'Compras'], ['egresos', 'Egresos'], ['conciliacion', 'Conciliación bancaria'], ['tributario', 'Tributario'], ['informes', 'Informes'], ['plan', 'Plan de cuentas'], ['saldos', 'Saldos iniciales'], ['parametros', 'Parámetros'], ['cierre', 'Cierre de mes']];
+  readonly pestanas: [Pestana, string][] = [['resumen', 'Resumen'], ['diario', 'Libro diario'], ['facturas', 'Facturas y cobros'], ['pagos', 'Pagos a conductores'], ['proveedores', 'Proveedores'], ['compras', 'Compras'], ['egresos', 'Egresos'], ['conciliacion', 'Conciliación bancaria'], ['tributario', 'Tributario'], ['nomina', 'Nómina y activos'], ['informes', 'Informes'], ['plan', 'Plan de cuentas'], ['saldos', 'Saldos iniciales'], ['parametros', 'Parámetros'], ['cierre', 'Cierre de mes']];
   readonly informes = INFORMES;
   readonly pestana = signal<Pestana>('resumen');
   readonly resumen = signal<any>(null);
@@ -333,7 +347,7 @@ export class Contabilidad {
   }
   ir(p: Pestana) { this.pestana.set(p); this.cargar(); }
   // Las pestañas de la fase 2 tienen sus propios filtros
-  conPeriodo() { return !['proveedores', 'compras', 'egresos', 'conciliacion', 'tributario'].includes(this.pestana()); }
+  conPeriodo() { return !['proveedores', 'compras', 'egresos', 'conciliacion', 'tributario', 'nomina'].includes(this.pestana()); }
   async cargar() {
     const per = { desde: this.desde, hasta: this.hasta };
     try {
@@ -358,7 +372,7 @@ export class Contabilidad {
     catch (e) { this.avisos.error(e); }
   }
   tituloForm() {
-    return ({ factura: 'Facturar a un cliente', cobro: 'Registrar cobro', pago: 'Registrar pago al conductor', gasto: 'Registrar gasto', manual: 'Asiento manual', cuenta: 'Agregar cuenta' } as Record<string, string>)[this.form()?.tipo] || '';
+    return ({ factura: 'Facturar a un cliente', cobro: 'Registrar cobro', nota: 'Nota crédito o débito', pago: 'Registrar pago al conductor', gasto: 'Registrar gasto', manual: 'Asiento manual', cuenta: 'Agregar cuenta' } as Record<string, string>)[this.form()?.tipo] || '';
   }
   abrir(tipo: string, extra: any = {}) {
     this.cruces.set([]); this.viajesFactura.set([]); this.marcados.set(new Set());
@@ -371,6 +385,7 @@ export class Contabilidad {
       factura: ['/gestion/contabilidad/facturas', { cliente: f.cliente, desde: f.desde, hasta: f.hasta, retefuentePct: f.retefuentePct, icaPct: f.icaPct, permitirCruce: !!f.permitirCruce,
         ...(this.viajesFactura().length ? { viajes: this.seleccionados().map(v => v._id) } : {}) }],
       cobro: ['/gestion/contabilidad/cobros', { factura: f.factura, valor: f.valor, fecha: f.fecha, cuenta: f.cuenta }],
+      nota: [`/gestion/contabilidad/facturas/${f.factura}/notas`, { tipo: f.tipoNota, valor: f.valor, motivo: f.motivo, fecha: f.fecha, cude: f.cude || '' }],
       pago: ['/gestion/contabilidad/pagos', { liquidacion: f.liquidacion, valor: f.valor, fecha: f.fecha, cuenta: f.cuenta }],
       gasto: ['/gestion/contabilidad/gastos', { fecha: f.fecha, cuenta: f.cuenta, concepto: f.concepto, valor: f.valor, tercero: f.tercero, formaPago: f.formaPago }],
       manual: ['/gestion/contabilidad/asientos', { fecha: f.fecha, debito: f.debito, credito: f.credito, valor: f.valor, concepto: f.concepto, centroCosto: f.centroCosto }],
@@ -417,5 +432,8 @@ export class Contabilidad {
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
   async anularAsiento(a: any) { try { await this.api.post(`/gestion/contabilidad/asientos/${a.numero}/anular`, {}); this.avisos.ok(`Asiento ${a.numero} anulado`); this.cargar(); } catch (e) { this.avisos.error(e); } }
+  saldo(f: any) { return f.neto + (f.ajusteNeto || 0) - f.cobrado; }
+  notasVigentes(f: any) { return (f.notas || []).filter((n: any) => n.estado !== 'ANULADA').length; }
+  async anularNota(f: any, n: any) { try { await this.api.post(`/gestion/contabilidad/facturas/${f.numero}/notas/${n.numero}/anular`, {}); this.avisos.ok(`Nota ${n.numero} anulada`); this.cargar(); } catch (e) { this.avisos.error(e); } }
   async anularFactura(f: any) { try { await this.api.post(`/gestion/contabilidad/facturas/${f.numero}/anular`, {}); this.avisos.ok(`Factura ${f.numero} anulada`); this.cargar(); } catch (e) { this.avisos.error(e); } }
 }
