@@ -20,9 +20,13 @@ import { soporteInterno, asegurarSoporte, soporteDeEjemplo, cumplirSoporte as so
 import { manifiestoPdf, ajusteLogo } from '../services/reportes/manifiesto.js';
 import { liquidacionPdf, liquidacionesMediaHoja } from '../services/reportes/liquidacion.js';
 import * as dulces from '../services/gestion/remesasDulces.js';
+import * as compras from '../services/gestion/compras.js';
+import rutasCompras from './contabilidadCompras.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
+// Contabilidad fase 2: proveedores, compras, egresos y conciliación bancaria
+r.use(rutasCompras);
 
 const id = z.string().refine(v => mongoose.isValidObjectId(v), 'identificador inválido');
 const fechaQ = (v, def) => parseFecha(v) || def;
@@ -258,7 +262,11 @@ r.get('/contabilidad/facturas/viajes', verCont, async (req, res) => {
 // Parámetros contables (modelo de ingresos y tipo de sociedad)
 r.get('/contabilidad/parametros', verCont, async (req, res) => res.json(await cont.parametros(req.empresaId)));
 r.put('/contabilidad/parametros', gestCont, async (req, res) => {
-  const d = z.object({ modeloIngresos: z.enum(['bruto', 'terceros']).optional(), tipoSociedad: z.enum(['SAS', 'LTDA', 'SA', 'COOPERATIVA', 'OTRA']).optional() }).parse(req.body);
+  const d = z.object({ modeloIngresos: z.enum(['bruto', 'terceros']).optional(), tipoSociedad: z.enum(['SAS', 'LTDA', 'SA', 'COOPERATIVA', 'OTRA']).optional(),
+    uvt: z.coerce.number().int().min(10000).max(500000).optional(), ivaDescontable: z.boolean().optional(), agenteReteIva: z.boolean().optional(),
+    reteIvaPct: z.coerce.number().min(0).max(100).optional(), gmf: z.boolean().optional(),
+    retenciones: z.record(z.enum(Object.keys(compras.CONCEPTOS_RETENCION)), z.object({ pct: z.coerce.number().min(0).max(40), baseUvt: z.coerce.number().min(0).max(1000) })).optional(),
+  }).parse(req.body);
   const p = await cont.guardarParametros(req.empresaId, d);
   await auditar(req, 'parametros_contables', { detalle: p });
   res.json(p);
@@ -307,6 +315,10 @@ r.get('/contabilidad/informes/:tipo', verCont, async (req, res) => {
     datos = await cont.cuentasPorPagar(req.empresaId); titulo = 'Cuentas por pagar a conductores';
     columnas = ['Liquidación', 'Fecha', 'Conductor', 'Placa', 'Neto', 'Pagado', 'Saldo'];
     filas = datos.map(l => [l.numero, fmtFecha(l.fecha), l.conductor, l.placa, l.neto, l.pagado, l.saldo]);
+  } else if (t === 'cxpProv') {
+    datos = await compras.cuentasPorPagarProveedores(req.empresaId); titulo = 'Cuentas por pagar a proveedores';
+    columnas = ['Compra', 'Fecha', 'Vence', 'Proveedor', 'NIT', 'Factura', 'Neto', 'Pagado', 'Saldo'];
+    filas = datos.map(c => [c.numero, fmtFecha(c.fecha), c.vence ? fmtFecha(c.vence) : '', c.proveedor, c.nit, c.documento, c.neto, c.pagado, c.saldo]);
   } else if (t === 'cartera') {
     datos = await cont.carteraPorEdades(req.empresaId, hasta); titulo = `Cartera por edades al ${fmtFecha(hasta)}`;
     columnas = ['Cliente', 'Facturas', ...cont.EDADES.map(e => e[1]), 'Total'];
