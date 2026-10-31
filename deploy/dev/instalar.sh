@@ -9,20 +9,14 @@
 set -euo pipefail
 PROD=/var/www/translogisticadelsur
 DEV=/var/www/tls-dev
-REPO=git@github.com:ramdsoft-34/translogisticadelsur.git
+# Repositorio público: clon de solo lectura por HTTPS. Si se vuelve privado, use una llave de despliegue (Deploy key)
+# de solo lectura del usuario tlsdev y la dirección git@github.com:ramdsoft-34/translogisticadelsur.git
+REPO=${REPO:-https://github.com/ramdsoft-34/translogisticadelsur.git}
 DOMINIO=dev.translogisticadelsur.com
 
 id tlsdev >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/tlsdev --shell /bin/bash tlsdev
 chmod 600 "$PROD/backend/.env"                       # los secretos de producción solo los lee root
 
-# Código: clon de solo lectura (llave de despliegue de GitHub del usuario tlsdev)
-sudo -u tlsdev mkdir -p /home/tlsdev/.ssh
-if [ ! -f /home/tlsdev/.ssh/id_ed25519 ]; then
-  sudo -u tlsdev ssh-keygen -q -t ed25519 -N '' -C "tlsdev@$DOMINIO" -f /home/tlsdev/.ssh/id_ed25519
-  sudo -u tlsdev sh -c 'ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null'
-  echo; echo ">> Agregue esta llave en GitHub → Settings → Deploy keys (solo lectura) y vuelva a ejecutar:"
-  cat /home/tlsdev/.ssh/id_ed25519.pub; exit 0
-fi
 mkdir -p "$DEV" && chown tlsdev:tlsdev "$DEV"
 [ -d "$DEV/.git" ] || sudo -u tlsdev git clone -q -b csalcedo17 "$REPO" "$DEV"
 
