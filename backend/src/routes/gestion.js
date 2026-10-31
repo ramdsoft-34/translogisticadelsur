@@ -23,6 +23,7 @@ import * as dulces from '../services/gestion/remesasDulces.js';
 import * as compras from '../services/gestion/compras.js';
 import rutasCompras from './contabilidadCompras.js';
 import rutasTributario from './tributario.js';
+import rutasNomina from './nominaActivos.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -30,6 +31,8 @@ r.use(autenticar, soloEmpresa);
 r.use(rutasCompras);
 // Contabilidad fase 3: tributario y fiscal (350, ICA, pagos, vencimientos, exógena, certificados, relación de remesas)
 r.use(rutasTributario);
+// Contabilidad fase 4: nómina, activos fijos, cierre anual y notas crédito/débito
+r.use(rutasNomina);
 
 const id = z.string().refine(v => mongoose.isValidObjectId(v), 'identificador inválido');
 const fechaQ = (v, def) => parseFecha(v) || def;
