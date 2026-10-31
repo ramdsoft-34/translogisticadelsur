@@ -113,6 +113,8 @@ const empresaSchema = new Schema({
     // Nómina (fase 4): salario mínimo y auxilio de transporte del año, y exoneración de aportes (art. 114-1 E.T.)
     smmlv: { type: Number, default: 1750905 }, auxilioTransporte: { type: Number, default: 249095 }, exoneradaAportes: { type: Boolean, default: true },
     prefijoDocumentoSoporte: str({ default: 'DS' }),
+    // Fase 5: envío automático al RNDC (proceso 86) de las facturas electrónicas validadas por la DIAN. Lo activa el administrador.
+    rndcFeAutomatico: { type: Boolean, default: false },
   },
   smtp: {
     activo: { type: Boolean, default: false },
@@ -569,7 +571,11 @@ const facturaContSchema = new Schema({
   asiento: str(),
   observaciones: str(),   // p. ej. el número que tenía en la plantilla de Excel si se renumeró al importar
   // Factura electrónica de transporte (DIAN): número y CUFE que devuelve el proveedor tecnológico
-  fe: { numero: str({ uppercase: true }), cufe: str({ lowercase: true }), tipoOperacion: str({ default: '12' }) },
+  fe: { numero: str({ uppercase: true }), cufe: str({ lowercase: true }), tipoOperacion: str({ default: '12' }),
+    // Registro en el RNDC (proceso 86) del AttachedDocument validado por la DIAN (fase 5). El XML va en XmlFacturaRndc.
+    // estado: '' sin XML · PENDIENTE · ERROR_CONEXION (se reintenta) · ACEPTADA · RECHAZADA · ERROR (agotó los reintentos)
+    rndc: { estado: str(), radicado: str(), mensaje: str(), intentos: { type: Number, default: 0 }, ultimoIntento: fecha,
+      siguienteIntento: fecha, enviadaEn: fecha, enviando: fecha } },
   // Notas crédito y débito (fase 4): ajustan el saldo por cobrar (ajusteNeto = notas débito − notas crédito, en neto)
   notas: { type: [{ numero: String, tipo: { type: String, enum: ['CREDITO', 'DEBITO'] }, fecha: Date, valor: Number, neto: Number, motivo: String,
     asiento: String, cude: String, estado: { type: String, default: 'VIGENTE' }, _id: false }], default: [] },
@@ -745,6 +751,18 @@ const secretoRndcSchema = new Schema({
 }, { timestamps: true });
 secretoRndcSchema.plugin(tenantPlugin);
 export const SecretoRndc = modelo('SecretoRndc', secretoRndcSchema);
+
+// ── XML de la factura electrónica validada por la DIAN (AttachedDocument) para el RNDC (fase 5) ──
+// Aparte de la factura para no cargarlo en los listados; el contenido solo se lee al enviarlo (select: false).
+const xmlFacturaRndcSchema = new Schema({
+  factura: { type: String, required: true },      // número interno (FV-0001)
+  xml: { type: String, default: '', select: false },
+  sha256: str(), bytes: { type: Number, default: 0 }, numeroFe: str(), cufe: str(),
+  cargadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null }, cargadoPorNombre: str(),
+}, { timestamps: true });
+xmlFacturaRndcSchema.plugin(tenantPlugin);
+xmlFacturaRndcSchema.index({ empresa: 1, factura: 1 }, { unique: true });
+export const XmlFacturaRndc = modelo('XmlFacturaRndc', xmlFacturaRndcSchema);
 
 // Siguiente valor de un contador de la empresa (atómico). `minimo` permite
 // continuar una numeración existente (ej. último manifiesto expedido).
