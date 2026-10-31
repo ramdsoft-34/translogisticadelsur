@@ -126,19 +126,37 @@ const mesAnterior = () => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth
           } @empty { <tr><td colspan="7" class="vacio">No se practicaron retenciones en el año</td></tr> }</tbody></table></div>
       }
       @case ('fe') {
-        <p class="sutil">Factura electrónica de transporte: escriba el número y el CUFE que devuelve el proveedor tecnológico y descargue la relación de remesas
-          (archivo plano del RNDC, Guía V11) o los ítems con radicado, consecutivo y flete de cada remesa.</p>
+        <p class="sutil">Factura electrónica de transporte: descargue la relación de remesas (archivo plano del RNDC, Guía V11) para el proveedor tecnológico.
+          Cuando la DIAN valide la factura, cargue el XML que le entrega el proveedor (AttachedDocument): la plataforma lo revisa contra la factura y sus remesas
+          y lo registra en el RNDC (proceso 86).</p>
+        @if (feRndc(); as e) {
+          <div class="panel-mini">
+            <div><span>RNDC</span><strong>{{ e.ambiente }}</strong></div>
+            <div><span>Contraseña guardada</span><strong>{{ e.claveGuardada ? 'Sí' : e.claveInvalida ? 'Rechazada' : 'No' }}</strong></div>
+            <div><span>Pendientes de enviar</span><strong>{{ e.pendientes }}</strong></div>
+            <div><span>Envío automático</span><strong>{{ e.automatico ? 'Activo' : 'Apagado' }}</strong>
+              @if (esAdmin) { <button class="pequeno" (click)="cambiarAutomatico(!e.automatico)">{{ e.automatico ? 'Apagar' : 'Activar' }}</button> }</div>
+          </div>
+          @if (e.automatico && !e.claveGuardada) { <p class="sutil">El envío automático necesita la contraseña del RNDC guardada (Configuración &gt; RNDC).</p> }
+        }
+        <input #archivoXml type="file" accept=".xml,text/xml,application/xml" hidden (change)="leerXml($event)" />
         <div class="tabla-caja"><table class="tabla-movil">
-          <thead><tr><th>Factura</th><th>Fecha</th><th>Cliente</th><th class="num">Total</th><th>Factura electrónica</th><th></th></tr></thead>
+          <thead><tr><th>Factura</th><th>Fecha</th><th>Cliente</th><th class="num">Total</th><th>Factura electrónica</th><th>RNDC</th><th></th></tr></thead>
           <tbody>@for (f of facturas(); track f._id) {
             <tr><td data-etiqueta="Factura">{{ f.numero }}</td><td data-etiqueta="Fecha">{{ f.fecha | dia }}</td><td data-etiqueta="Cliente">{{ f.cliente?.nombre }}</td>
               <td data-etiqueta="Total" class="num">{{ f.total | pesos }}</td>
               <td data-etiqueta="FE">@if (f.fe?.cufe) { <span class="chip ok">{{ f.fe.numero }}</span> } @else { <span class="chip alerta">Sin CUFE</span> }</td>
+              <td data-etiqueta="RNDC">@if (f.fe?.rndc?.estado) { <span class="chip" [class.ok]="f.fe.rndc.estado === 'ACEPTADA'" [class.error]="f.fe.rndc.estado === 'RECHAZADA' || f.fe.rndc.estado === 'ERROR'"
+                  [class.alerta]="f.fe.rndc.estado === 'PENDIENTE' || f.fe.rndc.estado === 'ERROR_CONEXION'">{{ nombreEstadoRndc(f.fe.rndc.estado) }}</span>
+                @if (f.fe.rndc.radicado) { <small class="sutil" style="display:block">Radicado {{ f.fe.rndc.radicado }}</small> }
+                @if (f.fe.rndc.mensaje) { <small class="sutil" style="display:block" [title]="f.fe.rndc.mensaje">{{ f.fe.rndc.mensaje.slice(0, 90) }}</small> } } @else { <span class="sutil">—</span> }</td>
               <td class="celda-acciones"><div class="acciones" style="justify-content:flex-end">
                 @if (puedeGestionar) { <button class="pequeno" (click)="abrirFe(f)">Datos DIAN</button> }
+                @if (puedeGestionar && f.fe?.rndc?.estado !== 'ACEPTADA') { <button class="pequeno" (click)="escogerXml(f, archivoXml)" [disabled]="trabajando()">Cargar XML DIAN</button> }
+                @if (puedeGestionar && enviable(f)) { <button class="pequeno primario" (click)="enviarRndc(f)" [disabled]="trabajando()">Enviar al RNDC</button> }
                 <button class="pequeno primario" (click)="relacion(f, 'txt')">Relación .txt</button>
                 <button class="pequeno" (click)="relacion(f, 'xlsx')">Excel</button></div></td></tr>
-          } @empty { <tr><td colspan="6" class="vacio">Sin facturas</td></tr> }</tbody></table></div>
+          } @empty { <tr><td colspan="7" class="vacio">Sin facturas</td></tr> }</tbody></table></div>
       }
     }
 
@@ -158,6 +176,16 @@ const mesAnterior = () => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth
         <p class="sutil">Asiento: débito a la cuenta por pagar de cada impuesto, intereses a 530520, sanción a 5315 y crédito a bancos o caja.</p>
       }
       <ng-container pie><button type="button" (click)="pago.set(null)">Cancelar</button><button class="primario" type="submit" form="form-pago-imp" [disabled]="trabajando()">Registrar pago</button></ng-container>
+    </app-modal>
+
+    <app-modal titulo="Enviar la factura al RNDC" [abierto]="!!envio()" (cerrar)="envio.set(null)">
+      @if (envio(); as e) {
+        <form id="form-env-rndc" class="formulario" style="grid-template-columns:1fr" (ngSubmit)="confirmarEnvio()">
+          <p class="sutil">La empresa no tiene guardada la contraseña del RNDC. Escriba la del usuario {{ feRndc()?.usuarioRndc }}: se usa solo para este envío y no se guarda.</p>
+          <div class="campo"><label for="er-c">Contraseña del RNDC</label><input id="er-c" type="password" name="c" autocomplete="off" [(ngModel)]="e.clave" required /></div>
+        </form>
+      }
+      <ng-container pie><button type="button" (click)="envio.set(null)">Cancelar</button><button class="primario" type="submit" form="form-env-rndc" [disabled]="trabajando()">Enviar</button></ng-container>
     </app-modal>
 
     <app-modal titulo="Datos de la factura electrónica" [abierto]="!!fe()" (cerrar)="fe.set(null)">
@@ -182,7 +210,9 @@ const mesAnterior = () => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth
 })
 export class TributarioCont {
   private api = inject(Api); private avisos = inject(Avisos);
-  readonly puedeGestionar = inject(Auth).tiene(P.CONTABILIDAD_GESTIONAR);
+  private auth = inject(Auth);
+  readonly puedeGestionar = this.auth.tiene(P.CONTABILIDAD_GESTIONAR);
+  readonly esAdmin = this.auth.tiene(P.CONFIG_GESTIONAR);
   readonly secciones: [Seccion, string][] = [['350', 'Retención (350)'], ['ica', 'ICA y ReteICA'], ['vencimientos', 'Vencimientos'], ['exogena', 'Exógena'],
     ['certificados', 'Certificados'], ['fe', 'Factura electrónica · RNDC']];
   readonly formatos: [string, string][] = [['1001', '1001 Pagos'], ['1007', '1007 Ingresos'], ['1008', '1008 Por cobrar'], ['1009', '1009 Por pagar']];
@@ -193,6 +223,8 @@ export class TributarioCont {
   readonly d350 = signal<any>(null); readonly ica = signal<any>(null); readonly reteica = signal<any>(null);
   readonly venc = signal<any[]>([]); readonly exo = signal<any>(null); readonly certs = signal<any[]>([]); readonly facturas = signal<any[]>([]);
   readonly pago = signal<any>(null); readonly fe = signal<any>(null);
+  readonly feRndc = signal<any>(null); readonly envio = signal<any>(null);
+  private xmlPara: any = null;
   readonly proximos = computed(() => this.venc().filter(v => v.estado === 'VENCIDO' || v.estado === 'PRÓXIMO'));
   mes = mesAnterior(); anio = new Date().getFullYear() - 1;
   desde = `${new Date().getFullYear()}-01-01`; hasta = hoyIso();
@@ -216,7 +248,10 @@ export class TributarioCont {
       }
       if (s === 'exogena') this.exo.set(await this.api.get(`/gestion/tributario/exogena/${this.formato()}`, { anio: this.anio }));
       if (s === 'certificados') this.certs.set(await this.api.get('/gestion/tributario/certificados', { anio: this.anio }));
-      if (s === 'fe') this.facturas.set((await this.api.get<any[]>('/gestion/contabilidad/facturas')).filter(f => f.estado !== 'ANULADA'));
+      if (s === 'fe') {
+        const [fs, e] = await Promise.all([this.api.get<any[]>('/gestion/contabilidad/facturas'), this.api.get<any>('/gestion/tributario/fe/rndc')]);
+        this.facturas.set(fs.filter(f => f.estado !== 'ANULADA')); this.feRndc.set(e);
+      }
     } catch (e) { this.avisos.error(e); }
   }
   private conIso(l: any[]) { return l.map(v => ({ ...v, fechaIso: String(v.fecha || '').slice(0, 10) })); }
@@ -254,6 +289,42 @@ export class TributarioCont {
     const f = this.fe(); this.trabajando.set(true);
     try { await this.api.put(`/gestion/tributario/facturas/${f.factura}/fe`, { numero: f.numero, cufe: f.cufe, tipoOperacion: f.tipoOperacion }); this.avisos.ok('Datos de la factura electrónica guardados'); this.fe.set(null); this.cargar(); }
     catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+  // ── Registro en el RNDC (proceso 86) ──
+  nombreEstadoRndc(e: string) {
+    return ({ PENDIENTE: 'Por enviar', ERROR_CONEXION: 'Sin conexión, se reintenta', ACEPTADA: 'Registrada', RECHAZADA: 'Rechazada', ERROR: 'No se pudo enviar' } as Record<string, string>)[e] || e;
+  }
+  enviable(f: any) { return ['PENDIENTE', 'ERROR_CONEXION', 'RECHAZADA', 'ERROR'].includes(f.fe?.rndc?.estado); }
+  escogerXml(f: any, input: HTMLInputElement) { this.xmlPara = f; input.value = ''; input.click(); }
+  async leerXml(ev: Event) {
+    const archivo = (ev.target as HTMLInputElement).files?.[0]; const f = this.xmlPara;
+    if (!archivo || !f) return;
+    if (archivo.size > 800 * 1024) { this.avisos.error('El XML pesa más de 800 KB: no parece el AttachedDocument de una factura'); return; }
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.post<any>(`/gestion/tributario/facturas/${f.numero}/fe/xml`, { xml: await archivo.text() });
+      this.avisos.ok(`XML de la factura ${r.numeroFe} revisado (${r.remesas} remesas): listo para el RNDC`);
+      for (const a of r.avisos || []) this.avisos.error(a);
+      this.cargar();
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+  enviarRndc(f: any) {
+    if (this.feRndc()?.claveGuardada) this.mandar(f.numero, {});
+    else this.envio.set({ numero: f.numero, clave: '' });
+  }
+  confirmarEnvio() { const e = this.envio(); this.envio.set(null); this.mandar(e.numero, { clave: e.clave }); }
+  private async mandar(numero: string, cuerpo: any) {
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.post<any>(`/gestion/tributario/facturas/${numero}/fe/rndc`, cuerpo);
+      if (r.estado === 'ACEPTADA') this.avisos.ok(`Factura ${r.numeroFe || numero} registrada en el RNDC (radicado ${r.radicado})`);
+      else this.avisos.error(`${this.nombreEstadoRndc(r.estado)}: ${r.mensaje}`);
+      this.cargar();
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+  async cambiarAutomatico(automatico: boolean) {
+    try { this.feRndc.set(await this.api.put<any>('/gestion/tributario/fe/rndc', { automatico })); this.avisos.ok(automatico ? 'Envío automático activado' : 'Envío automático apagado'); }
+    catch (e) { this.avisos.error(e); }
   }
   async relacion(f: any, formato: 'txt' | 'xlsx') {
     try {
