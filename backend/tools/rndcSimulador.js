@@ -17,7 +17,7 @@ const entre = (t, tag) => { const m = String(t).match(new RegExp(`<${tag}>([\\s\
 
 export function crearSimulador() {
   let radicado = 1000;
-  const estado = { remesas: new Map(), manifiestos: new Map(), maestros: new Map(), cumplidos: new Set(), anulados: new Set(), log: [] };
+  const estado = { remesas: new Map(), manifiestos: new Map(), maestros: new Map(), cumplidos: new Set(), anulados: new Set(), facturas: new Set(), log: [] };
   const ok = (extra = '') => `<?xml version="1.0" encoding="ISO-8859-1" ?><root><ingresoid>${++radicado}</ingresoid>${extra}</root>`;
   const error = (m) => `<?xml version="1.0" encoding="ISO-8859-1" ?><root><ErrorMSG>SIMULADOR: ${esc(m)}</ErrorMSG></root>`;
 
@@ -86,6 +86,17 @@ export function crearSimulador() {
         if (!estado.manifiestos.has(k)) return error('El manifiesto no existe');
         if (estado.cumplidos.has(`CM|${k}`)) return error('El manifiesto está cumplido');
         estado.manifiestos.delete(k); estado.anulados.add(`M|${k}`);
+        return ok();
+      }
+      case 86: {
+        // Factura electrónica de transporte: el AttachedDocument validado por la DIAN en base64, una factura por mensaje
+        if (!nit || !v.ARCHIVOBASE64) return error('Faltan variables obligatorias: NUMNITEMPRESATRANSPORTE, ARCHIVOBASE64');
+        const xml = desescapar(Buffer.from(v.ARCHIVOBASE64, 'base64').toString('utf8'));
+        if (!/<(?:\w+:)?AttachedDocument[\s>]/.test(xml)) return error('El archivo no es un AttachedDocument');
+        const cufe = (xml.match(/<(?:\w+:)?UUID[^>]*>([0-9a-f]{96})</i) || [])[1];
+        if (!cufe) return error('No se encontró el CUFE de la factura');
+        if (estado.facturas.has(`${nit}|${cufe}`)) return error('La factura electrónica ya fue registrada');
+        estado.facturas.add(`${nit}|${cufe}`);
         return ok();
       }
       case 28: estado.cumplidos.delete(`CR|${nit}|${v.CONSECUTIVOREMESA}`); return ok();
