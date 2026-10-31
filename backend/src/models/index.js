@@ -110,6 +110,9 @@ const empresaSchema = new Schema({
     // Tributario (fase 3): ICA del municipio y calendario de vencimientos que lleva la contadora
     icaTarifaPorMil: { type: Number, default: 0 }, avisosTablerosPct: { type: Number, default: 15 }, sobretasaBomberilPct: { type: Number, default: 0 },
     vencimientos: { type: [{ obligacion: String, periodo: String, fecha: Date, _id: false }], default: [] },
+    // Nómina (fase 4): salario mínimo y auxilio de transporte del año, y exoneración de aportes (art. 114-1 E.T.)
+    smmlv: { type: Number, default: 1750905 }, auxilioTransporte: { type: Number, default: 249095 }, exoneradaAportes: { type: Boolean, default: true },
+    prefijoDocumentoSoporte: str({ default: 'DS' }),
   },
   smtp: {
     activo: { type: Boolean, default: false },
@@ -567,6 +570,10 @@ const facturaContSchema = new Schema({
   observaciones: str(),   // p. ej. el número que tenía en la plantilla de Excel si se renumeró al importar
   // Factura electrónica de transporte (DIAN): número y CUFE que devuelve el proveedor tecnológico
   fe: { numero: str({ uppercase: true }), cufe: str({ lowercase: true }), tipoOperacion: str({ default: '12' }) },
+  // Notas crédito y débito (fase 4): ajustan el saldo por cobrar (ajusteNeto = notas débito − notas crédito, en neto)
+  notas: { type: [{ numero: String, tipo: { type: String, enum: ['CREDITO', 'DEBITO'] }, fecha: Date, valor: Number, neto: Number, motivo: String,
+    asiento: String, cude: String, estado: { type: String, default: 'VIGENTE' }, _id: false }], default: [] },
+  ajusteNeto: { type: Number, default: 0 },
 }, { timestamps: true });
 facturaContSchema.plugin(tenantPlugin);
 facturaContSchema.index({ empresa: 1, numero: 1 }, { unique: true });
@@ -643,6 +650,49 @@ const conciliacionSchema = new Schema({
 conciliacionSchema.plugin(tenantPlugin);
 conciliacionSchema.index({ empresa: 1, cuenta: 1, mes: 1 }, { unique: true });
 
+// ── Contabilidad fase 4: empleados y nómina, activos fijos ──────────────────
+const empleadoSchema = new Schema({
+  tipoId: str({ default: 'CC', uppercase: true }), numId: str({ required: true }),
+  nombres: str({ required: true }), apellidos: str(), cargo: str(), correo: str({ lowercase: true }), telefono: str(),
+  salario: { type: Number, required: true, min: 0 },
+  tipoSalario: { type: String, enum: ['ordinario', 'integral'], default: 'ordinario' },
+  tipoContrato: { type: String, enum: ['indefinido', 'fijo', 'obra', 'aprendiz'], default: 'indefinido' },
+  fechaIngreso: { type: Date, required: true }, fechaRetiro: fecha,
+  nivelRiesgoArl: { type: Number, enum: [1, 2, 3, 4, 5], default: 1 },
+  eps: str(), afp: str(), caja: str(), cesantiasFondo: str(),
+  banco: { entidad: str(), tipoCuenta: str(), cuenta: str() },
+  conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },   // si el empleado también es conductor
+  activo: { type: Boolean, default: true },
+}, { timestamps: true });
+empleadoSchema.plugin(tenantPlugin);
+empleadoSchema.index({ empresa: 1, numId: 1 }, { unique: true });
+
+const nominaSchema = new Schema({
+  numero: { type: String, required: true },             // NOM-2026-10 o NOM-2026-10-Q1
+  periodo: { type: String, required: true }, fecha: { type: Date, required: true },
+  lineas: { type: [Schema.Types.Mixed], default: [] },  // cálculo por empleado (devengos, deducciones, aportes, provisiones)
+  totales: { type: Schema.Types.Mixed, default: {} },
+  estado: { type: String, enum: ['VIGENTE', 'PAGADA', 'ANULADA'], default: 'VIGENTE' },
+  asiento: str(), asientoPago: str(), asientoAportes: str(),
+  usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+nominaSchema.plugin(tenantPlugin);
+nominaSchema.index({ empresa: 1, numero: 1 }, { unique: true });
+
+const activoFijoSchema = new Schema({
+  codigo: { type: String, required: true }, nombre: str({ required: true }),
+  cuenta: str({ default: '1540' }), placa: str({ uppercase: true }),
+  fechaCompra: { type: Date, required: true }, costo: { type: Number, required: true, min: 0 },
+  valorResidual: { type: Number, default: 0, min: 0 }, vidaUtilMeses: { type: Number, required: true, min: 1 },
+  depreciacionAcumulada: { type: Number, default: 0 },
+  depreciaciones: { type: [{ mes: String, valor: Number, asiento: String, _id: false }], default: [] },
+  estado: { type: String, enum: ['ACTIVO', 'VENDIDO', 'BAJA'], default: 'ACTIVO' },
+  baja: { fecha: Date, precio: Number, asiento: String, motivo: String },
+  asientoCompra: str(),
+}, { timestamps: true });
+activoFijoSchema.plugin(tenantPlugin);
+activoFijoSchema.index({ empresa: 1, codigo: 1 }, { unique: true });
+
 // ── Remesas de Dulces & Dulces (base de viajes VPL y su remesa impresa) ────
 const remesaDulcesSchema = new Schema({
   vpl: str({ required: true }), fecha, zona: str(), peso: Number, manifiesto: str(),
@@ -675,6 +725,9 @@ export const ProveedorCont = modelo('ProveedorCont', proveedorContSchema);
 export const CompraCont = modelo('CompraCont', compraContSchema);
 export const EgresoCont = modelo('EgresoCont', egresoContSchema);
 export const ConciliacionCont = modelo('ConciliacionCont', conciliacionSchema);
+export const Empleado = modelo('Empleado', empleadoSchema);
+export const Nomina = modelo('Nomina', nominaSchema);
+export const ActivoFijo = modelo('ActivoFijo', activoFijoSchema);
 export const RemesaDulces = modelo('RemesaDulces', remesaDulcesSchema);
 export const RecorridoRastreo = modelo('RecorridoRastreo', recorridoRastreoSchema);
 export const Autorizacion = modelo('Autorizacion', autorizacionSchema);
