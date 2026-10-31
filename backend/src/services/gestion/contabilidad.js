@@ -1,7 +1,7 @@
 // Contabilidad simplificada (módulo de contabilidad de la plantilla). Apoyo administrativo:
 // un contador debe revisarla. Partida doble: cada asiento cuadra (débitos = créditos).
 import mongoose from 'mongoose';
-import { CuentaContable, Asiento, FacturaCont, LiquidacionConductor, Viaje, Cliente, Tarifa, Empresa, siguiente, pob } from '../../models/index.js';
+import { CuentaContable, Asiento, FacturaCont, LiquidacionConductor, Viaje, Cliente, Tarifa, Empresa, CompraCont, siguiente, pob } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { asegurarMesAbierto } from './cierre.js';
 import { lineaLiquidacion, respaldosAuxiliar, NO_FACTURAR } from '../calculos.js';
@@ -20,10 +20,11 @@ export const PUC_BASE = [
   ['1540', 'Flota y equipo de transporte', 'ACTIVO', 'D'], ['1592', 'Depreciacion acumulada', 'ACTIVO', 'C'],
   // Pasivo
   ['2205', 'Cuentas por pagar a conductores y propietarios', 'PASIVO', 'C'],
-  ['2335', 'Costos y gastos por pagar', 'PASIVO', 'C'], ['2365', 'Retencion en la fuente por pagar', 'PASIVO', 'C'],
+  ['2335', 'Costos y gastos por pagar (proveedores)', 'PASIVO', 'C'], ['2365', 'Retencion en la fuente por pagar', 'PASIVO', 'C'],
+  ['2367', 'Impuesto a las ventas retenido (ReteIVA)', 'PASIVO', 'C'],
   ['2368', 'Retencion de ICA por pagar', 'PASIVO', 'C'], ['2370', 'Retenciones y aportes de nomina', 'PASIVO', 'C'],
   ['2380', 'FOPAT y contribuciones por pagar', 'PASIVO', 'C'], ['2404', 'Impuesto de renta por pagar', 'PASIVO', 'C'],
-  ['2408', 'IVA por pagar', 'PASIVO', 'C'], ['2505', 'Salarios por pagar', 'PASIVO', 'C'],
+  ['2408', 'IVA por pagar', 'PASIVO', 'C'], ['240810', 'IVA descontable en compras', 'PASIVO', 'D'], ['2505', 'Salarios por pagar', 'PASIVO', 'C'],
   ['2510', 'Cesantias consolidadas', 'PASIVO', 'C'], ['2515', 'Intereses sobre cesantias', 'PASIVO', 'C'],
   ['2520', 'Prima de servicios', 'PASIVO', 'C'], ['2525', 'Vacaciones consolidadas', 'PASIVO', 'C'],
   ['2815', 'Ingresos recibidos para terceros', 'PASIVO', 'C'],
@@ -40,7 +41,8 @@ export const PUC_BASE = [
   ['4210', 'Ingresos financieros (intereses de prestamos)', 'INGRESO', 'C'], ['4250', 'Recuperaciones', 'INGRESO', 'C'],
   // Gastos y costos
   ['5105', 'Gastos de personal', 'GASTO', 'D'], ['5110', 'Honorarios', 'GASTO', 'D'], ['5115', 'Impuestos', 'GASTO', 'D'],
-  ['5120', 'Arrendamientos', 'GASTO', 'D'], ['5135', 'Servicios', 'GASTO', 'D'],
+  ['5120', 'Arrendamientos', 'GASTO', 'D'], ['5130', 'Seguros', 'GASTO', 'D'], ['5135', 'Servicios', 'GASTO', 'D'],
+  ['5140', 'Gastos legales', 'GASTO', 'D'], ['5155', 'Gastos de viaje', 'GASTO', 'D'],
   ['5145', 'Mantenimiento y reparaciones', 'GASTO', 'D'], ['5160', 'Depreciaciones', 'GASTO', 'D'],
   ['5195', 'Gastos diversos', 'GASTO', 'D'], ['5305', 'Gastos financieros', 'GASTO', 'D'],
   ['530505', 'Gastos bancarios y GMF (4 x 1000)', 'GASTO', 'D'], ['5315', 'Gastos extraordinarios', 'GASTO', 'D'],
@@ -64,13 +66,16 @@ export async function asegurarPuc(empresaId) {
 // ── Parámetros contables de la empresa ───────────────────────────────────────
 export async function parametros(empresaId) {
   const e = await Empresa.findById(empresaId).select('contabilidad').lean();
-  return { modeloIngresos: e?.contabilidad?.modeloIngresos || 'bruto', tipoSociedad: e?.contabilidad?.tipoSociedad || 'SAS' };
+  const c = e?.contabilidad || {};
+  return { modeloIngresos: c.modeloIngresos || 'bruto', tipoSociedad: c.tipoSociedad || 'SAS',
+    uvt: c.uvt || 52374, ivaDescontable: !!c.ivaDescontable, agenteReteIva: !!c.agenteReteIva, reteIvaPct: c.reteIvaPct ?? 15,
+    gmf: c.gmf !== false, retenciones: c.retenciones || {} };
 }
-export async function guardarParametros(empresaId, { modeloIngresos, tipoSociedad }) {
+const PARAMETROS = ['modeloIngresos', 'tipoSociedad', 'uvt', 'ivaDescontable', 'agenteReteIva', 'reteIvaPct', 'gmf', 'retenciones'];
+export async function guardarParametros(empresaId, datos) {
   const $set = {};
-  if (modeloIngresos) $set['contabilidad.modeloIngresos'] = modeloIngresos;
-  if (tipoSociedad) $set['contabilidad.tipoSociedad'] = tipoSociedad;
-  await Empresa.updateOne({ _id: empresaId }, { $set });
+  for (const k of PARAMETROS) if (datos[k] !== undefined) $set[`contabilidad.${k}`] = datos[k];
+  if (Object.keys($set).length) await Empresa.updateOne({ _id: empresaId }, { $set });
   return parametros(empresaId);
 }
 
@@ -109,7 +114,7 @@ export async function validarAsiento(empresaId, { fecha, lineas }) {
 }
 
 // Los asientos de documentos (factura, liquidación, préstamo, abono) se anulan desde su documento.
-const ORIGEN_DOCUMENTO = { FAC: 'la factura', LIQ: 'la liquidación del conductor', PRE: 'el préstamo', ABO: 'el abono del préstamo' };
+const ORIGEN_DOCUMENTO = { FAC: 'la factura', LIQ: 'la liquidación del conductor', PRE: 'el préstamo', ABO: 'el abono del préstamo', CMP: 'la compra', EGR: 'el comprobante de egreso' };
 // Anula un asiento. Si es un cobro (COB) o un pago (PAG) devuelve el saldo a la factura o a la liquidación,
 // para que la cartera y las cuentas por pagar sigan cuadrando con la contabilidad.
 export async function anularAsiento(empresaId, numero, { desdeDocumento = false } = {}) {
@@ -406,17 +411,19 @@ export async function carteraPorEdades(empresaId, corte = new Date()) {
 
 // Panel de resumen contable del mes: por cobrar, por pagar, facturado, cobrado, gastos y excedente
 export async function resumenContable(empresaId, desde, hasta) {
-  const [cxc, cxp, facturas, asientos, res] = await Promise.all([
+  const [cxc, cxp, facturas, asientos, res, compras] = await Promise.all([
     cuentasPorCobrar(empresaId), cuentasPorPagar(empresaId),
     FacturaCont.find({ empresa: empresaId, fecha: { $gte: desde, $lte: hasta }, estado: { $ne: 'ANULADA' } }).select('total neto').lean(),
     Asiento.find({ empresa: empresaId, estado: 'ACTIVO', fecha: { $gte: desde, $lte: hasta }, origen: { $in: ['COB', 'PAG', 'GAS'] } }).lean(),
     resultados(empresaId, desde, hasta),
+    CompraCont.find({ empresa: empresaId, estado: 'PENDIENTE' }).select('neto pagado').lean(),
   ]);
   const suma = (l, k) => l.reduce((a, x) => a + (Number(x[k]) || 0), 0);
   const deOrigen = (o, f) => asientos.filter(a => a.origen === o).reduce((a, x) => a + x.lineas.filter(f).reduce((b, l) => b + l.debito, 0), 0);
   const cartera = await carteraPorEdades(empresaId);
   return {
     porCobrar: suma(cxc, 'saldo'), facturasPendientes: cxc.length, porPagar: suma(cxp, 'saldo'), liquidacionesPendientes: cxp.length,
+    porPagarProveedores: compras.reduce((a, c) => a + (c.neto - (c.pagado || 0)), 0), comprasPendientes: compras.length,
     facturado: suma(facturas, 'total'), facturas: facturas.length,
     cobrado: deOrigen('COB', l => /^11/.test(l.cuenta)), pagadoConductores: deOrigen('PAG', l => l.cuenta === '2205'),
     gastos: res.totalGastos, costos: res.totalCostos, ingresos: res.totalIngresos, excedente: res.utilidad,
@@ -426,5 +433,5 @@ export async function resumenContable(empresaId, desde, hasta) {
 
 export async function retenciones(empresaId, desde, hasta) {
   const s = await saldos(empresaId, hasta, desde);
-  return s.filter(c => ['1355', '1356', '2365', '2380'].includes(c.codigo));
+  return s.filter(c => ['1355', '1356', '2365', '2367', '2368', '240810', '2380'].includes(c.codigo));
 }

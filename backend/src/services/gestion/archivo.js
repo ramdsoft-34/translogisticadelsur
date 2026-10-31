@@ -31,7 +31,8 @@ const rangoMes = (mes) => { const [a, m] = mes.split('-').map(Number); return { 
 // Colecciones de la empresa que entran en el respaldo (sin claves ni secretos)
 const COLECCIONES = [['clientes', 'Cliente'], ['tarifas', 'Tarifa'], ['terceros', 'Tercero'], ['vehiculos', 'Vehiculo'], ['viajes', 'Viaje'],
   ['liquidaciones', 'Liquidacion'], ['liquidacionesConductor', 'LiquidacionConductor'], ['prestamos', 'Prestamo'], ['cuentas', 'CuentaContable'],
-  ['asientos', 'Asiento'], ['facturas', 'FacturaCont'], ['remesasDulces', 'RemesaDulces'], ['plantillasWhatsapp', 'PlantillaWhatsapp'],
+  ['asientos', 'Asiento'], ['facturas', 'FacturaCont'], ['proveedores', 'ProveedorCont'], ['compras', 'CompraCont'], ['egresos', 'EgresoCont'],
+  ['conciliaciones', 'ConciliacionCont'], ['remesasDulces', 'RemesaDulces'], ['plantillasWhatsapp', 'PlantillaWhatsapp'],
   ['enviosCorreo', 'EnvioCorreo'], ['contadores', 'Contador'], ['autorizaciones', 'Autorizacion'], ['recorridos', 'RecorridoRastreo'],
   ['transaccionesRndc', 'TransaccionRndc'], ['auditoria', 'Auditoria']];
 
