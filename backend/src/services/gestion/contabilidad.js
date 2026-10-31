@@ -23,7 +23,7 @@ export const PUC_BASE = [
   ['2335', 'Costos y gastos por pagar (proveedores)', 'PASIVO', 'C'], ['2365', 'Retencion en la fuente por pagar', 'PASIVO', 'C'],
   ['2367', 'Impuesto a las ventas retenido (ReteIVA)', 'PASIVO', 'C'],
   ['2368', 'Retencion de ICA por pagar', 'PASIVO', 'C'], ['2370', 'Retenciones y aportes de nomina', 'PASIVO', 'C'],
-  ['2380', 'FOPAT y contribuciones por pagar', 'PASIVO', 'C'], ['2404', 'Impuesto de renta por pagar', 'PASIVO', 'C'],
+  ['2380', 'FOPAT y contribuciones por pagar', 'PASIVO', 'C'], ['2404', 'Impuesto de renta por pagar', 'PASIVO', 'C'], ['2412', 'Impuesto de industria y comercio por pagar', 'PASIVO', 'C'],
   ['2408', 'IVA por pagar', 'PASIVO', 'C'], ['240810', 'IVA descontable en compras', 'PASIVO', 'D'], ['2505', 'Salarios por pagar', 'PASIVO', 'C'],
   ['2510', 'Cesantias consolidadas', 'PASIVO', 'C'], ['2515', 'Intereses sobre cesantias', 'PASIVO', 'C'],
   ['2520', 'Prima de servicios', 'PASIVO', 'C'], ['2525', 'Vacaciones consolidadas', 'PASIVO', 'C'],
@@ -45,7 +45,7 @@ export const PUC_BASE = [
   ['5140', 'Gastos legales', 'GASTO', 'D'], ['5155', 'Gastos de viaje', 'GASTO', 'D'],
   ['5145', 'Mantenimiento y reparaciones', 'GASTO', 'D'], ['5160', 'Depreciaciones', 'GASTO', 'D'],
   ['5195', 'Gastos diversos', 'GASTO', 'D'], ['5305', 'Gastos financieros', 'GASTO', 'D'],
-  ['530505', 'Gastos bancarios y GMF (4 x 1000)', 'GASTO', 'D'], ['5315', 'Gastos extraordinarios', 'GASTO', 'D'],
+  ['530505', 'Gastos bancarios y GMF (4 x 1000)', 'GASTO', 'D'], ['530520', 'Intereses de mora (impuestos)', 'GASTO', 'D'], ['5315', 'Gastos extraordinarios', 'GASTO', 'D'],
   ['5405', 'Impuesto de renta y complementarios', 'GASTO', 'D'],
   ['6155', 'Costo de transporte: fletes a conductores', 'COSTO', 'D'],
 ];
@@ -69,9 +69,12 @@ export async function parametros(empresaId) {
   const c = e?.contabilidad || {};
   return { modeloIngresos: c.modeloIngresos || 'bruto', tipoSociedad: c.tipoSociedad || 'SAS',
     uvt: c.uvt || 52374, ivaDescontable: !!c.ivaDescontable, agenteReteIva: !!c.agenteReteIva, reteIvaPct: c.reteIvaPct ?? 15,
-    gmf: c.gmf !== false, retenciones: c.retenciones || {} };
+    gmf: c.gmf !== false, retenciones: c.retenciones || {},
+    icaTarifaPorMil: c.icaTarifaPorMil || 0, avisosTablerosPct: c.avisosTablerosPct ?? 15, sobretasaBomberilPct: c.sobretasaBomberilPct || 0,
+    vencimientos: (c.vencimientos || []).map(v => ({ obligacion: v.obligacion, periodo: v.periodo, fecha: v.fecha })) };
 }
-const PARAMETROS = ['modeloIngresos', 'tipoSociedad', 'uvt', 'ivaDescontable', 'agenteReteIva', 'reteIvaPct', 'gmf', 'retenciones'];
+const PARAMETROS = ['modeloIngresos', 'tipoSociedad', 'uvt', 'ivaDescontable', 'agenteReteIva', 'reteIvaPct', 'gmf', 'retenciones',
+  'icaTarifaPorMil', 'avisosTablerosPct', 'sobretasaBomberilPct', 'vencimientos'];
 export async function guardarParametros(empresaId, datos) {
   const $set = {};
   for (const k of PARAMETROS) if (datos[k] !== undefined) $set[`contabilidad.${k}`] = datos[k];
