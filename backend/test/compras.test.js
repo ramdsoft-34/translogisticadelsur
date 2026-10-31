@@ -62,6 +62,14 @@ test('XML DIAN: la factura sola también se lee, y un XML sin factura se rechaza
   assert.throws(() => C.leerFacturaXml('hola'), /no es un XML/);
 });
 
+test('Seguridad: un XML armado para trabar el servidor (etiquetas sin cerrar) se lee en poco tiempo', () => {
+  for (const x of ['<Invoice>' + '<cbc:Description>'.repeat(50000), '<AttachedDocument>' + '<![CDATA['.repeat(80000), '<Invoice>' + '<cac:InvoiceLine '.repeat(40000)]) {
+    const t = Date.now();
+    try { C.leerFacturaXml(x); } catch { /* se rechaza: lo que importa es que no se quede pegado */ }
+    assert.ok(Date.now() - t < 3000, `tardó ${Date.now() - t} ms con ${x.length} caracteres`);
+  }
+});
+
 test('Retenciones: base mínima en UVT, no declarante, autorretenedor, ReteIVA, ReteICA y cambios manuales', () => {
   const param = { uvt: 52374 };
   const servicio = (base, fiscal = {}, extra = {}) => C.calcularCompra({ lineas: [{ cuenta: '5145', base, ivaPct: 19 }], concepto: 'servicios', proveedor: { fiscal }, param: { ...param, ...extra.param }, manual: extra.manual });
