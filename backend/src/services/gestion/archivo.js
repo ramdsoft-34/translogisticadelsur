@@ -32,7 +32,7 @@ const rangoMes = (mes) => { const [a, m] = mes.split('-').map(Number); return { 
 const COLECCIONES = [['clientes', 'Cliente'], ['tarifas', 'Tarifa'], ['terceros', 'Tercero'], ['vehiculos', 'Vehiculo'], ['viajes', 'Viaje'],
   ['liquidaciones', 'Liquidacion'], ['liquidacionesConductor', 'LiquidacionConductor'], ['prestamos', 'Prestamo'], ['cuentas', 'CuentaContable'],
   ['asientos', 'Asiento'], ['facturas', 'FacturaCont'], ['proveedores', 'ProveedorCont'], ['compras', 'CompraCont'], ['egresos', 'EgresoCont'],
-  ['conciliaciones', 'ConciliacionCont'], ['remesasDulces', 'RemesaDulces'], ['plantillasWhatsapp', 'PlantillaWhatsapp'],
+  ['conciliaciones', 'ConciliacionCont'], ['empleados', 'Empleado'], ['nominas', 'Nomina'], ['activos', 'ActivoFijo'], ['remesasDulces', 'RemesaDulces'], ['plantillasWhatsapp', 'PlantillaWhatsapp'],
   ['enviosCorreo', 'EnvioCorreo'], ['contadores', 'Contador'], ['autorizaciones', 'Autorizacion'], ['recorridos', 'RecorridoRastreo'],
   ['transaccionesRndc', 'TransaccionRndc'], ['auditoria', 'Auditoria']];
 

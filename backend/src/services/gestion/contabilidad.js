@@ -1,7 +1,7 @@
 // Contabilidad simplificada (módulo de contabilidad de la plantilla). Apoyo administrativo:
 // un contador debe revisarla. Partida doble: cada asiento cuadra (débitos = créditos).
 import mongoose from 'mongoose';
-import { CuentaContable, Asiento, FacturaCont, LiquidacionConductor, Viaje, Cliente, Tarifa, Empresa, CompraCont, siguiente, pob } from '../../models/index.js';
+import { CuentaContable, Asiento, FacturaCont, LiquidacionConductor, Viaje, Cliente, Tarifa, Empresa, CompraCont, Nomina, siguiente, pob } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { asegurarMesAbierto } from './cierre.js';
 import { lineaLiquidacion, respaldosAuxiliar, NO_FACTURAR } from '../calculos.js';
@@ -23,6 +23,8 @@ export const PUC_BASE = [
   ['2335', 'Costos y gastos por pagar (proveedores)', 'PASIVO', 'C'], ['2365', 'Retencion en la fuente por pagar', 'PASIVO', 'C'],
   ['2367', 'Impuesto a las ventas retenido (ReteIVA)', 'PASIVO', 'C'],
   ['2368', 'Retencion de ICA por pagar', 'PASIVO', 'C'], ['2370', 'Retenciones y aportes de nomina', 'PASIVO', 'C'],
+  ['237005', 'Aportes a EPS por pagar', 'PASIVO', 'C'], ['237006', 'Aportes a ARL por pagar', 'PASIVO', 'C'],
+  ['237010', 'Aportes parafiscales por pagar (caja, ICBF, SENA)', 'PASIVO', 'C'], ['237030', 'Aportes a fondos de pensiones por pagar', 'PASIVO', 'C'],
   ['2380', 'FOPAT y contribuciones por pagar', 'PASIVO', 'C'], ['2404', 'Impuesto de renta por pagar', 'PASIVO', 'C'], ['2412', 'Impuesto de industria y comercio por pagar', 'PASIVO', 'C'],
   ['2408', 'IVA por pagar', 'PASIVO', 'C'], ['240810', 'IVA descontable en compras', 'PASIVO', 'D'], ['2505', 'Salarios por pagar', 'PASIVO', 'C'],
   ['2510', 'Cesantias consolidadas', 'PASIVO', 'C'], ['2515', 'Intereses sobre cesantias', 'PASIVO', 'C'],
@@ -38,13 +40,18 @@ export const PUC_BASE = [
   // Ingresos
   ['4135', 'Ingresos por servicio de transporte de carga', 'INGRESO', 'C'],
   ['4145', 'Comisiones por intermediacion de transporte (ingreso propio)', 'INGRESO', 'C'],
-  ['4210', 'Ingresos financieros (intereses de prestamos)', 'INGRESO', 'C'], ['4250', 'Recuperaciones', 'INGRESO', 'C'],
+  ['4210', 'Ingresos financieros (intereses de prestamos)', 'INGRESO', 'C'], ['4245', 'Utilidad en venta de activos', 'INGRESO', 'C'], ['4250', 'Recuperaciones', 'INGRESO', 'C'],
   // Gastos y costos
-  ['5105', 'Gastos de personal', 'GASTO', 'D'], ['5110', 'Honorarios', 'GASTO', 'D'], ['5115', 'Impuestos', 'GASTO', 'D'],
+  ['5105', 'Gastos de personal', 'GASTO', 'D'],
+  ['510506', 'Sueldos', 'GASTO', 'D'], ['510515', 'Horas extras y recargos', 'GASTO', 'D'], ['510527', 'Auxilio de transporte', 'GASTO', 'D'],
+  ['510530', 'Cesantias', 'GASTO', 'D'], ['510533', 'Intereses sobre cesantias', 'GASTO', 'D'], ['510536', 'Prima de servicios', 'GASTO', 'D'],
+  ['510539', 'Vacaciones', 'GASTO', 'D'], ['510548', 'Bonificaciones', 'GASTO', 'D'], ['510568', 'Aportes a ARL', 'GASTO', 'D'],
+  ['510569', 'Aportes a EPS', 'GASTO', 'D'], ['510570', 'Aportes a fondos de pensiones', 'GASTO', 'D'], ['510572', 'Aportes a cajas de compensacion', 'GASTO', 'D'],
+  ['510575', 'Aportes ICBF', 'GASTO', 'D'], ['510578', 'Aportes SENA', 'GASTO', 'D'], ['5110', 'Honorarios', 'GASTO', 'D'], ['5115', 'Impuestos', 'GASTO', 'D'],
   ['5120', 'Arrendamientos', 'GASTO', 'D'], ['5130', 'Seguros', 'GASTO', 'D'], ['5135', 'Servicios', 'GASTO', 'D'],
   ['5140', 'Gastos legales', 'GASTO', 'D'], ['5155', 'Gastos de viaje', 'GASTO', 'D'],
   ['5145', 'Mantenimiento y reparaciones', 'GASTO', 'D'], ['5160', 'Depreciaciones', 'GASTO', 'D'],
-  ['5195', 'Gastos diversos', 'GASTO', 'D'], ['5305', 'Gastos financieros', 'GASTO', 'D'],
+  ['5195', 'Gastos diversos', 'GASTO', 'D'], ['5305', 'Gastos financieros', 'GASTO', 'D'], ['5310', 'Perdida en venta y retiro de bienes', 'GASTO', 'D'],
   ['530505', 'Gastos bancarios y GMF (4 x 1000)', 'GASTO', 'D'], ['530520', 'Intereses de mora (impuestos)', 'GASTO', 'D'], ['5315', 'Gastos extraordinarios', 'GASTO', 'D'],
   ['5405', 'Impuesto de renta y complementarios', 'GASTO', 'D'],
   ['6155', 'Costo de transporte: fletes a conductores', 'COSTO', 'D'],
@@ -71,10 +78,12 @@ export async function parametros(empresaId) {
     uvt: c.uvt || 52374, ivaDescontable: !!c.ivaDescontable, agenteReteIva: !!c.agenteReteIva, reteIvaPct: c.reteIvaPct ?? 15,
     gmf: c.gmf !== false, retenciones: c.retenciones || {},
     icaTarifaPorMil: c.icaTarifaPorMil || 0, avisosTablerosPct: c.avisosTablerosPct ?? 15, sobretasaBomberilPct: c.sobretasaBomberilPct || 0,
-    vencimientos: (c.vencimientos || []).map(v => ({ obligacion: v.obligacion, periodo: v.periodo, fecha: v.fecha })) };
+    vencimientos: (c.vencimientos || []).map(v => ({ obligacion: v.obligacion, periodo: v.periodo, fecha: v.fecha })),
+    smmlv: c.smmlv || 1750905, auxilioTransporte: c.auxilioTransporte || 249095, exoneradaAportes: c.exoneradaAportes !== false,
+    prefijoDocumentoSoporte: c.prefijoDocumentoSoporte || 'DS' };
 }
 const PARAMETROS = ['modeloIngresos', 'tipoSociedad', 'uvt', 'ivaDescontable', 'agenteReteIva', 'reteIvaPct', 'gmf', 'retenciones',
-  'icaTarifaPorMil', 'avisosTablerosPct', 'sobretasaBomberilPct', 'vencimientos'];
+  'icaTarifaPorMil', 'avisosTablerosPct', 'sobretasaBomberilPct', 'vencimientos', 'smmlv', 'auxilioTransporte', 'exoneradaAportes', 'prefijoDocumentoSoporte'];
 export async function guardarParametros(empresaId, datos) {
   const $set = {};
   for (const k of PARAMETROS) if (datos[k] !== undefined) $set[`contabilidad.${k}`] = datos[k];
@@ -117,7 +126,8 @@ export async function validarAsiento(empresaId, { fecha, lineas }) {
 }
 
 // Los asientos de documentos (factura, liquidación, préstamo, abono) se anulan desde su documento.
-const ORIGEN_DOCUMENTO = { FAC: 'la factura', LIQ: 'la liquidación del conductor', PRE: 'el préstamo', ABO: 'el abono del préstamo', CMP: 'la compra', EGR: 'el comprobante de egreso' };
+const ORIGEN_DOCUMENTO = { FAC: 'la factura', LIQ: 'la liquidación del conductor', PRE: 'el préstamo', ABO: 'el abono del préstamo', CMP: 'la compra', EGR: 'el comprobante de egreso',
+  NOM: 'la nómina', DEP: 'la depreciación del mes', ACT: 'el activo fijo', CIE: 'el cierre del año', NOT: 'la nota de la factura' };
 // Anula un asiento. Si es un cobro (COB) o un pago (PAG) devuelve el saldo a la factura o a la liquidación,
 // para que la cartera y las cuentas por pagar sigan cuadrando con la contabilidad.
 export async function anularAsiento(empresaId, numero, { desdeDocumento = false } = {}) {
@@ -129,17 +139,25 @@ export async function anularAsiento(empresaId, numero, { desdeDocumento = false 
   if (a.origen === 'COB') {
     const valor = a.lineas.filter(l => l.cuenta === '1305').reduce((t, l) => t + l.credito, 0);
     const f = await FacturaCont.findOne({ empresa: empresaId, numero: a.documento });
-    if (f && valor) { f.cobrado = Math.max(0, (f.cobrado || 0) - valor); if (f.estado === 'COBRADA' && f.neto - f.cobrado > 0) f.estado = 'PENDIENTE'; await f.save(); }
+    if (f && valor) { f.cobrado = Math.max(0, (f.cobrado || 0) - valor); if (f.estado === 'COBRADA' && saldoFactura(f) > 0) f.estado = 'PENDIENTE'; await f.save(); }
   }
   if (a.origen === 'PAG') {
     const valor = a.lineas.filter(l => l.cuenta === '2205').reduce((t, l) => t + l.debito, 0);
     const l = await LiquidacionConductor.findOne({ empresa: empresaId, numero: a.documento });
     if (l && valor) { l.pagado = Math.max(0, (l.pagado || 0) - valor); await l.save(); }
   }
+  if (a.origen === 'NPA') {
+    // Pago de nómina o de planilla PILA: la nómina vuelve a quedar pendiente de ese pago
+    const n = await Nomina.findOne({ empresa: empresaId, numero: a.documento });
+    if (n) { if (n.asientoPago === a.numero) n.asientoPago = ''; if (n.asientoAportes === a.numero) n.asientoAportes = ''; if (n.estado === 'PAGADA') n.estado = 'VIGENTE'; await n.save(); }
+  }
   a.estado = 'ANULADO';
   await a.save();
   return a;
 }
+
+// Saldo por cobrar de una factura: neto, más notas débito, menos notas crédito, menos lo cobrado
+export const saldoFactura = (f) => Math.round((f.neto || 0) + (f.ajusteNeto || 0) - (f.cobrado || 0));
 
 // ── Documentos ───────────────────────────────────────────────────────────────
 // Facturas vigentes del mismo cliente cuyo periodo se cruza con el indicado
@@ -218,6 +236,7 @@ export async function anularFactura(empresaId, numero) {
   if (!f) throw new ErrorHttp(404, 'Factura no encontrada');
   if (f.estado === 'ANULADA') throw new ErrorHttp(409, 'La factura ya estaba anulada');
   if (f.cobrado > 0) throw new ErrorHttp(409, 'La factura ya tiene cobros: no se puede anular');
+  if ((f.notas || []).some(n => n.estado !== 'ANULADA')) throw new ErrorHttp(409, 'La factura tiene notas crédito o débito: anúlelas primero');
   if (f.asiento) await anularAsiento(empresaId, f.asiento, { desdeDocumento: true });
   await Viaje.updateMany({ empresa: empresaId, facturaCont: f._id }, { $set: { facturaCont: null } });
   f.estado = 'ANULADA'; await f.save();
@@ -227,13 +246,13 @@ export async function anularFactura(empresaId, numero) {
 export async function cobrar(empresaId, { factura, valor, fecha = new Date(), cuenta = '1110', usuario }) {
   const f = await FacturaCont.findOne({ empresa: empresaId, numero: factura }).populate(pob(empresaId, 'cliente'));
   if (!f || f.estado === 'ANULADA') throw new ErrorHttp(404, 'Factura no encontrada');
-  const saldo = f.neto - f.cobrado;
+  const saldo = saldoFactura(f);
   const v = Math.round(valor || saldo);
   if (v <= 0 || v > saldo) throw new ErrorHttp(400, `El valor debe estar entre 1 y el saldo (${saldo})`);
   const a = await postear(empresaId, { fecha, documento: f.numero, concepto: `Cobro factura ${f.numero}`, origen: 'COB',
     terceroDoc: f.cliente?.nit, tercero: f.cliente?.nombre, usuario, lineas: [[cuenta, v], ['1305', -v]] });
   f.cobrado += v;
-  if (f.neto - f.cobrado <= 0) f.estado = 'COBRADA';
+  if (saldoFactura(f) <= 0) f.estado = 'COBRADA';
   await f.save();
   return { factura: f, asiento: a.numero };
 }
@@ -263,8 +282,9 @@ const oid = (v) => new mongoose.Types.ObjectId(String(v));
 // Así una cuenta correctora (depreciación acumulada, pérdidas) resta dentro de su grupo.
 export const signoTipo = (tipo) => (['ACTIVO', 'GASTO', 'COSTO'].includes(tipo) ? 1 : -1);
 
-async function sumasPorCuenta(empresaId, { hasta, desde = null, cuenta = null, terceroDoc = null }) {
+async function sumasPorCuenta(empresaId, { hasta, desde = null, cuenta = null, terceroDoc = null, excluirOrigen = null }) {
   const m = { empresa: oid(empresaId), estado: 'ACTIVO', fecha: { $lte: hasta, ...(desde ? { $gte: desde } : {}) } };
+  if (excluirOrigen?.length) m.origen = { $nin: excluirOrigen };
   if (terceroDoc) m.terceroDoc = terceroDoc;
   const pipe = [{ $match: m }, { $unwind: '$lineas' }];
   if (cuenta) pipe.push({ $match: { 'lineas.cuenta': { $regex: `^${String(cuenta).replace(/\D/g, '')}` } } });
@@ -277,10 +297,10 @@ export async function libroDiario(empresaId, desde, hasta) {
 }
 
 // Saldos por cuenta al corte → balance general y estado de resultados
-export async function saldos(empresaId, hasta, desde = null) {
+export async function saldos(empresaId, hasta, desde = null, excluirOrigen = null) {
   await asegurarPuc(empresaId);
   const cuentas = await CuentaContable.find({ empresa: empresaId }).sort({ codigo: 1 }).lean();
-  const sum = await sumasPorCuenta(empresaId, { hasta, desde });
+  const sum = await sumasPorCuenta(empresaId, { hasta, desde, excluirOrigen });
   return cuentas.map(c => {
     const s = sum.get(c.codigo) || { debito: 0, credito: 0 };
     return { ...c, debito: s.debito, credito: s.credito, saldo: signoTipo(c.tipo) * (s.debito - s.credito) };
@@ -377,8 +397,9 @@ export async function balance(empresaId, hasta) {
     resultadoEjercicio: ingresos - gastos };
 }
 
+// El asiento de cierre del año (CIE) no cuenta en el estado de resultados: si no, el año cerrado quedaría en cero
 export async function resultados(empresaId, desde, hasta) {
-  const s = (await saldos(empresaId, hasta, desde)).filter(c => ['INGRESO', 'GASTO', 'COSTO'].includes(c.tipo));
+  const s = (await saldos(empresaId, hasta, desde, ['CIE'])).filter(c => ['INGRESO', 'GASTO', 'COSTO'].includes(c.tipo));
   const ingresos = s.filter(c => c.tipo === 'INGRESO'); const costos = s.filter(c => c.tipo === 'COSTO'); const gastos = s.filter(c => c.tipo === 'GASTO');
   const t = (l) => l.reduce((a, c) => a + c.saldo, 0);
   return { ingresos, costos, gastos, totalIngresos: t(ingresos), totalCostos: t(costos), totalGastos: t(gastos), utilidad: t(ingresos) - t(costos) - t(gastos) };
@@ -386,7 +407,7 @@ export async function resultados(empresaId, desde, hasta) {
 
 export async function cuentasPorCobrar(empresaId) {
   return (await FacturaCont.find({ empresa: empresaId, estado: 'PENDIENTE' }).populate(pob(empresaId, 'cliente', 'nombre nit')).sort({ fecha: 1 }).lean())
-    .map(f => ({ numero: f.numero, fecha: f.fecha, cliente: f.cliente?.nombre, neto: f.neto, cobrado: f.cobrado, saldo: f.neto - f.cobrado }));
+    .map(f => ({ numero: f.numero, fecha: f.fecha, cliente: f.cliente?.nombre, neto: f.neto + (f.ajusteNeto || 0), cobrado: f.cobrado, saldo: saldoFactura(f) }));
 }
 
 export async function cuentasPorPagar(empresaId) {

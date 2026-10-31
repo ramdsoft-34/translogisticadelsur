@@ -209,12 +209,13 @@ export async function exogena(empresaId, anio, formato) {
       const c = f.cliente || {};
       const nit = soloDigitos(c.nit);
       sumarPorTercero(m, nit || c.nombre, { concepto: '4001', tipoDoc: tipoDoc(c.tipoId, nit), nit, dv: c.dv || '', nombre: c.nombre || '' },
-        { ingreso: f.modeloIngresos === 'terceros' ? f.propio : f.total, terceros: f.modeloIngresos === 'terceros' ? f.terceros : 0 });
+        { ingreso: f.modeloIngresos === 'terceros' ? f.propio : f.total, terceros: f.modeloIngresos === 'terceros' ? f.terceros : 0,
+          devoluciones: (f.notas || []).filter(n => n.tipo === 'CREDITO' && n.estado !== 'ANULADA').reduce((t, n) => t + n.valor, 0) });
     }
     const filas = [...m.values()].sort((a, b) => b.ingreso - a.ingreso);
     return { formato, titulo: 'Formato 1007 · Ingresos recibidos',
       columnas: ['Concepto', 'Tipo doc.', 'Número', 'DV', 'Nombre o razón social', 'País', 'Ingresos brutos recibidos', 'Devoluciones', 'Recibido para terceros (informativo)'],
-      filas: filas.map(x => [x.concepto, x.tipoDoc, x.nit, x.dv || (x.tipoDoc === '31' ? digitoVerificacion(x.nit) : ''), x.nombre, '169', x.ingreso, 0, x.terceros]) };
+      filas: filas.map(x => [x.concepto, x.tipoDoc, x.nit, x.dv || (x.tipoDoc === '31' ? digitoVerificacion(x.nit) : ''), x.nombre, '169', x.ingreso, x.devoluciones, x.terceros]) };
   }
   if (formato === '1008' || formato === '1009') {
     const cuentas = formato === '1008' ? [['1305', '1315'], ['1330', '1317'], ['1380', '1318']] : [['2335', '2201'], ['2205', '2201'], ['2815', '2206'], ['281505', '2206'], ['281510', '2206']];

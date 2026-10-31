@@ -116,13 +116,15 @@ export async function causarCompra(empresaId, d, usuario = null) {
   if (!p) throw new ErrorHttp(400, 'Proveedor no encontrado');
   const malas = (d.lineas || []).filter(l => !cuentaDeCompra(l.cuenta)).map(l => l.cuenta || '(vacía)');
   if (malas.length) throw new ErrorHttp(400, `Cuentas que no sirven para una compra: ${[...new Set(malas)].join(', ')}. Use gasto (5), costo (6/7), activo (15) o anticipo (1330).`);
-  const documento = String(d.documento || '').trim().toUpperCase();
+  const param = await parametros(empresaId);
+  let documento = String(d.documento || '').trim().toUpperCase();
+  // Documento soporte (compras a quien no está obligado a facturar): la empresa lo numera con su consecutivo
+  if (!documento && d.tipoDocumento === 'documento_soporte') documento = `${param.prefijoDocumentoSoporte || 'DS'}-${await siguiente(empresaId, 'documentoSoporte')}`;
   if (documento && await CompraCont.exists({ empresa: empresaId, proveedor: p._id, documento, estado: { $ne: 'ANULADA' } })) {
     throw new ErrorHttp(409, `La factura ${documento} de ${p.nombre} ya está causada`);
   }
   const cufe = String(d.cufe || '').trim().toLowerCase();
   if (cufe && await CompraCont.exists({ empresa: empresaId, cufe, estado: { $ne: 'ANULADA' } })) throw new ErrorHttp(409, 'Esa factura electrónica (CUFE) ya está causada');
-  const param = await parametros(empresaId);
   const c = calcularCompra({ lineas: d.lineas, concepto: d.conceptoRetencion || p.conceptoRetencion, proveedor: p, param, manual: d.manual || {} });
   const lineas = lineasAsientoCompra(c, param);
   await validarAsiento(empresaId, { fecha: d.fecha, lineas });
@@ -158,10 +160,43 @@ export async function cuentasPorPagarProveedores(empresaId) {
 // Acepta la factura (Invoice), la nota crédito (CreditNote) o el AttachedDocument que la envuelve.
 // Lectura por texto, sin librerías: solo trae los datos que se necesitan para causar.
 const quitarNs = (n) => `(?:[\\w-]+:)?${n}`;
-const bloques = (xml, n) => [...xml.matchAll(new RegExp(`<${quitarNs(n)}(?:\\s[^>]*)?>([\\s\\S]*?)</${quitarNs(n)}>`, 'g'))].map(m => m[1]);
+// Seguridad: el XML lo sube un usuario, así que se lee en tiempo lineal (sin expresiones que puedan quedarse
+// recorriendo el archivo una y otra vez con un XML armado a propósito: ReDoS). Cada etiqueta se busca una sola vez.
+// Devuelve [inicio del contenido, fin del contenido, fin del bloque] de cada bloque completo <n ...>…</n>.
+function rangos(xml, n) {
+  const abre = new RegExp(`<${quitarNs(n)}(?:\\s[^>]{0,2000})?>`, 'g');
+  const cierra = new RegExp(`</${quitarNs(n)}>`, 'g');
+  const out = []; let m;
+  while ((m = abre.exec(xml))) {
+    const ini = m.index; cierra.lastIndex = abre.lastIndex;
+    const c = cierra.exec(xml);
+    if (!c) break;                                   // sin cierre: no quedan bloques completos
+    out.push([ini, abre.lastIndex, c.index, cierra.lastIndex]);
+    abre.lastIndex = cierra.lastIndex;
+  }
+  return out;
+}
+const bloques = (xml, n) => rangos(xml, n).map(([, a, b]) => xml.slice(a, b));
+// Quita los bloques <n>…</n> (líneas, firma, extensiones) sin expresiones regulares sobre todo el documento
+function quitarBloques(xml, n) {
+  let out = ''; let desde = 0;
+  for (const [ini, , , fin] of rangos(xml, n)) { out += xml.slice(desde, ini); desde = fin; }
+  return out + xml.slice(desde);
+}
+// Contenido de las secciones CDATA (o el texto tal cual si no tiene)
+function cdatas(xml) {
+  const out = []; let i = 0;
+  for (;;) {
+    const a = xml.indexOf('<![CDATA[', i); if (a < 0) break;
+    const b = xml.indexOf(']]>', a + 9); if (b < 0) break;
+    out.push(xml.slice(a + 9, b)); i = b + 3;
+  }
+  return out;
+}
+const sinCdata = (t) => { const c = cdatas(t); return c.length ? c.join('') : t; };
 const bloque = (xml, n) => bloques(xml, n)[0] || '';
-const texto = (xml, n) => desescapar(bloque(xml, n).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '').trim());
-const atributo = (xml, n, a) => (new RegExp(`<${quitarNs(n)}\\s[^>]*\\b${a}="([^"]*)"`).exec(xml) || [])[1] || '';
+const texto = (xml, n) => desescapar(sinCdata(bloque(xml, n)).replace(/<[^>]{0,2000}>/g, '').trim());
+const atributo = (xml, n, a) => (new RegExp(`<${quitarNs(n)}\\s[^>]{0,500}?\\b${a}="([^"]{0,200})"`).exec(xml) || [])[1] || '';
 const numero = (v) => { const x = Number(String(v || '').trim()); return Number.isFinite(x) ? x : 0; };
 function desescapar(s) {
   return String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&amp;/g, '&');
@@ -172,7 +207,7 @@ export function leerFacturaXml(xml) {
   if (!doc.trim().startsWith('<')) throw new ErrorHttp(400, 'El archivo no es un XML');
   // AttachedDocument: la factura viene dentro de un CDATA (o escapada) en cbc:Description
   if (/<(?:\w+:)?AttachedDocument[\s>]/.test(doc)) {
-    const candidatos = [...doc.matchAll(/<!\[CDATA\[([\s\S]*?)\]\]>/g)].map(m => m[1]);
+    const candidatos = cdatas(doc);
     for (const d of bloques(doc, 'Description')) candidatos.push(desescapar(d));
     const interno = candidatos.find(t => /<(?:\w+:)?(Invoice|CreditNote|DebitNote)[\s>]/.test(t));
     if (!interno) throw new ErrorHttp(400, 'El AttachedDocument no trae la factura adentro');
@@ -180,11 +215,11 @@ export function leerFacturaXml(xml) {
   }
   const tipoM = /<(?:\w+:)?(Invoice|CreditNote|DebitNote)[\s>]/.exec(doc);
   if (!tipoM) throw new ErrorHttp(400, 'No se encontró una factura electrónica (Invoice) en el XML');
-  doc = doc.replace(/<(?:\w+:)?UBLExtensions[\s\S]*?<\/(?:\w+:)?UBLExtensions>/, '').replace(/<(?:\w+:)?Signature[\s\S]*?<\/(?:\w+:)?Signature>/g, '');
+  doc = quitarBloques(quitarBloques(doc, 'UBLExtensions'), 'Signature');
   const tipo = { Invoice: 'factura', CreditNote: 'nota_credito', DebitNote: 'nota_debito' }[tipoM[1]];
   const lineaTag = { Invoice: 'InvoiceLine', CreditNote: 'CreditNoteLine', DebitNote: 'DebitNoteLine' }[tipoM[1]];
   const lineasXml = bloques(doc, lineaTag);
-  const cabecera = doc.replace(new RegExp(`<${quitarNs(lineaTag)}[\\s>][\\s\\S]*?</${quitarNs(lineaTag)}>`, 'g'), '');
+  const cabecera = quitarBloques(doc, lineaTag);
   const parte = (n) => { const b = bloque(cabecera, n); return { nit: texto(b, 'CompanyID').replace(/\D/g, ''), dv: atributo(b, 'CompanyID', 'schemeID'),
     nombre: texto(b, 'RegistrationName') || texto(b, 'Name'), correo: texto(b, 'ElectronicMail'), telefono: texto(b, 'Telephone'),
     responsabilidades: texto(b, 'TaxLevelCode'), ciudad: texto(bloque(b, 'PhysicalLocation') || b, 'CityName'), direccion: texto(bloque(b, 'AddressLine') || '', 'Line') }; };
