@@ -42,7 +42,7 @@ Before=mongod-dev.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c 'for p in 27017 4100; do iptables -C OUTPUT -m owner --uid-owner tlsdev -p tcp --dport \$p -j REJECT 2>/dev/null || iptables -I OUTPUT -m owner --uid-owner tlsdev -p tcp --dport \$p -j REJECT; done'
+ExecStart=/bin/sh -c 'for p in 27017 4100; do iptables -C OUTPUT -m owner --uid-owner tlsdev -p tcp --dport $$p -j REJECT 2>/dev/null || iptables -I OUTPUT -m owner --uid-owner tlsdev -p tcp --dport $$p -j REJECT; done'
 [Install]
 WantedBy=multi-user.target
 EOF
