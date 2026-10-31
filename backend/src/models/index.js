@@ -107,6 +107,9 @@ const empresaSchema = new Schema({
     reteIvaPct: { type: Number, default: 15 },
     gmf: { type: Boolean, default: true },          // 4 x 1000 en los egresos por bancos
     retenciones: { type: Schema.Types.Mixed, default: () => ({}) },   // { concepto: { pct, baseUvt } } que reemplazan la tabla base
+    // Tributario (fase 3): ICA del municipio y calendario de vencimientos que lleva la contadora
+    icaTarifaPorMil: { type: Number, default: 0 }, avisosTablerosPct: { type: Number, default: 15 }, sobretasaBomberilPct: { type: Number, default: 0 },
+    vencimientos: { type: [{ obligacion: String, periodo: String, fecha: Date, _id: false }], default: [] },
   },
   smtp: {
     activo: { type: Boolean, default: false },
@@ -562,6 +565,8 @@ const facturaContSchema = new Schema({
   estado: { type: String, enum: ['PENDIENTE', 'COBRADA', 'ANULADA'], default: 'PENDIENTE' },
   asiento: str(),
   observaciones: str(),   // p. ej. el número que tenía en la plantilla de Excel si se renumeró al importar
+  // Factura electrónica de transporte (DIAN): número y CUFE que devuelve el proveedor tecnológico
+  fe: { numero: str({ uppercase: true }), cufe: str({ lowercase: true }), tipoOperacion: str({ default: '12' }) },
 }, { timestamps: true });
 facturaContSchema.plugin(tenantPlugin);
 facturaContSchema.index({ empresa: 1, numero: 1 }, { unique: true });
