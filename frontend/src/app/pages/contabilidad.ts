@@ -13,20 +13,21 @@ import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
 import { Confirmar } from '../shared/confirmar';
 import { filtrar } from '../shared/filtro';
 
-type Pestana = 'resumen' | 'diario' | 'facturas' | 'pagos' | 'informes' | 'plan' | 'saldos' | 'parametros' | 'cierre';
+type Pestana = 'resumen' | 'diario' | 'facturas' | 'pagos' | 'proveedores' | 'compras' | 'egresos' | 'conciliacion' | 'informes' | 'plan' | 'saldos' | 'parametros' | 'cierre';
 const INFORMES: [string, string][] = [['balance', 'Balance general'], ['resultados', 'Estado de resultados'], ['mayor', 'Libro mayor'], ['auxiliar', 'Auxiliar por cuenta'],
-  ['cxc', 'Cuentas por cobrar'], ['cartera', 'Cartera por edades'], ['cxp', 'Cuentas por pagar'], ['retenciones', 'Retenciones'], ['diario', 'Libro diario']];
+  ['cxc', 'Cuentas por cobrar'], ['cartera', 'Cartera por edades'], ['cxp', 'Por pagar a conductores'], ['cxpProv', 'Por pagar a proveedores'], ['retenciones', 'Retenciones'], ['diario', 'Libro diario']];
 // Orígenes de asiento que se pueden anular desde el libro diario (los de documentos se anulan desde su documento)
 const ANULABLES = ['MAN', 'GAS', 'COB', 'PAG', 'SI'];
 
 // Contabilidad simplificada (apoyo administrativo; un contador debe revisarla).
 // Los asientos de liquidaciones, préstamos y abonos se hacen solos; aquí se facturan, cobran y pagan y se registran gastos.
 import { CierreMes } from './gestion-varios';
+import { ProveedoresCont, ComprasCont, ConciliacionCont, RetencionesCont } from './contabilidad-compras';
 // Valor de una celda pegada de Excel: «1.234.567», «1234567,00» o «$ 1.234.567» → 1234567
 const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/[$\s]/g, '').replace(/,\d{1,2}$/, '').replace(/[.,]/g, ''); return Number(t) || 0; };
 @Component({
   selector: 'app-contabilidad',
-  imports: [FormsModule, Icono, MenuAcciones, Modal, Moneda, Confirmar, CierreMes, ...FORMATOS],
+  imports: [FormsModule, Icono, MenuAcciones, Modal, Moneda, Confirmar, CierreMes, ProveedoresCont, ComprasCont, ConciliacionCont, RetencionesCont, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Contabilidad</h1>
       <p class="sutil">Partida doble: facturas a clientes, cobros, pagos a conductores, gastos, libros e informes.
@@ -34,6 +35,8 @@ const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/
       @if (puedeGestionar) {
         <div class="acciones">
           <app-menu-acciones texto="Registrar">
+            <button (click)="ir('compras')"><app-icono nombre="documento" />Compra de proveedor<small>Causar una factura (con el XML de la DIAN) y sus retenciones</small></button>
+            <button (click)="ir('egresos')"><app-icono nombre="dinero" />Comprobante de egreso<small>Pagar a un proveedor con PDF, correo o WhatsApp</small></button>
             <button (click)="abrir('gasto')"><app-icono nombre="dinero" />Gasto<small>Un pago de la empresa con su soporte</small></button>
             <button (click)="abrir('manual')"><app-icono nombre="editar" />Asiento manual<small>Débitos y créditos escritos a mano</small></button>
           </app-menu-acciones>
@@ -45,6 +48,7 @@ const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/
     <div class="pestanas">
       @for (t of pestanas; track t[0]) { <button [class.activa]="pestana() === t[0]" (click)="ir(t[0])">{{ t[1] }}</button> }
     </div>
+    @if (conPeriodo()) {
     <section class="barra" aria-label="Periodo">
       <div class="campo"><label for="c-d">Desde</label><input id="c-d" type="date" [(ngModel)]="desde" (change)="cargar()" /></div>
       <div class="campo"><label for="c-h">Hasta</label><input id="c-h" type="date" [(ngModel)]="hasta" (change)="cargar()" /></div>
@@ -59,6 +63,7 @@ const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/
       }
       <div class="campo crece"><label for="c-q">Buscar</label><input id="c-q" type="search" placeholder="Número, tercero, cuenta o concepto" [ngModel]="q()" (ngModelChange)="q.set($event)" /></div>
     </section>
+    }
 
     @switch (pestana()) {
       @case ('resumen') {
@@ -66,6 +71,8 @@ const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/
           <div class="panel-resumen">
             <div><span>Por cobrar</span><strong>{{ r.porCobrar | pesos }}</strong><small>{{ r.facturasPendientes }} factura(s) pendientes</small></div>
             <div><span>Por pagar a conductores</span><strong>{{ r.porPagar | pesos }}</strong><small>{{ r.liquidacionesPendientes }} liquidación(es)</small></div>
+            <div><span>Por pagar a proveedores</span><strong>{{ r.porPagarProveedores | pesos }}</strong><small>{{ r.comprasPendientes }} compra(s)
+              <button class="texto pequeno" (click)="ir('compras')">Ver compras</button></small></div>
             <div><span>Facturado en el periodo</span><strong>{{ r.facturado | pesos }}</strong><small>{{ r.facturas }} factura(s)</small></div>
             <div><span>Cobrado en el periodo</span><strong>{{ r.cobrado | pesos }}</strong></div>
             <div><span>Pagado a conductores</span><strong>{{ r.pagadoConductores | pesos }}</strong></div>
@@ -179,7 +186,12 @@ const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/
               <option value="SAS">S.A.S.</option><option value="LTDA">Limitada</option><option value="SA">Sociedad anónima</option><option value="COOPERATIVA">Cooperativa</option><option value="OTRA">Otra</option></select></div>
           @if (puedeGestionar) { <div class="acciones"><button class="primario" [disabled]="trabajando()" (click)="guardarParametros()">Guardar parámetros</button></div> }
         </div>
+        <app-cont-retenciones />
       }
+      @case ('proveedores') { <app-cont-proveedores /> }
+      @case ('compras') { <app-cont-compras vista="compras" /> }
+      @case ('egresos') { <app-cont-compras vista="egresos" /> }
+      @case ('conciliacion') { <app-cont-conciliacion /> }
       @case ('cierre') { <app-cierre-mes [embebido]="true" /> }
     }
 
@@ -267,7 +279,7 @@ export class Contabilidad {
   private avisos = inject(Avisos);
   readonly puedeGestionar = this.auth.tiene(P.CONTABILIDAD_GESTIONAR);
   readonly anulables = ANULABLES;
-  readonly pestanas: [Pestana, string][] = [['resumen', 'Resumen'], ['diario', 'Libro diario'], ['facturas', 'Facturas y cobros'], ['pagos', 'Cuentas por pagar'], ['informes', 'Informes'], ['plan', 'Plan de cuentas'], ['saldos', 'Saldos iniciales'], ['parametros', 'Parámetros'], ['cierre', 'Cierre de mes']];
+  readonly pestanas: [Pestana, string][] = [['resumen', 'Resumen'], ['diario', 'Libro diario'], ['facturas', 'Facturas y cobros'], ['pagos', 'Pagos a conductores'], ['proveedores', 'Proveedores'], ['compras', 'Compras'], ['egresos', 'Egresos'], ['conciliacion', 'Conciliación bancaria'], ['informes', 'Informes'], ['plan', 'Plan de cuentas'], ['saldos', 'Saldos iniciales'], ['parametros', 'Parámetros'], ['cierre', 'Cierre de mes']];
   readonly informes = INFORMES;
   readonly pestana = signal<Pestana>('resumen');
   readonly resumen = signal<any>(null);
@@ -318,6 +330,8 @@ export class Contabilidad {
     this.api.get<any>('/gestion/contabilidad/parametros').then(p => this.parametros.set(p)).catch(() => {});
   }
   ir(p: Pestana) { this.pestana.set(p); this.cargar(); }
+  // Las pestañas de la fase 2 tienen sus propios filtros
+  conPeriodo() { return !['proveedores', 'compras', 'egresos', 'conciliacion'].includes(this.pestana()); }
   async cargar() {
     const per = { desde: this.desde, hasta: this.hasta };
     try {
@@ -389,7 +403,8 @@ export class Contabilidad {
   marcarTodos(si: boolean) { this.marcados.set(new Set(si ? this.viajesFactura().map(v => v._id) : [])); }
   async guardarParametros() {
     this.trabajando.set(true);
-    try { this.parametros.set(await this.api.put<any>('/gestion/contabilidad/parametros', this.parametros())); this.avisos.ok('Parámetros guardados'); }
+    const { modeloIngresos, tipoSociedad } = this.parametros();
+    try { this.parametros.set(await this.api.put<any>('/gestion/contabilidad/parametros', { modeloIngresos, tipoSociedad })); this.avisos.ok('Parámetros guardados'); }
     catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
   async registrarSaldos() {
