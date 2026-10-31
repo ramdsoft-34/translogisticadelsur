@@ -71,7 +71,7 @@ fi
 # Script de publicación (de root, fuera del código de la rama: la rama no lo puede cambiar)
 install -m 755 -o root -g root "$PROD/deploy/dev/desplegar.sh" /usr/local/sbin/tls-desplegar-dev
 
-# Publicación automática: el servidor revisa la rama cada 2 minutos y publica solo si cambió (sin llaves en GitHub)
+# Publicación automática: el servidor revisa la rama cada 5 minutos y publica solo si cambió (sin llaves en GitHub)
 cp "$PROD/deploy/dev/tls-dev-publicar.service" "$PROD/deploy/dev/tls-dev-publicar.timer" /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now tls-dev-publicar.timer
 
@@ -90,5 +90,5 @@ certbot --nginx -d "$DOMINIO" --non-interactive --agree-tos --redirect --registe
 # pm2 del usuario tlsdev (aparte del de producción) y primera publicación
 env PATH="$PATH" pm2 startup systemd -u tlsdev --hp /home/tlsdev >/dev/null
 /usr/local/sbin/tls-desplegar-dev
-echo; echo "Listo. La rama csalcedo17 se publica sola cada 2 minutos si tiene cambios."
+echo; echo "Listo. La rama csalcedo17 se publica sola cada 5 minutos si tiene cambios."
 echo "Usuario de nginx: pruebas · contraseña en /root/tls-dev-clave-nginx.txt"

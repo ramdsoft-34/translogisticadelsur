@@ -5,3 +5,7 @@ After=network-online.target mongod-dev.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/tls-desplegar-dev
+# Baja prioridad: si producción necesita procesador o disco, la compilación de pruebas espera
+Nice=15
+IOSchedulingClass=idle
+CPUWeight=20
