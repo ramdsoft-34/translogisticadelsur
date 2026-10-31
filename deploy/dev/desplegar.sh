@@ -15,7 +15,7 @@ cambios=$(como "git diff --name-only $antes $despues")
 echo "Rama csalcedo17: $(como 'git log -1 --format="%h %s"')"
 
 if [ "$primera" = si ] || echo "$cambios" | grep -q '^frontend/'; then
-  { [ "$primera" = si ] || echo "$cambios" | grep -q '^frontend/package'; } && como 'cd frontend && npm ci --silent'
+  { [ "$primera" = si ] || echo "$cambios" | grep -q '^frontend/package'; } && como 'cd frontend && npm install --no-audit --no-fund --loglevel=error'
   como 'cd frontend && npx ng build --output-path dist-nuevo/frontend > /tmp/tls-dev-ng.log 2>&1' || { tail -30 /tmp/tls-dev-ng.log; exit 1; }
   como 'cd frontend && rm -rf dist && mv dist-nuevo dist'
   echo "frontend de pruebas publicado"
