@@ -13,21 +13,22 @@ import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
 import { Confirmar } from '../shared/confirmar';
 import { filtrar } from '../shared/filtro';
 
-type Pestana = 'resumen' | 'diario' | 'facturas' | 'pagos' | 'proveedores' | 'compras' | 'egresos' | 'conciliacion' | 'informes' | 'plan' | 'saldos' | 'parametros' | 'cierre';
+type Pestana = 'resumen' | 'diario' | 'facturas' | 'pagos' | 'proveedores' | 'compras' | 'egresos' | 'conciliacion' | 'tributario' | 'informes' | 'plan' | 'saldos' | 'parametros' | 'cierre';
 const INFORMES: [string, string][] = [['balance', 'Balance general'], ['resultados', 'Estado de resultados'], ['mayor', 'Libro mayor'], ['auxiliar', 'Auxiliar por cuenta'],
   ['cxc', 'Cuentas por cobrar'], ['cartera', 'Cartera por edades'], ['cxp', 'Por pagar a conductores'], ['cxpProv', 'Por pagar a proveedores'], ['retenciones', 'Retenciones'], ['diario', 'Libro diario']];
 // Orígenes de asiento que se pueden anular desde el libro diario (los de documentos se anulan desde su documento)
-const ANULABLES = ['MAN', 'GAS', 'COB', 'PAG', 'SI'];
+const ANULABLES = ['MAN', 'GAS', 'COB', 'PAG', 'SI', 'IMP'];
 
 // Contabilidad simplificada (apoyo administrativo; un contador debe revisarla).
 // Los asientos de liquidaciones, préstamos y abonos se hacen solos; aquí se facturan, cobran y pagan y se registran gastos.
 import { CierreMes } from './gestion-varios';
 import { ProveedoresCont, ComprasCont, ConciliacionCont, RetencionesCont } from './contabilidad-compras';
+import { TributarioCont } from './contabilidad-tributario';
 // Valor de una celda pegada de Excel: «1.234.567», «1234567,00» o «$ 1.234.567» → 1234567
 const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/[$\s]/g, '').replace(/,\d{1,2}$/, '').replace(/[.,]/g, ''); return Number(t) || 0; };
 @Component({
   selector: 'app-contabilidad',
-  imports: [FormsModule, Icono, MenuAcciones, Modal, Moneda, Confirmar, CierreMes, ProveedoresCont, ComprasCont, ConciliacionCont, RetencionesCont, ...FORMATOS],
+  imports: [FormsModule, Icono, MenuAcciones, Modal, Moneda, Confirmar, CierreMes, ProveedoresCont, ComprasCont, ConciliacionCont, RetencionesCont, TributarioCont, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Contabilidad</h1>
       <p class="sutil">Partida doble: facturas a clientes, cobros, pagos a conductores, gastos, libros e informes.
@@ -192,6 +193,7 @@ const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/
       @case ('compras') { <app-cont-compras vista="compras" /> }
       @case ('egresos') { <app-cont-compras vista="egresos" /> }
       @case ('conciliacion') { <app-cont-conciliacion /> }
+      @case ('tributario') { <app-cont-tributario /> }
       @case ('cierre') { <app-cierre-mes [embebido]="true" /> }
     }
 
@@ -279,7 +281,7 @@ export class Contabilidad {
   private avisos = inject(Avisos);
   readonly puedeGestionar = this.auth.tiene(P.CONTABILIDAD_GESTIONAR);
   readonly anulables = ANULABLES;
-  readonly pestanas: [Pestana, string][] = [['resumen', 'Resumen'], ['diario', 'Libro diario'], ['facturas', 'Facturas y cobros'], ['pagos', 'Pagos a conductores'], ['proveedores', 'Proveedores'], ['compras', 'Compras'], ['egresos', 'Egresos'], ['conciliacion', 'Conciliación bancaria'], ['informes', 'Informes'], ['plan', 'Plan de cuentas'], ['saldos', 'Saldos iniciales'], ['parametros', 'Parámetros'], ['cierre', 'Cierre de mes']];
+  readonly pestanas: [Pestana, string][] = [['resumen', 'Resumen'], ['diario', 'Libro diario'], ['facturas', 'Facturas y cobros'], ['pagos', 'Pagos a conductores'], ['proveedores', 'Proveedores'], ['compras', 'Compras'], ['egresos', 'Egresos'], ['conciliacion', 'Conciliación bancaria'], ['tributario', 'Tributario'], ['informes', 'Informes'], ['plan', 'Plan de cuentas'], ['saldos', 'Saldos iniciales'], ['parametros', 'Parámetros'], ['cierre', 'Cierre de mes']];
   readonly informes = INFORMES;
   readonly pestana = signal<Pestana>('resumen');
   readonly resumen = signal<any>(null);
@@ -331,7 +333,7 @@ export class Contabilidad {
   }
   ir(p: Pestana) { this.pestana.set(p); this.cargar(); }
   // Las pestañas de la fase 2 tienen sus propios filtros
-  conPeriodo() { return !['proveedores', 'compras', 'egresos', 'conciliacion'].includes(this.pestana()); }
+  conPeriodo() { return !['proveedores', 'compras', 'egresos', 'conciliacion', 'tributario'].includes(this.pestana()); }
   async cargar() {
     const per = { desde: this.desde, hasta: this.hasta };
     try {
