@@ -99,6 +99,14 @@ const empresaSchema = new Schema({
   contabilidad: {
     modeloIngresos: { type: String, enum: ['bruto', 'terceros'], default: 'bruto' },
     tipoSociedad: { type: String, enum: ['SAS', 'LTDA', 'SA', 'COOPERATIVA', 'OTRA'], default: 'SAS' },
+    // Compras y retenciones (fase 2). El transporte de carga está excluido de IVA: por defecto el IVA de las
+    // compras es mayor valor del gasto; si la empresa es responsable de IVA se lleva como descontable (240810).
+    uvt: { type: Number, default: 52374 },
+    ivaDescontable: { type: Boolean, default: false },
+    agenteReteIva: { type: Boolean, default: false },
+    reteIvaPct: { type: Number, default: 15 },
+    gmf: { type: Boolean, default: true },          // 4 x 1000 en los egresos por bancos
+    retenciones: { type: Schema.Types.Mixed, default: () => ({}) },   // { concepto: { pct, baseUvt } } que reemplazan la tabla base
   },
   smtp: {
     activo: { type: Boolean, default: false },
@@ -558,6 +566,78 @@ const facturaContSchema = new Schema({
 facturaContSchema.plugin(tenantPlugin);
 facturaContSchema.index({ empresa: 1, numero: 1 }, { unique: true });
 
+// ── Contabilidad fase 2: proveedores, compras (causación), egresos y conciliación bancaria ──
+const proveedorContSchema = new Schema({
+  tipoId: str({ default: 'N', uppercase: true }),      // N NIT · C cédula · E extranjería · P pasaporte
+  nit: str({ required: true }), dv: str(), nombre: str({ required: true }),
+  correo: str({ lowercase: true }), telefono: str(), whatsapp: str(), direccion: str(), ciudad: str(),
+  // Datos fiscales: deciden las retenciones que se le practican al causar
+  fiscal: {
+    regimen: { type: String, enum: ['ordinario', 'simple', 'no_responsable_iva', 'especial'], default: 'ordinario' },
+    responsableIva: { type: Boolean, default: true },
+    declarante: { type: Boolean, default: true },
+    autorretenedor: { type: Boolean, default: false },
+    granContribuyente: { type: Boolean, default: false },
+    ciiu: str(),
+    reteIcaPorMil: { type: Number, default: 0, min: 0, max: 30 },
+  },
+  conceptoRetencion: str({ default: 'servicios' }),
+  cuentaGasto: str({ default: '5195' }),
+  banco: { entidad: str(), tipoCuenta: str(), cuenta: str() },
+  activo: { type: Boolean, default: true },
+}, { timestamps: true });
+proveedorContSchema.plugin(tenantPlugin);
+proveedorContSchema.index({ empresa: 1, nit: 1 }, { unique: true });
+
+const compraContSchema = new Schema({
+  numero: { type: String, required: true },             // CC-0001 (causación)
+  fecha: { type: Date, required: true }, vence: fecha,
+  proveedor: { type: Schema.Types.ObjectId, ref: 'ProveedorCont', required: true },
+  proveedorNit: str(), proveedorNombre: str(),
+  tipoDocumento: { type: String, enum: ['factura', 'documento_soporte', 'cuenta_cobro', 'otro'], default: 'factura' },
+  documento: str(),                                     // número de la factura del proveedor
+  cufe: str(),
+  lineas: { type: [{ cuenta: String, descripcion: String, base: Number, ivaPct: Number, iva: Number, _id: false }], default: [] },
+  subtotal: Number, iva: Number, total: Number,
+  conceptoRetencion: str(), retefuentePct: Number, retefuente: Number,
+  reteIvaPct: Number, reteIva: Number, reteIcaPorMil: Number, reteIca: Number,
+  neto: Number, pagado: { type: Number, default: 0 },
+  estado: { type: String, enum: ['PENDIENTE', 'PAGADA', 'ANULADA'], default: 'PENDIENTE' },
+  asiento: str(), observaciones: str(),
+  xml: { type: String, default: '', select: false },    // XML de la factura electrónica, como soporte
+  usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+compraContSchema.plugin(tenantPlugin);
+compraContSchema.index({ empresa: 1, numero: 1 }, { unique: true });
+compraContSchema.index({ empresa: 1, proveedor: 1, documento: 1 });
+
+const egresoContSchema = new Schema({
+  numero: { type: String, required: true },             // CE-0001 (comprobante de egreso)
+  fecha: { type: Date, required: true },
+  proveedor: { type: Schema.Types.ObjectId, ref: 'ProveedorCont', default: null },
+  beneficiarioDoc: str(), beneficiario: str(),
+  cuenta: str({ default: '1110' }), medio: str({ default: 'transferencia' }), referencia: str(),
+  pagos: { type: [{ compra: String, documento: String, valor: Number, _id: false }], default: [] },
+  otros: { type: [{ cuenta: String, descripcion: String, valor: Number, _id: false }], default: [] },
+  total: Number, gmf: { type: Number, default: 0 }, concepto: str(),
+  estado: { type: String, enum: ['ACTIVO', 'ANULADO'], default: 'ACTIVO' },
+  asiento: str(),
+  usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+egresoContSchema.plugin(tenantPlugin);
+egresoContSchema.index({ empresa: 1, numero: 1 }, { unique: true });
+
+const conciliacionSchema = new Schema({
+  cuenta: str({ default: '1110' }), mes: str({ required: true }),     // aaaa-mm
+  saldoExtracto: Number, saldoLibros: Number, diferencia: Number,
+  extracto: { type: [{ fecha: Date, descripcion: String, valor: Number, asiento: String, _id: false }], default: [] },
+  librosSinBanco: { type: [Schema.Types.Mixed], default: [] }, bancoSinLibros: { type: [Schema.Types.Mixed], default: [] },
+  estado: { type: String, enum: ['BORRADOR', 'CERRADA'], default: 'BORRADOR' },
+  usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+conciliacionSchema.plugin(tenantPlugin);
+conciliacionSchema.index({ empresa: 1, cuenta: 1, mes: 1 }, { unique: true });
+
 // ── Remesas de Dulces & Dulces (base de viajes VPL y su remesa impresa) ────
 const remesaDulcesSchema = new Schema({
   vpl: str({ required: true }), fecha, zona: str(), peso: Number, manifiesto: str(),
@@ -586,6 +666,10 @@ export const LiquidacionConductor = modelo('LiquidacionConductor', liquidacionCo
 export const CuentaContable = modelo('CuentaContable', cuentaSchema);
 export const Asiento = modelo('Asiento', asientoSchema);
 export const FacturaCont = modelo('FacturaCont', facturaContSchema);
+export const ProveedorCont = modelo('ProveedorCont', proveedorContSchema);
+export const CompraCont = modelo('CompraCont', compraContSchema);
+export const EgresoCont = modelo('EgresoCont', egresoContSchema);
+export const ConciliacionCont = modelo('ConciliacionCont', conciliacionSchema);
 export const RemesaDulces = modelo('RemesaDulces', remesaDulcesSchema);
 export const RecorridoRastreo = modelo('RecorridoRastreo', recorridoRastreoSchema);
 export const Autorizacion = modelo('Autorizacion', autorizacionSchema);
