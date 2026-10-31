@@ -44,9 +44,34 @@ Pestaña **Tributario** en Contabilidad (rutas `/api/gestion/tributario/...`, se
 - **Factura electrónica de transporte**: se guarda el número y el CUFE (SHA-384, 96 caracteres) que da el proveedor tecnológico, y se descarga la **relación de remesas** (archivo plano del RNDC, Guía V11: facturador, adquirente, factura, CUFE, tipo de operación 12/13, radicado y consecutivo de la remesa, valor del flete, kilos) en .txt o Excel. El JSON trae también los ítems con las propiedades 01 (radicado), 02 (consecutivo) y 03 (flete) para el XML.
 - Cuentas nuevas: `2412` ICA por pagar y `530520` intereses de mora.
 
+## Fase 4 (rama `csalcedo17`): nómina, activos, cierre anual, documento soporte y notas
+
+Pestaña **Nómina y activos** en Contabilidad (rutas `/api/gestion/nomina`, `/api/gestion/activos`, `/api/gestion/cierre-anual`; servicio `services/gestion/nomina.js`):
+
+- **Empleados** (colección `Empleado`): salario ordinario o integral, contrato (indefinido, fijo, obra, aprendiz SENA), ingreso y retiro, nivel de riesgo ARL, EPS, pensión y caja.
+- **Nómina** mensual (`2026-10`) o quincenal (`2026-10-Q1`): días proporcionales al ingreso o retiro y novedades (horas extras, bonificaciones, pagos no salariales, retención, otras deducciones).
+  - Auxilio de transporte hasta 2 SMMLV; IBC entre 1 y 25 SMMLV (70 % en salario integral); salud y pensión del empleado 4 % + 4 %; fondo de solidaridad desde 4 SMMLV.
+  - Aportes: pensión 12 %, ARL según nivel (0,522 % a 6,96 %), caja 4 %; salud 8,5 %, ICBF 3 % y SENA 2 % solo si no aplica la exoneración del art. 114-1 E.T. (menos de 10 SMMLV).
+  - Provisiones: cesantías 8,33 %, intereses 1 %, prima 8,33 %, vacaciones 4,17 %.
+  - Asiento `NOM` por concepto (5105xx) contra 2505, 237005, 237030, 237006, 237010, 2365, 1365 y 2510 a 2525. Pago del neto y de la planilla PILA (asientos `NPA`; si se anulan, la nómina vuelve a quedar pendiente).
+  - Desprendible en PDF por empleado y Excel para la **nómina electrónica** (proveedor tecnológico).
+  - SMMLV 2026 $ 1.750.905 (Decreto 1469 de 2025) y auxilio de transporte $ 249.095 (Decreto 1470 de 2025), editables cada año.
+- **Activos fijos** (colección `ActivoFijo`): compra (opcionalmente contabilizada), depreciación en línea recta del mes para todos los activos (asiento `DEP-aaaa-mm`: 5160 contra 1592, una sola vez por mes, se puede anular) y venta o baja (utilidad 4245 o pérdida 5310).
+- **Cierre del año** (asiento `CIERRE-aaaa`, origen `CIE`): lleva a cero las clases 4 a 7 del año contra 3605 (utilidad) o 3610 (pérdida). El estado de resultados no cuenta el asiento de cierre; se puede reabrir anulándolo.
+- **Documento soporte**: al causar una compra con soporte «documento soporte» sin número, se numera con el consecutivo de la empresa (`DS-1`, prefijo editable).
+- **Notas crédito y débito** a facturas de venta (`NC-0001`, `ND-0001`, asiento `NOT`): toman el asiento de la factura en proporción (sirven para el modelo bruto y el de terceros) y ajustan el saldo por cobrar (`ajusteNeto`). La factura con notas no se anula; las notas crédito van a «devoluciones» en la exógena 1007.
+
+### Seguridad y protección de datos (fase 4)
+
+- **Permiso propio de nómina** (`nomina.ver`, `nomina.gestionar`): solo el administrador y el rol de contabilidad ven empleados, salarios, cuentas bancarias, desprendibles y la nómina electrónica (Ley 1581 de 2012). El rol de consulta sigue viendo los libros, donde la nómina aparece solo en totales.
+- El registro de auditoría de empleados no guarda el salario.
+- El XML de las facturas de proveedores se lee en tiempo lineal y con límites: un archivo armado a propósito (etiquetas sin cerrar) no deja la API ocupada.
+- Todo sigue filtrado por empresa (`tenantPlugin`) y validado con zod; los documentos se anulan desde su módulo para no descuadrar saldos.
+- Ambiente de pruebas: `deploy/dev/copiar-datos.sh` (en `main`) copia la base de producción y quita las claves del RNDC y del correo. Esa copia trae cédulas, teléfonos y ahora salarios: conviene que solo la usen personas autorizadas o anonimizar esos campos.
+
 ## Pruebas
 
-`backend/test/contabilidad.test.js`, `backend/test/compras.test.js` y `backend/test/tributario.test.js` (necesitan MongoDB local, como las demás pruebas; las reglas puras de retenciones, XML y conciliación no la necesitan):
+`backend/test/contabilidad.test.js`, `backend/test/compras.test.js`, `backend/test/tributario.test.js` y `backend/test/nomina.test.js` (necesitan MongoDB local, como las demás pruebas; las reglas puras de retenciones, XML y conciliación no la necesitan):
 
 ```
 cd backend && npm test
@@ -56,5 +81,4 @@ Antes de pasar la rama a `main`, correr todas las pruebas y revisar con el conta
 
 ## Siguientes fases
 
-4. Nómina y provisiones, activos y depreciación, cierre anual, documento soporte, notas crédito/débito y nómina electrónica.
 5. Envío automático de la relación de remesas al RNDC (proceso 86) con el usuario del web service de la empresa.
