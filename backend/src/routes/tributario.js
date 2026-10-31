@@ -1,9 +1,12 @@
 // Contabilidad fase 3 (tributario y fiscal). Se monta dentro de /api/gestion (ya autenticado).
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { Empresa } from '../models/index.js';
 import { permitir, ErrorHttp } from '../middleware/auth.js';
-import { P } from '../config/permisos.js';
+import { P, tienePermiso } from '../config/permisos.js';
+import * as feRndc from '../services/gestion/rndcFactura.js';
+import * as claveRndc from '../services/rndc/claveGuardada.js';
 import { auditar } from '../services/auditoria.js';
 import { parseFecha, fmtFecha } from '../utils/texto.js';
 import { libroExcel } from '../services/reportes/comun.js';
@@ -95,6 +98,37 @@ r.get('/tributario/facturas/:numero/relacion-remesas', ver, async (req, res) => 
   }
   if (req.query.formato === 'xlsx') return excel(req, res, { titulo: `Relación de remesas · factura ${x.fe.numero || x.factura}`, subtitulo: `Generada el ${fmtFecha(new Date())}`,
     columnas: x.columnas, filas: x.filas, nombre: `${nombre}.xlsx` });
+  res.json(x);
+});
+
+// ── Fase 5: registro de la factura electrónica en el RNDC (proceso 86) ──
+r.get('/tributario/fe/rndc', ver, async (req, res) => res.json(await feRndc.estadoEnvio(req.empresaId)));
+// Activar o apagar el envío automático: solo el administrador de la empresa
+r.put('/tributario/fe/rndc', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const { automatico } = z.object({ automatico: z.boolean() }).parse(req.body);
+  const x = await feRndc.configurarAutomatico(req.empresaId, automatico);
+  await auditar(req, 'factura_rndc_automatico', { detalle: { automatico } });
+  res.json(x);
+});
+// Cargar el AttachedDocument que devuelve la DIAN (texto del XML; el límite general del cuerpo es 1 MB)
+r.post('/tributario/facturas/:numero/fe/xml', gestionar, async (req, res) => {
+  const { xml } = z.object({ xml: z.string().min(100).max(feRndc.LIMITE_XML) }).parse(req.body);
+  const x = await feRndc.cargarXml(req.empresaId, req.params.numero, xml, req.usuario);
+  await auditar(req, 'factura_rndc_xml', { entidad: 'FacturaCont', detalle: { factura: x.factura, numeroFe: x.numeroFe, remesas: x.remesas } });
+  res.json(x);
+});
+// Enviar ahora. Pocas peticiones por persona: una contraseña equivocada repetida bloquea el usuario del RNDC.
+const limiteEnvio = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false,
+  keyGenerator: (req) => String(req.usuario?._id || 'anonimo'), message: { error: 'Demasiados envíos seguidos. Espere unos minutos.' } });
+r.post('/tributario/facturas/:numero/fe/rndc', gestionar, limiteEnvio, async (req, res) => {
+  const { clave } = z.object({ clave: z.string().max(100).optional().default('') }).parse(req.body || {});
+  // Con la contraseña registrada por la empresa, solo el administrador puede escribir otra a mano (igual que en el RNDC)
+  if (clave && !tienePermiso(req.usuario.rol, P.CONFIG_GESTIONAR) && await claveRndc.registrada(req.empresaId)) {
+    throw new ErrorHttp(403, 'Se usa la contraseña del RNDC registrada por la empresa: no se escribe a mano');
+  }
+  const x = await feRndc.enviarFactura(req.empresaId, req.params.numero, { clave, usuario: req.usuario });
+  if (x.claveRechazada && !clave) await auditar(req, 'clave_rndc_rechazada');
+  await auditar(req, 'factura_rndc', { entidad: 'FacturaCont', detalle: { factura: x.factura, estado: x.estado, radicado: x.radicado } });
   res.json(x);
 });
 
