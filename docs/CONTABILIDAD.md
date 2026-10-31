@@ -31,9 +31,22 @@ Pestañas nuevas en Contabilidad: **Proveedores**, **Compras**, **Egresos** y **
 - **Informes y resumen**: «Por pagar a proveedores» (`cxpProv`), retenciones con 2367, 2368 y 240810, y el saldo por pagar a proveedores en el resumen.
 - Cuentas nuevas en el plan base: `2367`, `240810`, `5130`, `5140`, `5155`.
 
+## Fase 3 (rama `csalcedo17`): tributario y fiscal
+
+Pestaña **Tributario** en Contabilidad (rutas `/api/gestion/tributario/...`, servicio `services/gestion/tributario.js`):
+
+- **Retención en la fuente (350, borrador)** del mes: retenciones de las compras agrupadas por concepto con su base (honorarios, servicios, transporte, arrendamientos, compras), otras retenciones registradas en 2365 (liquidaciones de conductores, asientos) y ReteIVA. Muestra el saldo contable de 2365 y 2367 para cuadrar.
+- **ICA y ReteICA**: ICA de la empresa = ingresos de la clase 41 del periodo × tarifa por mil del municipio + avisos y tableros + sobretasa bomberil − ReteICA que practicaron los clientes (1356). Con ingresos para terceros la base es solo la comisión (4145). ReteICA practicado a proveedores, por proveedor.
+- **Pago de impuestos** (asiento `IMP`, documento `IMP-<IMPUESTO>-<periodo>`): débito a 2365, 2367, 2368, 2412, 2408, 2404 o 2380; intereses a `530520`, sanción a `5315`; crédito a bancos o caja. Se anula desde el libro diario.
+- **Calendario de vencimientos**: la contadora carga las fechas (DIAN según el último dígito del NIT y municipio). Avisa lo vencido y lo que vence en 7 días; queda «pagado» al registrar el pago de esa obligación y periodo.
+- **Información exógena** (JSON o Excel para el prevalidador): 1001 pagos y retenciones (compras por concepto 5002/5004/5005/5007/5016 y fletes a conductores 5004), 1007 ingresos por cliente (con modelo de terceros: ingreso propio y lo recibido para terceros aparte), 1008 cuentas por cobrar y 1009 cuentas por pagar al 31 de diciembre. Calcula el DV del NIT.
+- **Certificados de retención** en PDF por proveedor y año: fuente, IVA o ICA.
+- **Factura electrónica de transporte**: se guarda el número y el CUFE (SHA-384, 96 caracteres) que da el proveedor tecnológico, y se descarga la **relación de remesas** (archivo plano del RNDC, Guía V11: facturador, adquirente, factura, CUFE, tipo de operación 12/13, radicado y consecutivo de la remesa, valor del flete, kilos) en .txt o Excel. El JSON trae también los ítems con las propiedades 01 (radicado), 02 (consecutivo) y 03 (flete) para el XML.
+- Cuentas nuevas: `2412` ICA por pagar y `530520` intereses de mora.
+
 ## Pruebas
 
-`backend/test/contabilidad.test.js` y `backend/test/compras.test.js` (necesitan MongoDB local, como las demás pruebas; las reglas puras de retenciones, XML y conciliación no la necesitan):
+`backend/test/contabilidad.test.js`, `backend/test/compras.test.js` y `backend/test/tributario.test.js` (necesitan MongoDB local, como las demás pruebas; las reglas puras de retenciones, XML y conciliación no la necesitan):
 
 ```
 cd backend && npm test
@@ -43,5 +56,5 @@ Antes de pasar la rama a `main`, correr todas las pruebas y revisar con el conta
 
 ## Siguientes fases
 
-3. Impuestos por pagar, borradores 350 e ICA con vencimientos, exógena y certificados, factura electrónica de transporte con remesas y envío al RNDC (procesoid 86).
 4. Nómina y provisiones, activos y depreciación, cierre anual, documento soporte, notas crédito/débito y nómina electrónica.
+5. Envío automático de la relación de remesas al RNDC (proceso 86) con el usuario del web service de la empresa.
