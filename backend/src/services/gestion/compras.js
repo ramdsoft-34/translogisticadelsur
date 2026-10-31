@@ -202,6 +202,9 @@ function desescapar(s) {
   return String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&amp;/g, '&');
 }
 
+// Lectores de XML UBL en tiempo lineal, compartidos con el envío de la factura electrónica al RNDC (fase 5)
+export const xmlUbl = { bloques, bloque, texto, atributo, cdatas, desescapar, quitarBloques };
+
 export function leerFacturaXml(xml) {
   let doc = String(xml || '');
   if (!doc.trim().startsWith('<')) throw new ErrorHttp(400, 'El archivo no es un XML');

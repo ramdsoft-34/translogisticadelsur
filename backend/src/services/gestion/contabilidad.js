@@ -80,7 +80,7 @@ export async function parametros(empresaId) {
     icaTarifaPorMil: c.icaTarifaPorMil || 0, avisosTablerosPct: c.avisosTablerosPct ?? 15, sobretasaBomberilPct: c.sobretasaBomberilPct || 0,
     vencimientos: (c.vencimientos || []).map(v => ({ obligacion: v.obligacion, periodo: v.periodo, fecha: v.fecha })),
     smmlv: c.smmlv || 1750905, auxilioTransporte: c.auxilioTransporte || 249095, exoneradaAportes: c.exoneradaAportes !== false,
-    prefijoDocumentoSoporte: c.prefijoDocumentoSoporte || 'DS' };
+    prefijoDocumentoSoporte: c.prefijoDocumentoSoporte || 'DS', rndcFeAutomatico: !!c.rndcFeAutomatico };
 }
 const PARAMETROS = ['modeloIngresos', 'tipoSociedad', 'uvt', 'ivaDescontable', 'agenteReteIva', 'reteIvaPct', 'gmf', 'retenciones',
   'icaTarifaPorMil', 'avisosTablerosPct', 'sobretasaBomberilPct', 'vencimientos', 'smmlv', 'auxilioTransporte', 'exoneradaAportes', 'prefijoDocumentoSoporte'];
@@ -237,6 +237,7 @@ export async function anularFactura(empresaId, numero) {
   if (f.estado === 'ANULADA') throw new ErrorHttp(409, 'La factura ya estaba anulada');
   if (f.cobrado > 0) throw new ErrorHttp(409, 'La factura ya tiene cobros: no se puede anular');
   if ((f.notas || []).some(n => n.estado !== 'ANULADA')) throw new ErrorHttp(409, 'La factura tiene notas crédito o débito: anúlelas primero');
+  if (f.fe?.rndc?.estado === 'ACEPTADA') throw new ErrorHttp(409, 'La factura electrónica ya está registrada en el RNDC: se corrige con una nota crédito');
   if (f.asiento) await anularAsiento(empresaId, f.asiento, { desdeDocumento: true });
   await Viaje.updateMany({ empresa: empresaId, facturaCont: f._id }, { $set: { facturaCont: null } });
   f.estado = 'ANULADA'; await f.save();
