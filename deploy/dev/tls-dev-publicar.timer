@@ -1,0 +1,9 @@
+[Unit]
+Description=Revisar la rama csalcedo17 cada 2 minutos
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target

@@ -71,11 +71,9 @@ fi
 # Script de publicación (de root, fuera del código de la rama: la rama no lo puede cambiar)
 install -m 755 -o root -g root "$PROD/deploy/dev/desplegar.sh" /usr/local/sbin/tls-desplegar-dev
 
-# Llave para GitHub Actions: solo puede ejecutar la publicación de pruebas (comando forzado)
-if [ ! -f /root/.ssh/tls_dev_actions ]; then
-  ssh-keygen -q -t ed25519 -N '' -C 'github-actions-dev' -f /root/.ssh/tls_dev_actions
-  echo "command=\"/usr/local/sbin/tls-desplegar-dev\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding $(cat /root/.ssh/tls_dev_actions.pub)" >> /root/.ssh/authorized_keys
-fi
+# Publicación automática: el servidor revisa la rama cada 2 minutos y publica solo si cambió (sin llaves en GitHub)
+cp "$PROD/deploy/dev/tls-dev-publicar.service" "$PROD/deploy/dev/tls-dev-publicar.timer" /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now tls-dev-publicar.timer
 
 # nginx con usuario y contraseña + HTTPS
 if [ ! -f /etc/nginx/tls-dev.htpasswd ]; then
@@ -92,5 +90,5 @@ certbot --nginx -d "$DOMINIO" --non-interactive --agree-tos --redirect --registe
 # pm2 del usuario tlsdev (aparte del de producción) y primera publicación
 env PATH="$PATH" pm2 startup systemd -u tlsdev --hp /home/tlsdev >/dev/null
 /usr/local/sbin/tls-desplegar-dev
-echo; echo "Listo. Llave privada para GitHub Actions (secreto DEV_SSH_KEY): /root/.ssh/tls_dev_actions"
+echo; echo "Listo. La rama csalcedo17 se publica sola cada 2 minutos si tiene cambios."
 echo "Usuario de nginx: pruebas · contraseña en /root/tls-dev-clave-nginx.txt"

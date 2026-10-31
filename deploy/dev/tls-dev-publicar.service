@@ -1,0 +1,7 @@
+[Unit]
+Description=Publicar la rama csalcedo17 en dev.translogisticadelsur.com si tiene cambios
+After=network-online.target mongod-dev.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tls-desplegar-dev
