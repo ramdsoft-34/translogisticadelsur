@@ -71,7 +71,7 @@ Pestaña **Nómina y activos** en Contabilidad (rutas `/api/gestion/nomina`, `/a
 
 ## Pruebas
 
-`backend/test/contabilidad.test.js`, `backend/test/compras.test.js`, `backend/test/tributario.test.js` y `backend/test/nomina.test.js` (necesitan MongoDB local, como las demás pruebas; las reglas puras de retenciones, XML y conciliación no la necesitan):
+`backend/test/contabilidad.test.js`, `backend/test/compras.test.js`, `backend/test/tributario.test.js`, `backend/test/nomina.test.js` y `backend/test/rndcFactura.test.js` (necesitan MongoDB local, como las demás pruebas; las reglas puras de retenciones, XML y conciliación no la necesitan):
 
 ```
 cd backend && npm test
@@ -79,6 +79,27 @@ cd backend && npm test
 
 Antes de pasar la rama a `main`, correr todas las pruebas y revisar con el contador el modelo de ingresos y el plan de cuentas.
 
-## Siguientes fases
+## Fase 5 (rama `csalcedo17`): factura electrónica registrada en el RNDC (proceso 86)
 
-5. Envío automático de la relación de remesas al RNDC (proceso 86) con el usuario del web service de la empresa.
+En **Tributario → Factura electrónica · RNDC** (servicio `services/gestion/rndcFactura.js`, rutas `/api/gestion/tributario/fe/rndc` y `/api/gestion/tributario/facturas/:numero/fe/...`):
+
+1. Se descarga la relación de remesas (fase 3) para el proveedor tecnológico.
+2. Cuando la DIAN valida la factura, se carga el **AttachedDocument** que entrega el proveedor. La plataforma lo revisa antes de aceptarlo: respuesta de la DIAN «Documento validado» (código 02), CUFE de 96 caracteres, número y CUFE iguales a los registrados, tipo de operación 12, emisor = la empresa, adquirente = el cliente, y cada línea con **01 radicado, 02 consecutivo y 03 flete** de las remesas de la factura (las que faltan o sobran impiden el envío; un flete distinto queda como aviso). Con el XML aceptado se llenan el número y el CUFE de la factura.
+3. **Enviar al RNDC**: mensaje tipo 1, `procesoid` 86, con `NUMNITEMPRESATRANSPORTE` y `ARCHIVOBASE64` (el XML de la DIAN tal cual, en base64), una factura por mensaje. Queda el radicado; si el RNDC la rechaza queda el motivo.
+4. **Envío automático** (lo activa el administrador): cada 5 minutos el servidor envía las facturas con XML cargado de las empresas que lo activaron, con la contraseña del RNDC guardada de la empresa (hasta 10 por vuelta y empresa, de una en una y por el limitador del RNDC).
+
+Estados: «Por enviar» (`PENDIENTE`), «Sin conexión, se reintenta» (`ERROR_CONEXION`, a los 10, 20, 40… minutos, hasta 6 intentos), «Registrada» (`ACEPTADA`), «Rechazada» (`RECHAZADA`, datos que corrige una persona: no se reintenta sola) y «No se pudo enviar» (`ERROR`, agotó los reintentos). Una factura registrada en el RNDC no se anula ni se le cambia el XML: se corrige con nota crédito. El simulador local (`npm run simulador`) responde el proceso 86 y rechaza la misma factura dos veces.
+
+### Seguridad y protección de datos (fase 5)
+
+- El XML se lee en tiempo lineal y con límites (800 KB, sin `DOCTYPE` ni `ENTITY`); se guarda aparte (`XmlFacturaRndc`, contenido con `select: false`) y no viaja en los listados.
+- La contraseña del RNDC es la guardada cifrada de la empresa (AES-256-GCM con llave del servidor, ver `services/rndc/claveGuardada.js`) o, si no hay guardada, la que se escribe para ese envío; nunca se guarda en la factura y el registro de transacciones la oculta. Con contraseña registrada, solo el administrador puede escribir otra (igual que en las operaciones del RNDC).
+- Si el RNDC rechaza la contraseña guardada, se marca inválida y el envío automático se detiene (el RNDC bloquea el usuario tras varios intentos). Hay límite de 20 envíos manuales cada 15 minutos por persona.
+- Cargar y enviar: permiso `contabilidad.gestionar`; activar el envío automático: `config.gestionar` (administrador). Todo queda en la auditoría sin el XML ni la contraseña.
+- El servidor de pruebas no envía al RNDC real mientras `RNDC_PERMITIR_PRODUCCION` esté apagado.
+
+Pruebas: `backend/test/rndcFactura.test.js` (las reglas puras sin base de datos; la API con MongoDB local y el simulador del RNDC).
+
+## Pendiente de confirmar con el Ministerio
+
+- Si el RNDC exige un usuario del web service distinto para la factura electrónica, se configura ese usuario y su contraseña en Configuración > RNDC.
