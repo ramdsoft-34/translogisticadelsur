@@ -67,7 +67,7 @@ const nueva = () => ({ _id: '', nombre: '', encabezado: '{saludo},\n\nReporte de
         </div>
       </div>
       <ng-container pie>
-        @if (form()._id && !esBase()) { <button type="button" class="peligro" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()" style="margin-right:auto">Eliminar</button> }
+        @if (form()._id && !esBase()) { <button type="button" class="peligro" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()">Eliminar</button> }
         <button type="button" (click)="cerrar.emit()">Cerrar</button>
         @if (!esBase()) { <button class="primario" type="submit" form="form-plantilla" [disabled]="guardando()">{{ guardando() ? 'Guardando…' : 'Guardar plantilla' }}</button> }
       </ng-container>

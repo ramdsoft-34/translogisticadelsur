@@ -198,7 +198,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
       </form>
       <app-vista-rndc [variables]="vistaRndc()" (cerrar)="vistaRndc.set(null)" />
       <ng-container pie>
-        <button type="button" class="texto" style="margin-right:auto" (click)="verVista()" title="Solo muestra las variables del RNDC; no guarda ni envía nada">Solo mostrar lo que se enviaría</button>
+        <button type="button" class="texto" (click)="verVista()" title="Solo muestra las variables del RNDC; no guarda ni envía nada">Solo mostrar lo que se enviaría</button>
         <button type="button" (click)="abierto.set(false)">Cancelar</button>
         @if (puedeEditar) { <button class="primario" type="submit" form="form-tercero" [disabled]="trabajando()">{{ sincronizar && puedeRndc ? 'Guardar y registrar en el RNDC' : 'Guardar' }}</button> }
       </ng-container>

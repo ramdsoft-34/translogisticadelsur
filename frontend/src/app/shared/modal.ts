@@ -16,7 +16,7 @@ import { Icono } from './icono';
           <button class="cerrar" type="button" (click)="cerrar.emit()" aria-label="Cerrar"><app-icono nombre="x" [tam]="18" /></button>
         </header>
         <div class="cuerpo"><ng-content /></div>
-        <footer [class.centrado]="pieCentrado()"><ng-content select="[pie]" /></footer>
+        <footer><ng-content select="[pie]" /></footer>
       </div>
     </dialog>`,
   styles: [`
@@ -38,9 +38,8 @@ import { Icono } from './icono';
     .cerrar { min-height: 0; width: 38px; height: 38px; padding: 0; border-radius: 11px; box-shadow: none; flex: none; }
     .cerrar:hover:not(:disabled) { background: var(--gris-8); border-color: var(--gris-8); color: var(--gris-0); }
     .cuerpo { padding: 26px var(--lado) 36px; overflow: auto; flex: 1 1 auto; }
-    footer { padding: 12px var(--lado); display: flex; justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--gris-0);
+    footer { padding: 12px var(--lado); display: flex; justify-content: center; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--gris-0);
       border-top: 1px solid var(--gris-2); box-shadow: 0 -10px 28px -22px rgba(15, 23, 42, .4); flex: none; }
-    footer.centrado { justify-content: center; }
     footer:empty { display: none; }
     @media (max-width: 960px) { dialog { inset: 0; width: 100vw; } }
     @media (max-width: 640px) { header { padding: 10px 16px; min-height: 58px; } header h2 { font-size: 17px; } .esc { display: none; } .cuerpo { padding: 16px; } footer { padding: 10px 16px; } }
@@ -51,8 +50,6 @@ export class Modal {
   readonly titulo = input('');
   readonly abierto = input(false);
   readonly ancho = input(false);
-  // Botones del pie centrados (por defecto van a la derecha)
-  readonly pieCentrado = input(false);
   readonly cerrar = output<void>();
   private dlg = viewChild.required<ElementRef<HTMLDialogElement>>('dlg');
 

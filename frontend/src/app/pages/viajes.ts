@@ -127,7 +127,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       @if (viajes().length) { <app-cargar-mas [mostrados]="viajes().length" [total]="total()" [cargando]="cargandoMas()" unidad="viajes" (mas)="cargarMas()" /> }
     </div>
 
-    <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : (registradosTanda().length ? 'Registrar otro viaje' : 'Registrar viaje')" [abierto]="abierto()" (cerrar)="cerrarFormulario()" [ancho]="true" [pieCentrado]="true">
+    <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : (registradosTanda().length ? 'Registrar otro viaje' : 'Registrar viaje')" [abierto]="abierto()" (cerrar)="cerrarFormulario()" [ancho]="true">
       <div class="registro-columnas">
       <div class="col-form">
       @let f = form();

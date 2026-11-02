@@ -344,7 +344,7 @@ import { Confirmar } from './confirmar';
           <button type="button" class="primario" (click)="modoVer.set(false)" [disabled]="!previa()"><app-icono nombre="enviar" [tam]="16" />Expedir</button>
         } @else {
         @if (previa()?.estado === 'registrado') {
-          <button type="button" confirmar="Clic otra vez: sin manifiesto" (confirmado)="sinManifiesto()" [disabled]="trabajando()" style="margin-right:auto" title="Quitar este viaje de la lista de manifiestos">No requiere manifiesto</button>
+          <button type="button" confirmar="Clic otra vez: sin manifiesto" (confirmado)="sinManifiesto()" [disabled]="trabajando()" title="Quitar este viaje de la lista de manifiestos">No requiere manifiesto</button>
         }
         <button type="button" (click)="cerrar.emit()">Cerrar</button>
         <button type="button" (click)="guardar()" [disabled]="trabajando() || !previa()">Guardar cambios</button>

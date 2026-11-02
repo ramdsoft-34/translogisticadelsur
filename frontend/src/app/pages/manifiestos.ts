@@ -339,7 +339,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         } @empty { <tr><td colspan="5" class="vacio">Este viaje no tiene correos enviados. Revise que el cliente tenga destinatarios en Configuración → Correo.</td></tr> }</tbody>
       </table></div>
       <ng-container pie>
-        <button type="button" (click)="correosViaje.set(null)" style="margin-right:auto">Cerrar</button>
+        <button type="button" (click)="correosViaje.set(null)">Cerrar</button>
         <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="enviarDeNuevo(['manifiesto'])" [disabled]="trabajando()"
           title="Envía solo el PDF del manifiesto a los destinatarios del cliente"><app-icono nombre="enviar" [tam]="16" />Reenviar manifiesto</button>
         <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="enviarDeNuevo(['salida'])" [disabled]="trabajando()"
