@@ -127,7 +127,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       @if (viajes().length) { <app-cargar-mas [mostrados]="viajes().length" [total]="total()" [cargando]="cargandoMas()" unidad="viajes" (mas)="cargarMas()" /> }
     </div>
 
-    <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : (registradosTanda().length ? 'Registrar otro viaje' : 'Registrar viaje')" [abierto]="abierto()" (cerrar)="cerrarFormulario()" [ancho]="true">
+    <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : (registradosTanda().length ? 'Registrar otro viaje' : 'Registrar viaje')" [abierto]="abierto()" (cerrar)="cerrarFormulario()" [ancho]="true" [pieCentrado]="true">
       <div class="registro-columnas">
       <div class="col-form">
       @let f = form();
@@ -224,7 +224,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       </aside>
       </div>
       <ng-container pie>
-        @if (form()._id && !bloqueado() && puedeRegistrar) { <button class="peligro" type="button" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()" style="margin-right:auto">Eliminar</button> }
+        @if (form()._id && !bloqueado() && puedeRegistrar) { <button class="peligro" type="button" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()">Eliminar</button> }
         @if (form()._id && rastreoHabilitado() && puedeRegistrar) {
           <button type="button" (click)="rastreoForm()?.activo ? null : activarRastreo()" [disabled]="guardando() || rastreoForm()?.activo"
             [title]="rastreoForm()?.activo ? 'El viaje ya se está rastreando' : 'Rastrear este viaje con Sur Track'"><app-icono nombre="ubicacion" [tam]="15" />{{ rastreoForm()?.activo ? 'Rastreo activo' : 'Rastrear' }}</button>
