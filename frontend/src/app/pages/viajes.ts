@@ -25,7 +25,7 @@ import { RouterLink } from '@angular/router';
 import { AutorizacionAdmin } from '../core/autorizacion.service';
 
 interface Formulario {
-  licencia?: string; numeroManifiesto?: string;
+  licencia?: string; conLicencia?: boolean; numeroManifiesto?: string;
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
   placa: string; remolque: string; conductor: string; titular: string;
   pesoKg: number | null; cantidad: number | null; conAuxiliar: boolean; diasAuxiliar: number | null; planilla: string;
@@ -154,7 +154,10 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         </div>
 
         <label for="v-lic">Licencia:</label>
-        <input id="v-lic" name="licencia" [(ngModel)]="f.licencia" placeholder="Categoría-número" />
+        <div class="con-casilla">
+          <input id="v-lic" name="licencia" [(ngModel)]="f.licencia" placeholder="Categoría-número" />
+          <input type="checkbox" name="conLicencia" [(ngModel)]="f.conLicencia" title="Incluir la licencia en el reporte de WhatsApp" aria-label="Incluir la licencia en el reporte de WhatsApp" />
+        </div>
 
         <label for="v-placa">Placa:</label>
         <div>
@@ -217,13 +220,8 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         <label for="v-fecha">Fecha:</label>
         <input id="v-fecha" type="date" class="corto" name="fecha" [(ngModel)]="f.fecha" (ngModelChange)="fechaFormulario($event)" [disabled]="bloqueado()" required />
       </form>
-      </div>
-      <aside class="col-wa" aria-label="Reporte por WhatsApp">
-        <h3>Reporte por WhatsApp</h3>
-        <ng-container [ngTemplateOutlet]="panelWa" [ngTemplateOutletContext]="{ enFormulario: true }" />
-      </aside>
-      </div>
-      <ng-container pie>
+      <!-- Botones debajo del formulario (no en el pie de la ventana) -->
+      <div class="acciones-registro">
         @if (form()._id && !bloqueado() && puedeRegistrar) { <button class="peligro" type="button" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()">Eliminar</button> }
         @if (form()._id && rastreoHabilitado() && puedeRegistrar) {
           <button type="button" (click)="rastreoForm()?.activo ? null : activarRastreo()" [disabled]="guardando() || rastreoForm()?.activo"
@@ -243,7 +241,13 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             </div>
           }
         }
-      </ng-container>
+      </div>
+      </div>
+      <aside class="col-wa" aria-label="Reporte por WhatsApp">
+        <h3>Reporte por WhatsApp</h3>
+        <ng-container [ngTemplateOutlet]="panelWa" [ngTemplateOutletContext]="{ enFormulario: true }" />
+      </aside>
+      </div>
     </app-modal>
 
     <app-modal titulo="Reporte de vehículos por WhatsApp" [abierto]="waAbierto()" (cerrar)="waAbierto.set(false)" [ancho]="true">
@@ -333,6 +337,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     a.chip.gps { text-decoration: none; }
     .placas-conductor { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
     .registro-columnas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 16px; align-items: start; }
+    .acciones-registro { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--gris-2); }
     .col-form { padding: 12px 14px; border: 1px solid var(--gris-2); border-radius: var(--radio-l); background: var(--gris-0); }
     .registro { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 6px 10px; align-items: center; font-size: 13.5px; }
     .registro > label, .registro > .etq { font-weight: 700; white-space: nowrap; }
@@ -548,7 +553,7 @@ export class Viajes {
       titular: v.titular?._id || '', pesoKg: v.pesoKg, cantidad: v.cantidad, conAuxiliar: v.conAuxiliar, diasAuxiliar: v.diasAuxiliar || null, planilla: v.planilla || '', tarifa: v.tarifa,
       flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones, estado: v.estado, historico: !!v.historico,
       requiereManifiesto: v.requiereManifiesto !== false,
-      licencia: (v as any).licencia || '', numeroManifiesto: (v as any).numerosManuales?.manifiesto || '',
+      licencia: (v as any).licencia || '', conLicencia: !!(v as any).licencia, numeroManifiesto: (v as any).numerosManuales?.manifiesto || '',
     });
     this.preguntarManifiesto.set(false);
     this.habilitarRndc = false;
@@ -593,10 +598,11 @@ export class Viajes {
     if (lic) this.form.update(f => ({ ...f, licencia: lic }));
     const placas: string[] = t?.placas || [];
     this.placasConductor.set(placas);
+    // Con Enter sobre el conductor se sigue en el destino (sin empresa elegida, en la empresa)
+    setTimeout(() => document.getElementById(this.form().cliente ? 'v-dest' : 'v-cli')?.focus(), 30);
     if (!placas.length) return;
     // La primera es la placa principal del conductor (si la tiene)
     this.form.update(f => ({ ...f, placa: placas[0], remolque: f.remolque || t.remolque || '' }));
-    setTimeout(() => document.getElementById('v-peso')?.focus(), 30);
     this.revisarDocumentos();
   }
 
@@ -645,7 +651,8 @@ export class Viajes {
     if (!f._id) f.requiereManifiesto = !!requiere;
     if (!f.conductor && !this.bloqueado()) { this.avisos.mostrar('Seleccione el conductor', 'error'); return; }
     const cuerpo: any = { ...f, placa: f.placa.toUpperCase(), remolque: (f.remolque || '').toUpperCase(), tarifaRef: f.tarifaRef || null,
-      licencia: (f.licencia || '').trim(), numeroManifiesto: (f.numeroManifiesto || '').trim().toUpperCase() };
+      licencia: f.conLicencia ? (f.licencia || '').trim() : '', numeroManifiesto: (f.numeroManifiesto || '').trim().toUpperCase() };
+    delete cuerpo.conLicencia;
     delete cuerpo._id; delete cuerpo.estado; delete cuerpo.titular;
     if (!cuerpo.numeroManifiesto && !f._id) delete cuerpo.numeroManifiesto;
     for (const k of ['pesoKg', 'cantidad', 'diasAuxiliar', 'tarifa', 'flete', 'anticipo']) if (cuerpo[k] === null || cuerpo[k] === '') delete cuerpo[k];

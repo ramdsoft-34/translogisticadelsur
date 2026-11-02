@@ -2,7 +2,7 @@
 // (conductores, propietarios, tenedores…), vehículos y el catálogo DIVIPOLA.
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { Cliente, Tarifa, Tercero, Vehiculo, Municipio, Viaje, Empresa, pob } from '../models/index.js';
+import { Cliente, Tarifa, Tercero, Vehiculo, Municipio, Viaje, Empresa, Liquidacion, FacturaCont, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { auditar, cambios } from '../services/auditoria.js';
@@ -65,6 +65,20 @@ r.put('/clientes/:id', editarTarifas, async (req, res) => {
   res.json(c);
 });
 
+// Solo se elimina un cliente sin viajes, liquidaciones ni facturas (con historial se desactiva); sus destinos se eliminan con él.
+r.delete('/clientes/:id', editarTarifas, async (req, res) => {
+  const c = await Cliente.findOne(deEmpresa(req, { _id: req.params.id })).lean();
+  if (!c) throw new ErrorHttp(404, 'Cliente no encontrado');
+  const [viajes, liquidaciones, facturas] = await Promise.all([Viaje.countDocuments(deEmpresa(req, { cliente: c._id })),
+    Liquidacion.countDocuments(deEmpresa(req, { cliente: c._id })), FacturaCont.countDocuments(deEmpresa(req, { cliente: c._id }))]);
+  const usos = [viajes && `${viajes} viaje(s)`, liquidaciones && `${liquidaciones} liquidación(es)`, facturas && `${facturas} factura(s)`].filter(Boolean);
+  if (usos.length) throw new ErrorHttp(409, `${c.nombre} tiene ${usos.join(', ')}: no se puede eliminar. Desactívelo en «Editar cliente».`);
+  const { deletedCount: destinos } = await Tarifa.deleteMany(deEmpresa(req, { cliente: c._id }));
+  await Cliente.deleteOne(deEmpresa(req, { _id: c._id }));
+  await auditar(req, 'eliminar_cliente', { entidad: 'Cliente', entidadId: c._id, detalle: { nombre: c.nombre, nit: c.nit, destinos } });
+  res.json({ ok: true, destinos });
+});
+
 // ── Destinos y tarifas ──────────────────────────────────────────────────────
 
 async function clienteDeEmpresa(req, id) {
@@ -107,6 +121,17 @@ r.put('/tarifas/:id', editarTarifas, async (req, res) => {
   const x = await Tarifa.findOneAndUpdate(deEmpresa(req, { _id: req.params.id }), { $set: d }, { new: true, runValidators: true });
   await auditar(req, 'editar_tarifa', { entidad: 'Tarifa', entidadId: x._id, detalle: { destino: x.destino, cambios: cambios(antes, x.toObject(), Object.keys(d)) } });
   res.json(x);
+});
+
+// Solo se elimina un destino que ningún viaje usa (con viajes se desactiva, así el historial conserva su tarifa).
+r.delete('/tarifas/:id', editarTarifas, async (req, res) => {
+  const t = await Tarifa.findOne(deEmpresa(req, { _id: req.params.id })).lean();
+  if (!t) throw new ErrorHttp(404, 'Destino no encontrado');
+  const viajes = await Viaje.countDocuments(deEmpresa(req, { tarifaRef: t._id }));
+  if (viajes) throw new ErrorHttp(409, `El destino ${t.destino} tiene ${viajes} viaje(s) registrados: no se puede eliminar. Desactívelo en «Editar».`);
+  await Tarifa.deleteOne(deEmpresa(req, { _id: t._id }));
+  await auditar(req, 'eliminar_tarifa', { entidad: 'Tarifa', entidadId: t._id, detalle: { destino: t.destino, cliente: String(t.cliente) } });
+  res.json({ ok: true });
 });
 
 // ── Terceros ────────────────────────────────────────────────────────────────

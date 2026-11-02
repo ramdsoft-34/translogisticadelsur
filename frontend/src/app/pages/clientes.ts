@@ -12,6 +12,7 @@ import { FORMATOS } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
 import { Moneda } from '../shared/moneda';
 import { filtrar } from '../shared/filtro';
+import { Confirmar } from '../shared/confirmar';
 
 const clienteVacio = () => ({ nombre: '', tipoId: 'N', nit: '', dv: '', razonSocial: '', sedeRemitente: '', correos: '', whatsapp: '', activo: true,
   siglas: '', politicaAuxiliar: 'registrado', valorAuxiliarSinAnticipo: 30000 });
@@ -23,7 +24,7 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
 
 @Component({
   selector: 'app-clientes',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, Moneda, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, Moneda, Confirmar, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Clientes y tarifas</h1><p class="sutil">Generadores de carga y los destinos que atienden, con su tarifa, flete y anticipo habituales.</p></div>
@@ -46,7 +47,8 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
           <div class="tarjeta">
             <div class="pagina-cab" style="margin-bottom:8px"><div><h2 style="margin:0">{{ c.nombre }}</h2>
               <span class="sutil">{{ c.razonSocial }} · {{ c.tipoId }} {{ c.nit }}{{ c.dv ? '-' + c.dv : '' }} · Sede remitente: {{ c.sedeRemitente ? nombreSede(c.sedeRemitente) : '—' }}</span></div>
-              <div class="acciones">@if (puedeEditar) { <button class="pequeno" (click)="editarCliente(c)">Editar cliente</button> }
+              <div class="acciones">@if (puedeEditar) { <button class="pequeno" (click)="editarCliente(c)">Editar cliente</button>
+                  <button class="pequeno peligro" confirmar="Clic otra vez para eliminar" (confirmado)="eliminarCliente(c)" title="Eliminar el cliente y sus destinos (solo si no tiene viajes)">Eliminar cliente</button> }
                 @if (puedeTarifas) { <button class="pequeno primario" (click)="nuevaTarifa()"><app-icono nombre="mas" [tam]="15" />Destino</button> }</div></div>
             <div class="filtro-rapido"><input type="search" placeholder="Buscar destino o municipio" aria-label="Buscar destino o municipio" [value]="qTar()" (input)="qTar.set($any($event.target).value)" /></div>
             <div class="tabla-caja" style="box-shadow:none">
@@ -58,7 +60,8 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
                       @if (t.destinatario?.numId && t.destinatario.numId !== c.nit) { <small class="sutil d-bloque">{{ t.destinatario.tipoId }} {{ t.destinatario.numId }}</small> } } @else { <span class="sutil">—</span> }</td>
                     <td class="num">{{ t.tarifaCliente | pesos }}</td><td class="num">{{ t.fleteConductor | pesos }}</td>
                     <td class="num">{{ t.anticipoHabitual | pesos }}</td><td class="num">{{ t.tarifaAuxiliar | pesos }} / {{ t.auxiliarPagado | pesos }}</td>
-                    <td>@if (puedeTarifas) { <button class="pequeno" (click)="editarTarifa(t)">Editar</button> }</td></tr>
+                    <td>@if (puedeTarifas) { <div class="acciones-fila"><button class="pequeno" (click)="editarTarifa(t)">Editar</button>
+                      <button class="pequeno peligro" confirmar="¿Eliminar?" (confirmado)="eliminarTarifa(t)" [title]="'Eliminar el destino ' + t.destino">Eliminar</button></div> }</td></tr>
                 } @empty { <tr><td colspan="8" class="vacio">Sin destinos. Agregue los destinos habituales con su tarifa.</td></tr> }</tbody></table>
             </div>
           </div>
@@ -131,6 +134,7 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
     </app-modal>`,
   styles: [`.d-bloque { display: block; }
     .columnas { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+    .acciones-fila { display: flex; gap: 6px; justify-content: flex-end; }
     tr.activo { background: var(--primario-claro); box-shadow: inset 4px 0 0 var(--primario); }
     @media (max-width: 900px) { .columnas { grid-template-columns: 1fr; } }`],
 })
@@ -202,6 +206,21 @@ export class Clientes {
       const r: any = f._id ? await this.api.put(`/maestros/clientes/${f._id}`, cuerpo) : await this.api.post('/maestros/clientes', cuerpo);
       this.avisos.ok('Cliente guardado'); this.abiertoCliente.set(false);
       this.sel.set(r); await this.cargar();
+    } catch (e) { this.avisos.error(e); }
+  }
+
+  // Solo se eliminan clientes y destinos sin viajes; con historial el servidor indica que se desactiven
+  async eliminarCliente(c: any) {
+    try {
+      const r: any = await this.api.delete(`/maestros/clientes/${c._id}`);
+      this.avisos.ok(`Cliente ${c.nombre} eliminado${r.destinos ? ` con ${r.destinos} destino(s)` : ''}`);
+      this.sel.set(null); await this.cargar();
+    } catch (e) { this.avisos.error(e); }
+  }
+  async eliminarTarifa(t: any) {
+    try {
+      await this.api.delete(`/maestros/tarifas/${t._id}`);
+      this.avisos.ok(`Destino ${t.destino} eliminado`); await this.cargar();
     } catch (e) { this.avisos.error(e); }
   }
 
