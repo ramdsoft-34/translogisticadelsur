@@ -13,7 +13,7 @@ import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
 import { Confirmar } from '../shared/confirmar';
 import { filtrar } from '../shared/filtro';
 
-type Pestana = 'resumen' | 'diario' | 'facturas' | 'pagos' | 'proveedores' | 'compras' | 'egresos' | 'conciliacion' | 'tributario' | 'nomina' | 'informes' | 'plan' | 'saldos' | 'parametros' | 'cierre';
+type Pestana = 'resumen' | 'diario' | 'facturas' | 'pagos' | 'proveedores' | 'compras' | 'egresos' | 'conciliacion' | 'tributario' | 'nomina' | 'rentabilidad' | 'informes' | 'plan' | 'saldos' | 'parametros' | 'cierre';
 const INFORMES: [string, string][] = [['balance', 'Balance general'], ['resultados', 'Estado de resultados'], ['mayor', 'Libro mayor'], ['auxiliar', 'Auxiliar por cuenta'],
   ['cxc', 'Cuentas por cobrar'], ['cartera', 'Cartera por edades'], ['cxp', 'Por pagar a conductores'], ['cxpProv', 'Por pagar a proveedores'], ['retenciones', 'Retenciones'], ['diario', 'Libro diario']];
 // Orígenes de asiento que se pueden anular desde el libro diario (los de documentos se anulan desde su documento)
@@ -25,11 +25,12 @@ import { CierreMes } from './gestion-varios';
 import { ProveedoresCont, ComprasCont, ConciliacionCont, RetencionesCont } from './contabilidad-compras';
 import { TributarioCont } from './contabilidad-tributario';
 import { NominaCont } from './contabilidad-nomina';
+import { RentabilidadCont } from './contabilidad-rentabilidad';
 // Valor de una celda pegada de Excel: «1.234.567», «1234567,00» o «$ 1.234.567» → 1234567
 const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/[$\s]/g, '').replace(/,\d{1,2}$/, '').replace(/[.,]/g, ''); return Number(t) || 0; };
 @Component({
   selector: 'app-contabilidad',
-  imports: [FormsModule, Icono, MenuAcciones, Modal, Moneda, Confirmar, CierreMes, ProveedoresCont, ComprasCont, ConciliacionCont, RetencionesCont, TributarioCont, NominaCont, ...FORMATOS],
+  imports: [FormsModule, Icono, MenuAcciones, Modal, Moneda, Confirmar, CierreMes, ProveedoresCont, ComprasCont, ConciliacionCont, RetencionesCont, TributarioCont, NominaCont, RentabilidadCont, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Contabilidad</h1>
       <p class="sutil">Partida doble: facturas a clientes, cobros, pagos a conductores, gastos, libros e informes.
@@ -199,6 +200,7 @@ const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/
       @case ('conciliacion') { <app-cont-conciliacion /> }
       @case ('tributario') { <app-cont-tributario /> }
       @case ('nomina') { <app-cont-nomina /> }
+      @case ('rentabilidad') { <app-cont-rentabilidad /> }
       @case ('cierre') { <app-cierre-mes [embebido]="true" /> }
     }
 
@@ -259,6 +261,7 @@ const aNumero = (v: string | undefined) => { const t = String(v || '').replace(/
               <div class="campo"><label for="fg-x">Concepto</label><input id="fg-x" name="x" [(ngModel)]="fm.concepto" required /></div>
               <div class="campo"><label for="fg-v">Valor</label><div class="moneda"><input id="fg-v" moneda name="v" [(ngModel)]="fm.valor" required /></div></div>
               <div class="campo"><label for="fg-t">Proveedor / tercero</label><input id="fg-t" name="t" [(ngModel)]="fm.tercero" /></div>
+              <div class="campo"><label for="fg-pl">Vehículo (placa, opcional)</label><input id="fg-pl" name="pl" [(ngModel)]="fm.placa" maxlength="7" style="text-transform:uppercase" placeholder="Para la rentabilidad del vehículo" /></div>
               <div class="campo"><label for="fg-p">Pagado con</label><select id="fg-p" name="p" [(ngModel)]="fm.formaPago"><option value="1110">1110 Bancos</option><option value="1105">1105 Caja</option><option value="2335">2335 Por pagar</option></select></div>
             }
             @case ('manual') {
@@ -295,7 +298,7 @@ export class Contabilidad {
   private avisos = inject(Avisos);
   readonly puedeGestionar = this.auth.tiene(P.CONTABILIDAD_GESTIONAR);
   readonly anulables = ANULABLES;
-  readonly pestanas: [Pestana, string][] = [['resumen', 'Resumen'], ['diario', 'Libro diario'], ['facturas', 'Facturas y cobros'], ['pagos', 'Pagos a conductores'], ['proveedores', 'Proveedores'], ['compras', 'Compras'], ['egresos', 'Egresos'], ['conciliacion', 'Conciliación bancaria'], ['tributario', 'Tributario'], ['nomina', 'Nómina y activos'], ['informes', 'Informes'], ['plan', 'Plan de cuentas'], ['saldos', 'Saldos iniciales'], ['parametros', 'Parámetros'], ['cierre', 'Cierre de mes']];
+  readonly pestanas: [Pestana, string][] = [['resumen', 'Resumen'], ['diario', 'Libro diario'], ['facturas', 'Facturas y cobros'], ['pagos', 'Pagos a conductores'], ['proveedores', 'Proveedores'], ['compras', 'Compras'], ['egresos', 'Egresos'], ['conciliacion', 'Conciliación bancaria'], ['tributario', 'Tributario'], ['nomina', 'Nómina y activos'], ['rentabilidad', 'Rentabilidad'], ['informes', 'Informes'], ['plan', 'Plan de cuentas'], ['saldos', 'Saldos iniciales'], ['parametros', 'Parámetros'], ['cierre', 'Cierre de mes']];
   readonly informes = INFORMES;
   readonly pestana = signal<Pestana>('resumen');
   readonly resumen = signal<any>(null);
@@ -347,7 +350,7 @@ export class Contabilidad {
   }
   ir(p: Pestana) { this.pestana.set(p); this.cargar(); }
   // Las pestañas de la fase 2 tienen sus propios filtros
-  conPeriodo() { return !['proveedores', 'compras', 'egresos', 'conciliacion', 'tributario', 'nomina'].includes(this.pestana()); }
+  conPeriodo() { return !['proveedores', 'compras', 'egresos', 'conciliacion', 'tributario', 'nomina', 'rentabilidad'].includes(this.pestana()); }
   async cargar() {
     const per = { desde: this.desde, hasta: this.hasta };
     try {
@@ -387,7 +390,7 @@ export class Contabilidad {
       cobro: ['/gestion/contabilidad/cobros', { factura: f.factura, valor: f.valor, fecha: f.fecha, cuenta: f.cuenta }],
       nota: [`/gestion/contabilidad/facturas/${f.factura}/notas`, { tipo: f.tipoNota, valor: f.valor, motivo: f.motivo, fecha: f.fecha, cude: f.cude || '' }],
       pago: ['/gestion/contabilidad/pagos', { liquidacion: f.liquidacion, valor: f.valor, fecha: f.fecha, cuenta: f.cuenta }],
-      gasto: ['/gestion/contabilidad/gastos', { fecha: f.fecha, cuenta: f.cuenta, concepto: f.concepto, valor: f.valor, tercero: f.tercero, formaPago: f.formaPago }],
+      gasto: ['/gestion/contabilidad/gastos', { fecha: f.fecha, cuenta: f.cuenta, concepto: f.concepto, valor: f.valor, tercero: f.tercero, formaPago: f.formaPago, placa: String(f.placa || '').trim().toUpperCase() }],
       manual: ['/gestion/contabilidad/asientos', { fecha: f.fecha, debito: f.debito, credito: f.credito, valor: f.valor, concepto: f.concepto, centroCosto: f.centroCosto }],
       cuenta: ['/gestion/contabilidad/cuentas', { codigo: f.codigo, nombre: f.nombre, tipo: f.tipoCuenta, naturaleza: f.naturaleza }],
     };

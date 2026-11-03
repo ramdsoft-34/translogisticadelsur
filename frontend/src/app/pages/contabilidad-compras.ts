@@ -172,6 +172,7 @@ export class ProveedoresCont {
           <div class="campo"><label for="cp-d">N.° de factura</label><input id="cp-d" name="d" [(ngModel)]="f.documento" /></div>
           <div class="campo"><label for="cp-f">Fecha</label><input id="cp-f" type="date" name="f" [(ngModel)]="f.fecha" required /></div>
           <div class="campo"><label for="cp-v">Vence</label><input id="cp-v" type="date" name="v" [(ngModel)]="f.vence" /></div>
+          <div class="campo"><label for="cp-pl">Vehículo (placa, opcional)</label><input id="cp-pl" name="pl" [(ngModel)]="f.placa" maxlength="7" style="text-transform:uppercase" placeholder="Para la rentabilidad del vehículo" /></div>
           <div class="campo"><label for="cp-k">Retención en la fuente</label><select id="cp-k" name="k" [(ngModel)]="f.conceptoRetencion" (change)="recalcular()">@for (c of conceptos; track c[0]) { <option [value]="c[0]">{{ c[1] }}</option> }</select></div>
         </form>
         <div class="tabla-caja" style="margin-top:10px"><table>
@@ -352,7 +353,8 @@ export class ComprasCont {
     this.trabajando.set(true);
     try {
       const c = await this.api.post<any>('/gestion/contabilidad/compras', { proveedor: f.proveedor, fecha: f.fecha, vence: f.vence, tipoDocumento: f.tipoDocumento, documento: f.documento,
-        cufe: f.cufe, conceptoRetencion: f.conceptoRetencion, manual: this.manual(f), xml: f.xml, lineas: f.lineas.filter((l: any) => Number(l.base) > 0) });
+        cufe: f.cufe, conceptoRetencion: f.conceptoRetencion, manual: this.manual(f), xml: f.xml, placa: String(f.placa || '').trim().toUpperCase(),
+        lineas: f.lineas.filter((l: any) => Number(l.base) > 0) });
       this.avisos.ok(`Compra ${c.numero} causada · neto a pagar ${c.neto.toLocaleString('es-CO')}`); this.compra.set(null); this.cargar();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
