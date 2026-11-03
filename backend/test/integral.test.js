@@ -560,7 +560,12 @@ test('Plantillas de WhatsApp: crear, predeterminar, vista previa y eliminar', as
 test('Nuevo en el RNDC: próxima sede de una empresa y vista previa sin enviar', async () => {
   const nit = '9007770001';
   assert.equal((await s.adminA.get(`/api/maestros/terceros/sedes?numId=${nit}`)).body.siguiente, '1');
-  for (const c of ['1', '3']) assert.equal((await s.adminA.post('/api/maestros/terceros', { tipoId: 'N', numId: nit, nombres: 'Sedes SAS', sede: { codigo: c, nombre: `S${c}` }, roles: ['destinatario'] })).status, 201);
+  for (const c of ['1', '3']) assert.equal((await s.adminA.post('/api/maestros/terceros', { tipoId: 'N', numId: nit, nombres: 'Sedes SAS', sede: { codigo: c, nombre: `S${c}` }, direccion: 'CALLE 1', codMunicipio: '52001000', roles: ['destinatario'] })).status, 201);
+  // Sin dirección ni municipio no se crea; el vehículo nuevo solo exige el peso vacío
+  assert.equal((await s.adminA.post('/api/maestros/terceros', { tipoId: 'C', numId: '70808080', roles: ['conductor'] })).status, 400);
+  assert.equal((await s.adminA.post('/api/maestros/terceros', { tipoId: 'C', numId: '70808080', direccion: 'CALLE 2', codMunicipio: '52001000', roles: ['conductor'] })).status, 201);
+  assert.equal((await s.adminA.post('/api/maestros/vehiculos', { placa: 'QWE852' })).status, 400);
+  assert.equal((await s.adminA.post('/api/maestros/vehiculos', { placa: 'QWE852', pesoVacio: 4800 })).status, 201);
   const r = (await s.adminA.get(`/api/maestros/terceros/sedes?numId=${nit}`)).body;
   assert.equal(r.sedes.length, 2); assert.equal(r.siguiente, '4');
   const v = await s.adminA.post('/api/maestros/terceros/vista-rndc', { tipoId: 'N', numId: nit, nombres: 'Sedes SAS', sede: { codigo: '4', nombre: 'NUEVA' }, roles: ['destinatario'] });
@@ -1243,7 +1248,7 @@ test('Cambios en vivo: un cambio de una empresa llega por el canal SSE solo a es
   assert.equal((await fetch(`${base}/api/eventos`)).status, 401, 'sin sesión no hay canal');
   await new Promise(r => setTimeout(r, 100));
   await api().post('/api/maestros/terceros').set('Authorization', `Bearer ${tokA}`).set('X-Cliente-Id', 'pestana-1')
-    .send({ tipoId: 'C', numId: '70707070', nombres: 'EN VIVO', apellido1: 'PRUEBA', roles: ['titular'] });
+    .send({ tipoId: 'C', numId: '70707070', nombres: 'EN VIVO', apellido1: 'PRUEBA', direccion: 'CALLE 3', codMunicipio: '52001000', roles: ['titular'] });
   await new Promise(r => setTimeout(r, 200));
   const texto = a.recibidos.join('');
   assert.match(texto, /event: cambio/);

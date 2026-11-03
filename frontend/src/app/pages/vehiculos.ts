@@ -138,7 +138,7 @@ const vacio = () => ({
           <div class="campo" [hidden]="!ver('carroceria')" [class.falta]="falta('carroceria')"><label for="vca">Código carrocería RNDC</label><input id="vca" name="carroceria" [(ngModel)]="f.carroceria" /></div>
           <div class="campo" [hidden]="!ver('combustible')" [class.falta]="falta('combustible')"><label for="vcb">Código combustible RNDC</label><input id="vcb" name="comb" [(ngModel)]="f.combustible" /></div>
           <div class="campo" [hidden]="!ver('ejes')" [class.falta]="falta('ejes')"><label for="vej">Ejes</label><input id="vej" type="number" name="ejes" [(ngModel)]="f.ejes" /></div>
-          <div class="campo" [hidden]="!ver('pesoVacio')" [class.falta]="falta('pesoVacio')"><label for="vpv">Peso vacío (kg)</label><input id="vpv" type="number" name="pv" [(ngModel)]="f.pesoVacio" /></div>
+          <div class="campo" [hidden]="!ver('pesoVacio')" [class.falta]="falta('pesoVacio')"><label for="vpv">Peso vacío (kg) <span class="obligatorio">*</span></label><input id="vpv" type="number" min="1" name="pv" [(ngModel)]="f.pesoVacio" required /></div>
           <div class="campo" [hidden]="soloFaltantes()"><label for="vpb">Peso bruto vehicular (kg)</label><input id="vpb" type="number" name="pbv" [(ngModel)]="f.pbv" /></div>
           <div class="campo" [hidden]="!ver('capacidad')" [class.falta]="falta('capacidad')"><label for="vcp">Capacidad (kg)</label><input id="vcp" type="number" name="cap" [(ngModel)]="f.capacidad" /></div>
           @if (!soloFaltantes()) {
@@ -335,6 +335,8 @@ export class Vehiculos {
 
   async guardar() {
     const f = this.form();
+    // El peso vacío es lo único obligatorio; lo demás lo trae el RNDC o es opcional
+    if (!(Number(f.pesoVacio) > 0)) { this.avisos.mostrar('Escriba el peso vacío del vehículo (kg)', 'error'); return; }
     const cuerpo = this.cuerpo();
     this.trabajando.set(true);
     try {

@@ -173,7 +173,7 @@ test('Maestros: siglas y política del cliente, peso automático, placas y edad 
   Object.assign(s, { tPasto: t1.body._id, tIpiales: t2.body._id, tTuquerres: t3.body._id, tTumaco: t4.body._id });
 
   const cond = await s.admin.post('/api/maestros/terceros', { tipoId: 'C', numId: '98765432', nombres: 'Wilson', apellido1: 'Montero', apellido2: 'Rivera',
-    roles: ['conductor'], fechaNacimiento: '1980-05-20', licencia: { categoria: 'C2', numero: '98765432', vence: '2035-01-01' }, placas: ['ABC123'], placaPrincipal: 'slf645' });
+    direccion: 'CALLE 5', codMunicipio: '52001000', roles: ['conductor'], fechaNacimiento: '1980-05-20', licencia: { categoria: 'C2', numero: '98765432', vence: '2035-01-01' }, placas: ['ABC123'], placaPrincipal: 'slf645' });
   assert.equal(cond.status, 201, JSON.stringify(cond.body));
   assert.deepEqual(cond.body.placas, ['SLF645', 'ABC123']);
   assert.equal(cond.body.placaPrincipal, 'SLF645');
@@ -185,9 +185,9 @@ test('Maestros: siglas y política del cliente, peso automático, placas y edad 
   const lista = await s.admin.get('/api/maestros/terceros?rol=conductor&conPlacas=1&q=wilson');
   assert.equal(lista.body[0].placas[0], 'SLF645');
 
-  const veh = await s.admin.post('/api/maestros/vehiculos', { placa: 'SLF645', pbv: 9000, soat: { numero: 'S1', vence: '2035-01-01' }, venceTecnomecanica: '2035-01-01' });
+  const veh = await s.admin.post('/api/maestros/vehiculos', { placa: 'SLF645', pesoVacio: 4000, pbv: 9000, soat: { numero: 'S1', vence: '2035-01-01' }, venceTecnomecanica: '2035-01-01' });
   assert.equal(veh.status, 201, JSON.stringify(veh.body));
-  const vencido = await s.admin.post('/api/maestros/vehiculos', { placa: 'VEN001', pbv: 9000, soat: { numero: 'S2', vence: '2020-01-01' }, venceTecnomecanica: '2035-01-01' });
+  const vencido = await s.admin.post('/api/maestros/vehiculos', { placa: 'VEN001', pesoVacio: 4000, pbv: 9000, soat: { numero: 'S2', vence: '2020-01-01' }, venceTecnomecanica: '2035-01-01' });
   assert.equal(vencido.status, 201);
 });
 

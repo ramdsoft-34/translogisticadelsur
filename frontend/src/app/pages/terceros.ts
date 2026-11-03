@@ -152,9 +152,9 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
             @for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
           <div class="campo" [hidden]="soloFaltantes()"><label for="tn">Número</label><input id="tn" name="numId" [(ngModel)]="f.numId" [disabled]="editando() || !!origen()" required />
             @if (f.tipoId === 'N') { <small>NIT con dígito de verificación, sin guion.</small> }</div>
-          <div class="campo" [hidden]="!ver('nombres')" [class.falta]="falta('nombres')"><label for="tno">{{ f.tipoId === 'N' ? 'Razón social' : 'Nombres' }}</label><input id="tno" name="nombres" [(ngModel)]="f.nombres" required /></div>
+          <div class="campo" [hidden]="!ver('nombres')" [class.falta]="falta('nombres')"><label for="tno">{{ f.tipoId === 'N' ? 'Razón social' : 'Nombres' }}</label><input id="tno" name="nombres" [(ngModel)]="f.nombres" /></div>
           @if (f.tipoId !== 'N') {
-            <div class="campo" [hidden]="!ver('apellido1')" [class.falta]="falta('apellido1')"><label for="ta1">Primer apellido</label><input id="ta1" name="ap1" [(ngModel)]="f.apellido1" required /></div>
+            <div class="campo" [hidden]="!ver('apellido1')" [class.falta]="falta('apellido1')"><label for="ta1">Primer apellido</label><input id="ta1" name="ap1" [(ngModel)]="f.apellido1" /></div>
             <div class="campo" [hidden]="soloFaltantes()"><label for="ta2">Segundo apellido</label><input id="ta2" name="ap2" [(ngModel)]="f.apellido2" /></div>
           } @else {
             <div class="campo" [hidden]="!ver('sede.codigo')" [class.falta]="falta('sede.codigo')"><label for="ts">Código de sede</label><input id="ts" name="sede" maxlength="6" [(ngModel)]="f.sede.codigo" /></div>
@@ -162,8 +162,8 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
           }
           <div class="campo" [hidden]="!ver('celular')" [class.falta]="falta('celular')"><label for="tcel">Celular</label><input id="tcel" name="cel" maxlength="10" [(ngModel)]="f.celular" /></div>
           <div class="campo" [hidden]="!ver('telefono')" [class.falta]="falta('telefono')"><label for="ttel">Teléfono fijo</label><input id="ttel" name="tel" maxlength="7" [(ngModel)]="f.telefono" /></div>
-          <div class="campo" [hidden]="!ver('direccion')" [class.falta]="falta('direccion')"><label for="tdir">Dirección</label><input id="tdir" name="dir" maxlength="60" [(ngModel)]="f.direccion" /></div>
-          @if (ver('codMunicipio')) { <app-municipio etiqueta="Municipio" [(codigo)]="f.codMunicipio" [class.falta]="falta('codMunicipio')" /> }
+          <div class="campo" [hidden]="!ver('direccion')" [class.falta]="falta('direccion')"><label for="tdir">Dirección <span class="obligatorio">*</span></label><input id="tdir" name="dir" maxlength="60" [(ngModel)]="f.direccion" required /></div>
+          @if (ver('codMunicipio')) { <app-municipio etiqueta="Municipio *" [(codigo)]="f.codMunicipio" [class.falta]="falta('codMunicipio')" /> }
           <div class="campo ancho" [hidden]="soloFaltantes()"><span class="etiqueta">Roles</span><div class="acciones">
             @for (r of roles; track r[0]) { <label class="casilla"><input type="checkbox" [checked]="f.roles.includes(r[0])" (change)="alternarRol(r[0])" />{{ r[1] }}</label> }
           </div></div>
@@ -417,6 +417,9 @@ export class Terceros {
 
   async guardar() {
     const f = this.form();
+    // Solo la dirección y el municipio son obligatorios; lo demás lo trae el RNDC o es opcional
+    const faltan = [!String(f.direccion || '').trim() && 'la dirección', !f.codMunicipio && 'el municipio'].filter(Boolean);
+    if (faltan.length) { this.avisos.mostrar(`Escriba ${faltan.join(' y ')}`, 'error'); return; }
     const cuerpo = this.cuerpo();
     this.trabajando.set(true);
     try {

@@ -145,21 +145,18 @@ const CAMPOS_VEHICULO = {
   CODTIPOIDTENEDOR: ['tenedor.tipoId', 'Tipo de documento del tenedor'], NUMIDTENEDOR: ['tenedor.numId', 'Documento del tenedor'],
 };
 
-// Problemas según el diccionario oficial, más dos condiciones del manual:
-// los conductores llevan número y categoría de licencia, y las personas naturales, apellido.
+// Datos que la empresa debe escribir: del tercero solo dirección y municipio; del vehículo, solo el peso vacío.
+// Lo demás lo trae el RNDC (consulta oficial) y, si no lo tiene, es opcional: lo vacío no se envía en el XML.
+export const OBLIGATORIOS_MAESTRO = {
+  11: ['NUMNITEMPRESATRANSPORTE', 'CODTIPOIDTERCERO', 'NUMIDTERCERO', 'NOMENCLATURADIRECCION', 'CODMUNICIPIORNDC'],
+  12: ['NUMNITEMPRESATRANSPORTE', 'NUMPLACA', 'PESOVEHICULOVACIO'],
+};
+
+// Problemas según el diccionario oficial (tamaño y formato de lo que se envía), exigiendo solo los obligatorios de arriba.
 export function problemasMaestro(proceso, variables, doc) {
+  const obligatorios = OBLIGATORIOS_MAESTRO[proceso];
   let problemas = validarVariables(proceso, variables);
-  if (proceso === 11) {
-    // El diccionario marca la fecha de la licencia como obligatoria, pero el RNDC registra
-    // terceros sin licencia (titulares, propietarios): solo se exige a quien conduce o la tiene.
-    const conLicencia = (doc.roles || []).includes('conductor') || txt(doc.licencia?.numero);
-    if (!conLicencia) problemas = problemas.filter(p => !/LICENCIA/.test(p));
-    if ((doc.roles || []).includes('conductor')) {
-      if (!txt(doc.licencia?.numero)) problemas.push('NUMLICENCIACONDUCCION: es obligatorio para conductores');
-      if (!txt(doc.licencia?.categoria)) problemas.push('CODCATEGORIALICENCIACONDUCCION: es obligatorio para conductores');
-    }
-    if (doc.tipoId !== 'N' && !txt(doc.apellido1)) problemas.push('PRIMERAPELLIDOIDTERCERO: es obligatorio');
-  }
+  if (obligatorios) problemas = problemas.filter(p => !/: es obligatorio$/.test(p) || obligatorios.includes(p.split(':')[0]));
   return [...new Set(problemas)];
 }
 

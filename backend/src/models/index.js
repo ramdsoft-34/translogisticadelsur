@@ -196,7 +196,7 @@ tarifaSchema.index({ empresa: 1, cliente: 1, destino: 1 }, { unique: true, colla
 const terceroSchema = new Schema({
   tipoId: str({ required: true, uppercase: true }),   // C N P E T U
   numId: str({ required: true }),
-  nombres: str({ required: true }),                   // o razón social
+  nombres: str(),                                     // o razón social (lo trae el RNDC; puede quedar vacío)
   apellido1: str(), apellido2: str(),
   sede: { codigo: str(), nombre: str() },
   telefono: str(), celular: str(), direccion: str(), codMunicipio: str(),

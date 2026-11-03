@@ -345,3 +345,6 @@ input[type="search"] { -webkit-appearance: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+
+/* Marca de campo obligatorio en los formularios */
+.obligatorio { color: var(--rojo); font-weight: 700; }

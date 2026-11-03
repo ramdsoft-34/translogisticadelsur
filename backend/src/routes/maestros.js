@@ -134,6 +134,15 @@ r.delete('/tarifas/:id', editarTarifas, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Lo único que se exige al crear (lo demás lo trae el RNDC o es opcional)
+function exigirDatosTercero(d) {
+  const faltan = [!String(d.direccion || '').trim() && 'dirección', !d.codMunicipio && 'municipio'].filter(Boolean);
+  if (faltan.length) throw new ErrorHttp(400, `Escriba ${faltan.join(' y ')} del tercero`);
+}
+function exigirDatosVehiculo(d) {
+  if (!(Number(d.pesoVacio) > 0)) throw new ErrorHttp(400, 'Escriba el peso vacío del vehículo (kg)');
+}
+
 // ── Terceros ────────────────────────────────────────────────────────────────
 
 r.get('/terceros', ver, async (req, res) => {
@@ -215,7 +224,9 @@ r.post('/vehiculos/vista-rndc', ver, async (req, res) => {
 });
 
 r.post('/terceros', editar, async (req, res) => {
-  const x = await Tercero.create({ ...terceroSchema.parse(req.body), empresa: req.empresaId });
+  const d = terceroSchema.parse(req.body);
+  exigirDatosTercero(d);
+  const x = await Tercero.create({ ...d, empresa: req.empresaId });
   await auditar(req, 'crear_tercero', { entidad: 'Tercero', entidadId: x._id, detalle: { numId: x.numId } });
   res.status(201).json(x.toJSON());
 });
@@ -253,6 +264,7 @@ r.get('/vehiculos', ver, async (req, res) => {
 });
 r.post('/vehiculos', editar, async (req, res) => {
   const d = vehiculoSchema.parse(req.body);
+  exigirDatosVehiculo(d);
   await validarConductor(req, d.conductorHabitual);
   await validarConductor(req, d.titularHabitual);
   const x = await Vehiculo.create({ ...d, empresa: req.empresaId });
