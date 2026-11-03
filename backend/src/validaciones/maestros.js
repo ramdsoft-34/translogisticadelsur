@@ -29,6 +29,8 @@ export const clienteSchema = z.object({
   activo: z.boolean().optional(),
 });
 
+// Minutos (o vacío = lo de la empresa)
+const minutos = z.union([z.null(), z.literal("").transform(() => null), z.coerce.number().int().min(0).max(4320)]).optional();
 export const tarifaSchema = z.object({
   cliente: z.string().min(1),
   destino: z.string().trim().min(2).max(120),
@@ -39,6 +41,15 @@ export const tarifaSchema = z.object({
   operacion: z.string().trim().max(1).toUpperCase().optional().default(''),
   destinatario: z.object({ tipoId: z.union([tipoId, z.literal('')]).optional().default(''), numId: t(15), sede: t(6) }).optional(),
   activo: z.boolean().optional(),
+  // RNDC por destino (fase 7)
+  tipoOperacionRemesa: z.enum(['', 'G', 'P', 'C', 'V']).optional(),
+  tipoConsolidacion: z.enum(['', 'R', 'D', 'A', 'N']).optional(),
+  tipoEmpaque: z.string().trim().max(3).optional(),
+  horaCitaCargue: z.string().regex(/^(\d{2}:\d{2})?$/, 'hora HH:MM').optional(),
+  horaCitaDescargue: z.string().regex(/^(\d{2}:\d{2})?$/, 'hora HH:MM').optional(),
+  minutosPactoCargue: minutos, minutosPactoDescargue: minutos, minutosViaje: minutos, minutosEspera: minutos,
+  kmRuta: z.coerce.number().min(0).max(3000).nullable().optional(),
+  cargueMonitoreado: z.boolean().optional(), descargueMonitoreado: z.boolean().optional(),
 });
 
 const placaLibre = z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^[A-Z0-9]{5,6}$/, 'placa inválida'));
