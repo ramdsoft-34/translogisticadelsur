@@ -46,7 +46,7 @@ Este documento resume lo que se verificó en la documentación oficial del Minis
 | Vehículo | 12 | Vehículos → «RNDC», con la misma regla de cambios. |
 | Remesa terrestre de carga | 3 | Manifiestos → «Enviar». Expide la remesa y luego el manifiesto. |
 | Manifiesto de carga | 4 | Incluye el bloque `REMESASMAN` (proceso 43) y, en un reemplazo, `MANNROMANIFIESTOTRANSBORDO` (manual 8.9.2). |
-| Cumplido de remesa | 5 | Manifiestos → «Cumplir». |
+| Cumplido de remesa | 5 | Manifiestos → «Cumplir» (entradas al cargue y al descargue; llegada y salida si el punto no se monitoreó). |
 | Cumplido de manifiesto | 6 | Manifiestos → «Cumplir». |
 | Anular remesa | 9 | Por enviar → «Anular remesa». El RNDC solo lo permite dentro de la primera hora y si la remesa no tiene manifiesto vigente. |
 | Anular manifiesto | 32 | Manifestados → «Anular». Los motivos R, T, G, C y V quedan marcados como reemplazo. |
@@ -71,6 +71,19 @@ Este documento resume lo que se verificó en la documentación oficial del Minis
 
 - Datos en este orden: MEC, Fecha, Placa, Remolque (solo si hay), Config, Orig, Dest, Mercancia, Conductor, Empresa, Obs (solo si el RNDC las entregó) y Seguro.
 - Separados por CR+LF y sin tildes.
+
+## Cumplidos con la guía de 2026 y tiempos logísticos (fase 7)
+
+Fuentes: *Guía Cumplido de Remesa y Manifiesto V1* (Ministerio de Transporte, 2 de junio de 2026) y *Guía de registro de tiempos logísticos V2* (monitoreo de flota, Resolución 20243040058015).
+
+- **Cumplido de remesa (5):** la empresa reporta la **entrada al cargue** y la **entrada al descargue**. La llegada y la salida de cada punto las reporta la empresa de monitoreo de flota (registro de monitoreo de manifiesto). Si un punto no se monitoreó (sede sin coordenadas, novedad RNMM o incumplimiento de la empresa de monitoreo), la empresa escribe también su llegada y salida (guía de tiempos, numeral 11). En la ventana de cumplido hay una casilla por punto: «La empresa de monitoreo reportó…».
+- **Mercancía consolidada con recolección o distribución en varios puntos:** no aplica el monitoreo; el RNDC usa 1 h de cargue + 1 h de descargue. Solo van las dos entradas.
+- **Horas propuestas** (`GET /api/rndc/viajes/:id/cumplido/propuesta`, servicio `services/rndc/tiemposCumplido.js`): GPS de Sur Track (inicio del viaje, llegada a menos de 1 km del destino, primera y última entrega) y, si no hay, los tiempos del destino: cita de cargue, tiempo pactado, tiempo de viaje de la ruta, espera y cita de descargue. Si llega antes de la cita, entra a la cita. Siempre las revisa una persona.
+- **Revisión antes de enviar**, como el RNDC: llegada ≤ entrada ≤ salida, nada en el futuro y máximo 90 km/h (km de la ruta ÷ horas entre la salida del cargue y la llegada al descargue). Muestra el plazo del cumplido del manifiesto: 5 días hábiles desde la entrega (no descuenta festivos).
+- **Cumplido en lote:** cada viaje con sus propias horas propuestas (`usarPropuesta`), en lugar de las mismas horas para todos.
+- **Cumplido de manifiesto (6):** adicionales por tiempo de cargue y de descargue, y `RETENCIONFOPAT` (0,1 % del nuevo valor a pagar) solo si el vehículo lo lleva (peso bruto > 10,5 t y «Aplicar FOPAT» en Configuración).
+- **Por destino (Clientes → destino):** tipo de operación de la remesa (G, P mercancía consolidada, C, V), tipo de consolidación (R recolección, D distribución, A ambas, N normal), empaque, citas, tiempos pactados (en minutos), tiempo de viaje, espera, km y si cada punto lo monitorea la empresa de monitoreo. Vacío = lo de la empresa. Lo del destino reemplaza las variables adicionales fijas de la empresa (`TIPOCONSOLIDADA`).
+- **Por confirmar en el ambiente de pruebas del RNDC:** el código de «Mercancía consolidada» (se usa `P`) y los de consolidación R/A/N (la plantilla de la cooperativa usa `D` para distribución), y los códigos de motivo de los valores adicionales y descuentos del cumplido del manifiesto.
 
 ## Seguridad
 
