@@ -119,3 +119,18 @@ No se tuvieron credenciales de una empresa habilitada, así que **ningún envío
 - **Información de carga (1), información de viaje (2) y cumplido inicial (45):** son opcionales en el flujo del manual. La plantilla de Excel tampoco los usaba.
 - **Procesos municipales (81, 83 y siguientes), GPS/monitoreo (46, 60) y factura electrónica (86):** no estaban en la operación actual. Se pueden agregar con la misma arquitectura (`services/rndc/documentos.js` + `operaciones.js`).
 - **Firma electrónica del manifiesto (8.6.7):** según el manual, se hace en el portal del RNDC y no por web service.
+
+## Remesa como soporte interno para el cumplido (fase 7B)
+
+En **Manifiestos**, el número de la remesa (aceptada o cumplida) abre su PDF con el formato que imprime el RNDC
+(`GET /api/reportes/remesa/:id`, permiso de ver viajes). En la ventana de cumplido, **Ver remesa** la abre en otra pestaña
+para consultarla sin cerrar el formulario. Es un soporte interno: no se envía por correo ni se adjunta a nada.
+
+- El formato (cajas, líneas y rótulos) sale de `backend/src/assets/remesa-rndc.json`, generado con
+  `python backend/tools/plantillaRemesa.py <remesa_del_RNDC.pdf> backend/src/assets/remesa-rndc.json`.
+- Los datos son las variables de la remesa que el RNDC aceptó (proceso 3) y los maestros (remitente, destinatario y propietario por sede).
+- Debajo va el recuadro **Para el cumplido**: viaje (manifiesto, placa, conductor, kilos), horas propuestas de cargue y descargue
+  y de dónde salen (GPS de Sur Track, tarifa o citas), quién reporta cada punto (empresa de monitoreo o la empresa),
+  plazo del cumplido del manifiesto y alertas de la revisión. Si la remesa ya se cumplió, muestra lo que se envió al RNDC.
+- Las coordenadas de las sedes no están en la plataforma: la casilla sale vacía. Si el descargue no tiene coordenadas en el RNDC,
+  desmarque «La empresa de monitoreo reporta el descargue» en la tarifa del destino.
