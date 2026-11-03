@@ -206,18 +206,29 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
     .fijar { width: 32px; height: 32px; color: var(--tinta-tenue); }
     .fijar[aria-pressed="true"] { color: var(--primario); }
     @media (min-width: 961px) {
+      /* Recogido y abierto usan la misma distribución: los íconos no se mueven; solo cambia el ancho
+         y los textos se desvanecen (sin centrar ni ocultar de golpe). */
       :host(.suelto) { --ancho-lateral: 72px; }
-      :host(.suelto) .lateral { transition: width .2s ease, box-shadow .2s ease; overflow: hidden; }
+      :host(.suelto) .lateral { overflow: hidden; transition: width .26s cubic-bezier(.2, .8, .2, 1), box-shadow .26s ease; will-change: width; }
       :host(.suelto) .lateral:not(.recogido) { width: 252px; box-shadow: 18px 0 40px -20px rgba(0,0,0,.6); }
+      :host(.suelto) .lat-cab { justify-content: flex-start; gap: 10px; padding: 18px 12px 14px 16px; }
+      :host(.suelto) .marca { gap: 10px; }
+      :host(.suelto) .marca .logo { display: block; flex: none; }
+      :host(.suelto) .marca .nombre { width: 128px; }
+      :host(.suelto) .fijar { margin-left: auto; flex: none; }
+      :host(.suelto) .buscador { width: calc(100% - 28px); padding-left: 14px; overflow: hidden; }
+      :host(.suelto) .lat-nav { overflow-x: hidden; }
+      :host(.suelto) .lat-nav a { padding-left: 15px; }
+      :host(.suelto) .lat-nav h3 { white-space: nowrap; overflow: hidden; }
+      :host(.suelto) .disparador { padding-left: 8px; overflow: hidden; }
+      :host(.suelto) .ambiente { padding-left: 20px; }
+      :host(.suelto) .marca .nombre, :host(.suelto) .fijar, :host(.suelto) .txt-buscar, :host(.suelto) .buscador kbd, :host(.suelto) .lat-nav a span,
+      :host(.suelto) .lat-nav h3, :host(.suelto) .quien, :host(.suelto) .flecha, :host(.suelto) .ambiente span {
+        transition: opacity .18s ease .08s; }
       :host(.suelto) .recogido .marca .nombre, :host(.suelto) .recogido .fijar, :host(.suelto) .recogido .txt-buscar, :host(.suelto) .recogido .buscador kbd,
-      :host(.suelto) .recogido .lat-nav a span, :host(.suelto) .recogido .quien, :host(.suelto) .recogido .flecha, :host(.suelto) .recogido .ambiente span { display: none; }
-      :host(.suelto) .recogido .marca .logo { display: block; }
-      :host(.suelto) .recogido .lat-cab { padding: 18px 0 14px; justify-content: center; }
-      :host(.suelto) .recogido .buscador { width: 44px; padding: 0; justify-content: center; margin: 0 auto 10px; }
-      :host(.suelto) .recogido .lat-nav a { justify-content: center; padding: 9px 0; }
-      :host(.suelto) .recogido .lat-nav h3 { font-size: 0; height: 1px; margin: 4px 14px 8px; padding: 0; background: rgba(255,255,255,.1); }
-      :host(.suelto) .recogido .disparador { justify-content: center; padding: 6px 0; border-color: transparent; background: transparent; }
-      :host(.suelto) .recogido .ambiente { justify-content: center; padding: 0; }
+      :host(.suelto) .recogido .lat-nav a span, :host(.suelto) .recogido .lat-nav h3, :host(.suelto) .recogido .quien, :host(.suelto) .recogido .flecha,
+      :host(.suelto) .recogido .ambiente span { opacity: 0; pointer-events: none; transition-delay: 0s; transition-duration: .1s; }
+      :host(.suelto) .recogido .disparador { border-color: transparent; background: transparent; }
     }
 
     @media (max-width: 960px) {
@@ -231,7 +242,7 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
       .solo-movil { display: inline-flex; }
       main { margin-left: 0; padding: 18px 14px 40px; }
     }
-    @media (prefers-reduced-motion: reduce) { .lateral { transition: none; } }
+    @media (prefers-reduced-motion: reduce) { .lateral, .lateral * { transition: none !important; } }
   `],
 })
 export class Layout {
