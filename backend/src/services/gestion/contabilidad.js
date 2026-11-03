@@ -271,9 +271,10 @@ export async function pagarLiquidacion(empresaId, { liquidacion, valor, fecha = 
   return { liquidacion: l, asiento: a.numero };
 }
 
-export async function gasto(empresaId, { fecha, cuenta, concepto, valor, tercero = '', formaPago = '1110', usuario }) {
+// placa: vehículo al que se carga el gasto (centro de costo), para la rentabilidad por vehículo (fase 6)
+export async function gasto(empresaId, { fecha, cuenta, concepto, valor, tercero = '', formaPago = '1110', placa = '', usuario }) {
   if (!/^5\d{3,9}$/.test(String(cuenta))) throw new ErrorHttp(400, 'La cuenta del gasto debe ser de la clase 5 (por ejemplo 5135 o 530505)');
-  return postear(empresaId, { fecha, concepto, origen: 'GAS', tercero, usuario, lineas: [[cuenta, valor], [formaPago, -valor]] });
+  return postear(empresaId, { fecha, concepto, origen: 'GAS', tercero, centroCosto: placa, usuario, lineas: [[cuenta, valor], [formaPago, -valor]] });
 }
 
 // ── Informes ─────────────────────────────────────────────────────────────────

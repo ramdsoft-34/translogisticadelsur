@@ -129,11 +129,12 @@ export async function causarCompra(empresaId, d, usuario = null) {
   const lineas = lineasAsientoCompra(c, param);
   await validarAsiento(empresaId, { fecha: d.fecha, lineas });
   const numero = `CC-${String(await siguiente(empresaId, 'compra')).padStart(4, '0')}`;
-  const a = await postear(empresaId, { fecha: d.fecha, documento: numero, origen: 'CMP', terceroDoc: p.nit, tercero: p.nombre, usuario, lineas,
+  const placa = String(d.placa || '').trim().toUpperCase();
+  const a = await postear(empresaId, { fecha: d.fecha, documento: numero, origen: 'CMP', terceroDoc: p.nit, tercero: p.nombre, centroCosto: placa, usuario, lineas,
     concepto: `Compra ${numero} - ${p.nombre}${documento ? ` (fact. ${documento})` : ''}` });
   try {
     return await CompraCont.create({ empresa: empresaId, numero, fecha: d.fecha, vence: d.vence || null, proveedor: p._id, proveedorNit: p.nit, proveedorNombre: p.nombre,
-      tipoDocumento: d.tipoDocumento || 'factura', documento, cufe, ...c, asiento: a.numero, observaciones: d.observaciones || '', xml: d.xml || '', usuario });
+      tipoDocumento: d.tipoDocumento || 'factura', documento, cufe, placa, ...c, asiento: a.numero, observaciones: d.observaciones || '', xml: d.xml || '', usuario });
   } catch (e) {
     await Asiento.updateOne({ empresa: empresaId, _id: a._id }, { $set: { estado: 'ANULADO', concepto: `${a.concepto} (anulado: la compra no se pudo guardar)` } });
     throw e;
