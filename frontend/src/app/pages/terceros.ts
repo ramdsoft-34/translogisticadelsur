@@ -64,6 +64,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
         <button type="button" role="tab" [class.activa]="rol === p[0]" [attr.aria-selected]="rol === p[0]" (click)="rol = p[0]; cargar()">{{ p[1] }}</button>
       }
     </div>
+    <p class="sutil" style="margin:-8px 0 14px;font-size:13px">Los remitentes, destinatarios y sus sedes se manejan en <a href="/clientes" (click)="$event.preventDefault(); router.navigate(['/clientes'])">Clientes y tarifas</a>: cada cliente es una empresa y cada destino es una sede.</p>
     <div class="barra">
       <div class="campo crece"><label for="t-q">Buscar</label><input id="t-q" type="search" placeholder="Nombre o número de documento" [(ngModel)]="q" (input)="buscarDiferido()" /></div>
       <div class="campo"><label for="t-rndc">En el RNDC</label><select id="t-rndc" [(ngModel)]="rndc" (change)="cargar()"><option value="">Todos</option>
@@ -218,18 +219,18 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
   `],
 })
 export class Terceros {
-  private router = inject(Router);
+  readonly router = inject(Router);
   readonly TIPOS_NUEVO: { v: TipoNuevo; t: string; d: string; icono: string }[] = [
     { v: 'conductor', t: 'Conductor', d: 'Persona con licencia de conducción que maneja los vehículos.', icono: 'usuario' },
     { v: 'persona', t: 'Titular o tenedor', d: 'Persona propietaria, tenedora o titular de manifiestos (sin licencia).', icono: 'personas' },
     { v: 'empresa', t: 'Empresa', d: 'Empresa con NIT (cliente, remitente o destinatario) con su primera sede.', icono: 'edificio' },
-    { v: 'sede', t: 'Sede', d: 'Otra sede de una empresa ya registrada: se asigna el código de la próxima sede.', icono: 'edificio' },
+    { v: 'sede', t: 'Sede', d: 'Las sedes de clientes y destinatarios se crean en Clientes y tarifas.', icono: 'edificio' },
     { v: 'vehiculo', t: 'Vehículo', d: 'Camión o tractocamión: se crea en Vehículos.', icono: 'camion' },
     { v: 'remolque', t: 'Remolque', d: 'Remolque o semirremolque: se crea en Vehículos.', icono: 'camion' },
   ];
   // Pestañas de la lista: agrupan por el papel que cumple cada tercero
   readonly PESTANAS_LISTA: [string, string][] = [['', 'Todos'], ['conductor', 'Conductores'], ['titular', 'Titulares'], ['propietario', 'Propietarios'],
-    ['tenedor', 'Tenedores'], ['remitente', 'Remitentes'], ['destinatario', 'Destinatarios y sedes']];
+    ['tenedor', 'Tenedores']];
   descripcionTipo() { return this.TIPOS_NUEVO.find(o => o.v === this.tipoNuevo())?.d || ''; }
   readonly tipoNuevo = signal<TipoNuevo>('conductor');
   readonly sedesEmpresa = signal<any[]>([]);
@@ -322,12 +323,13 @@ export class Terceros {
     this.verificando.set(true);
   }
   elegirTipo(t: TipoNuevo) {
+    if (t === 'sede') { this.verificando.set(false); this.router.navigate(['/clientes']); return; }
     if (t === 'vehiculo' || t === 'remolque') { this.verificando.set(false); this.router.navigate(['/vehiculos'], { queryParams: { nuevo: t } }); return; }
     this.tipoNuevo.set(t);
     const conf = ({ conductor: ['C', 'conductor'], persona: ['C', 'titular'], empresa: ['N', 'destinatario'], sede: ['N', 'destinatario'] } as Record<string, string[]>)[t];
     // Conserva el rol de la pestaña cuando corresponde al tipo elegido (p. ej. «Tenedores» → persona tenedor)
     const rolPestana = t === 'persona' && ['titular', 'propietario', 'tenedor'].includes(this.rol) ? this.rol
-      : (t === 'empresa' || t === 'sede') && Terceros.EMPRESA.includes(this.rol) ? this.rol : conf[1];
+      : t === 'empresa' && Terceros.EMPRESA.includes(this.rol) ? this.rol : conf[1];
     this.buscar = { ...this.buscar, tipoId: conf[0], rol: rolPestana };
   }
 

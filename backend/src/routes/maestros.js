@@ -2,13 +2,14 @@
 // (conductores, propietarios, tenedores…), vehículos y el catálogo DIVIPOLA.
 import { Router } from 'express';
 import mongoose from 'mongoose';
+import { z } from 'zod';
 import { Cliente, Tarifa, Tercero, Vehiculo, Municipio, Viaje, Empresa, Liquidacion, FacturaCont, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { auditar, cambios } from '../services/auditoria.js';
 import { normalizar, escaparRegex, quitarTildes } from '../utils/texto.js';
 import { clienteSchema, tarifaSchema, terceroSchema, vehiculoSchema } from '../validaciones/maestros.js';
-import { variablesTercero, variablesVehiculo, huella } from '../services/rndc/documentos.js';
+import { variablesTercero, variablesVehiculo, huella, idCliente } from '../services/rndc/documentos.js';
 import { reglasDe, pesoPorTamano } from '../services/gestion/reglas.js';
 
 const r = Router();
@@ -51,10 +52,39 @@ r.get('/clientes', ver, async (req, res) => {
   if (req.query.activos === '1') filtro.activo = true;
   res.json(await Cliente.find(filtro).sort({ nombre: 1 }).lean());
 });
+// El cliente es la empresa remitente: al crearlo se registra también su sede principal (lugar de cargue)
+// como tercero del RNDC, si ese NIT aún no tiene sedes en la plataforma.
+const sedeNueva = z.object({ nombre: z.string().trim().max(20).optional().default(''), direccion: z.string().trim().min(3, 'escriba la dirección').max(60),
+  codMunicipio: z.string().trim().regex(/^\d{8}$/, 'elija el municipio') });
 r.post('/clientes', editarTarifas, async (req, res) => {
-  const c = await Cliente.create({ ...clienteSchema.parse(req.body), empresa: req.empresaId });
-  await auditar(req, 'crear_cliente', { entidad: 'Cliente', entidadId: c._id, detalle: { nombre: c.nombre } });
+  const d = clienteSchema.parse(req.body);
+  const sede = req.body?.sede ? sedeNueva.parse(req.body.sede) : null;
+  const numId = idCliente(d);
+  if (sede && numId && !(await Tercero.exists(deEmpresa(req, { numId })))) {
+    const codigo = d.sedeRemitente || '1';
+    await Tercero.create({ empresa: req.empresaId, tipoId: d.tipoId, numId, nombres: d.razonSocial || d.nombre, sede: { codigo, nombre: (sede.nombre || 'PRINCIPAL').toUpperCase() },
+      direccion: sede.direccion, codMunicipio: sede.codMunicipio, roles: ['remitente'] });
+    d.sedeRemitente = codigo;
+  }
+  const c = await Cliente.create({ ...d, empresa: req.empresaId });
+  await auditar(req, 'crear_cliente', { entidad: 'Cliente', entidadId: c._id, detalle: { nombre: c.nombre, sede: d.sedeRemitente } });
   res.status(201).json(c);
+});
+
+// Nueva sede de una empresa (del cliente o de un destinatario): el código es el siguiente libre de ese NIT
+r.post('/sedes', editarTarifas, async (req, res) => {
+  const d = z.object({ tipoId: z.string().trim().max(1).optional().default('N'), numId: z.string().trim().transform(v => v.replace(/\D/g, '')).pipe(z.string().min(5).max(15)),
+    nombreEmpresa: z.string().trim().max(100).optional().default(''), rol: z.enum(['remitente', 'destinatario']).optional().default('destinatario') })
+    .merge(sedeNueva).parse(req.body);
+  const existentes = await Tercero.find(deEmpresa(req, { numId: d.numId })).select('nombres apellido1 tipoId sede').lean();
+  const nombres = existentes[0]?.nombres || d.nombreEmpresa;
+  if (!nombres) throw new ErrorHttp(400, 'Escriba el nombre de la empresa');
+  const codigos = existentes.map(t => Number(t.sede?.codigo)).filter(Number.isFinite);
+  const codigo = String(codigos.length ? Math.max(...codigos) + 1 : 1);
+  const x = await Tercero.create({ empresa: req.empresaId, tipoId: existentes[0]?.tipoId || d.tipoId, numId: d.numId, nombres,
+    sede: { codigo, nombre: (d.nombre || `SEDE ${codigo}`).toUpperCase() }, direccion: d.direccion, codMunicipio: d.codMunicipio, roles: [d.rol] });
+  await auditar(req, 'crear_sede', { entidad: 'Tercero', entidadId: x._id, detalle: { numId: d.numId, sede: codigo } });
+  res.status(201).json(x.toJSON());
 });
 r.put('/clientes/:id', editarTarifas, async (req, res) => {
   const d = clienteSchema.partial().parse(req.body);
@@ -90,14 +120,15 @@ r.get('/tarifas', ver, async (req, res) => {
   const filtro = deEmpresa(req);
   if (req.query.cliente) filtro.cliente = req.query.cliente;
   if (req.query.activos === '1') filtro.activo = true;
-  const tarifas = await Tarifa.find(filtro).sort({ destino: 1 }).populate(pob(req.empresaId, 'cliente', 'nombre nit')).lean();
+  const tarifas = await Tarifa.find(filtro).sort({ destino: 1 }).populate(pob(req.empresaId, 'cliente', 'nombre nit dv tipoId')).lean();
   // Nombre de la sede del destinatario (código y nombre, como en el RNDC); sin destinatario = el mismo cliente
-  const docDe = (t) => String(t.destinatario?.numId || t.cliente?.nit || '').replace(/\D/g, '');
-  const docs = [...new Set(tarifas.filter(t => t.destinatario?.sede).map(docDe).filter(Boolean))];
-  const sedes = new Map((docs.length ? await Tercero.find(deEmpresa(req, { numId: { $in: docs }, 'sede.codigo': { $ne: '' } })).select('numId sede codMunicipio').lean() : [])
+  const docsDe = (t) => (t.destinatario?.numId ? [String(t.destinatario.numId).replace(/\D/g, '')]
+    : t.cliente ? [idCliente(t.cliente), String(t.cliente.nit || '').replace(/\D/g, '')] : []).filter(Boolean);
+  const docs = [...new Set(tarifas.filter(t => t.destinatario?.sede).flatMap(docsDe))];
+  const sedes = new Map((docs.length ? await Tercero.find(deEmpresa(req, { numId: { $in: docs }, 'sede.codigo': { $ne: '' } })).select('numId nombres sede codMunicipio direccion').lean() : [])
     .map(s => [`${s.numId}|${s.sede.codigo}`, s]));
-  res.json(tarifas.map(t => { const s = t.destinatario?.sede ? sedes.get(`${docDe(t)}|${t.destinatario.sede}`) : null;
-    return s ? { ...t, sedeNombre: s.sede.nombre, sedeMunicipio: s.codMunicipio } : t; }));
+  res.json(tarifas.map(t => { const s = t.destinatario?.sede ? docsDe(t).map(d => sedes.get(`${d}|${t.destinatario.sede}`)).find(Boolean) : null;
+    return s ? { ...t, sedeNombre: s.sede.nombre, sedeMunicipio: s.codMunicipio, sedeDireccion: s.direccion, destinatarioNombre: s.nombres } : t; }));
 });
 r.post('/tarifas', editarTarifas, async (req, res) => {
   const d = tarifaSchema.parse(req.body);
