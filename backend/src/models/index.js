@@ -211,6 +211,17 @@ const tarifaSchema = new Schema({
   pesoKg: { type: Number, default: 0, min: 0 },
   operacion: str(),                      // vacío = la de la empresa (ej. U = urbano)
   destinatario: { tipoId: str({ uppercase: true }), numId: str(), sede: str() },
+  // RNDC por destino (fase 7, guías de tiempos logísticos y de cumplidos 2026). Vacío = lo de la empresa.
+  tipoOperacionRemesa: str({ uppercase: true }),   // G general · P mercancía consolidada · C contenedor cargado · V contenedor vacío
+  tipoConsolidacion: str({ uppercase: true }),     // R recolección · D distribución · A ambas · N normal (solo con mercancía consolidada)
+  tipoEmpaque: str(),                              // código de empaque del RNDC
+  horaCitaCargue: str(), horaCitaDescargue: str(), // HH:MM
+  minutosPactoCargue: { type: Number, default: null }, minutosPactoDescargue: { type: Number, default: null },
+  minutosViaje: { type: Number, default: null },   // tiempo de viaje de la ruta (salida del cargue → llegada al descargue)
+  minutosEspera: { type: Number, default: null },  // de la llegada a la entrada en el sitio de descargue
+  kmRuta: { type: Number, default: null },         // km de la ruta (SICETAC) para revisar la velocidad máxima de 90 km/h
+  // ¿La empresa de monitoreo de flota reporta cada punto? No: sede sin coordenadas o novedad (RNMM) → la empresa escribe llegada y salida
+  cargueMonitoreado: { type: Boolean, default: true }, descargueMonitoreado: { type: Boolean, default: true },
   activo: { type: Boolean, default: true },
 }, { timestamps: true });
 tarifaSchema.plugin(tenantPlugin);
