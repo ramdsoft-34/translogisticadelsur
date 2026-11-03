@@ -615,6 +615,7 @@ const compraContSchema = new Schema({
   tipoDocumento: { type: String, enum: ['factura', 'documento_soporte', 'cuenta_cobro', 'otro'], default: 'factura' },
   documento: str(),                                     // número de la factura del proveedor
   cufe: str(),
+  placa: str({ uppercase: true }),                      // vehículo al que se carga la compra (centro de costo, fase 6)
   lineas: { type: [{ cuenta: String, descripcion: String, base: Number, ivaPct: Number, iva: Number, _id: false }], default: [] },
   subtotal: Number, iva: Number, total: Number,
   conceptoRetencion: str(), retefuentePct: Number, retefuente: Number,
