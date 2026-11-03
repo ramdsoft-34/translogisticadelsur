@@ -13,6 +13,7 @@ import { ImportarExcel } from '../shared/importar-excel';
 import { Moneda } from '../shared/moneda';
 import { filtrar } from '../shared/filtro';
 import { Confirmar } from '../shared/confirmar';
+import { RndcClave } from '../core/rndc-clave.service';
 
 const clienteVacio = () => ({ nombre: '', tipoId: 'N', nit: '', dv: '', razonSocial: '', sedeRemitente: '', correos: '', whatsapp: '', activo: true,
   siglas: '', politicaAuxiliar: 'registrado', valorAuxiliarSinAnticipo: 30000 });
@@ -100,9 +101,10 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
                       @if (String(s.sede.codigo) === String(c.sedeRemitente)) { <span class="chip ok">cargue</span> }</td>
                     <td data-etiqueta="Dirección">{{ s.direccion || '—' }}</td>
                     <td data-etiqueta="Municipio">{{ s.codMunicipio || '—' }}</td>
-                    <td data-etiqueta="RNDC">@switch (s.rndc?.estado) { @case ('aceptado') { <span class="chip ok">aceptada</span> } @case ('rechazado') { <span class="chip error">rechazada</span> } @default { <span class="chip">pendiente</span> } }</td>
-                    <td class="celda-acciones">@if (puedeEditar && String(s.sede.codigo) !== String(c.sedeRemitente)) {
-                      <div class="acciones acciones-fila"><button class="pequeno" (click)="usarDeCargue(c, s)">Usar de cargue</button></div> }</td></tr>
+                    <td data-etiqueta="RNDC">@switch (s.rndc?.estado) { @case ('enviado') { <span class="chip ok">registrada</span> } @case ('error') { <span class="chip error" [title]="s.rndc?.mensaje || ''">rechazada</span> } @default { <span class="chip">pendiente</span> } }</td>
+                    <td class="celda-acciones"><div class="acciones acciones-fila">
+                      @if (puedeRndc && s.rndc?.estado !== 'enviado') { <button class="pequeno primario" [disabled]="enviando()" (click)="enviarSedes([s])">Enviar al RNDC</button> }
+                      @if (puedeEditar && String(s.sede.codigo) !== String(c.sedeRemitente)) { <button class="pequeno" (click)="usarDeCargue(c, s)">Usar de cargue</button> }</div></td></tr>
                 } @empty { <tr><td colspan="5" class="vacio">El cliente aún no tiene sedes. Cree la sede donde se carga.</td></tr> }</tbody></table>
             }
           </div>
@@ -239,6 +241,9 @@ export class Clientes {
   private avisos = inject(Avisos);
   readonly puedeEditar = this.auth.tiene(P.MAESTROS_EDITAR, P.TARIFAS_EDITAR);
   readonly puedeTarifas = this.auth.tiene(P.MAESTROS_EDITAR, P.TARIFAS_EDITAR);
+  readonly puedeRndc = this.auth.tiene(P.RNDC_OPERAR);
+  private clave = inject(RndcClave);
+  readonly enviando = signal(false);
   readonly tipos = Object.entries(TIPOS_ID);
   readonly NUEVA = NUEVA;
   readonly String = String;
@@ -317,7 +322,30 @@ export class Clientes {
       const r: any = f._id ? await this.api.put(`/maestros/clientes/${f._id}`, cuerpo) : await this.api.post('/maestros/clientes', cuerpo);
       this.avisos.ok('Cliente guardado'); this.abiertoCliente.set(false);
       this.sel.set(r); await this.cargar();
+      if (!f._id) { await this.cargarSedesCliente(this.sel()); await this.enviarPendientes(this.sedesCliente()); }
     } catch (e) { this.avisos.error(e); }
+  }
+
+  // Al RNDC solo van las sedes (empresa + sede, proceso 11); tarifas y demás datos del cliente son internos
+  private async enviarPendientes(sedes: any[]) {
+    const p = sedes.filter(s => s.rndc?.estado !== 'enviado');
+    if (p.length && this.puedeRndc) await this.enviarSedes(p);
+  }
+  async enviarSedes(sedes: any[]) {
+    const c = await this.clave.obtener();
+    if (!c) return;
+    this.enviando.set(true);
+    try {
+      for (const s of sedes) {
+        const nombre = `sede ${s.sede?.codigo} · ${s.sede?.nombre || ''}`;
+        try {
+          const r = await this.api.post<any>(`/rndc/terceros/${s._id}/enviar`, { clave: c });
+          if (r.sinCambios) this.avisos.mostrar(r.mensaje, 'info');
+          else if (r.ok) this.avisos.ok(`La ${nombre} quedó registrada en el RNDC`);
+          else this.avisos.mostrar(`El RNDC rechazó la ${nombre}: ${r.mensaje}`, 'error', 9000);
+        } catch (e) { this.avisos.error(e); }
+      }
+    } finally { this.enviando.set(false); await this.cargarSedesCliente(this.sel()); }
   }
 
   // Solo se eliminan clientes y destinos sin viajes; con historial el servidor indica que se desactiven
@@ -345,6 +373,7 @@ export class Clientes {
       if (!c.sedeRemitente) await this.api.put(`/maestros/clientes/${c._id}`, { sedeRemitente: x.sede.codigo });
       this.avisos.ok(`Sede ${x.sede.codigo} · ${x.sede.nombre} creada`); this.abiertoSede.set(false);
       await this.cargar(); await this.cargarSedesCliente(this.sel());
+      await this.enviarPendientes([x]);
     } catch (e) { this.avisos.error(e); }
   }
   async usarDeCargue(c: any, s: any) {
@@ -398,6 +427,7 @@ export class Clientes {
   async guardarTarifa() {
     const t = this.tarifaForm(); const c = this.sel();
     const dest = { ...t.destinatario };
+    let sedeNueva: any = null;
     try {
       if (this.modo() === 'otra' && (!digitos(dest.numId) || !dest.sede)) throw new Error('Escriba el documento de la empresa y elija la sede de descargue');
       if (dest.sede === NUEVA) {
@@ -406,7 +436,7 @@ export class Clientes {
         const x: any = await this.api.post('/maestros/sedes', { tipoId: this.modo() === 'cliente' ? c.tipoId : (dest.tipoId || 'N'), numId,
           nombreEmpresa: this.modo() === 'cliente' ? (c.razonSocial || c.nombre) : s.nombreEmpresa, rol: 'destinatario',
           nombre: s.nombre, direccion: s.direccion, codMunicipio: s.codMunicipio });
-        dest.sede = x.sede.codigo;
+        dest.sede = x.sede.codigo; sedeNueva = x;
       }
       // Sede del cliente: el destinatario es el mismo cliente, con su documento para que el RNDC tome esa sede
       if (this.modo() === 'cliente') Object.assign(dest, dest.sede ? { tipoId: c.tipoId, numId: this.numIdCliente() || idCliente(c) } : { tipoId: '', numId: '' });
@@ -418,6 +448,7 @@ export class Clientes {
       if (t._id) await this.api.put(`/maestros/tarifas/${t._id}`, cuerpo); else await this.api.post('/maestros/tarifas', cuerpo);
       this.avisos.ok('Destino guardado'); this.abiertoTarifa.set(false);
       await this.cargar(); await this.cargarSedesCliente(this.sel());
+      if (sedeNueva) await this.enviarPendientes([sedeNueva]);
     } catch (e) { this.avisos.error(e); }
   }
 }
