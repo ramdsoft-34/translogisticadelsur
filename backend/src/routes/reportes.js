@@ -5,6 +5,7 @@ import { Empresa, Viaje, Liquidacion, Auditoria, pob } from '../models/index.js'
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { datosManifiesto, manifiestoPdf, nombreArchivo } from '../services/reportes/manifiesto.js';
+import { datosRemesa, remesaPdf, nombreRemesa } from '../services/reportes/remesa.js';
 import { libroExcel, nuevoPdf, encabezadoPdf, tablaPdf, numerarPaginas, pdfABuffer } from '../services/reportes/comun.js';
 import { parseFecha, fmtFecha, fmtMiles } from '../utils/texto.js';
 import { auditar, verificarCadena } from '../services/auditoria.js';
@@ -28,6 +29,14 @@ r.get('/manifiesto/:id', permitir(P.VIAJES_VER), async (req, res) => {
   const d = await datosManifiesto(empresa, req.params.id);
   await auditar(req, 'descarga', { entidad: 'Viaje', entidadId: req.params.id, detalle: { archivo: nombreArchivo(d) } });
   enviarArchivo(res, await manifiestoPdf(d), nombreArchivo(d), 'application/pdf');
+});
+
+// Remesa con el formato del RNDC y el recuadro «Para el cumplido»: soporte interno para revisar, no se envía
+r.get('/remesa/:id', permitir(P.VIAJES_VER), async (req, res) => {
+  const empresa = await empresaDe(req);
+  const d = await datosRemesa(empresa, req.params.id);
+  await auditar(req, 'descarga', { entidad: 'Viaje', entidadId: req.params.id, detalle: { archivo: nombreRemesa(d) } });
+  enviarArchivo(res, await remesaPdf(d), nombreRemesa(d), 'application/pdf');
 });
 
 // ── Bitácora ────────────────────────────────────────────────────────────────
