@@ -137,7 +137,7 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
     .lat-nav a:focus-visible { box-shadow: inset 0 0 0 2px var(--primario); }
     .lat-pie { border-top: 1px solid rgba(255,255,255,.07); padding: 12px 12px 14px; display: flex; flex-direction: column; gap: 10px; }
     .ambiente { display: inline-flex; align-items: center; gap: 7px; padding: 0 8px; font-size: 12px; color: var(--tinta-tenue); white-space: nowrap; }
-    .ambiente i { width: 8px; height: 8px; border-radius: 50%; background: #ffa04d; box-shadow: 0 0 0 3px rgba(255,160,77,.18); }
+    .ambiente i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #ffa04d; box-shadow: 0 0 0 3px rgba(255,160,77,.18); }
     .ambiente.prod i { background: #4fd18b; box-shadow: 0 0 0 3px rgba(79,209,139,.18); }
     .ico-btn { min-height: 0; width: 38px; height: 38px; padding: 0; border-radius: 10px; border: 0; background: transparent; color: inherit; box-shadow: none; }
     .ico-btn:hover:not(:disabled) { background: var(--tinta-3); }
@@ -212,16 +212,23 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
       :host(.suelto) .lateral { overflow: hidden; transition: width .26s cubic-bezier(.2, .8, .2, 1), box-shadow .26s ease; will-change: width; }
       :host(.suelto) .lateral:not(.recogido) { width: 252px; box-shadow: 18px 0 40px -20px rgba(0,0,0,.6); }
       :host(.suelto) .lat-cab { justify-content: flex-start; gap: 10px; padding: 18px 12px 14px 16px; }
-      :host(.suelto) .marca { gap: 10px; }
-      :host(.suelto) .marca .logo { display: block; flex: none; }
-      :host(.suelto) .marca .nombre { width: 128px; }
+      /* Cerrado: solo el monograma TS. Abierto: solo el nombre. Se reemplazan uno al otro en el mismo sitio */
+      :host(.suelto) .marca { position: relative; min-height: 40px; }
+      :host(.suelto) .marca .logo { display: block; position: absolute; left: 0; top: 50%; transform: translateY(-50%); transition: opacity .18s ease; }
+      :host(.suelto) .lateral:not(.recogido) .marca .logo { opacity: 0; }
+      :host(.suelto) .marca .nombre { width: 150px; }
       :host(.suelto) .fijar { margin-left: auto; flex: none; }
       :host(.suelto) .buscador { width: calc(100% - 28px); padding-left: 14px; overflow: hidden; }
-      :host(.suelto) .lat-nav { overflow-x: hidden; }
-      :host(.suelto) .lat-nav a { padding-left: 15px; }
+      /* Cada opción mide 44 px de alto con el ícono centrado en el cuadro (también el cuadro amarillo de la activa);
+         sin barra de desplazamiento visible, que le quitaba ancho y corría el ícono */
+      :host(.suelto) .lat-nav { overflow-x: hidden; padding-left: 14px; padding-right: 14px; scrollbar-width: none; }
+      :host(.suelto) .lat-nav::-webkit-scrollbar { display: none; }
+      :host(.suelto) .lat-nav a { padding: 0 0 0 13.5px; height: 40px; min-width: 44px; gap: 13px; }
+      :host(.suelto) .lat-nav a app-icono { flex: none; }
       :host(.suelto) .lat-nav h3 { white-space: nowrap; overflow: hidden; }
       :host(.suelto) .disparador { padding-left: 8px; overflow: hidden; }
       :host(.suelto) .ambiente { padding-left: 20px; }
+      :host(.suelto) .ambiente i { flex: none; }
       :host(.suelto) .marca .nombre, :host(.suelto) .fijar, :host(.suelto) .txt-buscar, :host(.suelto) .buscador kbd, :host(.suelto) .lat-nav a span,
       :host(.suelto) .lat-nav h3, :host(.suelto) .quien, :host(.suelto) .flecha, :host(.suelto) .ambiente span {
         transition: opacity .18s ease .08s; }
