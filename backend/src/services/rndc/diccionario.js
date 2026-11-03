@@ -126,16 +126,17 @@ export const DICCIONARIO = {
     UNIDADMEDIDACAPACIDAD: [1, 'numero', 'S'],
     FECHALLEGADACARGUE: [10, 'fecha', 'C'],
     HORALLEGADACARGUEREMESA: [5, 'texto', 'C'],
-    FECHAENTRADACARGUE: [10, 'fecha', 'C'],
-    HORAENTRADACARGUEREMESA: [5, 'texto', 'C'],
+    FECHAENTRADACARGUE: [10, 'fecha', 'S'],
+    HORAENTRADACARGUEREMESA: [5, 'texto', 'S'],
     FECHASALIDACARGUE: [10, 'fecha', 'C'],
     HORASALIDACARGUEREMESA: [5, 'texto', 'C'],
-    FECHALLEGADADESCARGUE: [10, 'fecha', 'S'],
-    HORALLEGADADESCARGUECUMPLIDO: [5, 'texto', 'S'],
+    // Guía de cumplido 2026: las entradas las reporta la empresa; llegada y salida, el monitoreo de flota (o la empresa si el punto no se monitoreó)
+    FECHALLEGADADESCARGUE: [10, 'fecha', 'C'],
+    HORALLEGADADESCARGUECUMPLIDO: [5, 'texto', 'C'],
     FECHAENTRADADESCARGUE: [10, 'fecha', 'S'],
     HORAENTRADADESCARGUECUMPLIDO: [5, 'texto', 'S'],
-    FECHASALIDADESCARGUE: [10, 'fecha', 'S'],
-    HORASALIDADESCARGUECUMPLIDO: [5, 'texto', 'S'],
+    FECHASALIDADESCARGUE: [10, 'fecha', 'C'],
+    HORASALIDADESCARGUECUMPLIDO: [5, 'texto', 'C'],
     OBSERVACIONES: [200, 'texto', 'N'],
   },
   6: {
@@ -152,6 +153,7 @@ export const DICCIONARIO = {
     MOTIVOVALORDESCUENTOMANIFIESTO: [1, 'texto', 'C'],
     VALORSOBREANTICIPO: [11, 'numero', 'N'],
     FECHAENTREGADOCUMENTOS: [10, 'fecha', 'S'],
+    RETENCIONFOPAT: [11, 'numero', 'C'],         // 0,1 % del valor a pagar, vehículos de más de 10,5 t (guía de cumplido 2026)
     OBSERVACIONES: [200, 'texto', 'N'],
   },
   7: {

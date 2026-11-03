@@ -5,6 +5,7 @@
 import crypto from 'node:crypto';
 import { txt, soloDigitos, fmtFecha, finDeMes, sumarDias } from '../../utils/texto.js';
 import { retencionFuente } from '../calculos.js';
+import { parametrosTiempo } from './tiemposCumplido.js';
 
 const PBV_FOPAT = 10500;
 
@@ -170,6 +171,7 @@ const OPERACIONES_REMESA = ['G', 'P', 'C', 'V'];
 // ── Remesa (proceso 3) ──────────────────────────────────────────────────────
 export function variablesRemesa(empresa, viaje, ctx, consecutivo) {
   const cfg = empresa.rndc || {};
+  const t = parametrosTiempo(empresa, viaje.tarifaRef || {});   // citas y tiempos pactados: del destino o de la empresa
   const p = cfg.poliza || {};
   const v = [
     ['NUMNITEMPRESATRANSPORTE', ctx.NIT],
@@ -195,16 +197,25 @@ export function variablesRemesa(empresa, viaje, ctx, consecutivo) {
     ['NUMPOLIZATRANSPORTE', p.numero],
     ['FECHAVENCIMIENTOPOLIZACARGA', fecha(p.vence)],
     ['COMPANIASEGURO', soloDigitos(p.aseguradoraNit)],
-    ['HORASPACTOCARGA', numero(cfg.horasPactoCargue ?? 1)],
-    ['MINUTOSPACTOCARGA', '0'],
-    ['HORASPACTODESCARGUE', numero(cfg.horasPactoDescargue ?? 1)],
-    ['MINUTOSPACTODESCARGUE', '0'],
+    ['HORASPACTOCARGA', String(Math.floor(t.pactoCargue / 60))],
+    ['MINUTOSPACTOCARGA', String(t.pactoCargue % 60)],
+    ['HORASPACTODESCARGUE', String(Math.floor(t.pactoDescargue / 60))],
+    ['MINUTOSPACTODESCARGUE', String(t.pactoDescargue % 60)],
     ['FECHACITAPACTADACARGUE', ctx.FECHA],
-    ['HORACITAPACTADACARGUE', cfg.horaCitaCargue || '08:00'],
-    ['FECHACITAPACTADADESCARGUE', ctx.FECHA],
-    ['HORACITAPACTADADESCARGUEREMESA', cfg.horaCitaDescargue || '18:00'],
+    ['HORACITAPACTADACARGUE', t.horaCitaCargue],
+    // Si la cita de descargue es más temprano que la de cargue, es al día siguiente
+    ['FECHACITAPACTADADESCARGUE', t.horaCitaDescargue.padStart(5, '0') <= t.horaCitaCargue.padStart(5, '0') ? fecha(sumarDias(viaje.fecha, 1)) : ctx.FECHA],
+    ['HORACITAPACTADADESCARGUEREMESA', t.horaCitaDescargue],
   ];
-  return aplicarExtras(v, empresa, 3, { ...ctx, REMESA: consecutivo });
+  const lista = aplicarExtras(v, empresa, 3, { ...ctx, REMESA: consecutivo });
+  // Lo del destino (tarifa) manda sobre lo de la empresa (fase 7): tipo de operación, consolidación y empaque
+  const poner = (n, valor) => { const i = lista.findIndex(([x]) => x === n); if (i >= 0) lista[i] = [n, valor]; else lista.push([n, valor]); };
+  const tar = viaje.tarifaRef || {};
+  if (tar.tipoOperacionRemesa) poner('CODOPERACIONTRANSPORTE', tar.tipoOperacionRemesa);
+  if (tar.tipoEmpaque) poner('CODTIPOEMPAQUE', tar.tipoEmpaque);
+  if (tar.tipoOperacionRemesa === 'P' && tar.tipoConsolidacion) poner('TIPOCONSOLIDADA', tar.tipoConsolidacion);
+  if (tar.tipoOperacionRemesa && tar.tipoOperacionRemesa !== 'P') { const i = lista.findIndex(([x]) => x === 'TIPOCONSOLIDADA'); if (i >= 0) lista.splice(i, 1); }
+  return lista;
 }
 
 // ── Manifiesto (proceso 4) ──────────────────────────────────────────────────
@@ -242,10 +253,23 @@ export function variablesManifiesto(empresa, viaje, ctx, consecutivo) {
 }
 
 // ── Cumplido de remesa (proceso 5) ──────────────────────────────────────────
-// datos: { tipo: C|S, motivoSuspension, cantidadEntregada, llegada, entrada, salida (fecha+hora), observaciones }
+// Guía de cumplido de remesa y manifiesto (junio de 2026): la empresa reporta la ENTRADA al cargue y la ENTRADA al
+// descargue; la llegada y la salida las pone el monitoreo de flota. Si un punto no se monitoreó (sede sin coordenadas,
+// novedad RNMM), la empresa escribe también su llegada y salida (guía de tiempos logísticos, numeral 11).
+// datos: { tipo: C|S, motivoSuspension, cantidadEntregada, entradaCargue, llegadaCargue, salidaCargue, llegada, entrada,
+//          salida (cada uno { fecha, hora }), cargueMonitoreado, descargueMonitoreado, observaciones }
+// Sin indicaciones de monitoreo se envía lo que venga (compatible con el formulario anterior).
 export function variablesCumplidoRemesa(empresa, viaje, datos) {
   const fh = (o) => [fecha(o?.fecha), txt(o?.hora)];
-  const [fl, hl] = fh(datos.llegada); const [fe, he] = fh(datos.entrada); const [fs, hs] = fh(datos.salida);
+  const t = parametrosTiempo(empresa, viaje.tarifaRef || {});
+  // La entrada al cargue es obligatoria: si no llega, la cita de cargue del viaje
+  const entradaCargue = datos.entradaCargue?.fecha && datos.entradaCargue?.hora ? datos.entradaCargue : { fecha: viaje.fecha, hora: t.horaCitaCargue };
+  const [fec, hec] = fh(entradaCargue);
+  const [flc, hlc] = datos.cargueMonitoreado === true ? ['', ''] : fh(datos.llegadaCargue);
+  const [fsc, hsc] = datos.cargueMonitoreado === true ? ['', ''] : fh(datos.salidaCargue);
+  const [fl, hl] = datos.descargueMonitoreado === true ? ['', ''] : fh(datos.llegada);
+  const [fe, he] = fh(datos.entrada);
+  const [fs, hs] = datos.descargueMonitoreado === true ? ['', ''] : fh(datos.salida);
   const v = [
     ['NUMNITEMPRESATRANSPORTE', nitEmpresa(empresa)],
     ['CONSECUTIVOREMESA', viaje.remesa.numero],
@@ -255,6 +279,9 @@ export function variablesCumplidoRemesa(empresa, viaje, datos) {
     ['CANTIDADCARGADA', numero(datos.cantidadCargada ?? viaje.pesoKg)],
     ['CANTIDADENTREGADA', numero(datos.cantidadEntregada ?? viaje.pesoKg)],
     ['UNIDADMEDIDACAPACIDAD', empresa.rndc?.unidadMedida || '1'],
+    ['FECHALLEGADACARGUE', flc], ['HORALLEGADACARGUEREMESA', hlc],
+    ['FECHAENTRADACARGUE', fec], ['HORAENTRADACARGUEREMESA', hec],
+    ['FECHASALIDACARGUE', fsc], ['HORASALIDACARGUEREMESA', hsc],
     ['FECHALLEGADADESCARGUE', fl], ['HORALLEGADADESCARGUECUMPLIDO', hl],
     ['FECHAENTRADADESCARGUE', fe], ['HORAENTRADADESCARGUECUMPLIDO', he],
     ['FECHASALIDADESCARGUE', fs], ['HORASALIDADESCARGUECUMPLIDO', hs],
@@ -264,7 +291,12 @@ export function variablesCumplidoRemesa(empresa, viaje, datos) {
 }
 
 // ── Cumplido de manifiesto (proceso 6) ──────────────────────────────────────
-export function variablesCumplidoManifiesto(empresa, viaje, datos) {
+// Reliquida el valor pagado al titular: adicionales por tiempo de cargue o descargue y otros, descuentos y
+// sobreanticipo. FOPAT (0,1 % del nuevo valor a pagar) solo si el vehículo lo lleva (peso bruto > 10,5 t).
+// fopatAplica: lo calcula quien llama con valoresManifiesto(empresa, viaje, vehiculo).
+export function variablesCumplidoManifiesto(empresa, viaje, datos, { fopatAplica = false } = {}) {
+  const valorPagar = Math.round(Number(viaje.flete) || 0) + (Number(datos.adicionalCargue) || 0) + (Number(datos.adicionalDescargue) || 0)
+    + (Number(datos.adicionalFlete) || 0) - (Number(datos.descuento) || 0);
   const v = [
     ['NUMNITEMPRESATRANSPORTE', nitEmpresa(empresa)],
     ['NUMMANIFIESTOCARGA', viaje.manifiesto.numero],
@@ -280,6 +312,7 @@ export function variablesCumplidoManifiesto(empresa, viaje, datos) {
     ['VALORSOBREANTICIPO', numero(datos.sobreanticipo || '')],
     ['OBSERVACIONES', txt(datos.observaciones).slice(0, 200)],
   ];
+  if (empresa.rndc?.aplicarFopat && fopatAplica) v.push(['RETENCIONFOPAT', String(Math.round(Math.max(0, valorPagar) * 0.001))]);
   return aplicarExtras(v, empresa, 6, { NIT: nitEmpresa(empresa) });
 }
 

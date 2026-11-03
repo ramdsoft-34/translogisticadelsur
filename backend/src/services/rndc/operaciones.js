@@ -12,6 +12,7 @@ import {
   variablesAnulacion, variablesTercero, variablesVehiculo, huella, idCliente, destinoIgualOrigen, PROBLEMA_DESTINO, valoresManifiesto,
 } from './documentos.js';
 import { TIPOS_ID_CONDUCTOR, MOTIVOS_REEMPLAZO } from './catalogos.js';
+import { validarTiempos, parametrosTiempo } from './tiemposCumplido.js';
 import { txt, hoyColombia, normalizar, escaparRegex } from '../../utils/texto.js';
 
 const BLOQUEO_MS = 3 * 60 * 1000;
@@ -525,13 +526,18 @@ export async function cumplir(empresaId, viajeId, clave, usuarioId, datos) {
   const cred = credenciales(empresa, clave);
   await bloquear(empresaId, viajeId);
   try {
-    const { v } = await cargarViaje(empresaId, viajeId);
+    const { v, vehiculo } = await cargarViaje(empresaId, viajeId);
     if (v.manifiesto?.estado !== 'aceptado') throw new ErrorHttp(409, 'El viaje no tiene un manifiesto aceptado para cumplir');
     const meta = { usuario: usuarioId, viaje: v._id, referencia: `Viaje ${v.numero}` };
     const resultado = { cumplidoRemesa: null, cumplidoManifiesto: null };
 
     if (v.cumplidoRemesa?.estado !== 'aceptado') {
-      const vars = variablesCumplidoRemesa(empresa, v, datos.remesa || {});
+      // Revisión de las horas como lo hace el RNDC (orden y velocidad máxima de 90 km/h) antes de enviar
+      const r = datos.remesa || {};
+      const rev = validarTiempos(r, { cargueMonitoreado: r.cargueMonitoreado !== false, descargueMonitoreado: r.descargueMonitoreado === true,
+        km: parametrosTiempo(empresa, v.tarifaRef || {}).km, revisarFuturo: false });
+      if (rev.bloqueantes.length) throw new ErrorHttp(422, 'Revise las horas del cumplido de la remesa', rev.bloqueantes);
+      const vars = variablesCumplidoRemesa(empresa, v, r);
       const problemas = validarVariables(5, vars);
       if (problemas.length) throw new ErrorHttp(422, 'Faltan datos para el cumplido de la remesa', problemas);
       const res = await registrar(empresa, cred, 5, vars, meta);
@@ -540,7 +546,7 @@ export async function cumplir(empresaId, viajeId, clave, usuarioId, datos) {
       resultado.cumplidoRemesa = doc;
       if (!res.ok) return resultado;
     }
-    const vars = variablesCumplidoManifiesto(empresa, v, datos.manifiesto || {});
+    const vars = variablesCumplidoManifiesto(empresa, v, datos.manifiesto || {}, { fopatAplica: valoresManifiesto(empresa, v, vehiculo).fopatAplica });
     const problemas = validarVariables(6, vars);
     if (problemas.length) throw new ErrorHttp(422, 'Faltan datos para el cumplido del manifiesto', problemas);
     const res = await registrar(empresa, cred, 6, vars, meta);
