@@ -410,19 +410,47 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
             @if (!cumplirLote().length) {
               <div class="campo"><label for="c-cant">Cantidad entregada (kg)</label><input id="c-cant" type="number" min="0" name="rcant" [(ngModel)]="c.remesa.cantidadEntregada" /></div>
             } @else {
-              <label class="casilla ancho"><input type="checkbox" name="ufv" [(ngModel)]="c.usarFechaViaje" />Usar la fecha de cada viaje para la llegada, entrada y salida (solo se eligen las horas)</label>
-            }
-            @for (m of momentos; track m[0]) {
-              <div class="campo"><label [for]="'c-' + m[0]">{{ m[1] }} al descargue</label>
-                <div class="acciones" style="flex-wrap:nowrap">@if (!(cumplirLote().length && c.usarFechaViaje)) { <input [id]="'c-' + m[0]" type="date" [name]="m[0] + 'f'" [(ngModel)]="c.remesa[m[0]].fecha" required /> }
-                <input type="time" [name]="m[0] + 'h'" [(ngModel)]="c.remesa[m[0]].hora" required [attr.aria-label]="'Hora ' + m[1]" style="max-width:120px" /></div></div>
+              <label class="casilla ancho"><input type="checkbox" name="upr" [(ngModel)]="c.usarPropuesta" />Cada viaje con sus propias horas: GPS de Sur Track o los tiempos de su destino (recomendado)</label>
+              @if (!c.usarPropuesta) { <label class="casilla ancho"><input type="checkbox" name="ufv" [(ngModel)]="c.usarFechaViaje" />Usar la fecha de cada viaje para la llegada, entrada y salida (solo se eligen las horas)</label> }
             }
           </div>
+          @if (!(cumplirLote().length && c.usarPropuesta)) {
+            @if (propuesta(); as p) {
+              <div class="mensaje info ancho">Horas propuestas con {{ textoFuente(p) }}.{{ p.variosPuntos ? ' Mercancía consolidada en varios puntos: el RNDC aplica el tiempo estándar (1 h + 1 h).' : '' }}
+                Plazo del cumplido del manifiesto: {{ p.fechaLimiteManifiesto?.fecha | dia }} (5 días hábiles desde la entrega). Revíselas: deben ser las reales.</div>
+            }
+            @for (e of erroresHoras(); track e) { <div class="mensaje error">{{ e }}</div> }
+            <div class="formulario" style="margin-top:8px">
+              <div class="campo"><label for="c-ec">Entrada al cargue</label>
+                <div class="acciones" style="flex-wrap:nowrap"><input id="c-ec" type="date" name="ecf" [(ngModel)]="c.remesa.entradaCargue.fecha" required />
+                <input type="time" name="ech" [(ngModel)]="c.remesa.entradaCargue.hora" required aria-label="Hora de entrada al cargue" style="max-width:120px" /></div></div>
+              <label class="casilla"><input type="checkbox" name="cmon" [(ngModel)]="c.remesa.cargueMonitoreado" />La empresa de monitoreo reportó la llegada y la salida del cargue</label>
+              @if (!c.remesa.cargueMonitoreado) {
+                @for (m of momentosCargue; track m[0]) {
+                  <div class="campo"><label [for]="'c-' + m[0]">{{ m[1] }}</label>
+                    <div class="acciones" style="flex-wrap:nowrap"><input [id]="'c-' + m[0]" type="date" [name]="m[0] + 'f'" [(ngModel)]="c.remesa[m[0]].fecha" required />
+                    <input type="time" [name]="m[0] + 'h'" [(ngModel)]="c.remesa[m[0]].hora" required [attr.aria-label]="'Hora ' + m[1]" style="max-width:120px" /></div></div>
+                }
+              }
+              <label class="casilla"><input type="checkbox" name="dmon" [(ngModel)]="c.remesa.descargueMonitoreado" />La empresa de monitoreo reportó la llegada y la salida del descargue</label>
+              @for (m of momentos; track m[0]) {
+                @if (m[0] === 'entrada' || !c.remesa.descargueMonitoreado) {
+                  <div class="campo"><label [for]="'c-' + m[0]">{{ m[1] }} al descargue</label>
+                    <div class="acciones" style="flex-wrap:nowrap">@if (!(cumplirLote().length && c.usarFechaViaje)) { <input [id]="'c-' + m[0]" type="date" [name]="m[0] + 'f'" [(ngModel)]="c.remesa[m[0]].fecha" required /> }
+                    <input type="time" [name]="m[0] + 'h'" [(ngModel)]="c.remesa[m[0]].hora" required [attr.aria-label]="'Hora ' + m[1]" style="max-width:120px" /></div></div>
+                }
+              }
+            </div>
+            <p class="sutil">Guía del Ministerio (2026): la empresa reporta las entradas; la llegada y la salida las reporta la empresa de monitoreo de flota.
+              Si un punto no se monitoreó (sede sin coordenadas o novedad), desmarque la casilla y escriba su llegada y salida.</p>
+          }
         </fieldset>
         <fieldset style="margin-top:14px"><legend>{{ cumplirLote().length ? 'Cumplido de los manifiestos' : 'Cumplido del manifiesto ' + (cumplirViaje()?.manifiesto?.numero || '') }}</legend>
           <div class="formulario">
             <div class="campo"><label for="m-tipo">Tipo</label><select id="m-tipo" name="mtipo" [(ngModel)]="c.manifiesto.tipo"><option value="C">Cumplido normal</option><option value="S">Suspensión</option></select></div>
             <div class="campo"><label for="m-ent">Entrega de documentos</label><input id="m-ent" type="date" name="ment" [(ngModel)]="c.manifiesto.fechaEntregaDocumentos" required /></div>
+            <div class="campo"><label for="m-adc">Adicional por tiempo de cargue</label><div class="moneda"><input id="m-adc" moneda name="madc" [(ngModel)]="c.manifiesto.adicionalCargue" /></div></div>
+            <div class="campo"><label for="m-add2">Adicional por tiempo de descargue</label><div class="moneda"><input id="m-add2" moneda name="madd2" [(ngModel)]="c.manifiesto.adicionalDescargue" /></div></div>
             <div class="campo"><label for="m-add">Valor adicional al flete</label><div class="moneda"><input id="m-add" moneda name="madd" [(ngModel)]="c.manifiesto.adicionalFlete" /></div></div>
             <div class="campo"><label for="m-desc">Descuento al flete</label><div class="moneda"><input id="m-desc" moneda name="mdesc" [(ngModel)]="c.manifiesto.descuento" /></div></div>
             <div class="campo"><label for="m-sob">Sobreanticipo</label><div class="moneda"><input id="m-sob" moneda name="msob" [(ngModel)]="c.manifiesto.sobreanticipo" /></div></div>
@@ -539,6 +567,13 @@ export class Manifiestos {
   readonly anularViaje = signal<Viaje | null>(null);
   readonly anulacion = signal<any>({ documento: 'manifiesto', motivo: '', observaciones: '' });
   readonly momentos: [string, string][] = [['llegada', 'Llegada'], ['entrada', 'Entrada'], ['salida', 'Salida']];
+  readonly momentosCargue: [string, string][] = [['llegadaCargue', 'Llegada al cargue'], ['salidaCargue', 'Salida del cargue']];
+  readonly propuesta = signal<any>(null);
+  readonly erroresHoras = signal<string[]>([]);
+  textoFuente(p: any) {
+    const f = p.fuente || {};
+    return [f.salidaCargue, f.descargue, f.salidaDescargue].filter(Boolean).join(', ') || 'las citas del destino';
+  }
 
   // Cambios de otros usuarios: la pantalla se actualiza sola
   private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'correo'], () => this.cargar());
@@ -865,12 +900,34 @@ export class Manifiestos {
 
   abrirCumplido(v: Viaje) {
     const dia = isoDia(v.fecha);
+    const vacio = () => ({ fecha: dia, hora: '' });
     this.cumplido.set({
-      remesa: { tipo: 'C', motivoSuspension: 'A', cantidadEntregada: v.pesoKg,
-        llegada: { fecha: dia, hora: '' }, entrada: { fecha: dia, hora: '' }, salida: { fecha: dia, hora: '' } },
-      manifiesto: { tipo: 'C', fechaEntregaDocumentos: hoyIso(), adicionalFlete: null, descuento: null, sobreanticipo: null, observaciones: '' },
+      usarPropuesta: true,
+      remesa: { tipo: 'C', motivoSuspension: 'A', cantidadEntregada: v.pesoKg, cargueMonitoreado: true, descargueMonitoreado: true,
+        entradaCargue: vacio(), llegadaCargue: vacio(), salidaCargue: vacio(), llegada: vacio(), entrada: vacio(), salida: vacio() },
+      manifiesto: { tipo: 'C', fechaEntregaDocumentos: hoyIso(), adicionalCargue: null, adicionalDescargue: null, adicionalFlete: null, descuento: null, sobreanticipo: null, observaciones: '' },
     });
+    this.propuesta.set(null); this.erroresHoras.set([]);
     this.cumplirViaje.set(v);
+    this.cargarPropuesta(v);
+  }
+  // Horas propuestas por el servidor (GPS de Sur Track o tiempos del destino); la persona las revisa
+  private async cargarPropuesta(v: Viaje) {
+    try {
+      const p = await this.api.get<any>(`/rndc/viajes/${v._id}/cumplido/propuesta`);
+      if (this.cumplirViaje()?._id !== v._id) return;
+      this.propuesta.set(p);
+      this.cumplido.update(c => ({ ...c, remesa: { ...c.remesa, cargueMonitoreado: p.cargueMonitoreado, descargueMonitoreado: p.descargueMonitoreado,
+        entradaCargue: p.entradaCargue, llegadaCargue: p.llegadaCargue, salidaCargue: p.salidaCargue, llegada: p.llegada, entrada: p.entrada, salida: p.salida } }));
+      this.erroresHoras.set(p.revision?.bloqueantes || []);
+    } catch { /* sin propuesta: se escriben a mano */ }
+  }
+  // Ninguna hora en el futuro: el RNDC no la acepta
+  private horasFuturas(r: any) {
+    const ahora = Date.now();
+    const usar = ['entradaCargue', 'entrada', ...(r.cargueMonitoreado ? [] : ['llegadaCargue', 'salidaCargue']), ...(r.descargueMonitoreado ? [] : ['llegada', 'salida'])];
+    return usar.filter(k => r[k]?.fecha && r[k]?.hora && new Date(`${r[k].fecha}T${r[k].hora}:00-05:00`).getTime() > ahora)
+      .map(k => `La hora de «${k}» está en el futuro: el RNDC no la acepta`);
   }
 
   // ── Cumplido y anulación de varios viajes a la vez ──
@@ -909,7 +966,7 @@ export class Manifiestos {
     const limpio = (o: any) => Object.fromEntries(Object.entries(o).filter(([, x]) => x !== null && x !== ''));
     if (this.cumplirLote().length) {
       const ids = this.cumplirLote().map(x => x._id);
-      const r = await this.conClave(cl => this.api.post<any[]>('/rndc/cumplir-lote', { clave: cl, viajes: ids, usarFechaViaje: !!c.usarFechaViaje,
+      const r = await this.conClave(cl => this.api.post<any[]>('/rndc/cumplir-lote', { clave: cl, viajes: ids, usarFechaViaje: !c.usarPropuesta && !!c.usarFechaViaje, usarPropuesta: !!c.usarPropuesta,
         remesa: limpio({ ...c.remesa, cantidadEntregada: null }), manifiesto: limpio(c.manifiesto) }));
       if (!r) return;
       this.cerrarCumplido();
@@ -917,6 +974,8 @@ export class Manifiestos {
       this.cargar();
       return;
     }
+    const futuras = this.horasFuturas(c.remesa);
+    if (futuras.length) { this.erroresHoras.set(futuras); return; }
     const r = await this.conClave(cl => this.api.post<any>(`/rndc/viajes/${v._id}/cumplir`, { clave: cl, remesa: limpio(c.remesa), manifiesto: limpio(c.manifiesto) }));
     if (!r) return;
     if (r.cumplidoManifiesto?.estado === 'aceptado') { this.avisos.ok(`Viaje ${v.numero} cumplido en el RNDC`); this.cumplirViaje.set(null); }

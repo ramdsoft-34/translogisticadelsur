@@ -19,7 +19,11 @@ const clienteVacio = () => ({ nombre: '', tipoId: 'N', nit: '', dv: '', razonSoc
 const POLITICAS: [string, string][] = [['registrado', 'Se cobra lo registrado en el viaje'], ['sin', 'Sin auxiliar (no se cobra)'],
   ['incluido', 'Incluido en la tarifa (no se cobra aparte)'], ['sin_anticipo', 'Valor fijo por viaje sin anticipo']];
 const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', tarifaCliente: 0, tarifaAuxiliar: 0, fleteConductor: 0,
-  auxiliarPagado: 0, anticipoHabitual: 0, pesoKg: 0, operacion: '', destinatario: { tipoId: '', numId: '', sede: '' }, activo: true });
+  auxiliarPagado: 0, anticipoHabitual: 0, pesoKg: 0, operacion: '', destinatario: { tipoId: '', numId: '', sede: '' }, activo: true,
+  // RNDC del destino (fase 7): vacío = lo de la empresa
+  tipoOperacionRemesa: '', tipoConsolidacion: '', tipoEmpaque: '', horaCitaCargue: '', horaCitaDescargue: '',
+  minutosPactoCargue: null, minutosPactoDescargue: null, minutosViaje: null, minutosEspera: null, kmRuta: null,
+  cargueMonitoreado: true, descargueMonitoreado: true });
 
 @Component({
   selector: 'app-clientes',
@@ -124,6 +128,27 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
             } @else { <input id="ds" name="ds" maxlength="6" [(ngModel)]="t.destinatario.sede" /> }
             <small>Sedes registradas del {{ t.destinatario.numId ? 'destinatario' : 'cliente' }} (código y nombre del RNDC).</small></div>
         </div></fieldset>
+        <fieldset class="ancho"><legend>Remesa y tiempos en el RNDC (vacío = lo de la empresa)</legend><div class="formulario">
+          <div class="campo"><label for="tor">Tipo de operación de la remesa</label><select id="tor" name="tor" [(ngModel)]="t.tipoOperacionRemesa">
+            <option value="">La de la empresa</option><option value="G">General</option><option value="P">Mercancía consolidada</option>
+            <option value="C">Contenedor cargado</option><option value="V">Contenedor vacío</option></select></div>
+          @if (t.tipoOperacionRemesa === 'P') {
+            <div class="campo"><label for="tcons">Tipo de consolidación</label><select id="tcons" name="tcons" [(ngModel)]="t.tipoConsolidacion">
+              <option value="">El de la empresa</option><option value="R">Recolección en varios puntos</option><option value="D">Distribución a varios puntos</option>
+              <option value="A">Ambas: recolección y distribución</option><option value="N">Normal: un cargue y un descargue</option></select>
+              <small>Con recolección o distribución en varios puntos no aplica el monitoreo de flota: el RNDC usa 1 h de cargue y 1 h de descargue.</small></div>
+          }
+          <div class="campo"><label for="temp">Código de empaque (RNDC)</label><input id="temp" name="temp" maxlength="3" [(ngModel)]="t.tipoEmpaque" placeholder="El de la empresa" /></div>
+          <div class="campo"><label for="tcc">Hora de cita de cargue</label><input id="tcc" type="time" name="tcc" [(ngModel)]="t.horaCitaCargue" /></div>
+          <div class="campo"><label for="tpc">Tiempo pactado de cargue (min)</label><input id="tpc" type="number" min="0" name="tpc" [(ngModel)]="t.minutosPactoCargue" /></div>
+          <div class="campo"><label for="tcd">Hora de cita de descargue</label><input id="tcd" type="time" name="tcd" [(ngModel)]="t.horaCitaDescargue" /><small>Si es más temprano que la de cargue, es al día siguiente.</small></div>
+          <div class="campo"><label for="tpd">Tiempo pactado de descargue (min)</label><input id="tpd" type="number" min="0" name="tpd" [(ngModel)]="t.minutosPactoDescargue" /></div>
+          <div class="campo"><label for="tmv">Tiempo de viaje de la ruta (min)</label><input id="tmv" type="number" min="0" name="tmv" [(ngModel)]="t.minutosViaje" /><small>De la salida del cargue a la llegada al descargue, en camión cargado.</small></div>
+          <div class="campo"><label for="tme">Espera para entrar al descargue (min)</label><input id="tme" type="number" min="0" name="tme" [(ngModel)]="t.minutosEspera" placeholder="15" /></div>
+          <div class="campo"><label for="tkm">Kilómetros de la ruta (SICETAC)</label><input id="tkm" type="number" min="0" name="tkm" [(ngModel)]="t.kmRuta" /><small>Para no pasar de 90 km/h, como valida el RNDC.</small></div>
+          <label class="casilla"><input type="checkbox" name="tcm" [(ngModel)]="t.cargueMonitoreado" />La empresa de monitoreo reporta el cargue</label>
+          <label class="casilla"><input type="checkbox" name="tdm" [(ngModel)]="t.descargueMonitoreado" />La empresa de monitoreo reporta el descargue (desmarque si la sede no tiene coordenadas)</label>
+        </div></fieldset>
         @if (t._id) { <label class="casilla"><input type="checkbox" name="activo" [(ngModel)]="t.activo" />Activo</label> }
       </form>
       <ng-container pie><button type="button" (click)="abiertoTarifa.set(false)">Cancelar</button>
@@ -224,7 +249,8 @@ export class Clientes {
   async guardarTarifa() {
     const t = this.tarifaForm();
     const campos = ['destino', 'codMunicipio', 'tipoCobro', 'tarifaCliente', 'tarifaAuxiliar', 'fleteConductor', 'auxiliarPagado',
-      'anticipoHabitual', 'pesoKg', 'operacion', 'destinatario', 'activo'];
+      'anticipoHabitual', 'pesoKg', 'operacion', 'destinatario', 'activo', 'tipoOperacionRemesa', 'tipoConsolidacion', 'tipoEmpaque', 'horaCitaCargue', 'horaCitaDescargue',
+      'minutosPactoCargue', 'minutosPactoDescargue', 'minutosViaje', 'minutosEspera', 'kmRuta', 'cargueMonitoreado', 'descargueMonitoreado'];
     const cuerpo: any = Object.fromEntries(campos.map(k => [k, t[k]]));
     cuerpo.cliente = this.sel()._id;
     try {
