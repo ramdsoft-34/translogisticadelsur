@@ -71,7 +71,7 @@ Pestaña **Nómina y activos** en Contabilidad (rutas `/api/gestion/nomina`, `/a
 
 ## Pruebas
 
-`backend/test/contabilidad.test.js`, `backend/test/compras.test.js`, `backend/test/tributario.test.js`, `backend/test/nomina.test.js` y `backend/test/rndcFactura.test.js` (necesitan MongoDB local, como las demás pruebas; las reglas puras de retenciones, XML y conciliación no la necesitan):
+`backend/test/contabilidad.test.js`, `backend/test/compras.test.js`, `backend/test/tributario.test.js`, `backend/test/nomina.test.js`, `backend/test/rndcFactura.test.js` y `backend/test/rentabilidad.test.js` (necesitan MongoDB local, como las demás pruebas; las reglas puras de retenciones, XML y conciliación no la necesitan):
 
 ```
 cd backend && npm test
@@ -99,6 +99,17 @@ Estados: «Por enviar» (`PENDIENTE`), «Sin conexión, se reintenta» (`ERROR_C
 - El servidor de pruebas no envía al RNDC real mientras `RNDC_PERMITIR_PRODUCCION` esté apagado.
 
 Pruebas: `backend/test/rndcFactura.test.js` (las reglas puras sin base de datos; la API con MongoDB local y el simulador del RNDC).
+
+## Fase 6 (rama `csalcedo17`): rentabilidad por viaje, vehículo, cliente o ruta
+
+Pestaña **Rentabilidad** en Contabilidad (ruta `/api/gestion/contabilidad/rentabilidad?desde=&hasta=&agrupar=placa|cliente|ruta|viaje`, servicio `services/gestion/rentabilidad.js`):
+
+- **Ingreso, flete y auxiliar** de cada viaje del periodo, igual que en la liquidación de fletes (tarifa del cliente, flete del conductor, auxiliar cobrado y pagado). Los viajes anulados no cuentan.
+- **Costos del vehículo**: los gastos y compras que se registran con la **placa** (campo nuevo «Vehículo» en *Registrar gasto* y en *Compras*; se guarda como centro de costo del asiento) en cuentas de las clases 5, 6 y 7, más la **depreciación** de los activos fijos con esa placa. Se reparten entre los viajes del vehículo en el periodo según lo cobrado; si el vehículo no tuvo viajes, sus costos quedan en una fila aparte.
+- Utilidad de la operación y margen por vehículo, cliente, ruta (municipio de origen → destino) o viaje, con gráfica de barras, Excel y PDF. No incluye los gastos generales sin vehículo: esos están en el estado de resultados.
+- Permiso `contabilidad.ver`; rango máximo de un año por consulta; todo filtrado por empresa.
+
+Pruebas: `backend/test/rentabilidad.test.js`.
 
 ## Pendiente de confirmar con el Ministerio
 
