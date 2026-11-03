@@ -115,16 +115,17 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
     <app-modal [titulo]="clienteForm()._id ? 'Editar cliente' : 'Nuevo cliente'" [abierto]="abiertoCliente()" (cerrar)="abiertoCliente.set(false)">
       @let f = clienteForm();
       <form id="form-cliente" class="formulario" (ngSubmit)="guardarCliente()">
+        <p class="ancho nota-rndc"><span class="marca-rndc">RNDC</span> Los campos marcados se envían al RNDC; los demás son internos de la empresa.</p>
         <div class="campo ancho"><label for="cn">Nombre corto</label><input id="cn" name="nombre" [(ngModel)]="f.nombre" required /></div>
-        <div class="campo ancho"><label for="crs">Razón social</label><input id="crs" name="rs" [(ngModel)]="f.razonSocial" /></div>
-        <div class="campo"><label for="ct">Tipo de documento</label><select id="ct" name="tipo" [(ngModel)]="f.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
-        <div class="campo"><label for="cnit">Número (sin DV)</label><input id="cnit" name="nit" [(ngModel)]="f.nit" /></div>
-        <div class="campo"><label for="cdv">DV</label><input id="cdv" name="dv" maxlength="1" [(ngModel)]="f.dv" /></div>
+        <div class="campo ancho va-rndc"><label for="crs">Razón social</label><input id="crs" name="rs" [(ngModel)]="f.razonSocial" /></div>
+        <div class="campo va-rndc"><label for="ct">Tipo de documento</label><select id="ct" name="tipo" [(ngModel)]="f.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
+        <div class="campo va-rndc"><label for="cnit">Número (sin DV)</label><input id="cnit" name="nit" [(ngModel)]="f.nit" /></div>
+        <div class="campo va-rndc"><label for="cdv">DV</label><input id="cdv" name="dv" maxlength="1" [(ngModel)]="f.dv" /></div>
         @if (!f._id) {
           <fieldset class="ancho"><legend>Sede principal (donde se carga)</legend><div class="formulario">
-            <div class="campo"><label for="csn">Nombre de la sede</label><input id="csn" name="csn" maxlength="20" placeholder="PRINCIPAL" [(ngModel)]="sedeCliente().nombre" /></div>
-            <div class="campo"><label for="csd">Dirección</label><input id="csd" name="csd" maxlength="60" [(ngModel)]="sedeCliente().direccion" /></div>
-            <app-municipio etiqueta="Municipio" [(codigo)]="sedeCliente().codMunicipio" />
+            <div class="campo va-rndc"><label for="csn">Nombre de la sede</label><input id="csn" name="csn" maxlength="20" placeholder="PRINCIPAL" [(ngModel)]="sedeCliente().nombre" /></div>
+            <div class="campo va-rndc"><label for="csd">Dirección</label><input id="csd" name="csd" maxlength="60" [(ngModel)]="sedeCliente().direccion" /></div>
+            <app-municipio class="va-rndc" etiqueta="Municipio" [(codigo)]="sedeCliente().codMunicipio" />
             <small class="ancho sutil">Si el NIT ya está registrado como tercero se usan sus sedes; si no, se crea esta sede para el RNDC.</small>
           </div></fieldset>
         } @else {
@@ -156,35 +157,36 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
     <app-modal [titulo]="tarifaForm()._id ? 'Editar destino' : 'Nuevo destino'" [abierto]="abiertoTarifa()" (cerrar)="abiertoTarifa.set(false)" [ancho]="true">
       @let t = tarifaForm();
       <form id="form-tarifa" class="formulario" (ngSubmit)="guardarTarifa()">
+        <p class="ancho nota-rndc"><span class="marca-rndc">RNDC</span> Los campos marcados se envían al RNDC; los demás son internos de la empresa.</p>
         <fieldset class="ancho"><legend>¿Dónde se descarga?</legend><div class="formulario">
           <div class="campo ancho"><div class="segmentos" role="group" aria-label="Dónde se descarga">
             <button type="button" [class.activo]="modo() === 'cliente'" (click)="cambiarModo('cliente')">En una sede del cliente</button>
             <button type="button" [class.activo]="modo() === 'otra'" (click)="cambiarModo('otra')">En otra empresa</button>
           </div></div>
           @if (modo() === 'otra') {
-            <div class="campo"><label for="dt">Tipo</label><select id="dt" name="dt" [(ngModel)]="t.destinatario.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
-            <div class="campo"><label for="dn">NIT o cédula (con DV)</label><input id="dn" name="dn" [(ngModel)]="t.destinatario.numId" (change)="cargarSedes()" placeholder="900123456" /></div>
+            <div class="campo va-rndc"><label for="dt">Tipo</label><select id="dt" name="dt" [(ngModel)]="t.destinatario.tipoId">@for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
+            <div class="campo va-rndc"><label for="dn">NIT o cédula (con DV)</label><input id="dn" name="dn" [(ngModel)]="t.destinatario.numId" (change)="cargarSedes()" placeholder="900123456" /></div>
             @if (empresaDestino(); as e) { <div class="campo"><label>Empresa</label><div class="dato-fijo">{{ e }}</div></div> }
             @else if (digitos(t.destinatario.numId).length >= 5) {
-              <div class="campo"><label for="dne">Nombre de la empresa</label><input id="dne" name="dne" maxlength="100" [(ngModel)]="sedeForm().nombreEmpresa" /><small>No está registrada; se crea con esta sede.</small></div>
+              <div class="campo va-rndc"><label for="dne">Nombre de la empresa</label><input id="dne" name="dne" maxlength="100" [(ngModel)]="sedeForm().nombreEmpresa" /><small>No está registrada; se crea con esta sede.</small></div>
             }
           }
           @if (modo() === 'cliente' || digitos(t.destinatario.numId).length >= 5) {
-            <div class="campo ancho"><label for="ds">Sede de descargue</label>
+            <div class="campo ancho va-rndc"><label for="ds">Sede de descargue</label>
               <select id="ds" name="ds" [ngModel]="t.destinatario.sede" (ngModelChange)="elegirSede($event)">
                 @if (modo() === 'cliente') { <option value="">La misma sede de cargue</option> } @else { <option value="" disabled>Elija la sede</option> }
                 @for (s of sedesDestinatario(); track s.sede.codigo) { <option [value]="s.sede.codigo">{{ s.sede.codigo }} · {{ s.sede.nombre || '(sin nombre)' }}{{ s.direccion ? ' — ' + s.direccion : '' }}</option> }
                 @if (puedeTarifas) { <option [value]="NUEVA">+ Crear una sede nueva…</option> }
               </select></div>
             @if (t.destinatario.sede === NUEVA) {
-              <div class="campo"><label for="nsn">Nombre de la sede</label><input id="nsn" name="nsn" maxlength="20" [(ngModel)]="sedeForm().nombre" placeholder="BODEGA NORTE" /></div>
-              <div class="campo"><label for="nsd">Dirección</label><input id="nsd" name="nsd" maxlength="60" [(ngModel)]="sedeForm().direccion" /></div>
-              <app-municipio etiqueta="Municipio de la sede" [codigo]="sedeForm().codMunicipio" (codigoChange)="municipioSede($event)" />
+              <div class="campo va-rndc"><label for="nsn">Nombre de la sede</label><input id="nsn" name="nsn" maxlength="20" [(ngModel)]="sedeForm().nombre" placeholder="BODEGA NORTE" /></div>
+              <div class="campo va-rndc"><label for="nsd">Dirección</label><input id="nsd" name="nsd" maxlength="60" [(ngModel)]="sedeForm().direccion" /></div>
+              <app-municipio class="va-rndc" etiqueta="Municipio de la sede" [codigo]="sedeForm().codMunicipio" (codigoChange)="municipioSede($event)" />
             }
           }
         </div></fieldset>
         <div class="campo"><label for="td">Nombre del destino</label><input id="td" name="destino" [(ngModel)]="t.destino" required placeholder="Ej. PASTO - BODEGA NORTE" /></div>
-        @if (abiertoTarifa()) { <app-municipio etiqueta="Municipio de destino (RNDC)" [(codigo)]="t.codMunicipio" /> }
+        @if (abiertoTarifa()) { <app-municipio class="va-rndc" etiqueta="Municipio de destino" [(codigo)]="t.codMunicipio" /> }
         <div class="campo"><label for="tc">Cobro</label><select id="tc" name="cobro" [(ngModel)]="t.tipoCobro"><option value="viaje">Por viaje</option><option value="unidad">Por unidad (× cantidad)</option></select></div>
         <div class="campo"><label for="tt">Tarifa al cliente</label><div class="moneda"><input id="tt" moneda name="tc2" [(ngModel)]="t.tarifaCliente" /></div></div>
         <div class="campo"><label for="tf">Flete al conductor</label><div class="moneda"><input id="tf" moneda name="tf" [(ngModel)]="t.fleteConductor" /></div></div>
@@ -201,14 +203,19 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
 
     <app-modal titulo="Nueva sede del cliente" [abierto]="abiertoSede()" (cerrar)="abiertoSede.set(false)">
       <form id="form-sede" class="formulario" (ngSubmit)="guardarSede()">
-        <div class="campo"><label for="ssn">Nombre de la sede</label><input id="ssn" name="ssn" maxlength="20" [(ngModel)]="sedeForm().nombre" placeholder="BODEGA NORTE" /></div>
-        <div class="campo"><label for="ssd">Dirección</label><input id="ssd" name="ssd" maxlength="60" [(ngModel)]="sedeForm().direccion" required /></div>
-        @if (abiertoSede()) { <app-municipio etiqueta="Municipio" [(codigo)]="sedeForm().codMunicipio" /> }
+        <p class="ancho nota-rndc"><span class="marca-rndc">RNDC</span> Los campos marcados se envían al RNDC; los demás son internos de la empresa.</p>
+        <div class="campo va-rndc"><label for="ssn">Nombre de la sede</label><input id="ssn" name="ssn" maxlength="20" [(ngModel)]="sedeForm().nombre" placeholder="BODEGA NORTE" /></div>
+        <div class="campo va-rndc"><label for="ssd">Dirección</label><input id="ssd" name="ssd" maxlength="60" [(ngModel)]="sedeForm().direccion" required /></div>
+        @if (abiertoSede()) { <app-municipio class="va-rndc" etiqueta="Municipio" [(codigo)]="sedeForm().codMunicipio" /> }
       </form>
       <ng-container pie><button type="button" (click)="abiertoSede.set(false)">Cancelar</button>
         <button class="primario" type="submit" form="form-sede">Crear sede</button></ng-container>
     </app-modal>`,
-  styles: [`.d-bloque { display: block; }
+  styles: [`.nota-rndc { margin: 0; font-size: 13px; color: var(--gris-6); display: flex; gap: 8px; align-items: center; }
+    .marca-rndc, :host ::ng-deep .va-rndc label::after { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .04em; line-height: 1;
+      padding: 3px 6px; border-radius: 999px; background: var(--azul-claro); color: var(--azul); vertical-align: middle; }
+    :host ::ng-deep .va-rndc label::after { content: 'RNDC'; margin-left: 6px; }
+    .d-bloque { display: block; }
     .min0 { min-width: 0; }
     .columnas { display: grid; grid-template-columns: minmax(220px, 290px) minmax(0, 1fr); gap: 16px; align-items: start; }
     .detalle { min-width: 0; }
