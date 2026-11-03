@@ -19,6 +19,7 @@ import { programarEnvios, enviarPendientes } from '../services/correo.js';
 import { estadoLimitador } from '../services/rndc/limitador.js';
 import { verificarViaje, verificarConsecutivos, verificacionVigente } from '../services/rndc/verificacion.js';
 import * as claveRndc from '../services/rndc/claveGuardada.js';
+import { propuestaViaje } from '../services/rndc/tiemposCumplido.js';
 import { verificarTotp } from '../services/totp.js';
 import { descifrar } from '../utils/cifrado.js';
 
@@ -356,6 +357,9 @@ const cumplidoSchema = z.object({
     tipo: z.enum(['C', 'S']).default('C'), motivoSuspension: t(1),
     cantidadCargada: z.coerce.number().min(0).optional(), cantidadEntregada: z.coerce.number().min(0).optional(),
     llegada: fechaHora, entrada: fechaHora, salida: fechaHora, observaciones: t(200),
+    // Fase 7 (guía de cumplido 2026): entrada al cargue y, si el punto no se monitoreó, su llegada y salida
+    entradaCargue: fechaHora, llegadaCargue: fechaHora, salidaCargue: fechaHora,
+    cargueMonitoreado: z.boolean().optional(), descargueMonitoreado: z.boolean().optional(),
   }).optional().default({}),
   manifiesto: z.object({
     tipo: z.enum(['C', 'S']).default('C'), motivoSuspension: t(2),
@@ -365,6 +369,12 @@ const cumplidoSchema = z.object({
     descuento: z.coerce.number().min(0).optional(), motivoDescuento: t(1),
     sobreanticipo: z.coerce.number().min(0).optional(), observaciones: t(200),
   }).optional().default({}),
+});
+
+// Horas propuestas para el cumplido (GPS de Sur Track, tiempos del destino o de la empresa) y su revisión
+r.get('/viajes/:id/cumplido/propuesta', operar, async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ErrorHttp(400, 'Viaje inválido');
+  res.json(await propuestaViaje(req.empresaId, req.params.id));
 });
 
 r.post('/viajes/:id/cumplir', operar, async (req, res) => {
@@ -391,7 +401,7 @@ const listaLote = z.array(z.string().refine(x => mongoose.isValidObjectId(x), 'v
 
 // ── Cumplido y anulación de varios viajes (uno tras otro, al ritmo del limitador del RNDC) ──
 r.post('/cumplir-lote', operar, async (req, res) => {
-  const d = cumplidoSchema.extend({ viajes: listaLote, usarFechaViaje: z.boolean().optional().default(true) }).parse(req.body);
+  const d = cumplidoSchema.extend({ viajes: listaLote, usarFechaViaje: z.boolean().optional().default(true), usarPropuesta: z.boolean().optional().default(false) }).parse(req.body);
   const resultados = [];
   for (const id of d.viajes) {
     const v = await Viaje.findOne(deEmpresa(req, { _id: id })).select('numero fecha').lean();
@@ -401,6 +411,13 @@ r.post('/cumplir-lote', operar, async (req, res) => {
     delete remesa.cantidadEntregada; delete remesa.cantidadCargada;
     if (d.usarFechaViaje) for (const k of ['llegada', 'entrada', 'salida']) remesa[k] = { ...(remesa[k] || {}), fecha: v.fecha };
     try {
+      // Fase 7: cada viaje con sus propias horas (GPS o tiempos del destino), no las mismas para todos
+      if (d.usarPropuesta) {
+        const p = await propuestaViaje(req.empresaId, id);
+        if (p.revision.bloqueantes.length) { resultados.push({ viaje: id, numero: v.numero, ok: false, mensaje: p.revision.bloqueantes.join('; ') }); continue; }
+        Object.assign(remesa, { entradaCargue: p.entradaCargue, llegadaCargue: p.llegadaCargue, salidaCargue: p.salidaCargue, llegada: p.llegada, entrada: p.entrada,
+          salida: p.salida, cargueMonitoreado: p.cargueMonitoreado, descargueMonitoreado: p.descargueMonitoreado });
+      }
       const r1 = await op.cumplir(req.empresaId, id, d.clave, req.usuario._id, { ...d, remesa });
       const ok = r1.cumplidoManifiesto?.estado === 'aceptado';
       const mensaje = ok ? '' : (r1.cumplidoManifiesto?.mensaje || r1.cumplidoRemesa?.mensaje || 'El RNDC rechazó el cumplido');
