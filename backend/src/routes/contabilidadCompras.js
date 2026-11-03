@@ -58,7 +58,8 @@ const compra = z.object({ proveedor: id, fecha: z.string(), vence: z.string().op
   tipoDocumento: z.enum(['factura', 'documento_soporte', 'cuenta_cobro', 'otro']).default('factura'), documento: z.string().max(40).optional().default(''),
   cufe: z.string().max(120).optional().default(''), lineas: z.array(linea).min(1).max(100),
   conceptoRetencion: z.enum(Object.keys(compras.CONCEPTOS_RETENCION)).optional(), manual,
-  observaciones: z.string().max(300).optional().default(''), xml: z.string().max(900000).optional().default('') });
+  observaciones: z.string().max(300).optional().default(''), xml: z.string().max(900000).optional().default(''),
+  placa: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{0,7}$/, 'Placa inválida').optional().default('') });   // vehículo (centro de costo, fase 6)
 
 r.get('/contabilidad/compras', ver, async (req, res) => {
   const f = deEmpresa(req);

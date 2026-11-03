@@ -24,6 +24,7 @@ import * as compras from '../services/gestion/compras.js';
 import rutasCompras from './contabilidadCompras.js';
 import rutasTributario from './tributario.js';
 import rutasNomina from './nominaActivos.js';
+import rutasRentabilidad from './rentabilidad.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -33,6 +34,8 @@ r.use(rutasCompras);
 r.use(rutasTributario);
 // Contabilidad fase 4: nómina, activos fijos, cierre anual y notas crédito/débito
 r.use(rutasNomina);
+// Contabilidad fase 6: rentabilidad por viaje, vehículo, cliente o ruta
+r.use(rutasRentabilidad);
 
 const id = z.string().refine(v => mongoose.isValidObjectId(v), 'identificador inválido');
 const fechaQ = (v, def) => parseFecha(v) || def;
@@ -254,7 +257,8 @@ r.post('/contabilidad/pagos', gestCont, async (req, res) => {
 });
 r.post('/contabilidad/gastos', gestCont, async (req, res) => {
   const d = z.object({ fecha: z.string(), cuenta: z.string(), concepto: z.string().trim().min(3).max(200), valor: z.coerce.number().positive(),
-    tercero: z.string().max(120).optional().default(''), formaPago: z.enum(['1110', '1105', '2335']).default('1110') }).parse(req.body);
+    tercero: z.string().max(120).optional().default(''), formaPago: z.enum(['1110', '1105', '2335']).default('1110'),
+    placa: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{0,7}$/, 'Placa inválida').optional().default('') }).parse(req.body);
   res.status(201).json(await cont.gasto(req.empresaId, { ...d, fecha: parseFecha(d.fecha), usuario: req.usuario._id }));
 });
 
