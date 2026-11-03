@@ -33,7 +33,7 @@ const sinTildes = (s) => quitarTildes(s).toUpperCase();
 const dd = (n) => String(n).padStart(2, '0');
 const nombre = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].map(txt).filter(Boolean).join(' ') : '');
 // Fecha AAAA/MM/DD desde Date o desde "DD/MM/AAAA" (como va en el XML)
-function fechaRndc(d) {
+export function fechaRndc(d) {
   if (!d) return '';
   const m = txt(d).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (m) return `${m[3]}/${dd(m[2])}/${dd(m[1])}`;
@@ -48,7 +48,7 @@ export function radicacionRndc(d) {
   return `${c.getUTCFullYear()}/${dd(c.getUTCMonth() + 1)}/${dd(c.getUTCDate())} ${dd(h)}:${dd(c.getUTCMinutes())}`;
 }
 
-async function lugar(codigo) {
+export async function lugar(codigo) {
   if (!txt(codigo)) return '';
   const m = await Municipio.findOne({ codigo: txt(codigo) }).lean();
   return m ? lugarRndc(m) : txt(codigo);
@@ -73,10 +73,10 @@ function aseguradora(vehiculo) {
   return `${base} ${ASEGURADORAS_RNDC[base] || sinTildes(vehiculo?.aseguradoraSoat || '')}`.trim();
 }
 const EMPAQUE_RNDC = { 0: 'Paquetes.' };
-const NATURALEZA_RNDC = { 1: 'Carga Normal', 2: 'Carga Peligrosa', 3: 'Carga Extradimensionada', 4: 'Carga Extrapesada', 5: 'Desechos Peligrosos', 6: 'Semovientes', 7: 'Refrigerada' };
-const UNIDAD_RNDC = { 1: 'Kilogramos', 2: 'Galones' };
+export const NATURALEZA_RNDC = { 1: 'Carga Normal', 2: 'Carga Peligrosa', 3: 'Carga Extradimensionada', 4: 'Carga Extrapesada', 5: 'Desechos Peligrosos', 6: 'Semovientes', 7: 'Refrigerada' };
+export const UNIDAD_RNDC = { 1: 'Kilogramos', 2: 'Galones' };
 const RESPONSABLE_RNDC = { E: 'EMPRESA DE TRANSPORTE', R: 'REMITENTE', D: 'DESTINATARIO' };
-const DUENO_POLIZA_RNDC = { E: 'Empresa de Transporte', G: 'Generador de Carga' };
+export const DUENO_POLIZA_RNDC = { E: 'Empresa de Transporte', G: 'Generador de Carga' };
 
 export function textoQR(d) {
   const p = (s, n) => sinTildes(s).slice(0, n);
@@ -90,7 +90,7 @@ export function textoQR(d) {
 }
 
 // Tercero tal como está registrado (por documento y, si se indica, sede)
-async function tercero(empresaId, tipoId, numId, sede, preferido) {
+export async function tercero(empresaId, tipoId, numId, sede, preferido) {
   if (preferido && txt(preferido.numId) === txt(numId) && (!sede || txt(preferido.sede?.codigo) === txt(sede))) return preferido;
   const f = { empresa: empresaId, numId: txt(numId), ...(tipoId ? { tipoId } : {}), ...(sede ? { 'sede.codigo': txt(sede) } : {}) };
   const l = await Tercero.find(f).lean();
@@ -243,7 +243,7 @@ function lineas(doc, texto, ancho, cortar) {
 
 // Ningún texto invade el recuadro vecino: si no cabe, se reduce la letra (hasta 5 pt) y,
 // si aún no cabe, se parte en las líneas permitidas; solo en último caso se recorta.
-function campo(doc, def, valor) {
+export function campo(doc, def, valor) {
   const texto = txt(valor);
   if (!texto) return;
   doc.font(def.negrita ? 'Helvetica-Bold' : 'Helvetica').fillColor('black');

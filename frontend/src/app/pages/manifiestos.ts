@@ -183,7 +183,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                   @if ($any(v).soporteInterno.estado === 'anulado' && $any(v).soporteInterno.anulado?.motivo) { <br /><span class="sutil" [title]="$any(v).soporteInterno.anulado.motivo">{{ $any(v).soporteInterno.anulado.motivo }}</span> }
                   @else { <br /><span class="sutil">Cód. {{ $any(v).soporteInterno.codigo }}</span> } }</td>
                 } @else {
-                <td data-etiqueta="Remesa">@if (v.remesa.numero) { {{ v.remesa.numero }}<br /><span class="chip" [class]="chip(v.remesa.estado)">{{ v.remesa.estado || 'sin enviar' }}</span> }</td>
+                <td data-etiqueta="Remesa">@if (v.remesa.numero) {
+                  @if (v.remesa.estado === 'aceptado' || v.estado === 'cumplido') { <button type="button" class="pequeno texto" style="padding:0;height:auto" (click)="verRemesa(v)" title="Ver la remesa (soporte interno para el cumplido)">{{ v.remesa.numero }}</button> }
+                  @else { {{ v.remesa.numero }} }<br /><span class="chip" [class]="chip(v.remesa.estado)">{{ v.remesa.estado || 'sin enviar' }}</span> }</td>
                 <td data-etiqueta="Manifiesto">@if (v.manifiesto.numero) { {{ v.manifiesto.numero }}<br /><span class="chip" [class]="chip(v.manifiesto.estado)">{{ v.manifiesto.estado || 'sin enviar' }}</span> }
                   @if (v.manifiesto.radicado && v.manifiesto.estado === 'aceptado') { <br /><span class="sutil">Rad. {{ v.manifiesto.radicado }}</span> }</td>
                 }
@@ -387,7 +389,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     <!-- Expedición: revisar, corregir y enviar -->
     <app-expedir-rndc [viajeId]="expedir()" [soloVer]="soloVer()" (cerrar)="expedir.set(null)" (actualizado)="cargar()" />
 
-    <!-- Ver PDF del manifiesto -->
+    <!-- Ver PDF del manifiesto o de la remesa -->
     <app-modal [titulo]="pdfVisto()?.titulo || ''" [abierto]="!!pdfVisto()" (cerrar)="cerrarPdf()" [ancho]="true">
       @if (pdfVisto(); as pv) { <iframe class="visor-pdf" [src]="pv.seguro" [title]="pv.titulo"></iframe> }
       <ng-container pie><button type="button" (click)="cerrarPdf()">Cerrar</button></ng-container>
@@ -400,6 +402,10 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       }
       @if (cumplido(); as c) {
       <form id="form-cumplido" (ngSubmit)="cumplir()">
+        @if (!cumplirLote().length && cumplirViaje(); as cv) {
+          <div class="acciones" style="justify-content:flex-end;margin-bottom:8px"><button type="button" class="pequeno" (click)="verRemesa(cv, true)" title="Abre la remesa en otra pestaña: citas, tiempos pactados y horas para el cumplido">
+            <app-icono nombre="ojo" [tam]="15" />Ver remesa {{ cv.remesa.numero }}</button></div>
+        }
         <fieldset><legend>{{ cumplirLote().length ? 'Cumplido de las remesas' : 'Cumplido de la remesa ' + (cumplirViaje()?.remesa?.numero || '') }}</legend>
           <div class="formulario">
             <div class="campo"><label for="c-tipo">Tipo</label><select id="c-tipo" name="rtipo" [(ngModel)]="c.remesa.tipo"><option value="C">Cumplido normal</option><option value="S">Suspensión</option></select></div>
@@ -855,6 +861,19 @@ export class Manifiestos {
       if (ventana) { ventana.location.href = url; return; }
       this.cerrarPdf();
       this.pdfVisto.set({ titulo: `Manifiesto ${v.manifiesto.numero}`, url, seguro: this.sanitizer.bypassSecurityTrustResourceUrl(url) });
+    } catch (e) { ventana?.close(); this.avisos.error(e); }
+  }
+  // Remesa con el formato del RNDC y el recuadro «Para el cumplido» (soporte interno, no se envía).
+  // Desde el cumplido se abre en otra pestaña para no cerrar el formulario.
+  async verRemesa(v: Viaje, otraPestana = false) {
+    const movil = otraPestana || window.matchMedia('(max-width: 700px)').matches;
+    const ventana = movil ? window.open('', '_blank') : null;
+    try {
+      const blob = await this.api.archivo(`/reportes/remesa/${v._id}`);
+      const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      if (ventana) { ventana.location.href = url; return; }
+      this.cerrarPdf();
+      this.pdfVisto.set({ titulo: `Remesa ${v.remesa.numero}`, url, seguro: this.sanitizer.bypassSecurityTrustResourceUrl(url) });
     } catch (e) { ventana?.close(); this.avisos.error(e); }
   }
   cerrarPdf() {
