@@ -140,8 +140,8 @@ export function contextoViaje(empresa, viaje, vehiculo) {
     FOPAT: numero(v.fopat),
     OPERACION: viaje.tarifaRef?.operacion || cfg.operacion || 'G',
     OBSERVACIONES: txt(viaje.observaciones).slice(0, 200),
-    // El auxiliar va primero: si no cabe todo en los 200 caracteres se recorta la observación escrita
-    OBSERVACIONES_MANIFIESTO: [txt(viaje.textoAuxiliar), txt(viaje.observaciones)].filter(Boolean).join(' ').slice(0, 200),
+    // En el manifiesto solo va el auxiliar del viaje (días y valor); las observaciones escritas son internas
+    OBSERVACIONES_MANIFIESTO: txt(viaje.textoAuxiliar),
     REMESA: viaje.remesa?.numero || '',
     MANIFIESTO: viaje.manifiesto?.numero || '',
   };

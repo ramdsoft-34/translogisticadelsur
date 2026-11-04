@@ -223,9 +223,9 @@ test('Corregir el cliente de un viaje con documentos anulados: el reporte de Wha
   // Observaciones del manifiesto: sin auxiliar no se agrega nada; con auxiliar, días y valor del viaje
   const obs = async () => Object.fromEntries((await s.a.get(`/api/rndc/viajes/${viaje._id}/vista-previa`)).body.manifiesto.variables).OBSERVACIONES;
   await s.a.put(`/api/viajes/${viaje._id}`, { conAuxiliar: false, observaciones: 'Llamar al llegar' });
-  assert.equal(await obs(), 'Llamar al llegar');
+  assert.equal(await obs(), '');
   await s.a.put(`/api/viajes/${viaje._id}`, { conAuxiliar: true, diasAuxiliar: 2 });
-  assert.equal(await obs(), 'Auxiliar 2 días $180.000. Llamar al llegar');
+  assert.equal(await obs(), 'Auxiliar 2 días $180.000.');
   await s.a.put(`/api/viajes/${viaje._id}`, { diasAuxiliar: 1, observaciones: '' });
   assert.equal(await obs(), 'Auxiliar 1 día $90.000.');
 });

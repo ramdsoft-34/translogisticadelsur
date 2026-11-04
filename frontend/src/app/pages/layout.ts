@@ -2,8 +2,8 @@ import { Component, DestroyRef, ElementRef, HostListener, computed, inject, sign
 import { EnVivo } from '../core/en-vivo.service';
 import { environment } from '../../environments/environment';
 import { Avisos } from '../core/avisos.service';
+import { Router, RouterLink, RouterLinkActive, RouterOutlet, NavigationEnd, NavigationStart, NavigationCancel, NavigationError } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router, RouterLink, RouterLinkActive, RouterOutlet, NavigationEnd } from '@angular/router';
 import { Auth } from '../core/auth.service';
 import { RndcClave } from '../core/rndc-clave.service';
 import { Icono } from '../shared/icono';
@@ -85,6 +85,7 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
       </div>
     </aside>
 
+    @if (navegando()) { <div class="barra-navegacion" role="progressbar" aria-label="Cargando la página"></div> }
     <main id="contenido"><router-outlet /></main>
 
     <!-- Buscador de páginas (Ctrl + K) -->
@@ -174,6 +175,8 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
     .desplegable .cerrar, .desplegable .cerrar app-icono { color: var(--rojo); }
     .desplegable .cerrar:hover:not(:disabled) { background: var(--rojo-claro); }
 
+    .barra-navegacion { position: fixed; inset: 0 0 auto 0; height: 3px; z-index: 1000; background: var(--primario); transform-origin: left; animation: navegar 1.2s ease-out infinite; }
+    @keyframes navegar { from { transform: scaleX(0); } to { transform: scaleX(1); opacity: .35; } }
     main { margin-left: var(--ancho-lateral); padding: 28px 32px 56px; animation: entrar .22s ease-out; }
     main > :not(router-outlet) { display: block; max-width: var(--ancho-pagina); margin-left: auto; margin-right: auto; }
     @keyframes entrar { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -276,6 +279,11 @@ export class Layout {
   readonly indice = signal(0);
   private entrada = viewChild<ElementRef<HTMLInputElement>>('entrada');
   private readonly url = signal(this.router.url);
+  readonly navegando = signal(false);
+  private navegacion = this.router.events.pipe(takeUntilDestroyed()).subscribe(e => {
+    if (e instanceof NavigationStart) this.navegando.set(true);
+    else if (e instanceof NavigationEnd || e instanceof NavigationCancel || e instanceof NavigationError) this.navegando.set(false);
+  });
 
   // Módulos y páginas que el rol puede ver
   readonly modulos = computed(() => {

@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { Component, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -248,20 +249,24 @@ export class Vehiculos {
   clase = '';
   soat = '';
   activos = '';
+  private turno = new Turno();
   async cargar() {
+    const vigente = this.turno.tomar();
     this.cargando.set(true);
     this.pagina = 1;
     try {
       const r = await this.api.get<any>('/maestros/vehiculos', { q: this.q, clase: this.clase, soat: this.soat, activos: this.activos, pagina: 1, limite: 50 });
-      this.lista.set(r.items); this.total.set(r.total);
-    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
+      if (vigente()) { this.lista.set(r.items); this.total.set(r.total); }
+    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
   }
 
   async cargarMas() {
     if (this.cargandoMas() || this.lista().length >= this.total()) return;
     this.cargandoMas.set(true);
+    const vigente = this.turno.actual();
     try {
       const r = await this.api.get<any>('/maestros/vehiculos', { q: this.q, clase: this.clase, soat: this.soat, activos: this.activos, pagina: this.pagina + 1, limite: 50 });
+      if (!vigente()) return;
       this.pagina += 1;
       this.lista.update(l => [...l, ...r.items]);
     } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }

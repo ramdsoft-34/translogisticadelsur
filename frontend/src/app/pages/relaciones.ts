@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -221,9 +222,13 @@ export class Relaciones {
     this.cargar();
   }
 
+  private turno = new Turno();
   async cargar() {
-    try { this.datos.set(await this.api.get('/gestion/relaciones/viajes', { agrupar: 'empresa', ...this.f, placa: this.f.placa.toUpperCase() })); }
-    catch (e) { this.avisos.error(e); }
+    const vigente = this.turno.tomar();
+    try {
+      const d = await this.api.get('/gestion/relaciones/viajes', { agrupar: 'empresa', ...this.f, placa: this.f.placa.toUpperCase() });
+      if (vigente()) this.datos.set(d as any);
+    } catch (e) { if (vigente()) this.avisos.error(e); }
   }
 
   elegirPeriodo(p: Periodo) { this.periodo.set(p); this.f = { ...this.f, ...rangoPeriodo(p)! }; this.cargar(); }

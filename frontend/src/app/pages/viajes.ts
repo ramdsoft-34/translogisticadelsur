@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -503,22 +504,27 @@ export class Viajes {
   }
 
   // Primera página (reinicia la lista)
+  private turno = new Turno();
   async cargar() {
+    const vigente = this.turno.tomar();
     this.cargando.set(true);
     this.pagina = 1;
     try {
       const r = await this.api.get<any>('/viajes', { ...this.filtro, pagina: 1, limite: POR_PAGINA });
+      if (!vigente()) return;
       this.viajes.set(r.viajes); this.total.set(r.total);
       if (r.sumas) this.sumas.set(r.sumas);
-    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
+    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
   }
 
   // Páginas siguientes (carga progresiva)
   async cargarMas() {
     if (this.cargandoMas() || this.viajes().length >= this.total()) return;
     this.cargandoMas.set(true);
+    const vigente = this.turno.actual();
     try {
       const r = await this.api.get<any>('/viajes', { ...this.filtro, pagina: this.pagina + 1, limite: POR_PAGINA });
+      if (!vigente()) return;
       this.pagina += 1;
       this.viajes.update(l => [...l, ...r.viajes]);
     } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }
@@ -740,11 +746,14 @@ export class Viajes {
   }
 
   // reiniciar: al cambiar la fecha o el filtro se quita la selección
+  private turnoWa = new Turno();
   async cargarWhatsapp(reiniciar = false) {
+    const vigente = this.turnoWa.tomar();
     if (reiniciar) { this.waSeleccion.set(new Set()); this.waUnificados.set(new Set()); }
     try {
       const r = await this.api.get<{ mensajes: any[]; viajes: any[] }>('/viajes/reporte-whatsapp', { fecha: this.waFecha, incluirReportados: this.waIncluir ? 1 : 0,
         plantilla: this.waPlantilla, seleccion: 1, viajes: [...this.waSeleccion()].join(','), unificar: [...this.waUnificados()].join(',') });
+      if (!vigente()) return;
       this.waViajes.set(r.viajes);
       // Lo elegido que ya no está en la lista (p. ej. marcado como reportado) se quita de la selección
       const ids = new Set(r.viajes.map(x => x._id));

@@ -282,7 +282,7 @@ import { Confirmar } from './confirmar';
                     <div class="campo"><span class="etiqueta">Anticipo</span><strong>{{ f.anticipo | pesos }}</strong></div>
                   }
                   <div class="campo ancho"><label for="ex-obs">Observaciones</label><input id="ex-obs" name="obs" maxlength="200" [(ngModel)]="f.observaciones" />
-                    <small>Si el viaje tiene auxiliar, su valor se agrega solo al inicio de las observaciones del manifiesto.</small></div>
+                    <small>Internas del viaje: al manifiesto solo va el auxiliar (días y valor), si el viaje lo tiene.</small></div>
                 </div></fieldset>
                 @if (p.documentos.manifiesto.estado !== 'aceptado') {
                   <!-- Retenciones: las calcula la plataforma, pero se pueden escribir a mano (p. ej. si el RNDC exige otra FOPAT) -->
@@ -635,6 +635,7 @@ export class ExpedirRndc {
     this.resultado.set(null); this.detalles.set([]); this.mostrarRemolque.set(false);
     try {
       const [v, p] = await Promise.all([this.api.get<any>(`/viajes/${id}`), this.api.get<any>(`/rndc/viajes/${id}/vista-previa`)]);
+      if (this.viajeId() !== id) return;   // se abrió otro viaje mientras cargaba
       this.viaje.set(v);
       this.form.set({
         fecha: isoDia(v.fecha), codOrigen: v.codOrigen || '', codDestino: v.codDestino || v.tarifaRef?.codMunicipio || '',
@@ -688,7 +689,7 @@ export class ExpedirRndc {
       this.viaje.set(v); this.previa.set(p); this.alinearLugares(p);
       if (this.puedeValores) await this.cargarListas();
     } catch { /* se reintenta con el próximo cambio */ }
-  });
+  }, 600, false);
 
   chip(e: string) { return ({ aceptado: 'ok', rechazado: 'error', anulado: 'alerta' } as Record<string, string>)[e] || ''; }
   chipMaestro(e: string) { return ({ enviado: 'ok', error: 'error', no_existe: 'error' } as Record<string, string>)[e] || 'alerta'; }

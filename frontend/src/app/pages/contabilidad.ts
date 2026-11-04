@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { Component, computed, inject, input, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -233,17 +234,20 @@ export class Contabilidad {
     this.api.get<any[]>('/maestros/clientes').then(c => this.clientes.set(c)).catch(() => {});
     this.api.get<any>('/gestion/reglas').then(r => { this.retefuenteFactura = r.reglas.retefuenteFacturaPct; }).catch(() => {});
   }
-  ir(p: Pestana) { this.pestana.set(p); this.cargar(); }
+  ir(p: Pestana) { this.pestana.set(p); this.informe.set(null); this.cargar(); }
+  private turno = new Turno();
   async cargar() {
+    const vigente = this.turno.tomar();
     const per = { desde: this.desde, hasta: this.hasta };
+    const traer = async (destino: { set(v: any): void }, url: string, params?: any) => { const r = await this.api.get(url, params); if (vigente()) destino.set(r); };
     try {
-      if (this.pestana() === 'resumen') this.resumen.set(await this.api.get('/gestion/contabilidad/resumen', per));
-      if (this.pestana() === 'diario') this.asientos.set(await this.api.get('/gestion/contabilidad/asientos', per));
-      if (this.pestana() === 'facturas') this.facturas.set(await this.api.get('/gestion/contabilidad/facturas'));
-      if (this.pestana() === 'pagos') this.informe.set(await this.api.get('/gestion/contabilidad/informes/cxp'));
-      if (this.pestana() === 'informes') this.informe.set(await this.api.get(`/gestion/contabilidad/informes/${this.tipoInforme()}`, per));
-      if (this.pestana() === 'plan') this.cuentas.set(await this.api.get('/gestion/contabilidad/cuentas'));
-    } catch (e) { this.avisos.error(e); }
+      if (this.pestana() === 'resumen') await traer(this.resumen, '/gestion/contabilidad/resumen', per);
+      if (this.pestana() === 'diario') await traer(this.asientos, '/gestion/contabilidad/asientos', per);
+      if (this.pestana() === 'facturas') await traer(this.facturas, '/gestion/contabilidad/facturas');
+      if (this.pestana() === 'pagos') await traer(this.informe, '/gestion/contabilidad/informes/cxp');
+      if (this.pestana() === 'informes') await traer(this.informe, `/gestion/contabilidad/informes/${this.tipoInforme()}`, per);
+      if (this.pestana() === 'plan') await traer(this.cuentas, '/gestion/contabilidad/cuentas');
+    } catch (e) { if (vigente()) this.avisos.error(e); }
   }
   esNumero(v: unknown) { return typeof v === 'number'; }
   esFecha(v: unknown) { return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v); }

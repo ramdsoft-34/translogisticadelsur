@@ -50,7 +50,7 @@ export class Auth {
   async salir(llamarServidor = true) {
     if (llamarServidor && this.usuario()) { try { await this.api.post('/auth/salir'); } catch { /* ya expiró */ } }
     this.usuario.set(null);
-    this.router.navigate(['/ingresar']);
+    location.assign('/ingresar');
   }
 
   tiene(...permisos: string[]) {

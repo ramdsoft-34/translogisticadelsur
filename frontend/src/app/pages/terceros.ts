@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { Component, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { Router } from '@angular/router';
@@ -61,10 +62,9 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
     <app-traer-rndc tipo="terceros" [abierto]="traer()" (cerrar)="traer.set(false)" (traidos)="cargar()" />
     <div class="pestanas" role="tablist" aria-label="Tipo de tercero">
       @for (p of PESTANAS_LISTA; track p[0]) {
-        <button type="button" role="tab" [class.activa]="rol === p[0]" [attr.aria-selected]="rol === p[0]" (click)="rol = p[0]; cargar()">{{ p[1] }}</button>
+        <button type="button" role="tab" [class.activa]="rol === p[0]" [attr.aria-selected]="rol === p[0]" (click)="irRol(p[0])">{{ p[1] }}</button>
       }
     </div>
-    <p class="sutil" style="margin:-8px 0 14px;font-size:13px">Los remitentes, destinatarios y sus sedes se manejan en <a href="/clientes" (click)="$event.preventDefault(); router.navigate(['/clientes'])">Clientes y tarifas</a>: cada cliente es una empresa y cada destino es una sede.</p>
     <div class="barra">
       <div class="campo crece"><label for="t-q">Buscar</label><input id="t-q" type="search" placeholder="Nombre o número de documento" [(ngModel)]="q" (input)="buscarDiferido()" /></div>
       <div class="campo"><label for="t-rndc">En el RNDC</label><select id="t-rndc" [(ngModel)]="rndc" (change)="cargar()"><option value="">Todos</option>
@@ -219,7 +219,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
   `],
 })
 export class Terceros {
-  readonly router = inject(Router);
+  private router = inject(Router);
   readonly TIPOS_NUEVO: { v: TipoNuevo; t: string; d: string; icono: string }[] = [
     { v: 'conductor', t: 'Conductor', d: 'Persona con licencia de conducción que maneja los vehículos.', icono: 'usuario' },
     { v: 'persona', t: 'Titular o tenedor', d: 'Persona propietaria, tenedora o titular de manifiestos (sin licencia).', icono: 'personas' },
@@ -280,20 +280,25 @@ export class Terceros {
 
   rndc = '';
   activos = '';
+  irRol(rol: string) { this.rol = rol; this.lista.set([]); this.total.set(0); this.cargar(); }
+  private turno = new Turno();
   async cargar() {
+    const vigente = this.turno.tomar();
     this.cargando.set(true);
     this.pagina = 1;
     try {
       const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, pagina: 1, limite: 50 });
-      this.lista.set(r.items); this.total.set(r.total);
-    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
+      if (vigente()) { this.lista.set(r.items); this.total.set(r.total); }
+    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
   }
 
   async cargarMas() {
     if (this.cargandoMas() || this.lista().length >= this.total()) return;
     this.cargandoMas.set(true);
+    const vigente = this.turno.actual();
     try {
       const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, pagina: this.pagina + 1, limite: 50 });
+      if (!vigente()) return;
       this.pagina += 1;
       this.lista.update(l => [...l, ...r.items]);
     } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }

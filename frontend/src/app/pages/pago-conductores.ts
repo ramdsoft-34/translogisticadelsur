@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { Component, ViewChild, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -300,7 +301,7 @@ export class PagoConductores {
   });
 
   // Cambios de otros usuarios: la pantalla se actualiza sola
-  private enVivo = inject(EnVivo).al(['gestion', 'viajes'], () => this.ir(this.pestana()));
+  private enVivo = inject(EnVivo).al(['gestion', 'viajes'], () => this.ir(this.pestana()), 600, false);
 
   constructor() { this.calcular(); }
 
@@ -328,11 +329,14 @@ export class PagoConductores {
   alternarLiq(n: string) { const s = new Set(this.selLiq()); if (s.has(n)) s.delete(n); else s.add(n); this.selLiq.set(s); }
   alternarTodasLiq() { this.selLiq.set(this.todasLiq() ? new Set() : new Set(this.liquidacionesVisibles().map(l => l.numero))); }
   imprimirLote() { this.visorPdf?.ver('/gestion/liq-conductores-lote/pdf', 'Liquidaciones (dos por hoja)', { numeros: [...this.selLiq()].join(','), ver: 1 }); }
+  private turnoCalculo = new Turno();
   async calcular() {
+    const vigente = this.turnoCalculo.tomar();
     this.agrupar.set(this.agrupacion);
     // Como en la plantilla, se liquidan todos los viajes del periodo: quedan elegidos y se pueden quitar uno a uno
     try {
       const c = await this.api.post<any>('/gestion/liq-conductores/calcular', { desde: this.f.desde, hasta: this.f.hasta, q: this.f.q });
+      if (!vigente()) return;
       this.calc.set(c); this.sel.set(new Set((c.lineas || []).map((l: any) => l.viaje))); this.descuentos.set({});
     }
     catch (e) { this.avisos.error(e); }

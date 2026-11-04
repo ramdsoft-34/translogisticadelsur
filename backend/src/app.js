@@ -41,6 +41,7 @@ export function crearApp() {
   app.get('/api/salud', (_req, res) => res.json({ ok: true }));
   // Cambios en vivo: canal SSE y aviso de cada modificación a los usuarios de la empresa
   app.use('/api/eventos', eventos);
+  app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
   app.use('/api', avisarCambios);
   app.use('/api/publico', publico);
   app.use('/api/auth', auth);

@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { AfterViewInit, Component, ElementRef, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -480,16 +481,19 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
   readonly historialTotal = signal(0);
   readonly cargandoHistorial = signal(false);
   private paginaHistorial = 1;
+  private turnoHistorial = new Turno();
   async cargarHistorial(mas = false) {
+    const vigente = this.turnoHistorial.tomar();
     this.cargandoHistorial.set(true);
     try {
       const pagina = mas ? this.paginaHistorial + 1 : 1;
       const r = await this.api.get<any>('/rastreo/historial', { ...this.h, placa: this.h.placa.toUpperCase(), pagina, limite: 30 });
+      if (!vigente()) return;
       this.paginaHistorial = pagina;
       this.historialItems.set(mas ? [...this.historialItems(), ...r.items] : r.items);
       this.historialTotal.set(r.total);
-    } catch (e) { this.avisos.error(e); }
-    finally { this.cargandoHistorial.set(false); }
+    } catch (e) { if (vigente()) this.avisos.error(e); }
+    finally { if (vigente()) this.cargandoHistorial.set(false); }
   }
 
   readonly detalle = signal<any>(null);

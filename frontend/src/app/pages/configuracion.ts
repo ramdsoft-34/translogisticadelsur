@@ -361,7 +361,7 @@ export class Configuracion {
   readonly responsables: [string, string][] = [['E', 'Empresa de transporte'], ['R', 'Remitente'], ['D', 'Destinatario']];
 
   // Cambios de otros usuarios: la pantalla se actualiza sola
-  private enVivo = inject(EnVivo).al(['usuarios', 'rndc', 'correo'], () => this.refrescarConfig());
+  private enVivo = inject(EnVivo).al(['usuarios', 'rndc', 'correo'], () => this.refrescarConfig(), 600, false);
 
   // Pestaña inicial desde el enlace (p. ej. Importar datos → ?tab=importar)
   readonly tab = input<Pestana | ''>('');

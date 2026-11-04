@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { Component, computed, inject, input, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
@@ -584,24 +585,32 @@ export class Manifiestos {
     this.api.get<any>('/rndc/config').then(c => this.ambiente.set(c.ambiente)).catch(() => {});
   }
 
-  ir(p: Pestana) { this.pestana.set(p); this.seleccion.set(new Set()); this.texto.set(''); this.cargar(); }
+  ir(p: Pestana) {
+    this.pestana.set(p); this.seleccion.set(new Set()); this.texto.set('');
+    this.viajes.set([]); this.total.set(0); this.transacciones.set([]); this.envios.set([]);
+    this.cargar();
+  }
 
+  private turno = new Turno();
   async cargar() {
+    const vigente = this.turno.tomar();
     this.cargando.set(true);
     try {
-      if (this.pestana() === 'historial') this.transacciones.set(await this.api.get<any[]>('/rndc/transacciones', { limite: 200 }));
+      if (this.pestana() === 'historial') {
+        const t = await this.api.get<any[]>('/rndc/transacciones', { limite: 200 });
+        if (vigente()) this.transacciones.set(t);
+      }
       else if (this.pestana() === 'correos') {
         const [l, p] = await Promise.all([this.api.get<any[]>('/correo/envios', { limite: 300, ...(this.filtroCorreo() ? { estado: this.filtroCorreo() } : {}) }),
           this.api.get<any[]>('/correo/envios', { estado: 'pendiente', limite: 1000 })]);
-        this.envios.set(l); this.pendientesCorreo.set(p.filter(x => x.tipo === 'manifiesto').length);
+        if (vigente()) { this.envios.set(l); this.pendientesCorreo.set(p.filter(x => x.tipo === 'manifiesto').length); }
       }
       else {
         this.pagina = 1;
         const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: 1, limite: 50, historico: 0, ...this.filtroSoporte() });
-        this.viajes.set(r.viajes); this.total.set(r.total);
-        this.cargarCorreos(r.viajes);
+        if (vigente()) { this.viajes.set(r.viajes); this.total.set(r.total); this.cargarCorreos(r.viajes); }
       }
-    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
+    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
   }
 
   // Carga progresiva de la lista de la pestaña
@@ -611,8 +620,10 @@ export class Manifiestos {
   async cargarMas() {
     if (['historial', 'correos'].includes(this.pestana()) || this.cargandoMas() || this.viajes().length >= this.total()) return;
     this.cargandoMas.set(true);
+    const vigente = this.turno.actual();
     try {
       const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: this.pagina + 1, limite: 50, historico: 0, ...this.filtroSoporte() });
+      if (!vigente()) return;
       this.pagina += 1;
       this.viajes.update(l => [...l, ...r.viajes]);
       this.cargarCorreos(this.viajes());

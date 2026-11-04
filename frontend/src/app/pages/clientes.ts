@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -288,7 +289,7 @@ export class Clientes {
     } catch (e) { this.avisos.error(e); }
   }
 
-  elegir(c: any) { this.sel.set(c); this.qTar.set(''); }
+  elegir(c: any) { if (c._id !== this.sel()?._id) { this.sedesCliente.set([]); this.numIdCliente.set(''); } this.sel.set(c); this.qTar.set(''); }
   destinosDe(c: any) { return this.tarifas().filter(t => (t.cliente?._id || t.cliente) === c._id).length; }
 
   readonly politicas = POLITICAS;
@@ -299,15 +300,19 @@ export class Clientes {
   readonly sedesCliente = signal<any[]>([]);
   readonly numIdCliente = signal('');
   private sedesDe = effect(() => { this.cargarSedesCliente(this.sel()); });
+  private turnoSedes = new Turno();
   async cargarSedesCliente(c: any) {
+    const vigente = this.turnoSedes.tomar();
     const nit = digitos(c?.nit);
     if (!nit) { this.sedesCliente.set([]); this.numIdCliente.set(''); return; }
     for (const numId of [...new Set([idCliente(c), nit])]) {
       try {
         const l = (await this.api.get<any>('/maestros/terceros/sedes', { numId })).sedes.filter((x: any) => x.sede?.codigo);
+        if (!vigente()) return;
         if (l.length) { this.sedesCliente.set(l); this.numIdCliente.set(numId); return; }
       } catch { /* sin sedes */ }
     }
+    if (!vigente()) return;
     this.sedesCliente.set([]); this.numIdCliente.set('');
   }
   existeSede(cod: string) { return this.sedesCliente().some(x => x.sede.codigo === String(cod)); }
