@@ -103,6 +103,10 @@ async function validarReferencias(req, d) {
   if (malos.length) throw new ErrorHttp(400, `Datos que no pertenecen a su empresa: ${malos.join(', ')}`);
 }
 
+// «Por enviar» en Manifiestos: solo lo ya reportado por WhatsApp. También lo creado desde Manifiestos
+// y lo que ya tiene la remesa aceptada, que no se puede dejar sin terminar.
+const LISTOS_PARA_MANIFIESTO = [{ 'reporteWhatsapp.fecha': { $ne: null } }, { origen: 'manifiesto' }, { 'remesa.estado': 'aceptado' }];
+
 function filtroLista(req) {
   const f = deEmpresa(req);
   const desde = parseFecha(req.query.desde); const hasta = parseFecha(req.query.hasta);
@@ -123,6 +127,7 @@ function filtroLista(req) {
   const anulado = [{ 'remesa.estado': 'anulado' }, { 'manifiesto.estado': 'anulado' },
     { 'anuladoBase.remesa': { $nin: ['', null] }, 'remesa.estado': { $ne: 'aceptado' } },
     { 'anuladoBase.manifiesto': { $nin: ['', null] }, 'manifiesto.estado': { $ne: 'aceptado' } }];
+  if (req.query.reportados === '1') (f.$and ||= []).push({ $or: LISTOS_PARA_MANIFIESTO });
   if (req.query.anulados === '0') f.$nor = anulado;
   if (req.query.anulados === '1') (f.$and ||= []).push({ $or: anulado });
   if (req.query.q) {
@@ -188,8 +193,8 @@ r.get('/resumen', permitir(P.VIAJES_VER), async (req, res) => {
   const [hoyN, porEstado, mes] = await Promise.all([
     Viaje.countDocuments(deEmpresa(req, { fecha: hoy })),
     // Los históricos importados del Excel no cuentan como pendientes de RNDC
-    // Igual que «Por enviar» en Manifiestos RNDC: sin históricos, sin los que no requieren manifiesto y sin anulados
-    Viaje.aggregate([{ $match: { ...base, historico: { $ne: true }, requiereManifiesto: { $ne: false },
+    // Igual que «Por enviar» en Manifiestos RNDC: reportados, sin históricos, sin los que no requieren manifiesto y sin anulados
+    Viaje.aggregate([{ $match: { ...base, historico: { $ne: true }, requiereManifiesto: { $ne: false }, $or: LISTOS_PARA_MANIFIESTO,
       $nor: [{ 'remesa.estado': 'anulado' }, { 'manifiesto.estado': 'anulado' }] } }, { $group: { _id: '$estado', n: { $sum: 1 } } }]),
     Viaje.aggregate([{ $match: { ...base, fecha: { $gte: inicioMes }, estado: { $ne: 'anulado' } } },
       { $group: { _id: null, viajes: { $sum: 1 }, tarifa: { $sum: '$tarifa' }, flete: { $sum: '$flete' }, anticipo: { $sum: '$anticipo' } } }]),

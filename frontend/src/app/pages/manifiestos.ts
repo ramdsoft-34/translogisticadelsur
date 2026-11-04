@@ -25,7 +25,7 @@ type Pestana = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'sopor
 type PestanaViajes = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'soporte';
 // Filtro de cada pestaña. Con remesa o manifiesto anulados el viaje sale de «Por enviar» y queda en «Anulados».
 const FILTROS: Record<PestanaViajes, Record<string, string | number>> = {
-  pendientes: { estado: 'registrado,remesa', anulados: 0 }, anulados: { estado: 'registrado,remesa', anulados: 1 },
+  pendientes: { estado: 'registrado,remesa', anulados: 0, reportados: 1 }, anulados: { estado: 'registrado,remesa', anulados: 1 },
   manifestados: { estado: 'manifestado' }, cumplidos: { estado: 'cumplido' },
   soporte: { soporte: 1 },
 };
@@ -262,7 +262,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
               }
             } @empty {
               @if (cargando()) { @for (i of [1, 2, 3]; track i) { <tr><td colspan="10"><span class="esqueleto"></span></td></tr> } }
-              @else { <tr><td colspan="10" class="vacio"><strong>Nada pendiente en esta lista</strong>Los viajes aparecen aquí según su estado en el RNDC.</td></tr> }
+              @else { <tr><td colspan="10" class="vacio"><strong>Nada pendiente en esta lista</strong>{{ pestana() === 'pendientes' ? 'Aquí aparecen los viajes ya reportados por WhatsApp en el módulo de Viajes.' : 'Los viajes aparecen aquí según su estado en el RNDC.' }}</td></tr> }
             }
           </tbody>
         </table>

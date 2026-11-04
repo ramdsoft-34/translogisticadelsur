@@ -145,7 +145,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
         <span class="etq">Conductor:</span>
         <div>
-          <app-buscar-tercero etiqueta="" rol="conductor" [conPlacas]="true" [(valor)]="f.conductor" (elegido)="elegirConductor($event)"
+          <app-buscar-tercero id="v-cond" etiqueta="" rol="conductor" [conPlacas]="true" [(valor)]="f.conductor" (elegido)="elegirConductor($event)"
             [deshabilitado]="bloqueado()" placeholder="Nombre, apellido o cédula" />
           @if (documentos(); as dc) {
             @if (dc.vencidos.length) { <span class="chip error sin-punto" [title]="dc.vencidos.join('; ')">Documentos vencidos: se pedirá autorización</span> }
@@ -311,8 +311,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
               <pre class="wa-texto">{{ m.texto }}</pre>
               <div class="acciones">
                 <button class="pequeno" (click)="copiar(m.texto)">Copiar</button>
-                <a class="boton pequeno wa" [href]="m.enlace" target="_blank" rel="noopener noreferrer"><app-icono nombre="enviar" [tam]="15" />Abrir en WhatsApp</a>
-                @if (puedeRegistrar) { <button class="pequeno" (click)="marcarReportado(m)">Marcar como reportado</button> }
+                <a class="boton pequeno wa" [href]="m.enlace" target="_blank" rel="noopener noreferrer" (click)="puedeRegistrar && marcarReportado(m)"><app-icono nombre="enviar" [tam]="15" />Reportar por WhatsApp</a>
               </div>
             </div>
           } @empty {
@@ -705,6 +704,7 @@ export class Viajes {
           this.registradosTanda.update(l => [...l, { numero: v.numero, placa: v.placa, sinManifiesto: !requiere }]);
           this.form.set({ ...vacio(), fecha: f.fecha });
           this.placasConductor.set([]); this.rastrear.set(false); this.preguntarManifiesto.set(false); this.cargarSiguienteNumero();
+          this.enfocarConductor();
           return;
         }
         if (this.seguirRegistrando()) {
@@ -714,7 +714,7 @@ export class Viajes {
           this.form.set({ ...f, tarifaRef: '', destino: '', codDestino: '', tarifa: null, flete: null, anticipo: null, pesoKg: null, cantidad: 1,
             conAuxiliar: false, diasAuxiliar: null, planilla: '', placa: '', remolque: '', conductor: '', titular: '', observaciones: '', requiereManifiesto: true });
           this.placasConductor.set([]); this.preguntarManifiesto.set(false); this.cargarSiguienteNumero();
-          setTimeout(() => document.getElementById('v-dest')?.focus(), 50);
+          this.enfocarConductor();
           return;
         }
       }
@@ -723,6 +723,9 @@ export class Viajes {
       this.cargar();
     } catch (e) { this.avisos.error(e); } finally { this.guardando.set(false); }
   }
+
+  // Después de guardar se sigue con el conductor del próximo viaje
+  private enfocarConductor() { setTimeout(() => document.querySelector<HTMLInputElement>('#v-cond input')?.focus(), 50); }
 
   async eliminar() {
     try {

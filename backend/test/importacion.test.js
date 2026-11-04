@@ -228,6 +228,13 @@ test('Corregir el cliente de un viaje con documentos anulados: el reporte de Wha
   assert.equal(await obs(), 'Auxiliar 2 días $180.000.');
   await s.a.put(`/api/viajes/${viaje._id}`, { diasAuxiliar: 1, observaciones: '' });
   assert.equal(await obs(), 'Auxiliar 1 día $90.000.');
+  // «Por enviar» en Manifiestos: solo aparece después de reportarlo por WhatsApp
+  await Viaje.collection.updateOne({ _id: new mongoose.Types.ObjectId(viaje._id) }, { $set: { 'remesa.estado': '', 'manifiesto.estado': '', anuladoBase: {} } });
+  const porEnviar = async () => (await s.a.get('/api/viajes?estado=registrado,remesa&anulados=0&reportados=1&limite=200')).body.viajes.map(x => x._id);
+  assert.ok(!(await porEnviar()).includes(viaje._id));
+  await s.a.post('/api/viajes/reporte-whatsapp/marcar', { viajes: [viaje._id] });
+  assert.ok((await porEnviar()).includes(viaje._id));
+  await Viaje.collection.updateOne({ _id: new mongoose.Types.ObjectId(viaje._id) }, { $set: { historico: true } });
 });
 
 test('Importación de vehículos y terceros desde Excel: simular, errores por fila y aplicar', async () => {
