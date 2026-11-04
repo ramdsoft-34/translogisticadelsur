@@ -131,7 +131,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       <div class="registro-columnas">
       <div class="col-form">
       @let f = form();
-      @if (bloqueado()) { <div class="mensaje info compacto-msj">Este viaje ya tiene documentos en el RNDC: solo puede cambiar observaciones, auxiliar, tarifa y licencia.</div> }
+      @if (bloqueado()) { <div class="mensaje info compacto-msj">Este viaje ya tiene documentos en el RNDC: solo puede cambiar observaciones, auxiliar, tarifa y licencia. Para cambiar el cliente, anule el manifiesto y la remesa.</div> }
       @if (f.historico && puedeEditarTodos) {
         <label class="casilla compacto-msj"><input type="checkbox" name="habilitar" [(ngModel)]="habilitarRndc" />Viaje histórico del Excel: habilitarlo para expedir en el RNDC</label>
       }
@@ -665,8 +665,10 @@ export class Viajes {
     try {
       if (f._id) {
         // Al editar, el viaje se actualiza y la ventana sigue abierta (se cierra con «Cerrar»)
-        await this.api.put(`/viajes/${f._id}`, cuerpo);
+        const r = await this.api.put<any>(`/viajes/${f._id}`, cuerpo);
         this.avisos.ok(`Viaje N° ${this.numeroEditado()} actualizado`);
+        if ((this.viajeRastreo as any)?.reporteWhatsapp?.fecha && !r.reporteWhatsapp?.fecha) this.avisos.mostrar('El viaje vuelve a quedar por reportar: sale en el mensaje de WhatsApp del cliente corregido.', 'info', 9000);
+        if (this.viajeRastreo) (this.viajeRastreo as any).reporteWhatsapp = r.reporteWhatsapp;
         this.cargarWhatsapp();
         this.registradosTanda.update(l => l.length ? l : [{ numero: this.numeroEditado(), placa: f.placa, sinManifiesto: f.requiereManifiesto === false }]);
         return;

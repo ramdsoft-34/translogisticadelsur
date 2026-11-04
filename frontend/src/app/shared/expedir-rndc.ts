@@ -186,6 +186,17 @@ import { Confirmar } from './confirmar';
                 }
                 <h3 class="titulo-col">Datos principales</h3>
                 <fieldset><legend>Viaje</legend><div class="formulario">
+                  @if (puedeCorregirCliente()) {
+                    <div class="campo"><label for="ex-cli">Cliente</label>
+                      <select id="ex-cli" name="cliente" [ngModel]="f.cliente" (ngModelChange)="elegirCliente($event)" required>
+                        @for (c of clientes(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }
+                      </select><small>Se puede cambiar porque no hay remesa ni manifiesto vigentes.</small></div>
+                    <div class="campo"><label for="ex-tar">Destino del cliente</label>
+                      <select id="ex-tar" name="tarifaRef" [ngModel]="f.tarifaRef" (ngModelChange)="elegirDestino($event)">
+                        <option value="">{{ f.cliente === f.clienteInicial ? 'Conservar: ' + (viaje()?.destino || '') : 'Elija el destino' }}</option>
+                        @for (t of tarifasCliente(); track t._id) { <option [value]="t._id">{{ t.destino }}</option> }
+                      </select><small>Del destino se toman la tarifa y el municipio. El flete y el anticipo no cambian.</small></div>
+                  }
                   <div class="campo"><label for="ex-fecha">Fecha</label><input id="ex-fecha" type="date" name="fecha" [(ngModel)]="f.fecha" [disabled]="p.remesaAceptada" required />
                     @if (p.remesaAceptada) { <small>Fijada por la remesa aceptada.</small> }</div>
                   <app-municipio etiqueta="Origen (cargue)" [(codigo)]="f.codOrigen" />
@@ -594,6 +605,12 @@ export class ExpedirRndc {
     return { retefuente: rete, ica, fopat, neto, saldo: neto - (Number(val.anticipo) || 0) };
   }
   readonly form = signal<any>({});
+  readonly clientes = signal<any[]>([]);
+  private tarifas = signal<any[]>([]);
+  readonly tarifasCliente = computed(() => this.tarifas().filter(t => (t.cliente?._id || t.cliente) === this.form().cliente));
+  // El cliente solo se corrige sin remesa ni manifiesto vigentes en el RNDC
+  readonly puedeCorregirCliente = computed(() => { const p = this.previa(); const v = this.viaje();
+    return this.puedeValores && !!p && !p.remesaAceptada && p.documentos.manifiesto.estado !== 'aceptado' && !v?.liquidacion && !v?.liquidacionConductor; });
   readonly trabajando = signal(false);
   readonly resultado = signal<{ ok: boolean; texto: string } | null>(null);
   readonly detalles = signal<string[]>([]);
@@ -623,7 +640,13 @@ export class ExpedirRndc {
         pesoKg: v.pesoKg, destinatario: { tipoId: v.destinatario?.tipoId || '', numId: v.destinatario?.numId || '', sede: v.destinatario?.sede || '' },
         flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones || '',
         codDestinoManifiesto: p.destinoManifiestoFijo || '', numeroRemesa: p.numeros?.manualRemesa || '', numeroManifiesto: p.numeros?.manualManifiesto || '',
+        ...this.datosCliente(v),
       });
+      if (this.puedeValores && !this.clientes().length) {
+        const [c, t] = await Promise.all([this.api.get<any[]>('/maestros/clientes'), this.api.get<any[]>('/maestros/tarifas')]);
+        const actual = v.cliente?._id;
+        this.clientes.set(c.filter(x => x.activo !== false || x._id === actual)); this.tarifas.set(t.filter(x => x.activo !== false));
+      }
       // Si el viaje no tiene origen propio se muestra el que se enviará (el de la empresa)
       const origen = p.manifiesto.variables.find((x: string[]) => x[0] === 'CODMUNICIPIOORIGENMANIFIESTO')?.[1];
       if (!this.form().codOrigen && origen) this.form.update(f => ({ ...f, codOrigen: origen }));
@@ -632,6 +655,16 @@ export class ExpedirRndc {
       const proceso = p.ultimoError?.proceso;
       this.pestana.set(proceso === 4 ? 'manifiesto' : proceso === 3 ? 'remesa' : this.maestrosPendientes() ? 'maestros' : p.remesaAceptada ? 'manifiesto' : 'remesa');
     } catch (e) { this.avisos.error(e); this.cerrar.emit(); }
+  }
+
+  private datosCliente(v: any) {
+    const cliente = v.cliente?._id || ''; const tarifaRef = v.tarifaRef?._id || v.tarifaRef || '';
+    return { cliente, clienteInicial: cliente, tarifaRef, tarifaInicial: tarifaRef };
+  }
+  elegirCliente(id: string) { this.form.update(f => ({ ...f, cliente: id, tarifaRef: '', destinatario: { tipoId: '', numId: '', sede: '' } })); }
+  elegirDestino(id: string) {
+    const t = this.tarifasCliente().find(x => x._id === id);
+    this.form.update(f => ({ ...f, tarifaRef: id, codDestino: t?.codMunicipio || f.codDestino }));
   }
 
   chip(e: string) { return ({ aceptado: 'ok', rechazado: 'error', anulado: 'alerta' } as Record<string, string>)[e] || ''; }
@@ -728,6 +761,8 @@ export class ExpedirRndc {
     const c: any = { codOrigen: f.codOrigen || '', codDestino: f.codDestino || '', placa: String(f.placa || '').toUpperCase(),
       remolque: String(f.remolque || '').toUpperCase(), observaciones: f.observaciones || '' };
     if (f.conductor) c.conductor = f.conductor;
+    if (f.cliente && f.cliente !== f.clienteInicial) c.cliente = f.cliente;
+    if (f.tarifaRef !== f.tarifaInicial) c.tarifaRef = f.tarifaRef || null;
     // El titular solo se envía si se cambió aquí (si no, el servidor lo toma del vehículo)
     if ((f.titular || '') !== (f.titularInicial || '')) c.titular = f.titular || null;
     if (!p.remesaAceptada) { c.fecha = f.fecha; c.pesoKg = Number(f.pesoKg) || 0; c.destinatario = f.destinatario.tipoId ? f.destinatario : { tipoId: '', numId: '', sede: '' }; }
@@ -747,8 +782,11 @@ export class ExpedirRndc {
       this.previa.set(await this.api.put<any>(`/rndc/viajes/${id}/datos`, this.cuerpo()));
       // Placa, remolque, conductor o titular corregidos en el formulario del RNDC pasan al viaje: se recargan aquí
       const v = await this.api.get<any>(`/viajes/${id}`);
+      if (this.viaje()?.reporteWhatsapp?.fecha && !v.reporteWhatsapp?.fecha) this.avisos.mostrar('El viaje vuelve a quedar por reportar: en Viajes → Reporte por WhatsApp sale en el mensaje del cliente corregido.', 'info', 9000);
       this.viaje.set(v);
-      this.form.update(f => ({ ...f, placa: v.placa, remolque: v.remolque || '', conductor: v.conductor?._id || '', titular: v.titular?._id || '', titularInicial: v.titular?._id || '' }));
+      this.form.update(f => ({ ...f, placa: v.placa, remolque: v.remolque || '', conductor: v.conductor?._id || '', titular: v.titular?._id || '', titularInicial: v.titular?._id || '',
+        codDestino: v.codDestino || f.codDestino, codDestinoManifiesto: this.previa()?.destinoManifiestoFijo || '',
+        destinatario: { tipoId: v.destinatario?.tipoId || '', numId: v.destinatario?.numId || '', sede: v.destinatario?.sede || '' }, ...this.datosCliente(v) }));
       if (!silencioso) { this.avisos.ok('Datos del viaje guardados'); this.actualizado.emit(); }
       return true;
     } catch (e) {

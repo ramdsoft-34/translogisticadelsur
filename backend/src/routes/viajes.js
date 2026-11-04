@@ -56,6 +56,17 @@ export async function titularDePlaca(empresaId, placa) {
   const v = await Vehiculo.findOne({ empresa: empresaId, placa }).select('titularHabitual').lean();
   return v?.titularHabitual || null;
 }
+// Cliente corregido (sin documentos vigentes en el RNDC): lo del cliente anterior no pasa al nuevo
+// y el viaje vuelve a quedar por reportar, para que salga en el mensaje del cliente correcto.
+export function corregirCliente(v, d) {
+  if (!d.cliente || d.cliente === String(v.cliente)) return;
+  if (d.tarifaRef === undefined) d.tarifaRef = null;
+  if (d.destinatario === undefined) d.destinatario = { tipoId: '', numId: '', sede: '' };
+  d.codDestinoManifiesto = '';
+  d['ajustesRndc.remesa'] = {};
+  d['reporteWhatsapp.fecha'] = null;
+  d['reporteWhatsapp.usuario'] = null;
+}
 // Después de expedir documentos en el RNDC solo se pueden cambiar datos internos.
 const CAMPOS_INTERNOS = ['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa', 'historico', 'licencia'];
 // «Manifiesto» del formulario → número manual del manifiesto para el RNDC
@@ -383,6 +394,7 @@ r.put('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   await validarReferencias(req, { ...d, cliente: d.cliente || (d.tarifaRef ? String(v.cliente) : undefined) });
   if (d.historico !== undefined && !tienePermiso(req.usuario.rol, P.VIAJES_EDITAR_TODOS)) throw new ErrorHttp(403, 'No puede cambiar el estado histórico del viaje');
   const antes = v.toObject();
+  corregirCliente(v, d);
   if (d.conductor) {
     const cond = await Tercero.findOne(deEmpresa(req, { _id: d.conductor })).select('nombres apellido1 apellido2').lean();
     d.conductorNombre = nombreTercero(cond);

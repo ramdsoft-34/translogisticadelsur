@@ -188,6 +188,32 @@ test('Reporte de WhatsApp con la estructura del Excel y valores en pesos', async
   assert.equal((await s.b.post('/api/viajes/reporte-whatsapp/marcar', { viajes: m.viajes })).body.marcados, 0);
 });
 
+test('Corregir el cliente de un viaje con documentos anulados: el reporte de WhatsApp sale con el cliente nuevo', async () => {
+  const viaje = (await s.a.get('/api/viajes/reporte-whatsapp?fecha=2026-10-11&incluirReportados=1')).body.viajes[0];
+  const nuevo = (await s.a.post('/api/maestros/clientes', { nombre: 'Cliente Corregido', tipoId: 'N', nit: '901222333', dv: '4' })).body;
+  const tarifa = (await s.a.post('/api/maestros/tarifas', { cliente: nuevo._id, destino: 'Linares', codMunicipio: '52411000', tarifaCliente: 800000 })).body;
+  const Viaje = mongoose.model('Viaje');
+  const antes = { estado: 'manifestado', remesa: { numero: 'R1', estado: 'aceptado' }, manifiesto: { numero: 'M1', estado: 'aceptado' } };
+  await Viaje.collection.updateOne({ _id: new mongoose.Types.ObjectId(viaje._id) }, { $set: { ...antes, destinatario: { tipoId: 'N', numId: '8909009431', sede: '27' }, 'ajustesRndc.remesa': { X: '1' } } });
+  // Con documentos vigentes no se cambia
+  assert.equal((await s.a.put(`/api/rndc/viajes/${viaje._id}/datos`, { cliente: nuevo._id })).status, 409);
+  await Viaje.collection.updateOne({ _id: new mongoose.Types.ObjectId(viaje._id) }, { $set: { estado: 'registrado', 'remesa.estado': 'anulado', 'manifiesto.estado': 'anulado' } });
+  // Otra empresa no puede usar sus clientes ni tocar el viaje
+  assert.equal((await s.b.put(`/api/rndc/viajes/${viaje._id}/datos`, { cliente: nuevo._id })).status, 404);
+  const r = await s.a.put(`/api/rndc/viajes/${viaje._id}/datos`, { cliente: nuevo._id, tarifaRef: tarifa._id, destinatario: { tipoId: '', numId: '', sede: '' } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  const v = (await s.a.get(`/api/viajes/${viaje._id}`)).body;
+  assert.equal(v.cliente._id, nuevo._id);
+  assert.equal(v.destino, 'Linares');
+  assert.equal(v.codDestino, '52411000');
+  assert.equal(v.tarifa, 800000);
+  assert.equal(v.destinatario.numId, '');
+  assert.equal(v.reporteWhatsapp.fecha, null);
+  // Vuelve a salir por reportar, en el mensaje del cliente corregido
+  const m = (await s.a.get('/api/viajes/reporte-whatsapp?fecha=2026-10-11')).body.mensajes;
+  assert.deepEqual(m.map(x => x.cliente), ['Cliente Corregido']);
+});
+
 test('Importación de vehículos y terceros desde Excel: simular, errores por fila y aplicar', async () => {
   const pl = await s.a.get('/api/importaciones/plantillas/terceros').buffer(true).parse((res, cb) => { const p = []; res.on('data', c => p.push(c)); res.on('end', () => cb(null, Buffer.concat(p))); });
   assert.equal(pl.status, 200);
