@@ -312,6 +312,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
               <div class="acciones">
                 <button class="pequeno" (click)="copiar(m.texto)">Copiar</button>
                 <a class="boton pequeno wa" [href]="m.enlace" target="_blank" rel="noopener noreferrer" (click)="puedeRegistrar && marcarReportado(m)"><app-icono nombre="enviar" [tam]="15" />Reportar por WhatsApp</a>
+                @if (puedeRegistrar) { <button class="pequeno" (click)="marcarReportado(m)" title="Lo marca como reportado sin abrir WhatsApp; pasa a Manifiestos">Marcar como reportado</button> }
               </div>
             </div>
           } @empty {
