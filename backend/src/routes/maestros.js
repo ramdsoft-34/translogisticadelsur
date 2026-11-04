@@ -11,6 +11,7 @@ import { normalizar, escaparRegex, quitarTildes } from '../utils/texto.js';
 import { clienteSchema, tarifaSchema, terceroSchema, vehiculoSchema } from '../validaciones/maestros.js';
 import { variablesTercero, variablesVehiculo, huella, idCliente } from '../services/rndc/documentos.js';
 import { reglasDe, pesoPorTamano } from '../services/gestion/reglas.js';
+import { sincronizarDestinoViajes } from '../services/gestion/sincronizarDestino.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -150,8 +151,9 @@ r.put('/tarifas/:id', editarTarifas, async (req, res) => {
     if (kg) d.pesoKg = kg;
   }
   const x = await Tarifa.findOneAndUpdate(deEmpresa(req, { _id: req.params.id }), { $set: d }, { new: true, runValidators: true });
-  await auditar(req, 'editar_tarifa', { entidad: 'Tarifa', entidadId: x._id, detalle: { destino: x.destino, cambios: cambios(antes, x.toObject(), Object.keys(d)) } });
-  res.json(x);
+  const viajesActualizados = ('destino' in d || 'codMunicipio' in d) ? await sincronizarDestinoViajes(req.empresaId, x) : 0;
+  await auditar(req, 'editar_tarifa', { entidad: 'Tarifa', entidadId: x._id, detalle: { destino: x.destino, viajesActualizados, cambios: cambios(antes, x.toObject(), Object.keys(d)) } });
+  res.json({ ...x.toJSON(), viajesActualizados });
 });
 
 // Solo se elimina un destino que ningún viaje usa (con viajes se desactiva, así el historial conserva su tarifa).

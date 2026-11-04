@@ -2,14 +2,15 @@
 // cumplir, anular, registrar maestros y consultar. Cada envío queda en
 // TransaccionRndc. La clave del usuario web service se recibe en cada
 // operación y nunca se guarda.
-import { Empresa, Viaje, Vehiculo, Tercero, Municipio, TransaccionRndc, Contador, proximo, pob } from '../../models/index.js';
+import { Empresa, Viaje, Vehiculo, Tercero, Municipio, Tarifa, TransaccionRndc, Contador, proximo, pob } from '../../models/index.js';
+import { lineaLiquidacion, respaldosAuxiliar } from '../calculos.js';
 import { buscadorMunicipios } from '../importacion/excel.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { enviar, registrarTransaccion } from './cliente.js';
 import { xmlRegistro, xmlConsulta, bloqueRemesas, interpretarRegistro, interpretarConsulta, validarVariables, ocultarClave } from './xml.js';
 import {
   contextoViaje, variablesRemesa, variablesManifiesto, variablesCumplidoRemesa, variablesCumplidoManifiesto,
-  variablesAnulacion, variablesTercero, variablesVehiculo, huella, idCliente, destinoIgualOrigen, PROBLEMA_DESTINO, valoresManifiesto,
+  variablesAnulacion, variablesTercero, variablesVehiculo, huella, idCliente, destinoIgualOrigen, PROBLEMA_DESTINO, valoresManifiesto, textoAuxiliar,
 } from './documentos.js';
 import { TIPOS_ID_CONDUCTOR, MOTIVOS_REEMPLAZO } from './catalogos.js';
 import { txt, hoyColombia, normalizar, escaparRegex } from '../../utils/texto.js';
@@ -46,6 +47,12 @@ export async function cargarViaje(empresaId, viajeId) {
     .populate(['cliente', 'conductor', 'titular', 'tarifaRef'].map(x => pob(empresaId, x))).lean();
   if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
   const vehiculo = await Vehiculo.findOne({ empresa: empresaId, placa: v.placa }).lean();
+  // Auxiliares registrados en el viaje: el mismo valor pagado que muestra el reporte de viajes
+  if (v.conAuxiliar) {
+    const tarifas = await Tarifa.find({ empresa: empresaId, cliente: v.cliente?._id }).lean();
+    const { totalAuxiliarPagado } = lineaLiquidacion(v, v.tarifaRef, { respaldo: respaldosAuxiliar(tarifas).get(String(v.cliente?._id)) });
+    v.textoAuxiliar = textoAuxiliar(Number(v.diasAuxiliar) > 0 ? Number(v.diasAuxiliar) : (Number(v.cantidad) || 1), totalAuxiliarPagado);
+  }
   // Sin destinatario en el viaje ni en la tarifa: la sede del cliente en el municipio de destino
   if (!v.destinatario?.numId && !v.tarifaRef?.destinatario?.numId && v.cliente) {
     const codDestino = v.codDestino || v.tarifaRef?.codMunicipio;

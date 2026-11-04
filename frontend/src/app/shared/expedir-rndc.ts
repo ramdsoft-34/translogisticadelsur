@@ -4,6 +4,7 @@ import { Api, mensajeError } from '../core/api.service';
 import { Auth } from '../core/auth.service';
 import { Avisos } from '../core/avisos.service';
 import { RndcClave } from '../core/rndc-clave.service';
+import { EnVivo } from '../core/en-vivo.service';
 import { P, TIPOS_ID } from '../core/modelos';
 import { Modal } from './modal';
 import { Icono } from './icono';
@@ -188,11 +189,11 @@ import { Confirmar } from './confirmar';
                 <fieldset><legend>Viaje</legend><div class="formulario">
                   @if (puedeCorregirCliente()) {
                     <div class="campo"><label for="ex-cli">Cliente</label>
-                      <select id="ex-cli" name="cliente" [ngModel]="f.cliente" (ngModelChange)="elegirCliente($event)" required>
+                      <select id="ex-cli" name="cliente" [ngModel]="f.cliente" (ngModelChange)="elegirCliente($event)" [disabled]="trabajando()" required>
                         @for (c of clientes(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }
                       </select><small>Se puede cambiar porque no hay remesa ni manifiesto vigentes.</small></div>
                     <div class="campo"><label for="ex-tar">Destino del cliente</label>
-                      <select id="ex-tar" name="tarifaRef" [ngModel]="f.tarifaRef" (ngModelChange)="elegirDestino($event)">
+                      <select id="ex-tar" name="tarifaRef" [ngModel]="f.tarifaRef" (ngModelChange)="elegirDestino($event)" [disabled]="trabajando()">
                         <option value="">{{ f.cliente === f.clienteInicial ? 'Conservar: ' + (viaje()?.destino || '') : 'Elija el destino' }}</option>
                         @for (t of tarifasCliente(); track t._id) { <option [value]="t._id">{{ t.destino }}</option> }
                       </select><small>Del destino se toman la tarifa y el municipio. El flete y el anticipo no cambian.</small></div>
@@ -280,7 +281,8 @@ import { Confirmar } from './confirmar';
                     <div class="campo"><span class="etiqueta">Flete pactado</span><strong>{{ f.flete | pesos }}</strong></div>
                     <div class="campo"><span class="etiqueta">Anticipo</span><strong>{{ f.anticipo | pesos }}</strong></div>
                   }
-                  <div class="campo ancho"><label for="ex-obs">Observaciones</label><input id="ex-obs" name="obs" maxlength="200" [(ngModel)]="f.observaciones" /></div>
+                  <div class="campo ancho"><label for="ex-obs">Observaciones</label><input id="ex-obs" name="obs" maxlength="200" [(ngModel)]="f.observaciones" />
+                    <small>Si el viaje tiene auxiliar, su valor se agrega solo al inicio de las observaciones del manifiesto.</small></div>
                 </div></fieldset>
                 @if (p.documentos.manifiesto.estado !== 'aceptado') {
                   <!-- Retenciones: las calcula la plataforma, pero se pueden escribir a mano (p. ej. si el RNDC exige otra FOPAT) -->
@@ -642,15 +644,9 @@ export class ExpedirRndc {
         codDestinoManifiesto: p.destinoManifiestoFijo || '', numeroRemesa: p.numeros?.manualRemesa || '', numeroManifiesto: p.numeros?.manualManifiesto || '',
         ...this.datosCliente(v),
       });
-      if (this.puedeValores && !this.clientes().length) {
-        const [c, t] = await Promise.all([this.api.get<any[]>('/maestros/clientes'), this.api.get<any[]>('/maestros/tarifas')]);
-        const actual = v.cliente?._id;
-        this.clientes.set(c.filter(x => x.activo !== false || x._id === actual)); this.tarifas.set(t.filter(x => x.activo !== false));
-      }
-      // Si el viaje no tiene origen propio se muestra el que se enviará (el de la empresa)
-      const origen = p.manifiesto.variables.find((x: string[]) => x[0] === 'CODMUNICIPIOORIGENMANIFIESTO')?.[1];
-      if (!this.form().codOrigen && origen) this.form.update(f => ({ ...f, codOrigen: origen }));
+      if (this.puedeValores) await this.cargarListas();
       this.previa.set(p);
+      this.alinearLugares(p);
       // Abre la pestaña donde está el problema: rechazo de la remesa o del manifiesto, o datos de vehículo/personas
       const proceso = p.ultimoError?.proceso;
       this.pestana.set(proceso === 4 ? 'manifiesto' : proceso === 3 ? 'remesa' : this.maestrosPendientes() ? 'maestros' : p.remesaAceptada ? 'manifiesto' : 'remesa');
@@ -661,11 +657,38 @@ export class ExpedirRndc {
     const cliente = v.cliente?._id || ''; const tarifaRef = v.tarifaRef?._id || v.tarifaRef || '';
     return { cliente, clienteInicial: cliente, tarifaRef, tarifaInicial: tarifaRef };
   }
-  elegirCliente(id: string) { this.form.update(f => ({ ...f, cliente: id, tarifaRef: '', destinatario: { tipoId: '', numId: '', sede: '' } })); }
-  elegirDestino(id: string) {
-    const t = this.tarifasCliente().find(x => x._id === id);
-    this.form.update(f => ({ ...f, tarifaRef: id, codDestino: t?.codMunicipio || f.codDestino }));
+  // Al elegir, se guarda de una vez: quién recibe, el origen y el destino se recalculan en el servidor
+  async elegirCliente(id: string) {
+    this.form.update(f => ({ ...f, cliente: id, tarifaRef: '', destinatario: { tipoId: '', numId: '', sede: '' } }));
+    if (await this.guardar(true)) this.actualizado.emit();
   }
+  async elegirDestino(id: string) {
+    const t = this.tarifasCliente().find(x => x._id === id);
+    this.form.update(f => ({ ...f, tarifaRef: id, codDestino: t?.codMunicipio || f.codDestino, destinatario: { tipoId: '', numId: '', sede: '' } }));
+    if (await this.guardar(true)) this.actualizado.emit();
+  }
+  // Origen y destino: se muestran los que irán en los documentos (salen de las sedes del remitente y de quien recibe)
+  private alinearLugares(p: any) {
+    const valor = (k: string) => p.manifiesto.variables.find((x: string[]) => x[0] === k)?.[1];
+    const origen = valor('CODMUNICIPIOORIGENMANIFIESTO'); const destino = valor('CODMUNICIPIODESTINOMANIFIESTO');
+    this.form.update(f => ({ ...f, codOrigen: origen || f.codOrigen, codDestino: destino || f.codDestino }));
+  }
+  private async cargarListas() {
+    const [c, t] = await Promise.all([this.api.get<any[]>('/maestros/clientes'), this.api.get<any[]>('/maestros/tarifas')]);
+    const actual = this.viaje()?.cliente?._id;
+    this.clientes.set(c.filter(x => x.activo !== false || x._id === actual)); this.tarifas.set(t.filter(x => x.activo !== false));
+  }
+  // Clientes, sedes o destinos editados por otro usuario: la ventana abierta toma lo nuevo
+  private enVivo = inject(EnVivo).al(['maestros'], async () => {
+    const id = this.viajeId();
+    if (!id || this.trabajando() || !this.previa()) return;
+    try {
+      const [v, p] = await Promise.all([this.api.get<any>(`/viajes/${id}`), this.api.get<any>(`/rndc/viajes/${id}/vista-previa`)]);
+      if (this.viajeId() !== id) return;
+      this.viaje.set(v); this.previa.set(p); this.alinearLugares(p);
+      if (this.puedeValores) await this.cargarListas();
+    } catch { /* se reintenta con el próximo cambio */ }
+  });
 
   chip(e: string) { return ({ aceptado: 'ok', rechazado: 'error', anulado: 'alerta' } as Record<string, string>)[e] || ''; }
   chipMaestro(e: string) { return ({ enviado: 'ok', error: 'error', no_existe: 'error' } as Record<string, string>)[e] || 'alerta'; }
@@ -785,8 +808,9 @@ export class ExpedirRndc {
       if (this.viaje()?.reporteWhatsapp?.fecha && !v.reporteWhatsapp?.fecha) this.avisos.mostrar('El viaje vuelve a quedar por reportar: en Viajes → Reporte por WhatsApp sale en el mensaje del cliente corregido.', 'info', 9000);
       this.viaje.set(v);
       this.form.update(f => ({ ...f, placa: v.placa, remolque: v.remolque || '', conductor: v.conductor?._id || '', titular: v.titular?._id || '', titularInicial: v.titular?._id || '',
-        codDestino: v.codDestino || f.codDestino, codDestinoManifiesto: this.previa()?.destinoManifiestoFijo || '',
+        codOrigen: v.codOrigen || '', codDestino: v.codDestino || f.codDestino, codDestinoManifiesto: this.previa()?.destinoManifiestoFijo || '',
         destinatario: { tipoId: v.destinatario?.tipoId || '', numId: v.destinatario?.numId || '', sede: v.destinatario?.sede || '' }, ...this.datosCliente(v) }));
+      this.alinearLugares(this.previa());
       if (!silencioso) { this.avisos.ok('Datos del viaje guardados'); this.actualizado.emit(); }
       return true;
     } catch (e) {

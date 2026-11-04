@@ -452,8 +452,8 @@ export class Clientes {
         'anticipoHabitual', 'pesoKg', 'operacion', 'activo'];
       const cuerpo: any = Object.fromEntries(campos.map(k => [k, t[k]]));
       cuerpo.destinatario = dest; cuerpo.cliente = c._id;
-      if (t._id) await this.api.put(`/maestros/tarifas/${t._id}`, cuerpo); else await this.api.post('/maestros/tarifas', cuerpo);
-      this.avisos.ok('Destino guardado'); this.abiertoTarifa.set(false);
+      const g: any = t._id ? await this.api.put(`/maestros/tarifas/${t._id}`, cuerpo) : await this.api.post('/maestros/tarifas', cuerpo);
+      this.avisos.ok(g.viajesActualizados ? `Destino guardado: ${g.viajesActualizados} viaje(s) sin documentos vigentes se actualizaron` : 'Destino guardado'); this.abiertoTarifa.set(false);
       await this.cargar(); await this.cargarSedesCliente(this.sel());
       if (sedeNueva) await this.enviarPendientes([sedeNueva]);
     } catch (e) { this.avisos.error(e); }

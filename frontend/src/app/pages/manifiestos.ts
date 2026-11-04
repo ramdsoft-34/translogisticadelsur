@@ -557,7 +557,7 @@ export class Manifiestos {
   readonly momentos: [string, string][] = [['llegada', 'Llegada'], ['entrada', 'Entrada'], ['salida', 'Salida']];
 
   // Cambios de otros usuarios: la pantalla se actualiza sola
-  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'correo'], () => this.cargar());
+  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'correo', 'maestros'], () => this.cargar());
 
   // Vista fija desde el menú (Soporte interno, Envíos al RNDC, Correos); vacía = Manifiestos con sus pestañas
   readonly vista = input<'' | 'soporte' | 'historial' | 'correos'>('');

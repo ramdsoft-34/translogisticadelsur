@@ -197,7 +197,7 @@ test('Corregir el cliente de un viaje con documentos anulados: el reporte de Wha
   await Viaje.collection.updateOne({ _id: new mongoose.Types.ObjectId(viaje._id) }, { $set: { ...antes, destinatario: { tipoId: 'N', numId: '8909009431', sede: '27' }, 'ajustesRndc.remesa': { X: '1' } } });
   // Con documentos vigentes no se cambia
   assert.equal((await s.a.put(`/api/rndc/viajes/${viaje._id}/datos`, { cliente: nuevo._id })).status, 409);
-  await Viaje.collection.updateOne({ _id: new mongoose.Types.ObjectId(viaje._id) }, { $set: { estado: 'registrado', 'remesa.estado': 'anulado', 'manifiesto.estado': 'anulado' } });
+  await Viaje.collection.updateOne({ _id: new mongoose.Types.ObjectId(viaje._id) }, { $set: { estado: 'registrado', historico: false, 'remesa.estado': 'anulado', 'manifiesto.estado': 'anulado' } });
   // Otra empresa no puede usar sus clientes ni tocar el viaje
   assert.equal((await s.b.put(`/api/rndc/viajes/${viaje._id}/datos`, { cliente: nuevo._id })).status, 404);
   const r = await s.a.put(`/api/rndc/viajes/${viaje._id}/datos`, { cliente: nuevo._id, tarifaRef: tarifa._id, destinatario: { tipoId: '', numId: '', sede: '' } });
@@ -212,6 +212,22 @@ test('Corregir el cliente de un viaje con documentos anulados: el reporte de Wha
   // Vuelve a salir por reportar, en el mensaje del cliente corregido
   const m = (await s.a.get('/api/viajes/reporte-whatsapp?fecha=2026-10-11')).body.mensajes;
   assert.deepEqual(m.map(x => x.cliente), ['Cliente Corregido']);
+  // Origen: al cambiar de cliente no queda el del cliente anterior
+  assert.equal(v.codOrigen, '');
+  // Destino editado en Clientes y tarifas: el viaje sin documentos vigentes toma el nombre y el municipio nuevos
+  const ed = await s.a.put(`/api/maestros/tarifas/${tarifa._id}`, { destino: 'Tumaco', codMunicipio: '52835000', auxiliarPagado: 90000 });
+  assert.equal(ed.body.viajesActualizados, 1);
+  const v2 = (await s.a.get(`/api/viajes/${viaje._id}`)).body;
+  assert.equal(v2.destino, 'Tumaco');
+  assert.equal(v2.codDestino, '52835000');
+  // Observaciones del manifiesto: sin auxiliar no se agrega nada; con auxiliar, días y valor del viaje
+  const obs = async () => Object.fromEntries((await s.a.get(`/api/rndc/viajes/${viaje._id}/vista-previa`)).body.manifiesto.variables).OBSERVACIONES;
+  await s.a.put(`/api/viajes/${viaje._id}`, { conAuxiliar: false, observaciones: 'Llamar al llegar' });
+  assert.equal(await obs(), 'Llamar al llegar');
+  await s.a.put(`/api/viajes/${viaje._id}`, { conAuxiliar: true, diasAuxiliar: 2 });
+  assert.equal(await obs(), 'Auxiliar 2 días $180.000. Llamar al llegar');
+  await s.a.put(`/api/viajes/${viaje._id}`, { diasAuxiliar: 1, observaciones: '' });
+  assert.equal(await obs(), 'Auxiliar 1 día $90.000.');
 });
 
 test('Importación de vehículos y terceros desde Excel: simular, errores por fila y aplicar', async () => {

@@ -56,14 +56,19 @@ export async function titularDePlaca(empresaId, placa) {
   const v = await Vehiculo.findOne({ empresa: empresaId, placa }).select('titularHabitual').lean();
   return v?.titularHabitual || null;
 }
-// Cliente corregido (sin documentos vigentes en el RNDC): lo del cliente anterior no pasa al nuevo
-// y el viaje vuelve a quedar por reportar, para que salga en el mensaje del cliente correcto.
+// Cliente o destino corregidos (sin documentos vigentes en el RNDC): lo anterior no pasa al nuevo.
+// Con otro cliente, el origen vuelve a salir de su sede y el viaje queda por reportar,
+// para que salga en el mensaje del cliente correcto.
 export function corregirCliente(v, d) {
-  if (!d.cliente || d.cliente === String(v.cliente)) return;
-  if (d.tarifaRef === undefined) d.tarifaRef = null;
+  const cambiaCliente = !!d.cliente && d.cliente !== String(v.cliente);
+  const cambiaDestino = d.tarifaRef !== undefined && String(d.tarifaRef || '') !== String(v.tarifaRef || '');
+  if (!cambiaCliente && !cambiaDestino) return;
   if (d.destinatario === undefined) d.destinatario = { tipoId: '', numId: '', sede: '' };
   d.codDestinoManifiesto = '';
   d['ajustesRndc.remesa'] = {};
+  if (!cambiaCliente) return;
+  if (d.tarifaRef === undefined) d.tarifaRef = null;
+  d.codOrigen = '';
   d['reporteWhatsapp.fecha'] = null;
   d['reporteWhatsapp.usuario'] = null;
 }
