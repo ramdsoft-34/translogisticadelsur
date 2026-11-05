@@ -29,6 +29,7 @@ export const P = {
   REPORTES_VER:       'reportes.ver',
   SST_VER:            'sst.ver',                  // SG-SST y PESV: planillas, colaboradores, flota…
   SST_GESTIONAR:      'sst.gestionar',
+  NOTIFICACIONES_GESTIONAR: 'notificaciones.gestionar',   // avisos a los conductores de la app (solo admin)
 };
 
 const TODOS_EMPRESA = Object.values(P).filter(p => p !== P.EMPRESAS_GESTIONAR);

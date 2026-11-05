@@ -112,6 +112,12 @@ appSt.servidor = http.createServer((req, res) => {
     if (mp && req.method === 'GET') { if (url.searchParams.get('empresaId') !== appSt.empresaPlanillas) return json(404, { error: 'no' }); res.writeHead(200, { 'content-type': 'application/pdf' }); return res.end(Buffer.from('%PDF-1.4 planilla')); }
     mp = ruta.match(/^\/planillas\/([a-f0-9]{24})\/(excluir|incluir|carga-tardia)$/);
     if (mp && req.method === 'POST') { appSt.ultimaDecision = { accion: mp[2], ...b }; return json(200, { id: mp[1], nombre: 'Pedro', periodo: '2026-12', estado: mp[2] === 'excluir' ? 'excluida' : 'pendiente' }); }
+    // Avisos a conductores (la lógica real se prueba en el backend de Sur Track)
+    if (ruta === '/avisos/conductores') return json(200, [{ id: 'c'.repeat(24), nombre: 'Pedro', cedula: '12345678', terceroId: 'x' }]);
+    if (ruta === '/avisos/vista-previa') { appSt.ultimoAviso = b; return json(200, { total: 1, masivo: false, nombres: ['Pedro'] }); }
+    if (ruta === '/avisos' && req.method === 'POST') { appSt.ultimoAviso = b; return json(201, { id: 'a'.repeat(24), titulo: b.titulo, total: 1, estado: 'enviada' }); }
+    if (ruta === '/avisos' && req.method === 'GET') return json(200, { total: 0, pagina: 1, items: [], automaticos: [], empresaId: url.searchParams.get('empresaId') });
+    if (ruta.startsWith('/avisos/automaticos/reglas') && req.method === 'PUT') { appSt.ultimoAviso = b; return json(200, { clave: 'pago', activa: b.activa }); }
     if (ruta === '/conductores' && req.method === 'GET') {
       return json(200, url.searchParams.get('cedulas').split(',').filter(c => appSt.cuentas.has(c)).map(c => ({ cedula: c, ...appSt.cuentas.get(c) })));
     }
@@ -1429,6 +1435,21 @@ test('App nueva: invitar al conductor, viaje al servidor nuevo, fotos privadas y
   const xl = await adm.get('/api/sst/planillas/exportar?periodo=2026-12');
   assert.equal(xl.status, 200); assert.match(xl.headers['content-type'], /spreadsheetml/);
   assert.equal((await s.adminB.get('/api/sst/planillas')).status, 403, 'empresa sin la app de conductores');
+  // Avisos a conductores: solo el administrador; se audita cada envío
+  const lav = await adm.get('/api/avisos-conductores');
+  assert.equal(lav.status, 200, JSON.stringify(lav.body)); assert.equal(lav.body.empresaId, String(empA));
+  assert.equal((await consulta.get('/api/avisos-conductores')).status, 403, 'consulta no maneja avisos');
+  assert.equal((await rep.get('/api/avisos-conductores')).status, 403);
+  const env = await adm.post('/api/avisos-conductores', { titulo: 'Reunión', texto: 'El sábado a las 8', destino: { modo: 'todos' }, accion: 'enviar' });
+  assert.equal(env.status, 201, JSON.stringify(env.body));
+  assert.equal(appSt.ultimoAviso.empresaId, String(empA)); assert.ok(appSt.ultimoAviso.por); assert.ok(appSt.ultimoAviso.claveIdempotencia.length >= 8);
+  assert.ok(await M.Auditoria.exists({ accion: 'enviar_aviso_conductores' }));
+  const prog = await adm.post('/api/avisos-conductores', { titulo: 'Taller', texto: 'Mantenimiento', destino: { modo: 'todos' }, accion: 'programar', programadaPara: '2026-12-24T08:30' });
+  assert.equal(prog.status, 201); assert.equal(appSt.ultimoAviso.programadaPara, '2026-12-24T08:30:00-05:00', 'la hora se toma de Colombia');
+  assert.equal((await adm.put('/api/avisos-conductores/automaticos/pago', { activa: false })).status, 200);
+  assert.equal(appSt.ultimoAviso.activa, false);
+  assert.equal((await adm.put('/api/avisos-conductores/automaticos/otra-cosa', { activa: false })).status, 400);
+  assert.equal((await s.adminB.get('/api/avisos-conductores')).status, 403, 'empresa sin la app de conductores');
   // Finalizar cierra en el servidor nuevo; quitar acceso deja al conductor sin cuenta en esta empresa
   await adm.post(`/api/rastreo/viajes/${v2._id}/finalizar`);
   assert.equal(appSt.viajes.get(a2.body.externoId).estado, 'completado');

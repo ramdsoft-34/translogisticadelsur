@@ -22,6 +22,7 @@ export const P = {
   REPORTES_VER: 'reportes.ver',
   SST_VER: 'sst.ver',
   SST_GESTIONAR: 'sst.gestionar',
+  NOTIFICACIONES_GESTIONAR: 'notificaciones.gestionar',
 } as const;
 
 export interface DocRndc { numero: string; radicado: string; qr?: string; fecha: string | null; estado: '' | 'aceptado' | 'rechazado' | 'anulado'; mensaje: string }
