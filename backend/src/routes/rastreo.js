@@ -23,11 +23,13 @@ const id = (v) => { if (!mongoose.isValidObjectId(v)) throw new ErrorHttp(400, '
 r.get('/estado', permitir(P.VIAJES_VER), async (req, res) => {
   const e = await Empresa.findById(req.empresaId).select('rastreo').lean();
   res.json({ habilitado: !!e?.rastreo?.surTrack && st.configurado(), configuradoServidor: st.configurado(),
-    velocidadMaxima: e?.rastreo?.velocidadMaxima ?? 80, minutosSinSenal: e?.rastreo?.minutosSinSenal ?? 10, surTrack: !!e?.rastreo?.surTrack });
+    velocidadMaxima: e?.rastreo?.velocidadMaxima ?? 80, minutosSinSenal: e?.rastreo?.minutosSinSenal ?? 10, surTrack: !!e?.rastreo?.surTrack,
+    enviarManifiesto: !!e?.rastreo?.enviarManifiesto });
 });
 
 r.put('/configuracion', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
-  const d = z.object({ surTrack: z.boolean(), velocidadMaxima: z.coerce.number().min(20).max(150), minutosSinSenal: z.coerce.number().min(2).max(240) }).parse(req.body);
+  const d = z.object({ surTrack: z.boolean(), velocidadMaxima: z.coerce.number().min(20).max(150), minutosSinSenal: z.coerce.number().min(2).max(240),
+    enviarManifiesto: z.boolean().optional().default(false) }).parse(req.body);
   await Empresa.updateOne({ _id: req.empresaId }, { $set: { rastreo: d } });
   await auditar(req, 'configurar_rastreo', { detalle: d });
   res.json(d);

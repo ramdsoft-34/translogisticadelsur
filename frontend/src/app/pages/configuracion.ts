@@ -250,6 +250,8 @@ type Pestana = 'rndc' | 'reglas' | 'correo' | 'logo' | 'rastreo' | 'usuarios' | 
               <div class="campo"><label for="ra-sen">Minutos sin señal</label><input id="ra-sen" type="number" min="2" max="240" [(ngModel)]="rc.minutosSinSenal" />
                 <small>Sin posición nueva por más tiempo, el viaje pasa a «Sin señal».</small></div>
             </div>
+            <label class="casilla" style="margin-top:14px"><input type="checkbox" [(ngModel)]="rc.enviarManifiesto" />Mandar a Sur Track el enlace del manifiesto al activar el rastreo</label>
+            <small class="sutil d-bloque">Actívelo cuando Sur Track tenga el botón «Ver manifiesto» en su app.</small>
             <div class="acciones" style="margin-top:18px; justify-content:flex-end"><button class="primario" (click)="guardarRastreo()">Guardar</button></div>
           } @else { <span class="esqueleto"></span> }
         </div>
@@ -378,7 +380,7 @@ export class Configuracion {
   async guardarRastreo() {
     const rc = this.rastreoConf();
     try {
-      await this.api.put('/rastreo/configuracion', { surTrack: !!rc.surTrack, velocidadMaxima: Number(rc.velocidadMaxima), minutosSinSenal: Number(rc.minutosSinSenal) });
+      await this.api.put('/rastreo/configuracion', { surTrack: !!rc.surTrack, velocidadMaxima: Number(rc.velocidadMaxima), minutosSinSenal: Number(rc.minutosSinSenal), enviarManifiesto: !!rc.enviarManifiesto });
       this.avisos.ok('Configuración del rastreo guardada');
     } catch (e) { this.avisos.error(e); }
   }
@@ -388,7 +390,7 @@ export class Configuracion {
     try {
       if (p === 'rastreo') {
         const e = await this.api.get<any>('/rastreo/estado');
-        this.rastreoConf.set({ surTrack: !!e.surTrack, velocidadMaxima: e.velocidadMaxima ?? 80, minutosSinSenal: e.minutosSinSenal ?? 10, configuradoServidor: e.configuradoServidor !== false });
+        this.rastreoConf.set({ surTrack: !!e.surTrack, velocidadMaxima: e.velocidadMaxima ?? 80, minutosSinSenal: e.minutosSinSenal ?? 10, enviarManifiesto: !!e.enviarManifiesto, configuradoServidor: e.configuradoServidor !== false });
       }
       if (p === 'rndc') {
         const c = await this.api.get<any>('/rndc/config');

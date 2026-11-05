@@ -86,6 +86,8 @@ const ESTADOS: Record<string, [string, string]> = {
             <span class="tx"><strong>Por manifestar</strong><small>Remesa y manifiesto sin enviar</small></span><span class="num">{{ pendientes() }}</span></a></li>
           <li [class.vacia]="!(r()?.estados?.manifestado)"><a [routerLink]="rutaRndc()"><span class="ico gris"><app-icono nombre="reloj" [tam]="16" /></span>
             <span class="tx"><strong>Manifestados sin cumplir</strong><small>Registrar el cumplido</small></span><span class="num">{{ r()?.estados?.manifestado || 0 }}</span></a></li>
+          <li [class.vacia]="!(r()?.sinEnviarConductor)"><a [routerLink]="rutaRndc()" [queryParams]="{ abrir: 'manifestados' }"><span class="ico ambar"><app-icono nombre="enviar" [tam]="16" /></span>
+            <span class="tx"><strong>Manifiestos sin enviar al conductor</strong><small>Por WhatsApp, últimos 7 días</small></span><span class="num">{{ r()?.sinEnviarConductor || 0 }}</span></a></li>
           <li [class.vacia]="!vencidos()"><a href="#documentos" (click)="irDocumentos($event)"><span class="ico rojo"><app-icono nombre="candado" [tam]="16" /></span>
             <span class="tx"><strong>Documentos vencidos</strong><small>SOAT, tecnomecánica o licencia</small></span><span class="num">{{ vencidos() }}</span></a></li>
           <li [class.vacia]="!porVencer()"><a href="#documentos" (click)="irDocumentos($event)"><span class="ico ambar"><app-icono nombre="reloj" [tam]="16" /></span>

@@ -56,7 +56,7 @@ const hace = (h: string | Date | null | undefined) => {
       </section>
       <div class="tabla-caja">
         <table class="tabla-movil">
-          <thead><tr><th>Viaje</th><th>Rastreo</th><th>Vehículo</th><th>Conductor</th><th>Cliente</th><th>Destino / clientes</th><th class="num">Km</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Viaje</th><th>Rastreo</th><th>Vehículo</th><th>Conductor</th><th>Cliente</th><th>Destino / clientes</th><th class="num">Km</th><th>Manifiesto</th><th>Checklist · vel. máx.</th><th>Estado</th><th></th></tr></thead>
           <tbody>
             @for (x of historialItems(); track x._id) {
               <tr>
@@ -67,11 +67,21 @@ const hace = (h: string | Date | null | undefined) => {
                 <td data-etiqueta="Cliente">{{ x.cliente }}</td>
                 <td data-etiqueta="Destino / clientes">{{ x.modalidad === 'clientes' ? x.clientes + ' cliente(s) · ' + x.entregados + ' entregado(s)' : x.destino }}</td>
                 <td data-etiqueta="Km" class="num">{{ x.km ?? '—' }}</td>
+                <td data-etiqueta="Manifiesto">@if (x.manifiesto) { <strong>{{ x.manifiesto }}</strong>
+                  @if (x.envio?.surtrack) { <small class="d-bloque"><span class="chip ok sin-punto">Enviado a Sur Track</span></small> }
+                  @if (x.envio?.whatsapp) { <small class="d-bloque"><span class="chip sin-punto" [class.ok]="x.envio.abierto" [class.alerta]="!x.envio.abierto">WhatsApp {{ x.envio.abierto ? '✓ abierto' : '· no lo abrió' }}</span></small> }
+                  @else if (!x.envio?.surtrack) { <small class="d-bloque"><span class="chip alerta sin-punto">No se le envió</span></small> }
+                } @else { <span class="sutil">Sin manifiesto</span> }</td>
+                <td data-etiqueta="Checklist · vel. máx.">
+                  @if (x.checklist) { <span class="chip sin-punto" [class.ok]="x.checklist.apto" [class.error]="!x.checklist.apto">{{ x.checklist.apto ? 'Apto' : 'No apto' }} {{ x.checklist.fecha | fechaHora }}</span> }
+                  @else { <span class="chip error sin-punto">Sin checklist guardado</span> }
+                  @if (x.velocidadMaxima != null) { <small class="d-bloque"><span class="chip sin-punto" [class.error]="x.velocidadMaxima > limiteVelocidad()">Máx. {{ x.velocidadMaxima }} km/h</span></small> }</td>
                 <td data-etiqueta="Estado"><span class="chip sin-punto" [class.ok]="x.estadoViaje === 'cumplido'">{{ x.estadoViaje === 'cumplido' ? 'Cumplido' : x.estadoViaje === 'anulado' ? 'Anulado' : 'Terminado' }}</span>
                   @if (x.origen === 'cooespatrans') { <small class="sutil d-bloque">Desde Cooespatrans</small> }</td>
-                <td><button type="button" class="pequeno" (click)="verDetalle(x)">Ver seguimiento</button></td>
+                <td><div class="acciones" style="flex-direction:column;align-items:stretch"><button type="button" class="pequeno" (click)="verDetalle(x)">Ver seguimiento</button>
+                  @if (x.manifiesto) { <button type="button" class="pequeno" (click)="verManifiesto(x._id)">Ver manifiesto</button> }</div></td>
               </tr>
-            } @empty { <tr><td colspan="9" class="vacio">{{ cargandoHistorial() ? 'Cargando…' : 'No hay viajes terminados con estos filtros' }}</td></tr> }
+            } @empty { <tr><td colspan="11" class="vacio">{{ cargandoHistorial() ? 'Cargando…' : 'No hay viajes terminados con estos filtros' }}</td></tr> }
           </tbody>
         </table>
         @if (historialItems().length < historialTotal()) {
@@ -199,6 +209,19 @@ const hace = (h: string | Date | null | undefined) => {
                 }
               </ul>
             }
+            @if (detalleItem()?.manifiesto; as man) {
+              <h3 class="sub">Documentos del viaje</h3>
+              <div class="docs-viaje">
+                <div><span>Manifiesto <strong>{{ man }}</strong></span><button type="button" class="pequeno" (click)="verManifiesto(detalleId)">Ver PDF</button></div>
+                <div class="chips">
+                  @if (detalleItem().envio?.surtrack) { <span class="chip ok sin-punto">Enviado a Sur Track {{ detalleItem().envio.surtrack | fechaHora }}</span> }
+                  @if (detalleItem().envio?.whatsapp) { <span class="chip ok sin-punto">WhatsApp {{ detalleItem().envio.whatsapp | fechaHora }}</span> }
+                  @if (detalleItem().envio?.abierto) { <span class="chip info sin-punto">Abierto {{ detalleItem().envio.abierto | fechaHora }}</span> }
+                  @if (!detalleItem().envio?.whatsapp && !detalleItem().envio?.surtrack) { <span class="chip alerta sin-punto">No se le envió al conductor</span> }
+                </div>
+                @if (detalleItem().checklist; as ck) { <div><span>Checklist <strong>{{ ck.apto ? 'apto' : 'no apto' }}</strong> · {{ ck.fecha | fechaHora }}</span></div> }
+              </div>
+            }
             <h3 class="sub">Registro de seguimiento</h3>
             <ul class="eventos">
               @for (e of d.eventos; track $index) { <li><strong>{{ textoEvento(e.tipo) }}</strong> · <span class="sutil">{{ e.fecha | fechaHora }}</span>@if (e.detalle) { <small class="d-bloque">{{ e.detalle }}</small> }</li> }
@@ -227,6 +250,8 @@ const hace = (h: string | Date | null | undefined) => {
       </ng-container>
     </app-modal>`,
   styles: [`
+    .docs-viaje { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--gris-2); border-top: 3px solid var(--primario); border-radius: var(--radio-l); margin-bottom: 12px; }
+    .docs-viaje > div { display: flex; justify-content: space-between; align-items: center; gap: 8px; } .docs-viaje .chips { justify-content: flex-start; flex-wrap: wrap; }
     .acciones { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .vacio-grande { text-align: center; padding: 40px 20px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
     .vacio-grande h2 { margin: 6px 0 0; font-size: 18px; }
@@ -487,7 +512,7 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
       const r = await this.api.get<any>('/rastreo/historial', { ...this.h, placa: this.h.placa.toUpperCase(), pagina, limite: 30 });
       this.paginaHistorial = pagina;
       this.historialItems.set(mas ? [...this.historialItems(), ...r.items] : r.items);
-      this.historialTotal.set(r.total);
+      this.historialTotal.set(r.total); if (r.limiteVelocidad) this.limiteVelocidad.set(r.limiteVelocidad);
     } catch (e) { this.avisos.error(e); }
     finally { this.cargandoHistorial.set(false); }
   }
@@ -497,8 +522,16 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
   readonly checklist = viewChild.required(ChecklistConductor);
   private contDetalle = viewChild<ElementRef<HTMLDivElement>>('mapaDetalle');
   private mapaDetalle: L.Map | null = null;
+  readonly detalleItem = signal<any>(null);
+  readonly limiteVelocidad = signal(80);
+  async verManifiesto(id: string) {
+    try {
+      const blob = await this.api.archivo(`/reportes/manifiesto/${id}`);
+      window.open(URL.createObjectURL(new Blob([blob], { type: 'application/pdf' })), '_blank');
+    } catch (e) { this.avisos.error(e); }
+  }
   async verDetalle(x: any) {
-    this.detalleId = x._id;
+    this.detalleId = x._id; this.detalleItem.set(x);
     try {
       const d = await this.api.get<any>(`/rastreo/viajes/${x._id}/recorrido`);
       this.detalle.set(d);

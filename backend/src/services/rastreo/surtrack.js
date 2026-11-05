@@ -2,8 +2,9 @@
 // y Translogística lo consulta por su puerta de integración (/api/integracion, clave compartida).
 // El viaje de Translogística es la única fuente: el rastreo es una sección del mismo viaje.
 import { env } from '../../config/env.js';
-import { Empresa, Viaje, Vehiculo, Tercero, Cliente, RecorridoRastreo } from '../../models/index.js';
+import { Empresa, Viaje, Vehiculo, Tercero, Cliente, RecorridoRastreo, InspeccionSst } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
+import { enlaceDe, nuevoToken } from '../manifiestoConductor.js';
 
 export const configurado = () => !!(env.surTrack.url && env.surTrack.clave);
 
@@ -139,12 +140,21 @@ export async function activar(empresaId, viajeId, usuarioId, opciones = {}) {
     v.conductor ? Tercero.findOne({ empresa: empresaId, _id: v.conductor }).select('numId').lean() : null,
     Cliente.findOne({ empresa: empresaId, _id: v.cliente }).select('nombre').lean(),
   ]);
+  // Fase 9: si la empresa lo activa, va el enlace del manifiesto para el botón «Ver manifiesto» de la app
+  const emp = await Empresa.findById(empresaId).select('rastreo.enviarManifiesto').lean();
+  let manifiestoUrl = '';
+  if (emp?.rastreo?.enviarManifiesto && v.manifiesto?.estado === 'aceptado') {
+    if (!v.envioConductor?.token) { v.set('envioConductor.token', nuevoToken()); v.set('envioConductor.creado', new Date()); }
+    manifiestoUrl = enlaceDe(v.envioConductor.token);
+  }
   const r = await llamar('/viajes', { metodo: 'POST', cuerpo: {
     referencia: `tls:${empresaId}:${v._id}`, codigo: v.manifiesto?.numero || `V-${v.numero}`, placa: v.placa, cedula: cond?.numId || '',
     valorFlete: Math.max(1, Number(v.flete) || 0), anticipo: Number(v.anticipo) || 0, empresa: cli?.nombre || '',
+    ...(manifiestoUrl ? { manifiesto: { numero: v.manifiesto.numero, url: manifiestoUrl } } : {}),
     ...(await paradasParaSurTrack(paradas)),
   } });
   (r.clientes || []).forEach(x => { const c = paradas.clientes[Number(x.referencia)]; if (c) c.externoId = x.clienteId; });
+  if (manifiestoUrl) v.set('envioConductor.surtrack', new Date());
   v.rastreo = { activo: true, estado: 'esperando', origen: 'translogistica', externoId: r.viajeId, codigoExterno: r.codigo,
     activado: new Date(), activadoPor: usuarioId, finalizado: null, error: '', ...paradas,
     eventos: [evento('activado', paradas.modalidad === 'clientes' ? `Con ${paradas.clientes.length} cliente(s)` : `Destino: ${paradas.destino.nombre || v.destino}`)] };
@@ -391,14 +401,26 @@ export async function historial(empresaId, f = {}) {
   const [total, viajes] = await Promise.all([
     Viaje.countDocuments(filtro),
     Viaje.find(filtro).sort({ 'rastreo.finalizado': -1, 'rastreo.activado': -1 }).skip((pagina - 1) * limite).limit(limite)
-      .select('numero fecha placa conductor conductorNombre destino estado cliente rastreo.activo rastreo.estado rastreo.origen rastreo.modalidad rastreo.activado rastreo.finalizado rastreo.codigoExterno rastreo.resumen rastreo.clientes rastreo.destino')
+      .select('numero fecha placa conductor conductorNombre destino estado cliente rastreo.activo rastreo.estado rastreo.origen rastreo.modalidad rastreo.activado rastreo.finalizado rastreo.codigoExterno rastreo.resumen rastreo.clientes rastreo.destino manifiesto.numero manifiesto.estado envioConductor')
       .populate({ path: 'cliente', select: 'nombre', match: { empresa: empresaId } }).lean(),
   ]);
-  return { total, pagina, limite, items: viajes.map(v => ({ _id: v._id, numero: v.numero, fecha: v.fecha, placa: v.placa, conductor: v.conductorNombre,
+  // Fase 9: checklist del viaje (copia de Sur Track) y estado del manifiesto que recibió el conductor
+  const [checks, emp] = await Promise.all([
+    InspeccionSst.find({ empresa: empresaId, viaje: { $in: viajes.map(v => v._id) } }).select('viaje apto delDia fecha').sort({ fecha: -1 }).lean(),
+    Empresa.findById(empresaId).select('rastreo.velocidadMaxima').lean(),
+  ]);
+  const checkDe = new Map(); for (const c of checks) if (!checkDe.has(String(c.viaje))) checkDe.set(String(c.viaje), c);
+  const limiteVel = emp?.rastreo?.velocidadMaxima || 80;
+  return { total, pagina, limite, limiteVelocidad: limiteVel, items: viajes.map(v => ({ _id: v._id, numero: v.numero, fecha: v.fecha, placa: v.placa, conductor: v.conductorNombre,
     cliente: v.cliente?.nombre || '', destino: v.rastreo.modalidad === 'clientes' ? '' : (v.rastreo.destino?.nombre || v.destino), estadoViaje: v.estado, activo: v.rastreo.activo,
     estado: v.rastreo.estado, origen: v.rastreo.origen, modalidad: v.rastreo.modalidad || 'destino', activado: v.rastreo.activado,
     finalizado: v.rastreo.finalizado, codigoExterno: v.rastreo.codigoExterno, km: v.rastreo.resumen?.km ?? null,
-    clientes: (v.rastreo.clientes || []).length, entregados: (v.rastreo.clientes || []).filter(c => c.estadoEntrega && c.estadoEntrega !== 'pendiente').length })) };
+    clientes: (v.rastreo.clientes || []).length, entregados: (v.rastreo.clientes || []).filter(c => c.estadoEntrega && c.estadoEntrega !== 'pendiente').length,
+    velocidadMaxima: v.rastreo.resumen?.velocidadMaxima != null ? Math.round(v.rastreo.resumen.velocidadMaxima) : null,
+    manifiesto: v.manifiesto?.estado === 'aceptado' || v.estado === 'cumplido' ? v.manifiesto?.numero || '' : '',
+    envio: { whatsapp: v.envioConductor?.whatsapp || null, abierto: v.envioConductor?.abierto || null, surtrack: v.envioConductor?.surtrack || null },
+    checklist: checkDe.has(String(v._id)) ? { _id: checkDe.get(String(v._id))._id, apto: checkDe.get(String(v._id)).apto, delDia: checkDe.get(String(v._id)).delDia,
+      fecha: checkDe.get(String(v._id)).fecha } : null })) };
 }
 
 function distanciaKm(a, b) {

@@ -3,7 +3,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { Viaje, Cliente, Tarifa, Tercero, Vehiculo, PlantillaWhatsapp, siguiente, proximo, pob } from '../models/index.js';
+import { Viaje, Cliente, Tarifa, Tercero, Vehiculo, Empresa, PlantillaWhatsapp, siguiente, proximo, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P, tienePermiso } from '../config/permisos.js';
 import { auditar, cambios } from '../services/auditoria.js';
@@ -20,6 +20,8 @@ export const autorizacionSchema = z.object({ email: z.string().trim().max(120), 
   motivo: z.string().trim().max(300) }).optional();
 import * as rastreo from '../services/rastreo/surtrack.js';
 import { asegurarSoporte } from '../services/gestion/soporteInterno.js';
+import { datosManifiesto } from '../services/reportes/manifiesto.js';
+import * as MC from '../services/manifiestoConductor.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -184,7 +186,7 @@ r.get('/resumen', permitir(P.VIAJES_VER), async (req, res) => {
   const inicioAnt = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - 1, 1));
   const mismoDiaAnt = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - 1, Math.min(hoy.getUTCDate(), 28), 23, 59));
   const vivos = { ...base, estado: { $ne: 'anulado' } };
-  const [serie, mesAnt, clientes, rechazos, enRuta, ultimos] = await Promise.all([
+  const [serie, mesAnt, clientes, rechazos, enRuta, ultimos, sinEnviarConductor] = await Promise.all([
     Viaje.aggregate([{ $match: { ...vivos, fecha: { $gte: desde14 } } },
       { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$fecha' } }, viajes: { $sum: 1 }, tarifa: { $sum: '$tarifa' } } }]),
     Viaje.aggregate([{ $match: { ...vivos, fecha: { $gte: inicioAnt, $lte: mismoDiaAnt } } },
@@ -197,6 +199,9 @@ r.get('/resumen', permitir(P.VIAJES_VER), async (req, res) => {
     Viaje.countDocuments(deEmpresa(req, { 'rastreo.activo': true })),
     Viaje.find(deEmpresa(req, {})).sort({ createdAt: -1 }).limit(6)
       .select('numero fecha placa destino estado conductorNombre tarifa cliente requiereManifiesto').populate(pob(req.empresaId, 'cliente', 'nombre')).lean(),
+    // Fase 9: manifiestos de los últimos 7 días que aún no se le enviaron al conductor
+    Viaje.countDocuments(deEmpresa(req, { estado: 'manifestado', 'manifiesto.estado': 'aceptado', fecha: { $gte: new Date(hoy.getTime() - 7 * 86400000) },
+      'envioConductor.whatsapp': null })),
   ]);
   const porDia = new Map(serie.map(x => [x._id, x]));
   const dias = Array.from({ length: 14 }, (_, i) => {
@@ -204,7 +209,7 @@ r.get('/resumen', permitir(P.VIAJES_VER), async (req, res) => {
     return { dia: d, viajes: porDia.get(d)?.viajes || 0, tarifa: porDia.get(d)?.tarifa || 0 };
   });
   res.json({ hoy: hoyN, estados, mes: mes[0] || { viajes: 0, tarifa: 0, flete: 0, anticipo: 0 },
-    mesAnterior: mesAnt[0] || { viajes: 0, tarifa: 0 }, dias, rechazos, enRuta,
+    mesAnterior: mesAnt[0] || { viajes: 0, tarifa: 0 }, dias, rechazos, enRuta, sinEnviarConductor,
     clientes: clientes.map(c => ({ nombre: c.c?.[0]?.nombre || 'Sin cliente', viajes: c.viajes, tarifa: c.tarifa })),
     ultimos: ultimos.map(v => ({ _id: v._id, numero: v.numero, fecha: v.fecha, placa: v.placa, destino: v.destino, estado: v.estado,
       conductor: v.conductorNombre, cliente: v.cliente?.nombre || '', tarifa: v.tarifa, sinManifiesto: v.requiereManifiesto === false })) });
@@ -304,6 +309,45 @@ r.post('/reporte-whatsapp/marcar', permitir(P.VIAJES_REGISTRAR), async (req, res
     { $set: { 'reporteWhatsapp.fecha': new Date(), 'reporteWhatsapp.usuario': req.usuario._id } });
   await auditar(req, 'reporte_whatsapp', { entidad: 'Viaje', detalle: { viajes: viajes.length, marcados: r2.modifiedCount } });
   res.json({ marcados: r2.modifiedCount });
+});
+
+// ── Fase 9: el manifiesto para el conductor (enlace propio y WhatsApp) ──────
+const enviarConductor = permitir(P.RNDC_OPERAR, P.VIAJES_REGISTRAR);
+async function paqueteConductor(req, id, empresa) {
+  const token = await MC.asegurarToken(req.empresaId, id);
+  const v = await Viaje.findOne(deEmpresa(req, { _id: id })).select('placa conductor conductorNombre manifiesto remesa envioConductor')
+    .populate(pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 celular')).lean();
+  const d = await datosManifiesto(empresa, id);
+  const enlace = MC.enlaceDe(token);
+  const numero = MC.numeroWhatsapp(v.conductor?.celular);
+  const texto = MC.mensajeConductor({ conductor: v.conductor, conductorNombre: v.conductorNombre, manifiesto: v.manifiesto.numero, placa: v.placa,
+    origen: d.origen, destino: d.destino, remesa: d.remesa, empresa: empresa.nombre }, enlace);
+  return { _id: id, numero: v.manifiesto.numero, placa: v.placa, conductor: v.conductorNombre, celular: v.conductor?.celular || '', enlace, texto,
+    wa: numero ? `https://wa.me/${numero}?text=${encodeURIComponent(texto)}` : '', error: numero ? '' : 'El conductor no tiene un celular válido en su ficha (Conductores y terceros)',
+    ...MC.estadoEnvio(v) };
+}
+r.post('/manifiesto-conductor/lote', enviarConductor, async (req, res) => {
+  const { ids } = z.object({ ids: z.array(z.string().refine(x => mongoose.isValidObjectId(x))).min(1).max(100) }).parse(req.body);
+  const empresa = await Empresa.findById(req.empresaId).lean();
+  const salida = [];
+  for (const id of ids) {
+    try { salida.push(await paqueteConductor(req, id, empresa)); } catch (e) { salida.push({ _id: id, error: e.message, wa: '' }); }
+  }
+  res.json(salida);
+});
+r.post('/:id/manifiesto-conductor', enviarConductor, async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ErrorHttp(400, 'Identificador inválido');
+  res.json(await paqueteConductor(req, req.params.id, await Empresa.findById(req.empresaId).lean()));
+});
+// Se marca cuando el usuario abre WhatsApp con el mensaje (el envío lo hace él desde su celular o WhatsApp Web)
+r.put('/:id/manifiesto-conductor/enviado', enviarConductor, async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ErrorHttp(400, 'Identificador inválido');
+  const ahora = new Date();
+  const v = await Viaje.findOneAndUpdate(deEmpresa(req, { _id: req.params.id, 'envioConductor.token': { $gt: '' } }),
+    { $set: { 'envioConductor.whatsapp': ahora, 'envioConductor.whatsappPor': req.usuario._id } }, { new: true }).select('envioConductor manifiesto').lean();
+  if (!v) throw new ErrorHttp(404, 'Primero genere el enlace del manifiesto');
+  await auditar(req, 'manifiesto_whatsapp', { entidad: 'Viaje', entidadId: req.params.id, detalle: { manifiesto: v.manifiesto?.numero } });
+  res.json(MC.estadoEnvio(v));
 });
 
 r.get('/:id', permitir(P.VIAJES_VER), async (req, res) => {

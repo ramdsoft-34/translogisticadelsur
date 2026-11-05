@@ -75,6 +75,7 @@ const empresaSchema = new Schema({
     surTrack: { type: Boolean, default: false },
     velocidadMaxima: { type: Number, default: 80 },     // km/h: por encima se marca alerta
     minutosSinSenal: { type: Number, default: 10 },     // sin posición nueva por más tiempo → «Sin señal»
+    enviarManifiesto: { type: Boolean, default: false },   // fase 9: mandar a Sur Track el enlace del manifiesto (cuando Sur Track lo muestre)
   },
   cierres: { type: [{ mes: String, fecha: Date, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario' }, resumen: Object, archivos: [String], _id: false }], default: [] },
   // Reglas de negocio configurables sin programar (liquidación, avisos y pesos)
@@ -416,6 +417,9 @@ const viajeSchema = new Schema({
   // Importado de la plantilla de Excel: sus documentos RNDC se gestionaron fuera de la
   // plataforma, por eso no aparece en «Por enviar» hasta que un usuario lo habilite.
   historico: { type: Boolean, default: false },
+  // Fase 9: el manifiesto que recibe el conductor (enlace propio, WhatsApp y Sur Track)
+  envioConductor: { token: str(), creado: fecha, whatsapp: fecha, whatsappPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+    abierto: fecha, ultimaApertura: fecha, aperturas: { type: Number, default: 0 }, surtrack: fecha },
   reporteWhatsapp: { fecha, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null } },                      // manifiesto anulado que reemplaza el nuevo
   enviandoRndc: fecha,                                // bloqueo para no enviar dos veces a la vez
   creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
@@ -427,6 +431,7 @@ viajeSchema.index({ empresa: 1, fecha: -1 });
 viajeSchema.index({ empresa: 1, estado: 1 });
 viajeSchema.index({ empresa: 1, 'manifiesto.numero': 1 });
 viajeSchema.index({ empresa: 1, 'rastreo.activo': 1 });
+viajeSchema.index({ 'envioConductor.token': 1 }, { unique: true, partialFilterExpression: { 'envioConductor.token': { $gt: '' } } });
 viajeSchema.index({ empresa: 1, 'rastreo.activado': -1 });
 
 // ── Recorrido GPS guardado al terminar el rastreo (el historial no depende de Sur Track) ──

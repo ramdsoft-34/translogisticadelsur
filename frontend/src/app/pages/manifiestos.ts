@@ -46,6 +46,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         @if (pestana() === 'manifestados' && seleccion().size) {
           <button type="button" class="peligro" (click)="abrirAnularLote()" [disabled]="trabajando()">Anular ({{ seleccion().size }})</button>
           <button type="button" class="primario" (click)="abrirCumplidoLote()" [disabled]="trabajando()">Cumplir ({{ seleccion().size }})</button>
+          <button type="button" class="whatsapp" (click)="prepararWhatsapp([...seleccion()])" [disabled]="trabajando()" title="Mandarle el manifiesto a cada conductor por WhatsApp">WhatsApp a los conductores ({{ seleccion().size }})</button>
           <button type="button" (click)="abrirCorreoManual()" [disabled]="trabajando()" title="Correo armado a mano con los manifiestos elegidos y archivos adjuntos">
             <app-icono nombre="correo" />Correo con estos manifiestos</button>
           @if (conCorreo()) {
@@ -169,7 +170,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
           <thead><tr>
             @if (conSeleccion()) { <th><input type="checkbox" aria-label="Seleccionar todos" [checked]="todos()" (change)="alternarTodos()" /></th> }
             <th>N°</th><th>Fecha</th><th>Cliente / destino</th><th>Placa</th><th>Conductor</th><th class="num">Flete</th>
-            <th>Remesa</th><th>Manifiesto</th>@if (conCorreo()) { <th>Correo</th> }<th></th></tr></thead>
+            <th>Remesa</th><th>Manifiesto</th>@if (conCorreo()) { <th>Correo</th> }@if (pestana() === 'manifestados') { <th>WhatsApp conductor</th> }<th></th></tr></thead>
           <tbody>
             @for (v of viajes(); track v._id) {
               <tr>
@@ -192,6 +193,17 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                 @if (conCorreo()) {
                   <td data-etiqueta="Correo">@if (resumenCorreo(v._id); as rc) { <button type="button" class="chip-boton" (click)="verCorreos(v)" [title]="rc.titulo"><span class="chip" [class]="rc.clase">{{ rc.texto }}</span></button> }
                     @else { <button type="button" class="pequeno texto" (click)="verCorreos(v)">Sin envío</button> }</td>
+                }
+                @if (pestana() === 'manifestados') {
+                  @let ec = $any(v).envioConductor;
+                  <td data-etiqueta="WhatsApp conductor">
+                    @if (ec?.whatsapp) { <span class="chip ok sin-punto" [title]="'Enviado ' + (ec.whatsapp | fechaHora)">Enviado</span>
+                      @if (ec.abierto) { <span class="chip info sin-punto" [title]="'Lo abrió ' + (ec.abierto | fechaHora) + ' · ' + ec.aperturas + ' vez/veces'">Abierto</span> }
+                      <small class="linea-wa sutil">{{ (ec.abierto || ec.whatsapp) | fechaHora }}</small> }
+                    @else if (!celularDe(v)) { <span class="chip error sin-punto">Sin celular</span><small class="linea-wa sutil">Agréguelo en Conductores</small> }
+                    @else { <span class="chip alerta sin-punto">Por enviar</span> }
+                    @if (ec?.surtrack) { <small class="linea-wa"><span class="chip sin-punto" title="El enlace se mandó a Sur Track al activar el rastreo">En Sur Track</span></small> }
+                  </td>
                 }
                 <td class="celda-acciones">
                   <div class="acciones" style="justify-content:flex-end">
@@ -219,6 +231,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                           }
                           <div class="fila-acciones">
                             <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
+                            <button class="pequeno whatsapp" (click)="prepararWhatsapp([v._id])" [disabled]="trabajando()" title="Mandarle el manifiesto al conductor por WhatsApp">WhatsApp</button>
+                          </div>
+                          <div class="fila-acciones">
                             <button class="pequeno primario" (click)="abrirCumplido(v)">Cumplir</button>
                             <button class="pequeno peligro" (click)="abrirAnular(v)">Anular</button>
                           </div>
@@ -305,6 +320,30 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       }
       <ng-container pie><button type="button" (click)="soporteAnular.set(null)">Cancelar</button>
         <button class="peligro" type="submit" form="form-anular-soporte" [disabled]="trabajando() || (soporteAnular()?.motivo || '').trim().length < 3">Anular</button></ng-container>
+    </app-modal>
+
+    <!-- Fase 9: el manifiesto al conductor por WhatsApp (un clic por conductor: WhatsApp no deja enviar varios solos sin la API) -->
+    <app-modal [titulo]="(waLista()?.length || 0) > 1 ? 'Enviar manifiestos a los conductores' : 'Enviar manifiesto ' + (waLista()?.[0]?.numero || '') + ' · ' + (waLista()?.[0]?.placa || '')" [abierto]="!!waLista()" (cerrar)="waLista.set(null)" [ancho]="true">
+      @if (waLista(); as lista) {
+        <p class="sutil" style="margin-top:0">El conductor recibe un enlace propio al PDF del manifiesto, el mismo que se descarga del RNDC. El enlace deja de funcionar cuando se cumple el viaje, si el manifiesto se anula o a los 30 días.</p>
+        <div class="lista-wa">
+          @for (x of lista; track x._id) {
+            <div class="dest-wa">
+              <div class="crece"><strong>{{ x.numero }} · <span class="placa-wa">{{ x.placa }}</span> · {{ x.conductor }}</strong>
+                @if (x.error) { <small class="linea-wa error-wa">{{ x.error }}</small> }
+                @else { <small class="linea-wa sutil">Celular {{ x.celular }}</small> }
+                <span class="estado-wa">
+                  @if (x.whatsapp) { <span class="chip ok sin-punto">Enviado {{ x.whatsapp | fechaHora }}</span> }
+                  @if (x.abierto) { <span class="chip info sin-punto">Abierto {{ x.abierto | fechaHora }}</span> }
+                </span>
+                @if (x.enlace) { <span class="enlace-wa"><code>{{ x.enlace }}</code><button type="button" class="pequeno" (click)="copiarEnlace(x.enlace)">Copiar</button></span> }
+              </div>
+              @if (x.wa) { <a class="boton whatsapp" [href]="x.wa" target="_blank" rel="noopener" (click)="marcarWhatsapp(x)">{{ x.whatsapp ? 'Enviar otra vez' : 'Enviar por WhatsApp' }}</a> }
+            </div>
+          }
+        </div>
+      }
+      <ng-container pie><span class="sutil" style="margin-right:auto;font-size:12.5px">Se abre WhatsApp con el mensaje listo; usted oprime enviar.</span><button type="button" class="primario" (click)="waLista.set(null)">Listo</button></ng-container>
     </app-modal>
 
     <!-- Correo manual: manifiestos elegidos (sueltos o en un solo PDF) y adjuntos -->
@@ -518,6 +557,11 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     .chip-boton { border: 0; background: none; padding: 0; min-height: 0; cursor: pointer; }
     .rejilla { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
     .rejilla .campo > label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    button.whatsapp, a.boton.whatsapp { background: var(--whatsapp, #1fa855); border-color: var(--whatsapp, #1fa855); color: #fff; }
+    a.boton.whatsapp { display: inline-flex; align-items: center; padding: 9px 14px; border-radius: 10px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+    .lista-wa { display: flex; flex-direction: column; gap: 10px; } .dest-wa { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--gris-2); border-radius: var(--radio-l); }
+    .placa-wa { font-size: 12px; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: var(--primario); color: #0f0e0c; } .error-wa { color: var(--rojo-texto); }
+    .estado-wa { display: flex; gap: 6px; margin-top: 4px; } .dest-wa .crece { flex: 1; min-width: 0; } .linea-wa { display: block; font-size: 12px; margin-top: 3px; } .enlace-wa { display: flex; gap: 8px; align-items: center; margin-top: 6px; } .enlace-wa code { font-size: 12px; color: var(--gris-6); }
     @media (max-width: 760px) { .rejilla { grid-template-columns: 1fr; } }
   `],
 })
@@ -610,6 +654,25 @@ export class Manifiestos {
   }
 
   ir(p: Pestana) { this.pestana.set(p); this.seleccion.set(new Set()); this.texto.set(''); this.cargar(); }
+
+  // ── Fase 9: manifiesto al conductor por WhatsApp ──
+  readonly waLista = signal<any[] | null>(null);
+  celularDe = (v: Viaje) => String(((v as any).conductor)?.celular || '').replace(/\D/g, '').length >= 10;
+  async prepararWhatsapp(ids: string[]) {
+    if (!ids.length) return;
+    this.trabajando.set(true);
+    try { this.waLista.set(await this.api.post<any[]>('/viajes/manifiesto-conductor/lote', { ids })); }
+    catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+  // El enlace de WhatsApp lo abre el navegador; aquí solo se anota que se envió
+  async marcarWhatsapp(x: any) {
+    try {
+      const e = await this.api.put<any>(`/viajes/${x._id}/manifiesto-conductor/enviado`, {});
+      this.waLista.update(l => (l || []).map(y => (y._id === x._id ? { ...y, ...e } : y)));
+      this.viajes.update(l => l.map(v => (v._id === x._id ? { ...v, envioConductor: { ...((v as any).envioConductor || {}), ...e } } as any : v)));
+    } catch (err) { this.avisos.error(err); }
+  }
+  async copiarEnlace(t: string) { try { await navigator.clipboard.writeText(t); this.avisos.ok('Enlace copiado'); } catch { this.avisos.error('No se pudo copiar'); } }
 
   async cargar() {
     this.cargando.set(true);
