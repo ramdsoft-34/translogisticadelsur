@@ -175,6 +175,7 @@ const enDias = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Amer
     .estados { margin: 4px 0 12px; }
     .sin-app { color: var(--ambar); font-weight: 600; }
     .decidir { color: var(--ambar); font-weight: 600; }
+    th.celda-acciones { text-align: right; }
     .celda-acciones .acciones { justify-content: flex-end; flex-wrap: wrap; }
     .mes { border: 1px solid var(--gris-2); border-radius: var(--radio-l); padding: 12px 14px; margin-bottom: 12px; background: var(--gris-0); }
     .mes header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
