@@ -1,7 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { Api } from './api.service';
-import { Usuario } from './modelos';
+import { P, Usuario } from './modelos';
 
 // Sesión del usuario. El token va en una cookie HttpOnly que pone el servidor: el navegador no lo guarda en
 // localStorage ni sessionStorage y JavaScript no lo puede leer. Al recargar la página, la sesión se recupera
@@ -59,6 +59,9 @@ export class Auth {
   }
 
   inicio() {
-    return this.esSuper() ? '/admin/empresas' : '/inicio';
+    if (this.esSuper()) return '/admin/empresas';
+    // Fase 8: el responsable del SG-SST empieza en su tablero
+    if (!this.tiene(P.VIAJES_VER)) return this.tiene(P.SST_VER) || this.tiene(P.SST_GESTIONAR) ? '/sst' : '/mi-cuenta';
+    return '/inicio';
   }
 }

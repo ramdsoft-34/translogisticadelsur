@@ -4,7 +4,8 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { Empresa, Usuario, Auditoria, Viaje } from '../models/index.js';
+import { Empresa, Usuario, Auditoria, Viaje, Tercero, Empleado, Vehiculo, InspeccionSst } from '../models/index.js';
+import { alertas as alertasSst } from '../services/sst/vencimientos.js';
 import { autenticar, permitir, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { auditar, verificarCadena } from '../services/auditoria.js';
@@ -149,6 +150,21 @@ r.get('/auditoria.xlsx', async (req, res) => {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="Auditoria.xlsx"');
   res.send(buf);
+});
+
+// Fase 8: resumen del SG-SST y del PESV de cada empresa para el consultor (solo cifras, sin datos personales)
+r.get('/sst-resumen', async (_req, res) => {
+  const empresas = await Empresa.find({ activa: true }).select('nombre nit dv sst').sort({ nombre: 1 }).lean();
+  const desde = new Date(Date.now() - 30 * 864e5);
+  res.json(await Promise.all(empresas.map(async (e) => {
+    const [conductores, empleados, vehiculos, inspecciones, noAptos, al] = await Promise.all([
+      Tercero.countDocuments({ empresa: e._id, roles: 'conductor', activo: true }), Empleado.countDocuments({ empresa: e._id, activo: true }), Vehiculo.countDocuments({ empresa: e._id, activo: true, clase: 'vehiculo' }),
+      InspeccionSst.countDocuments({ empresa: e._id, fecha: { $gte: desde } }), InspeccionSst.countDocuments({ empresa: e._id, fecha: { $gte: desde }, apto: false }),
+      alertasSst(e._id)]);
+    return { _id: e._id, nombre: e.nombre, nit: `${e.nit}${e.dv ? `-${e.dv}` : ''}`, claseRiesgo: e.sst?.claseRiesgo ?? null, nivelPesv: e.sst?.nivelPesv || '',
+      puntaje0312: e.sst?.puntaje0312 ?? null, puntajePesv: e.sst?.puntajePesv ?? null, colaboradores: conductores + empleados, vehiculos, inspecciones30: inspecciones, noAptos30: noAptos,
+      vencidos: al.filter(a => a.nivel === 'vencido').length, porVencer: al.filter(a => a.nivel !== 'vencido').length };
+  })));
 });
 
 export default r;

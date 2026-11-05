@@ -9,6 +9,7 @@ export const ROLES = {
   manifiestos: 'Responsable de manifiestos',
   contabilidad:'Contabilidad',
   consulta:    'Consulta',
+  sst:         'Responsable SG-SST y PESV',
 };
 
 export const P = {
@@ -33,6 +34,10 @@ export const P = {
   // el rol de consulta, que ve los libros, no vea salarios, cuentas bancarias ni desprendibles.
   NOMINA_VER:         'nomina.ver',
   NOMINA_GESTIONAR:   'nomina.gestionar',
+  // Fase 8: SG-SST (Decreto 1072 y Res. 0312) y PESV (Res. 40595). Los exámenes médicos son datos sensibles:
+  // solo los ve quien gestiona el SG-SST (no el rol de consulta).
+  SST_VER:            'sst.ver',
+  SST_GESTIONAR:      'sst.gestionar',
 };
 
 const TODOS_EMPRESA = Object.values(P).filter(p => p !== P.EMPRESAS_GESTIONAR);
@@ -45,7 +50,9 @@ export const PERMISOS_POR_ROL = {
     P.RNDC_OPERAR, P.RNDC_CONSULTAR, P.REPORTES_VER],
   contabilidad: [P.VIAJES_VER, P.MAESTROS_VER, P.TARIFAS_EDITAR, P.LIQUIDACION_VER, P.LIQUIDACION_GESTIONAR,
     P.REPORTES_VER, P.RNDC_CONSULTAR, P.CONTABILIDAD_VER, P.CONTABILIDAD_GESTIONAR, P.NOMINA_VER, P.NOMINA_GESTIONAR],
-  consulta: [P.VIAJES_VER, P.MAESTROS_VER, P.LIQUIDACION_VER, P.REPORTES_VER, P.CONTABILIDAD_VER],
+  consulta: [P.VIAJES_VER, P.MAESTROS_VER, P.LIQUIDACION_VER, P.REPORTES_VER, P.CONTABILIDAD_VER, P.SST_VER],
+  // El preoperacional lo hace el conductor en Sur Track; aquí llega la copia
+  sst: [P.SST_VER, P.SST_GESTIONAR, P.MAESTROS_VER],
 };
 
 export const ROLES_EMPRESA = Object.keys(ROLES).filter(r => r !== 'superadmin');

@@ -1,6 +1,6 @@
 // Contabilidad fase 4: empleados y nómina (aportes, provisiones, pago, planilla PILA, desprendibles y nómina electrónica),
 // activos fijos con depreciación y venta o baja, y cierre contable del año. Pestaña «Nómina y activos» de Contabilidad.
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -10,6 +10,7 @@ import { Icono } from '../shared/icono';
 import { Modal } from '../shared/modal';
 import { Moneda } from '../shared/moneda';
 import { Confirmar } from '../shared/confirmar';
+import { PerfilSst } from '../shared/perfil-sst';
 import { FORMATOS, hoyIso } from '../shared/formato';
 import { VisorPdf } from '../shared/visor-pdf';
 
@@ -19,7 +20,7 @@ const iso = (v: any) => (v ? String(v).slice(0, 10) : '');
 
 @Component({
   selector: 'app-cont-nomina',
-  imports: [FormsModule, Icono, Modal, Moneda, Confirmar, VisorPdf, ...FORMATOS],
+  imports: [FormsModule, Icono, Modal, Moneda, Confirmar, VisorPdf, PerfilSst, ...FORMATOS],
   template: `
     <app-visor-pdf #visor />
     <div class="segmentos" style="margin-bottom:12px">
@@ -37,7 +38,8 @@ const iso = (v: any) => (v ? String(v).slice(0, 10) : '');
               <td data-etiqueta="Salario" class="num">{{ e.salario | pesos }}@if (e.tipoSalario === 'integral') { <small class="sutil" style="display:block">integral</small> }</td>
               <td data-etiqueta="Contrato">{{ e.tipoContrato }}</td><td data-etiqueta="ARL">Nivel {{ e.nivelRiesgoArl }}</td><td data-etiqueta="Ingreso">{{ e.fechaIngreso | dia }}</td>
               <td data-etiqueta="Estado"><span class="chip" [class.ok]="e.activo" [class.error]="!e.activo">{{ e.activo ? 'Activo' : 'Retirado' }}</span></td>
-              <td>@if (gestNomina) { <button class="pequeno" (click)="abrirEmpleado(e)"><app-icono nombre="editar" [tam]="14" />Editar</button> }</td></tr>
+              <td><div class="acciones" style="justify-content:flex-end">@if (gestNomina) { <button class="pequeno" (click)="abrirEmpleado(e)"><app-icono nombre="editar" [tam]="14" />Editar</button> }
+                @if (verSst) { <button class="pequeno" (click)="perfilSst().abrir('empleado', e._id)" title="Exámenes, EPP y capacitaciones"><app-icono nombre="escudo" [tam]="14" />SST</button> }</div></td></tr>
           } @empty { <tr><td colspan="9" class="vacio">Sin empleados</td></tr> }</tbody></table></div>
       }
 
@@ -205,7 +207,8 @@ const iso = (v: any) => (v ? String(v).slice(0, 10) : '');
         <p class="sutil">Valor en libros {{ b.valorEnLibros | pesos }}. La diferencia con el precio va a 4245 (utilidad) o 5310 (pérdida).</p>
       }
       <ng-container pie><button type="button" (click)="baja.set(null)">Cancelar</button><button class="primario" type="submit" form="form-baja" [disabled]="trabajando()">Registrar</button></ng-container>
-    </app-modal>`,
+    </app-modal>
+    <app-perfil-sst />`,
   styles: [`
     .barra-mini { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 12px; }
     tr.total td { font-weight: 700; background: var(--gris-1); } tr.anulado td { color: var(--gris-5); text-decoration: line-through; }
@@ -215,6 +218,8 @@ const iso = (v: any) => (v ? String(v).slice(0, 10) : '');
 })
 export class NominaCont {
   private api = inject(Api); private avisos = inject(Avisos);
+  readonly verSst = inject(Auth).tiene(P.SST_VER, P.SST_GESTIONAR);
+  readonly perfilSst = viewChild.required(PerfilSst);
   private auth = inject(Auth);
   readonly puedeGestionar = this.auth.tiene(P.CONTABILIDAD_GESTIONAR);
   // La nómina (salarios, datos personales y bancarios) solo la ve quien tiene permiso de nómina

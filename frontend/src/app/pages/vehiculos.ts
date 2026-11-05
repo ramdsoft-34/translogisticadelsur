@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -9,6 +9,7 @@ import { P, TIPOS_ID, nombreTercero } from '../core/modelos';
 import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
 import { MenuAcciones } from '../shared/menu-acciones';
+import { HojaVidaPesv } from '../shared/hoja-vida-pesv';
 import { FORMATOS, isoDia } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
 import { TraerRndc } from '../shared/traer-rndc';
@@ -29,7 +30,7 @@ const vacio = () => ({
 
 @Component({
   selector: 'app-vehiculos',
-  imports: [FormsModule, Modal, Icono, MenuAcciones, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, BuscarTercero, VistaRndc, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, MenuAcciones, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, BuscarTercero, VistaRndc, HojaVidaPesv, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Vehículos</h1><p class="sutil">Vehículos y remolques con sus documentos. Los códigos (configuración, marca, línea…) son los de las tablas del RNDC.</p></div>
@@ -69,6 +70,7 @@ const vacio = () => ({
               <td><span class="chip" [class]="chip(v.rndc?.estado)" [title]="v.rndc?.mensaje || ''">{{ estadoRndc(v.rndc?.estado) }}</span></td>
               <td><div class="acciones" style="justify-content:flex-end">
                 <button class="pequeno" (click)="editar(v)">{{ puedeEditar ? 'Editar' : 'Ver' }}</button>
+                @if (verSst && v.clase !== 'remolque') { <button class="pequeno" (click)="hojaPesv().abrir(v._id)" title="Kilometraje, mantenimiento preventivo, pólizas y checklists de Sur Track"><app-icono nombre="escudo" [tam]="15" />PESV</button> }
                 @if (puedeRndc) { <button class="pequeno" (click)="enviar(v)" [disabled]="trabajando()"><app-icono nombre="enviar" [tam]="15" />RNDC</button> }
               </div></td>
             </tr>
@@ -168,7 +170,8 @@ const vacio = () => ({
         <button type="button" (click)="abierto.set(false)">Cancelar</button>
         @if (puedeEditar) { <button class="primario" type="submit" form="form-veh" [disabled]="trabajando()">{{ sincronizar && puedeRndc ? 'Guardar y registrar en el RNDC' : 'Guardar' }}</button> }
       </ng-container>
-    </app-modal>`,
+    </app-modal>
+    <app-hoja-vida-pesv />`,
 })
 export class Vehiculos {
   private api = inject(Api);
@@ -176,6 +179,9 @@ export class Vehiculos {
   private avisos = inject(Avisos);
   private clave = inject(RndcClave);
   readonly puedeEditar = this.auth.tiene(P.MAESTROS_EDITAR);
+  // Fase 8: la hoja de vida del PESV va en la misma ficha del vehículo
+  readonly verSst = this.auth.tiene(P.SST_VER, P.SST_GESTIONAR);
+  readonly hojaPesv = viewChild.required(HojaVidaPesv);
   readonly puedeRndc = this.auth.tiene(P.RNDC_OPERAR);
   readonly puedeConsultar = this.auth.tiene(P.RNDC_OPERAR) || this.auth.tiene(P.RNDC_CONSULTAR);
   readonly tipos = Object.entries(TIPOS_ID);

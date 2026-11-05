@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -11,6 +11,7 @@ import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
 import { MenuAcciones } from '../shared/menu-acciones';
 import { SelectorMunicipio } from '../shared/municipio';
+import { PerfilSst } from '../shared/perfil-sst';
 import { FORMATOS, isoDia } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
 import { TraerRndc } from '../shared/traer-rndc';
@@ -41,7 +42,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
 
 @Component({
   selector: 'app-terceros',
-  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, VistaRndc, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, VistaRndc, PerfilSst, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Conductores y terceros</h1><p class="sutil">Conductores, titulares, propietarios, tenedores y destinatarios que se registran en el RNDC.</p></div>
@@ -91,6 +92,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
               <td><span class="chip" [class]="chip(t.rndc?.estado)" [title]="t.rndc?.mensaje || ''">{{ estadoRndc(t.rndc?.estado) }}</span></td>
               <td><div class="acciones" style="justify-content:flex-end">
                 <button class="pequeno" (click)="editar(t)">{{ puedeEditar ? 'Editar' : 'Ver' }}</button>
+                @if (verSst && t.roles?.includes('conductor')) { <button class="pequeno" (click)="perfilSst().abrir('tercero', t._id)" title="Exámenes, EPP, comparendos, checklists y excesos de velocidad"><app-icono nombre="escudo" [tam]="15" />SST</button> }
                 @if (puedeRndc) { <button class="pequeno" (click)="enviar(t)" [disabled]="trabajando()" title="Registrar o actualizar en el RNDC"><app-icono nombre="enviar" [tam]="15" />RNDC</button> }
               </div></td>
             </tr>
@@ -202,7 +204,8 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
         <button type="button" (click)="abierto.set(false)">Cancelar</button>
         @if (puedeEditar) { <button class="primario" type="submit" form="form-tercero" [disabled]="trabajando()">{{ sincronizar && puedeRndc ? 'Guardar y registrar en el RNDC' : 'Guardar' }}</button> }
       </ng-container>
-    </app-modal>`,
+    </app-modal>
+    <app-perfil-sst />`,
   styles: [`
     .cod-sede { display: inline-block; min-width: 26px; text-align: center; font-weight: 750; font-size: 12px; padding: 1px 7px; margin-right: 4px;
       border-radius: 6px; background: var(--gris-15); color: var(--gris-7); font-variant-numeric: tabular-nums; }
@@ -239,6 +242,9 @@ export class Terceros {
   private avisos = inject(Avisos);
   private clave = inject(RndcClave);
   readonly puedeEditar = this.auth.tiene(P.MAESTROS_EDITAR);
+  // Fase 8: el SG-SST y el PESV del conductor van en su misma ficha
+  readonly verSst = this.auth.tiene(P.SST_VER, P.SST_GESTIONAR);
+  readonly perfilSst = viewChild.required(PerfilSst);
   readonly puedeRndc = this.auth.tiene(P.RNDC_OPERAR);
   readonly puedeConsultar = this.auth.tiene(P.RNDC_OPERAR) || this.auth.tiene(P.RNDC_CONSULTAR);
   readonly roles = ROLES;

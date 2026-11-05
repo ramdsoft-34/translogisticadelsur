@@ -3,14 +3,15 @@
 import express, { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { Empresa } from '../models/index.js';
+import { Empresa, Viaje, Vehiculo, Tercero } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
 import * as st from '../services/rastreo/surtrack.js';
 import { leerLibro, filas, txt, num } from '../services/importacion/excel.js';
 import { libroExcel } from '../services/reportes/comun.js';
-import { checklistPdf } from '../services/reportes/checklist.js';
+import * as Ck from '../services/sst/checklistSurTrack.js';
+import { pdfFormato, contexto } from '../services/sst/autollenado.js';
 import { normalizar, parseFecha } from '../utils/texto.js';
 
 const r = Router();
@@ -103,9 +104,24 @@ r.get('/viajes/:id/checklist', permitir(P.VIAJES_VER), async (req, res) => res.j
 r.get('/viajes/:id/checklist/pdf', permitir(P.VIAJES_VER), async (req, res) => {
   const d = await st.checklistDelViaje(req.empresaId, id(req.params.id), { conFirma: true });
   if (!d.checklist) throw new ErrorHttp(404, 'El conductor no tiene checklist registrado en Sur Track');
-  const buf = await checklistPdf(await Empresa.findById(req.empresaId).lean(), d);
+  // Fase 8: sale como formato SST-FOR-06 de la empresa (membrete, código, versión y página), con los datos del viaje,
+  // SOAT, licencia y técnico-mecánica de la plataforma, resultado apto / no apto y vigencia contra el día del viaje
+  const [empresa, v] = await Promise.all([
+    Empresa.findById(req.empresaId).select('+logo +membrete.encabezado +membrete.pie').lean(),
+    Viaje.findOne({ empresa: req.empresaId, _id: req.params.id }).select('numero fecha placa destino conductor conductorNombre cliente rastreo.resumen.km')
+      .populate({ path: 'cliente', select: 'nombre', match: { empresa: req.empresaId } }).lean(),
+  ]);
+  const [vehiculo, conductor] = await Promise.all([
+    Vehiculo.findOne({ empresa: req.empresaId, placa: v.placa }).select('soat venceTecnomecanica sst.kmActual').lean(),
+    v.conductor ? Tercero.findOne({ empresa: req.empresaId, _id: v.conductor }).select('nombres apellido1 apellido2 numId licencia').lean() : null,
+  ]);
+  const datos = Ck.datosSurTrack({ viaje: { numero: v.numero, fecha: v.fecha, placa: v.placa, destino: v.destino, cliente: v.cliente?.nombre, conductor: v.conductorNombre,
+    km: v.rastreo?.resumen?.km ?? null }, conductor, vehiculo, checklist: d.checklist });
+  const numVehiculos = await Vehiculo.countDocuments({ empresa: req.empresaId, activo: true, clase: 'vehiculo' });
+  const buf = await pdfFormato({ plantilla: Ck.plantillaSurTrack(), datos, ctx: contexto(empresa, { usuario: req.usuario, numVehiculos }),
+    membrete: empresa.membrete || {}, logo: empresa.logo, firmas: [{ campo: 'firma_conductor', nombre: datos.conductor }] });
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `${req.query.ver === '1' ? 'inline' : 'attachment'}; filename="checklist_${d.viaje.placa}_${new Date(d.checklist.fecha).toISOString().slice(0, 10)}.pdf"`);
+  res.setHeader('Content-Disposition', `${req.query.ver === '1' ? 'inline' : 'attachment'}; filename="${Ck.nombreChecklist(v.placa, d.checklist.fecha)}"`);
   res.send(buf);
 });
 

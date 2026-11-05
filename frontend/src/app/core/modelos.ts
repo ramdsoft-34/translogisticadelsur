@@ -24,6 +24,8 @@ export const P = {
   CONTABILIDAD_GESTIONAR: 'contabilidad.gestionar',
   NOMINA_VER: 'nomina.ver',
   NOMINA_GESTIONAR: 'nomina.gestionar',
+  SST_VER: 'sst.ver',
+  SST_GESTIONAR: 'sst.gestionar',
 } as const;
 
 export interface DocRndc { numero: string; radicado: string; qr?: string; fecha: string | null; estado: '' | 'aceptado' | 'rechazado' | 'anulado'; mensaje: string }

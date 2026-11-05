@@ -33,6 +33,15 @@ export const MODULOS: Modulo[] = [
     { ruta: '/revision', texto: 'Revisión de datos', icono: 'alerta', permisos: [P.MAESTROS_VER], descripcion: 'Datos por corregir antes de expedir' },
     { ruta: '/importar', texto: 'Importar datos', icono: 'descargar', permisos: [P.MAESTROS_EDITAR, P.TARIFAS_EDITAR, P.CONFIG_GESTIONAR], descripcion: 'Cargas desde Excel: terceros, vehículos, tarifas y plantilla de viajes', claves: 'excel plantilla cargar' },
   ] },
+  { id: 'sst', nombre: 'SG-SST y PESV', icono: 'escudo', paginas: [
+    { ruta: '/sst', texto: 'Tablero SST y PESV', icono: 'escudo', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Vencimientos, checklists del día, indicadores del PESV con Sur Track y capacitaciones', claves: 'sg-sst pesv seguridad vial salud trabajo 0312 40595 velocidad fatiga' },
+    { ruta: '/sst/preoperacionales', texto: 'Preoperacionales', icono: 'check', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Checklists de Sur Track guardados, no aptos y PDF para auditoría', claves: 'checklist sur track inspeccion apto' },
+    { ruta: '/sst/personas', texto: 'Personas', icono: 'personas', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Conductores y empleados: exámenes, EPP, comparendos y checklists', claves: 'examen medico epp comparendo conductor trabajador' },
+    { ruta: '/sst/capacitaciones', texto: 'Capacitaciones', icono: 'lista', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Programa anual y asistencia con firmas', claves: 'cronograma asistencia induccion' },
+    { ruta: '/sst/formatos', texto: 'Formatos', icono: 'documento', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Formatos con auto-llenado, firmas y membrete; Word y Excel propios', claves: 'acta plantilla membrete word excel firma' },
+    { ruta: '/sst/empresa', texto: 'Datos y membrete', icono: 'edificio', permisos: [P.SST_GESTIONAR], descripcion: 'Representante legal, ARL, clase de riesgo, nivel PESV, fatiga y membrete', claves: 'membrete logo encabezado pie arl riesgo' },
+    { ruta: '/admin/sst', texto: 'SST de las empresas', icono: 'escudo', permisos: [P.EMPRESAS_GESTIONAR], descripcion: 'Cumplimiento y vencimientos de cada empresa (cifras)' },
+  ] },
   { id: 'rndc', nombre: 'RNDC', icono: 'enviar', paginas: [
     { ruta: '/consultas-rndc', texto: 'Consultas', icono: 'buscar', permisos: [P.RNDC_CONSULTAR], descripcion: 'Lo que el RNDC tiene registrado para la empresa' },
     { ruta: '/rndc/envios', texto: 'Envíos', icono: 'enviar', permisos: [P.RNDC_OPERAR], descripcion: 'Historial de envíos al RNDC y sus respuestas', claves: 'historial transacciones radicado' },

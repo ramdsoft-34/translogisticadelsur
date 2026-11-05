@@ -116,6 +116,27 @@ const empresaSchema = new Schema({
     // Fase 5: envío automático al RNDC (proceso 86) de las facturas electrónicas validadas por la DIAN. Lo activa el administrador.
     rndcFeAutomatico: { type: Boolean, default: false },
   },
+  // Fase 8: datos del SG-SST y del PESV que van en los formatos, y membrete de la empresa para todos sus informes
+  sst: {
+    representanteLegal: str(), documentoRepresentante: str(),
+    responsableSst: str(), licenciaSst: str(), liderPesv: str(),
+    arl: str(), claseRiesgo: { type: Number, enum: [1, 2, 3, 4, 5], default: null }, actividad: str(),
+    numTrabajadores: { type: Number, default: 0 },
+    nivelPesv: { type: String, enum: ['', 'basico', 'estandar', 'avanzado'], default: '' },
+    // Puntaje de la última autoevaluación (0 a 100) para el tablero
+    puntaje0312: { type: Number, default: null }, fechaEvaluacion0312: fecha,
+    puntajePesv: { type: Number, default: null }, fechaEvaluacionPesv: fecha,
+    // PESV con Sur Track: horas de manejo seguido que disparan el aviso de fatiga, y minutos detenido que cuentan como pausa
+    horasConduccionContinua: { type: Number, default: 4 }, minutosPausa: { type: Number, default: 15 },
+  },
+  membrete: {
+    // Franjas de encabezado y pie (data URL PNG/JPEG); no se cargan salvo que se pidan (+membrete.encabezado)
+    encabezado: { type: String, default: '', select: false },
+    pie: { type: String, default: '', select: false },
+    colorPrimario: str({ default: '#0d1117' }), colorSecundario: str({ default: '#f6b80f' }),
+    textoPie: str(),                      // dirección · teléfono · correo · web (si está vacío se arma con los datos de la empresa)
+    actualizado: fecha,
+  },
   smtp: {
     activo: { type: Boolean, default: false },
     host: str(), puerto: { type: Number, default: 587 },
@@ -227,6 +248,22 @@ const tarifaSchema = new Schema({
 tarifaSchema.plugin(tenantPlugin);
 tarifaSchema.index({ empresa: 1, cliente: 1, destino: 1 }, { unique: true, collation: { locale: 'es', strength: 1 } });
 
+// ── Fase 8: SG-SST y PESV ─────────────────────────────────────────────────
+// Lo del SG-SST va dentro de la ficha que ya existe: el conductor (Tercero) o el empleado de nómina. No hay una
+// lista aparte de personas: licencia, cédula y teléfono son los mismos del RNDC y de la nómina.
+const firmaSst = new Schema({ rol: str(), nombre: str(), documento: str(), imagen: str(), fecha: { type: Date, default: Date.now } }, { _id: false });
+export const perfilSstSchema = new Schema({
+  // Datos sensibles (historia clínica ocupacional): solo con permiso de gestionar el SG-SST
+  examenes: { type: [{ tipo: { type: String, enum: ['ingreso', 'periodico', 'retiro', 'post_incapacidad'], default: 'periodico' },
+    fecha, ips: str(), concepto: { type: String, enum: ['apto', 'apto_con_restricciones', 'no_apto', 'aplazado'], default: 'apto' },
+    restricciones: str(), vence: fecha }], default: [] },
+  epp: { type: [{ elemento: str(), cantidad: { type: Number, default: 1 }, entrega: fecha, reposicion: fecha, firma: { type: firmaSst, default: null } }], default: [] },
+  comparendos: { type: [{ numero: str(), fecha, codigo: str(), descripcion: str(), valor: { type: Number, default: 0 },
+    estado: { type: String, enum: ['pendiente', 'pagado', 'curso', 'impugnado'], default: 'pendiente' }, placa: str({ uppercase: true }) }], default: [] },
+  ssi: { type: [{ periodo: str(), eps: Boolean, afp: Boolean, arl: Boolean, planilla: str() }], default: [] },   // control mensual SST-FOR-04
+}, { _id: false });
+const personaSst = { tipo: { type: String, enum: ['tercero', 'empleado'], default: 'tercero' }, id: { type: Schema.Types.ObjectId, default: null } };
+
 // ── Tercero (conductores, propietarios, tenedores, titulares, destinatarios) ─
 const terceroSchema = new Schema({
   tipoId: str({ required: true, uppercase: true }),   // C N P E T U
@@ -244,6 +281,7 @@ const terceroSchema = new Schema({
   roles: { type: [String], default: [] },
   activo: { type: Boolean, default: true },
   rndc: { type: sincronizacion, default: () => ({}) },
+  sst: { type: perfilSstSchema, default: () => ({}), select: false },   // fase 8 (se pide con +sst)
 }, { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } });
 terceroSchema.plugin(tenantPlugin);
 terceroSchema.index({ empresa: 1, tipoId: 1, numId: 1, 'sede.codigo': 1 }, { unique: true });
@@ -280,6 +318,13 @@ const vehiculoSchema = new Schema({
   activo: { type: Boolean, default: true },
   rndc: { type: sincronizacion, default: () => ({}) },
   surTrack: { choferId: str(), vinculado: fecha },   // conductor de Sur Track que usa este vehículo
+  // Fase 8 (PESV): kilometraje, pólizas y plan de mantenimiento preventivo (por km o por días, lo que llegue primero)
+  sst: {
+    kmActual: { type: Number, default: null }, kmFecha: fecha,
+    venceRcContractual: fecha, venceRcExtracontractual: fecha,
+    plan: { type: [{ actividad: str(), cadaKm: { type: Number, default: null }, cadaDias: { type: Number, default: null },
+      ultimoKm: { type: Number, default: null }, ultimaFecha: fecha }], default: [] },
+  },
 }, { timestamps: true });
 vehiculoSchema.plugin(tenantPlugin);
 vehiculoSchema.index({ empresa: 1, placa: 1 }, { unique: true });
@@ -681,6 +726,7 @@ const empleadoSchema = new Schema({
   banco: { entidad: str(), tipoCuenta: str(), cuenta: str() },
   conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },   // si el empleado también es conductor
   activo: { type: Boolean, default: true },
+  sst: { type: perfilSstSchema, default: () => ({}), select: false },   // fase 8 (se pide con +sst)
 }, { timestamps: true });
 empleadoSchema.plugin(tenantPlugin);
 empleadoSchema.index({ empresa: 1, numId: 1 }, { unique: true });
@@ -719,6 +765,65 @@ const remesaDulcesSchema = new Schema({
 }, { timestamps: true });
 remesaDulcesSchema.plugin(tenantPlugin);
 remesaDulcesSchema.index({ empresa: 1, vpl: 1 }, { unique: true });
+
+const capacitacionSstSchema = new Schema({
+  tema: str({ required: true }), eje: { type: String, enum: ['sst', 'pesv', 'ambos'], default: 'sst' },
+  dirigidoA: str(), fecha: { type: Date, required: true }, horas: { type: Number, default: 1 }, facilitador: str(),
+  estado: { type: String, enum: ['programada', 'ejecutada', 'cancelada'], default: 'programada' },
+  asistentes: { type: [{ persona: { type: personaSst, default: () => ({}) }, nombre: str(), documento: str(),
+    asistio: { type: Boolean, default: true }, firma: { type: firmaSst, default: null } }], default: [] },
+}, { timestamps: true });
+capacitacionSstSchema.plugin(tenantPlugin);
+capacitacionSstSchema.index({ empresa: 1, fecha: -1 });
+
+const mantenimientoSchema = new Schema({
+  vehiculo: { type: Schema.Types.ObjectId, ref: 'Vehiculo', required: true }, placa: str({ uppercase: true }),
+  tipo: { type: String, enum: ['preventivo', 'correctivo'], default: 'preventivo' },
+  actividad: str(), fecha: { type: Date, required: true }, km: { type: Number, default: null },
+  taller: str(), descripcion: str(), costo: { type: Number, default: 0 },
+}, { timestamps: true });
+mantenimientoSchema.plugin(tenantPlugin);
+mantenimientoSchema.index({ empresa: 1, vehiculo: 1, fecha: -1 });
+
+// Copia del checklist preoperacional que el conductor diligencia en Sur Track (evidencia del PESV aunque Sur Track cambie)
+const inspeccionSstSchema = new Schema({
+  origen: { type: String, enum: ['surtrack'], default: 'surtrack' }, checklistId: str({ required: true }),
+  viaje: { type: Schema.Types.ObjectId, ref: 'Viaje', default: null }, numeroViaje: { type: Number, default: null }, fechaViaje: fecha,
+  vehiculo: { type: Schema.Types.ObjectId, ref: 'Vehiculo', default: null }, placa: str({ uppercase: true, required: true }),
+  tercero: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null }, conductor: str(), cedula: str(),
+  fecha: { type: Date, required: true },          // cuando el conductor lo diligenció
+  items: { type: [{ grupo: str(), codigo: str(), texto: str(), critico: Boolean, cumple: Boolean }], default: [] },
+  completo: { type: Boolean, default: true }, apto: { type: Boolean, required: true }, delDia: { type: Boolean, default: true },
+  venceRtmDeclarada: fecha, ubicacion: { lat: { type: Number, default: null }, lng: { type: Number, default: null } },
+  firma: { type: firmaSst, default: null },
+  revision: { por: str(), fecha, accion: str() },   // lo que hizo la empresa con un no apto
+}, { timestamps: true });
+inspeccionSstSchema.plugin(tenantPlugin);
+inspeccionSstSchema.index({ empresa: 1, fecha: -1 });
+inspeccionSstSchema.index({ empresa: 1, checklistId: 1 }, { unique: true });
+
+// Formato diligenciado en la plataforma (acta, asistencia, entrega de EPP…) a partir de una plantilla del catálogo
+const registroSstSchema = new Schema({
+  codigo: str({ required: true }), version: { type: Number, default: 1 }, titulo: str(),
+  consecutivo: { type: Number, required: true },
+  datos: { type: Schema.Types.Mixed, default: () => ({}) },
+  firmas: { type: [firmaSst], default: [] },
+  estado: { type: String, enum: ['borrador', 'diligenciado', 'firmado', 'anulado'], default: 'borrador' },
+  creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+registroSstSchema.plugin(tenantPlugin);
+registroSstSchema.index({ empresa: 1, codigo: 1, consecutivo: 1 }, { unique: true });
+
+// Formato propio de la empresa en Word o Excel con marcadores {{empresa.razonSocial}}… que la plataforma llena
+const formatoSstSchema = new Schema({
+  codigo: str({ required: true, uppercase: true }), nombre: str({ required: true }), version: { type: Number, default: 1 },
+  estandar: str(),                                 // ítem de la Res. 0312 o paso del PESV que soporta
+  tipo: { type: String, enum: ['docx', 'xlsx'], required: true },
+  archivo: { type: Buffer, select: false }, nombreArchivo: str(), marcadores: { type: [String], default: [] },
+  creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+formatoSstSchema.plugin(tenantPlugin);
+formatoSstSchema.index({ empresa: 1, codigo: 1, version: 1 }, { unique: true });
 
 export const Empresa = modelo('Empresa', empresaSchema);
 export const Usuario = modelo('Usuario', usuarioSchema);
@@ -775,6 +880,11 @@ const xmlFacturaRndcSchema = new Schema({
 xmlFacturaRndcSchema.plugin(tenantPlugin);
 xmlFacturaRndcSchema.index({ empresa: 1, factura: 1 }, { unique: true });
 export const XmlFacturaRndc = modelo('XmlFacturaRndc', xmlFacturaRndcSchema);
+export const CapacitacionSst = modelo('CapacitacionSst', capacitacionSstSchema);
+export const Mantenimiento = modelo('Mantenimiento', mantenimientoSchema);
+export const InspeccionSst = modelo('InspeccionSst', inspeccionSstSchema);
+export const RegistroSst = modelo('RegistroSst', registroSstSchema);
+export const FormatoSst = modelo('FormatoSst', formatoSstSchema);
 
 // Siguiente valor de un contador de la empresa (atómico). `minimo` permite
 // continuar una numeración existente (ej. último manifiesto expedido).
