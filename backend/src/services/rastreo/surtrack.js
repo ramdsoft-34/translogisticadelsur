@@ -420,3 +420,11 @@ export async function checklistDelViaje(empresaId, viajeId, { conFirma = false }
   if (checklist && conFirma) checklist = (await llamar(`/checklist/${checklist.checklistId}`)).checklist;
   return { viaje: { numero: v.numero, placa: v.placa, conductor: v.conductorNombre }, conductor: r.chofer, checklist };
 }
+
+// Fase 8: checklist del día de un conductor y una placa (para guardar la copia del SG-SST / PESV)
+export async function checklistPorConductor(cedula, placa, { conFirma = false } = {}) {
+  const r = await llamar(`/checklist?cedula=${encodeURIComponent(cedula || '')}&placa=${encodeURIComponent(placa || '')}`);
+  let checklist = r.checklist || null;
+  if (checklist && conFirma && checklist.checklistId) checklist = (await llamar(`/checklist/${checklist.checklistId}`)).checklist || checklist;
+  return checklist;
+}
