@@ -9,6 +9,8 @@ import { liquidacionPdf } from '../reportes/liquidacion.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 
 const CONFIG = { cooespatrans: () => env.surTrack, app: () => env.surTrackApp };
+/** Llamada al backend de la app nueva (planillas, avisos, versión). */
+export const llamarApp = (ruta, opciones = {}) => llamar(ruta, { ...opciones, servidor: 'app' });
 export const configuradoServidor = (servidor) => { const c = CONFIG[servidor](); return !!(c.url && c.clave); };
 export const configurado = () => configuradoServidor('cooespatrans') || configuradoServidor('app');
 export const servidorDe = (rastreo) => (rastreo?.servidor === 'app' ? 'app' : 'cooespatrans');

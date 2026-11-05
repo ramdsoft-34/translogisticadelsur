@@ -27,6 +27,8 @@ export const P = {
   LIQUIDACION_VER:    'liquidacion.ver',
   LIQUIDACION_GESTIONAR: 'liquidacion.gestionar',
   REPORTES_VER:       'reportes.ver',
+  SST_VER:            'sst.ver',                  // SG-SST y PESV: planillas, colaboradores, flota…
+  SST_GESTIONAR:      'sst.gestionar',
 };
 
 const TODOS_EMPRESA = Object.values(P).filter(p => p !== P.EMPRESAS_GESTIONAR);
@@ -39,7 +41,7 @@ export const PERMISOS_POR_ROL = {
     P.RNDC_OPERAR, P.RNDC_CONSULTAR, P.REPORTES_VER],
   contabilidad: [P.VIAJES_VER, P.MAESTROS_VER, P.TARIFAS_EDITAR, P.LIQUIDACION_VER, P.LIQUIDACION_GESTIONAR,
     P.REPORTES_VER, P.RNDC_CONSULTAR],
-  consulta: [P.VIAJES_VER, P.MAESTROS_VER, P.LIQUIDACION_VER, P.REPORTES_VER],
+  consulta: [P.VIAJES_VER, P.MAESTROS_VER, P.LIQUIDACION_VER, P.REPORTES_VER, P.SST_VER],
 };
 
 export const ROLES_EMPRESA = Object.keys(ROLES).filter(r => r !== 'superadmin');

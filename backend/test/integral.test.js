@@ -77,7 +77,7 @@ process.env.OSRM_URL = `http://127.0.0.1:${surTrack.servidor.address().port}`;
 process.env.NOMINATIM_URL = `http://127.0.0.1:${surTrack.servidor.address().port}`;
 
 // Servidor de la app Sur Track nueva, simulado: solo recibe viajes de conductores con la cuenta activada
-const appSt = { viajes: new Map(), activos: [], cuentas: new Map(), autorizado: null, pagos: new Map(), clave: crypto.randomBytes(24).toString('hex') };
+const appSt = { viajes: new Map(), activos: [], cuentas: new Map(), autorizado: null, pagos: new Map(), padron: null, planillas: [], clave: crypto.randomBytes(24).toString('hex') };
 const FOTO = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
 appSt.servidor = http.createServer((req, res) => {
   const partes = [];
@@ -102,6 +102,16 @@ appSt.servidor = http.createServer((req, res) => {
       appSt.pagos.set(num, { ...appSt.pagos.get(num), ...b, empresaId: mp[1] });
       return json(nuevo ? 201 : 200, { pagoId: 'p-' + num });
     }
+    // Planillas (la lógica real se prueba en el backend de Sur Track; aquí solo el paso de datos)
+    if (ruta === '/planillas/padron' && req.method === 'PUT') { appSt.padron = b; return json(200, { activos: b.conductores.length, inactivados: 0, planillasNuevas: b.conductores.length }); }
+    if (ruta === '/planillas' && req.method === 'GET') {
+      appSt.ultimaConsulta = Object.fromEntries(url.searchParams);
+      return json(200, { periodo: '2026-12', ahora: new Date().toISOString(), indicadores: { total: appSt.planillas.length, recibidas: 0, pendientes: appSt.planillas.length, vencidas: 0, excluidas: 0, porDecidir: 0, cumplimiento: 0 }, items: appSt.planillas });
+    }
+    mp = ruta.match(/^\/planillas\/([a-f0-9]{24})\/archivo$/);
+    if (mp && req.method === 'GET') { if (url.searchParams.get('empresaId') !== appSt.empresaPlanillas) return json(404, { error: 'no' }); res.writeHead(200, { 'content-type': 'application/pdf' }); return res.end(Buffer.from('%PDF-1.4 planilla')); }
+    mp = ruta.match(/^\/planillas\/([a-f0-9]{24})\/(excluir|incluir|carga-tardia)$/);
+    if (mp && req.method === 'POST') { appSt.ultimaDecision = { accion: mp[2], ...b }; return json(200, { id: mp[1], nombre: 'Pedro', periodo: '2026-12', estado: mp[2] === 'excluir' ? 'excluida' : 'pendiente' }); }
     if (ruta === '/conductores' && req.method === 'GET') {
       return json(200, url.searchParams.get('cedulas').split(',').filter(c => appSt.cuentas.has(c)).map(c => ({ cedula: c, ...appSt.cuentas.get(c) })));
     }
@@ -1394,6 +1404,34 @@ test('App nueva: invitar al conductor, viaje al servidor nuevo, fotos privadas y
   assert.equal(lq2.status, 201, JSON.stringify(lq2.body));
   assert.equal(appSt.pagos.size, antes);
   appSt.cuentas.set('12345678', { estado: 'activo', email: 'pedro@conductor.test' });
+  // Planillas de seguridad social: Translogística manda los conductores activos y la oficina consulta y decide
+  appSt.empresaPlanillas = String(empA);
+  appSt.planillas = [{ id: 'e'.repeat(24), nombre: 'PEDRO PÉREZ GÓMEZ', cedula: '12345678', estado: 'pendiente', cantidadVersiones: 0 }];
+  const lp = await adm.get('/api/sst/planillas?periodo=2026-12&estado=pendiente');
+  assert.equal(lp.status, 200, JSON.stringify(lp.body));
+  assert.equal(lp.body.items.length, 1);
+  assert.deepEqual([appSt.ultimaConsulta.periodo, appSt.ultimaConsulta.estado, appSt.ultimaConsulta.empresaId], ['2026-12', 'pendiente', String(empA)]);
+  assert.ok(appSt.padron.conductores.some(c => c.cedula === '12345678' && /PEDRO/i.test(c.nombre)), 'el conductor activo va en la lista');
+  assert.ok(appSt.padron.conductores.every(c => c.cedula.length >= 5));
+  assert.equal(appSt.padron.empresaId, String(empA));
+  await M.Usuario.create({ nombre: 'Consulta App', email: 'consulta.app@a.test', rol: 'consulta', empresa: empA, passwordHash: await bcrypt.hash(CLAVE, 10) });
+  const consulta = con(await login('consulta.app@a.test'));
+  assert.equal((await consulta.get('/api/sst/planillas')).status, 200, 'consulta ve planillas');
+  assert.equal((await consulta.post(`/api/sst/planillas/${'e'.repeat(24)}/excluir`, { motivo: 'Vacaciones del mes' })).status, 403, 'consulta no decide');
+  assert.equal((await rep.get('/api/sst/planillas')).status, 403, 'reportero no ve SG-SST');
+  const ex = await adm.post(`/api/sst/planillas/${'e'.repeat(24)}/excluir`, { motivo: 'Vacaciones del mes' });
+  assert.equal(ex.status, 200, JSON.stringify(ex.body));
+  assert.equal(appSt.ultimaDecision.accion, 'excluir'); assert.equal(appSt.ultimaDecision.empresaId, String(empA)); assert.ok(appSt.ultimaDecision.por);
+  const ct = await adm.post(`/api/sst/planillas/${'e'.repeat(24)}/carga-tardia`, { motivo: 'Estuvo incapacitado', hasta: '2026-12-09' });
+  assert.equal(ct.status, 200); assert.equal(appSt.ultimaDecision.hasta, '2026-12-09T23:59:59-05:00', 'hasta el final del día en Colombia');
+  const pdfPl = await adm.get(`/api/sst/planillas/${'e'.repeat(24)}/archivo`);
+  assert.equal(pdfPl.status, 200); assert.equal(pdfPl.headers['content-type'], 'application/pdf');
+  assert.ok(await M.Auditoria.exists({ accion: 'ver_planilla' }), 'ver el PDF queda en la auditoría');
+  assert.ok(await M.Auditoria.exists({ accion: 'excluir_planilla' }));
+  assert.equal((await adm.get('/api/sst/planillas/no-es-id')).status, 400);
+  const xl = await adm.get('/api/sst/planillas/exportar?periodo=2026-12');
+  assert.equal(xl.status, 200); assert.match(xl.headers['content-type'], /spreadsheetml/);
+  assert.equal((await s.adminB.get('/api/sst/planillas')).status, 403, 'empresa sin la app de conductores');
   // Finalizar cierra en el servidor nuevo; quitar acceso deja al conductor sin cuenta en esta empresa
   await adm.post(`/api/rastreo/viajes/${v2._id}/finalizar`);
   assert.equal(appSt.viajes.get(a2.body.externoId).estado, 'completado');

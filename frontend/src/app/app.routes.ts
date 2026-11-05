@@ -30,6 +30,7 @@ export const routes: Routes = [
       { path: 'remesas-dulces', ...pagina([P.VIAJES_REGISTRAR], () => import('./pages/gestion-varios').then(m => m.RemesasDulces)) },
       { path: 'importar', ...pagina([P.MAESTROS_EDITAR, P.TARIFAS_EDITAR, P.CONFIG_GESTIONAR], () => import('./pages/importar').then(m => m.Importar)) },
       { path: 'revision', ...pagina([P.MAESTROS_VER], () => import('./pages/revision').then(m => m.Revision)) },
+      { path: 'sst/planillas', ...pagina([P.SST_VER], () => import('./pages/sst-planillas').then(m => m.SstPlanillas)) },
       { path: 'vehiculos', ...pagina([P.MAESTROS_VER], () => import('./pages/vehiculos').then(m => m.Vehiculos)) },
       { path: 'clientes', ...pagina([P.MAESTROS_VER], () => import('./pages/clientes').then(m => m.Clientes)) },
       { path: 'liquidaciones', ...pagina([P.LIQUIDACION_VER], () => import('./pages/liquidaciones').then(m => m.Liquidaciones)) },

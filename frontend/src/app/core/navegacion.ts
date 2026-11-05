@@ -26,6 +26,9 @@ export const MODULOS: Modulo[] = [
     { ruta: '/pago-conductores', texto: 'Pago a conductores', icono: 'personas', permisos: [P.LIQUIDACION_VER], descripcion: 'Liquidaciones, préstamos, descuentos y relación de pago', claves: 'prestamo descuento abono' },
     { ruta: '/contabilidad', texto: 'Contabilidad', icono: 'lista', permisos: [P.LIQUIDACION_VER], descripcion: 'Libro diario, facturas, cuentas por pagar, informes y cierre de mes', claves: 'factura asiento cierre balance' },
   ] },
+  { id: 'sst', nombre: 'SG-SST y PESV', icono: 'escudo', paginas: [
+    { ruta: '/sst/planillas', texto: 'Planillas', icono: 'documento', permisos: [P.SST_VER], descripcion: 'Planilla de seguridad social de cada conductor, mes a mes', claves: 'seguridad social eps arl pila planilla' },
+  ] },
   { id: 'datos', nombre: 'Datos', icono: 'edificio', paginas: [
     { ruta: '/clientes', texto: 'Clientes y tarifas', icono: 'edificio', permisos: [P.MAESTROS_VER], descripcion: 'Clientes (remitentes), sus sedes y destinos con tarifa', claves: 'destino tarifa sede remitente destinatario' },
     { ruta: '/conductores', texto: 'Conductores y terceros', icono: 'personas', permisos: [P.MAESTROS_VER], descripcion: 'Conductores, titulares, tenedores y empresas', claves: 'cedula licencia tercero' },
