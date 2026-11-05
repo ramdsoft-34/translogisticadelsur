@@ -9,6 +9,7 @@ export const routes: Routes = [
   { path: 'verificar/:codigo', loadComponent: () => import('./pages/verificar').then(m => m.Verificar) },
   { path: 'm/:token', loadComponent: () => import('./pages/manifiesto-conductor').then(m => m.ManifiestoConductor) },
   { path: 'f/:token', loadComponent: () => import('./pages/firma-capacitacion').then(m => m.FirmaCapacitacion) },
+  { path: 'r/:token', loadComponent: () => import('./pages/relacion-publica').then(m => m.RelacionPublica) },
   // Página pública de la empresa; con sesión iniciada lleva directo a la plataforma
   { path: '', pathMatch: 'full', canActivate: [sinSesion], loadComponent: () => import('./pages/landing').then(m => m.Landing) },
   { path: 'ingresar', canActivate: [sinSesion], loadComponent: () => import('./pages/ingresar').then(m => m.Ingresar) },
@@ -32,6 +33,7 @@ export const routes: Routes = [
       { path: 'remesas-dulces', ...pagina([P.VIAJES_REGISTRAR], () => import('./pages/gestion-varios').then(m => m.RemesasDulces)) },
       { path: 'importar', ...pagina([P.MAESTROS_EDITAR, P.TARIFAS_EDITAR, P.CONFIG_GESTIONAR], () => import('./pages/importar').then(m => m.Importar)) },
       { path: 'revision', ...pagina([P.MAESTROS_VER], () => import('./pages/revision').then(m => m.Revision)) },
+      { path: 'sst/planillas', ...pagina([P.SST_VER], () => import('./pages/sst-planillas').then(m => m.SstPlanillas)) },
       { path: 'vehiculos', ...pagina([P.MAESTROS_VER], () => import('./pages/vehiculos').then(m => m.Vehiculos)) },
       { path: 'clientes', ...pagina([P.MAESTROS_VER], () => import('./pages/clientes').then(m => m.Clientes)) },
       { path: 'liquidaciones', ...pagina([P.LIQUIDACION_VER], () => import('./pages/liquidaciones').then(m => m.Liquidaciones)) },

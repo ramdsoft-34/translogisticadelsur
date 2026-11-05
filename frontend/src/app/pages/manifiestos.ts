@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { Component, computed, inject, input, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
@@ -24,7 +25,7 @@ type Pestana = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'sopor
 type PestanaViajes = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'soporte';
 // Filtro de cada pestaña. Con remesa o manifiesto anulados el viaje sale de «Por enviar» y queda en «Anulados».
 const FILTROS: Record<PestanaViajes, Record<string, string | number>> = {
-  pendientes: { estado: 'registrado,remesa', anulados: 0 }, anulados: { estado: 'registrado,remesa', anulados: 1 },
+  pendientes: { estado: 'registrado,remesa', anulados: 0, reportados: 1 }, anulados: { estado: 'registrado,remesa', anulados: 1 },
   manifestados: { estado: 'manifestado' }, cumplidos: { estado: 'cumplido' },
   soporte: { soporte: 1 },
 };
@@ -229,11 +230,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                             <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([v._id])" [disabled]="trabajando()"
                               title="Envía al cliente el manifiesto y la carta de salida de este viaje"><app-icono nombre="correo" [tam]="15" />Aprobar correo</button>
                           }
+                          <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto y la remesa"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
                           <div class="fila-acciones">
-                            <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
                             <button class="pequeno whatsapp" (click)="prepararWhatsapp([v._id])" [disabled]="trabajando()" title="Mandarle el manifiesto al conductor por WhatsApp">WhatsApp</button>
-                          </div>
-                          <div class="fila-acciones">
                             <button class="pequeno primario" (click)="abrirCumplido(v)">Cumplir</button>
                             <button class="pequeno peligro" (click)="abrirAnular(v)">Anular</button>
                           </div>
@@ -264,8 +263,10 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                         }
                       }
                       @case ('cumplidos') {
-                        <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
-                        <button class="pequeno peligro" (click)="abrirAnular(v)">Anular cumplido</button>
+                        <div class="pila-acciones">
+                          <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto y la remesa"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
+                          <button class="pequeno peligro" (click)="abrirAnular(v)">Anular cumplido</button>
+                        </div>
                       }
                     }
                   </div>
@@ -276,7 +277,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
               }
             } @empty {
               @if (cargando()) { @for (i of [1, 2, 3]; track i) { <tr><td colspan="10"><span class="esqueleto"></span></td></tr> } }
-              @else { <tr><td colspan="10" class="vacio"><strong>Nada pendiente en esta lista</strong>Los viajes aparecen aquí según su estado en el RNDC.</td></tr> }
+              @else { <tr><td colspan="10" class="vacio"><strong>Nada pendiente en esta lista</strong>{{ pestana() === 'pendientes' ? 'Aquí aparecen los viajes ya reportados por WhatsApp en el módulo de Viajes.' : 'Los viajes aparecen aquí según su estado en el RNDC.' }}</td></tr> }
             }
           </tbody>
         </table>
@@ -380,7 +381,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         } @empty { <tr><td colspan="5" class="vacio">Este viaje no tiene correos enviados. Revise que el cliente tenga destinatarios en Configuración → Correo.</td></tr> }</tbody>
       </table></div>
       <ng-container pie>
-        <button type="button" (click)="correosViaje.set(null)" style="margin-right:auto">Cerrar</button>
+        <button type="button" (click)="correosViaje.set(null)">Cerrar</button>
         <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="enviarDeNuevo(['manifiesto'])" [disabled]="trabajando()"
           title="Envía solo el PDF del manifiesto a los destinatarios del cliente"><app-icono nombre="enviar" [tam]="16" />Reenviar manifiesto</button>
         <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="enviarDeNuevo(['salida'])" [disabled]="trabajando()"
@@ -430,7 +431,16 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
 
     <!-- Ver PDF del manifiesto o de la remesa -->
     <app-modal [titulo]="pdfVisto()?.titulo || ''" [abierto]="!!pdfVisto()" (cerrar)="cerrarPdf()" [ancho]="true">
-      @if (pdfVisto(); as pv) { <iframe class="visor-pdf" [src]="pv.seguro" [title]="pv.titulo"></iframe> }
+      @if (pdfVisto(); as pv) {
+        @if (pv.docs; as docs) {
+          <div class="pestanas" role="tablist">
+            @for (d of docs; track d.id) { <button type="button" role="tab" [class.activa]="pv.activa === d.id" [attr.aria-selected]="pv.activa === d.id" (click)="cambiarDoc(d.id)">{{ d.titulo }}</button> }
+          </div>
+        }
+        @if (pv.cargando) { <div class="visor-pdf visor-cargando">Cargando…</div> }
+        @else if (pv.movil) { <div class="visor-pdf visor-cargando">En el celular el PDF se abre en otra pestaña del navegador.</div> }
+        @else { <iframe class="visor-pdf" [src]="pv.seguro" [title]="pv.titulo"></iframe> }
+      }
       <ng-container pie><button type="button" (click)="cerrarPdf()">Cerrar</button></ng-container>
     </app-modal>
 
@@ -545,6 +555,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     .pila-acciones { display: inline-flex; flex-direction: column; align-items: stretch; gap: 6px; }
     .fila-acciones { display: flex; gap: 8px; justify-content: flex-end; }
     label.sub { margin-top: 10px; }
+    .visor-cargando { display: grid; place-items: center; color: var(--gris-5); }
     .visor-pdf { width: 100%; height: 70vh; border: 1px solid var(--gris-2); border-radius: var(--radio); background: var(--gris-1); }
     .resultado-lote { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
     .resultado-lote ul { margin: 4px 0 0; padding-left: 18px; }
@@ -626,7 +637,7 @@ export class Manifiestos {
   }
 
   // Cambios de otros usuarios: la pantalla se actualiza sola
-  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'correo'], () => this.cargar());
+  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'correo', 'maestros'], () => this.cargar());
 
   // Vista fija desde el menú (Soporte interno, Envíos al RNDC, Correos); vacía = Manifiestos con sus pestañas
   readonly vista = input<'' | 'soporte' | 'historial' | 'correos'>('');
@@ -653,7 +664,11 @@ export class Manifiestos {
     this.api.get<any>('/rndc/config').then(c => this.ambiente.set(c.ambiente)).catch(() => {});
   }
 
-  ir(p: Pestana) { this.pestana.set(p); this.seleccion.set(new Set()); this.texto.set(''); this.cargar(); }
+  ir(p: Pestana) {
+    this.pestana.set(p); this.seleccion.set(new Set()); this.texto.set('');
+    this.viajes.set([]); this.total.set(0); this.transacciones.set([]); this.envios.set([]);
+    this.cargar();
+  }
 
   // ── Fase 9: manifiesto al conductor por WhatsApp ──
   readonly waLista = signal<any[] | null>(null);
@@ -674,22 +689,26 @@ export class Manifiestos {
   }
   async copiarEnlace(t: string) { try { await navigator.clipboard.writeText(t); this.avisos.ok('Enlace copiado'); } catch { this.avisos.error('No se pudo copiar'); } }
 
+  private turno = new Turno();
   async cargar() {
+    const vigente = this.turno.tomar();
     this.cargando.set(true);
     try {
-      if (this.pestana() === 'historial') this.transacciones.set(await this.api.get<any[]>('/rndc/transacciones', { limite: 200 }));
+      if (this.pestana() === 'historial') {
+        const t = await this.api.get<any[]>('/rndc/transacciones', { limite: 200 });
+        if (vigente()) this.transacciones.set(t);
+      }
       else if (this.pestana() === 'correos') {
         const [l, p] = await Promise.all([this.api.get<any[]>('/correo/envios', { limite: 300, ...(this.filtroCorreo() ? { estado: this.filtroCorreo() } : {}) }),
           this.api.get<any[]>('/correo/envios', { estado: 'pendiente', limite: 1000 })]);
-        this.envios.set(l); this.pendientesCorreo.set(p.filter(x => x.tipo === 'manifiesto').length);
+        if (vigente()) { this.envios.set(l); this.pendientesCorreo.set(p.filter(x => x.tipo === 'manifiesto').length); }
       }
       else {
         this.pagina = 1;
         const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: 1, limite: 50, historico: 0, ...this.filtroSoporte() });
-        this.viajes.set(r.viajes); this.total.set(r.total);
-        this.cargarCorreos(r.viajes);
+        if (vigente()) { this.viajes.set(r.viajes); this.total.set(r.total); this.cargarCorreos(r.viajes); }
       }
-    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
+    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
   }
 
   // Carga progresiva de la lista de la pestaña
@@ -699,8 +718,10 @@ export class Manifiestos {
   async cargarMas() {
     if (['historial', 'correos'].includes(this.pestana()) || this.cargandoMas() || this.viajes().length >= this.total()) return;
     this.cargandoMas.set(true);
+    const vigente = this.turno.actual();
     try {
       const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: this.pagina + 1, limite: 50, historico: 0, ...this.filtroSoporte() });
+      if (!vigente()) return;
       this.pagina += 1;
       this.viajes.update(l => [...l, ...r.viajes]);
       this.cargarCorreos(this.viajes());
@@ -899,7 +920,10 @@ export class Manifiestos {
   }
 
   // Ver el PDF del manifiesto en pantalla (sin descargarlo). En el celular se abre en otra pestaña.
-  readonly pdfVisto = signal<{ titulo: string; url: string; seguro: SafeResourceUrl } | null>(null);
+  readonly pdfVisto = signal<{ titulo: string; url: string; seguro: SafeResourceUrl | null;
+    // Ver PDF de un viaje: pestañas Manifiesto y Remesa (cada PDF se pide la primera vez que se abre)
+    docs?: { id: string; titulo: string; ruta: string }[]; activa?: string; cargando?: boolean; movil?: boolean } | null>(null);
+  private pdfsViaje = new Map<string, string>();
   // ── Soporte interno: estado, cumplido, anulación y reemplazo ──
   readonly estadosSoporte: [string, string][] = [['', 'Todos'], ['vigente', 'Por cumplir'], ['cumplido', 'Cumplidos'], ['anulado', 'Anulados']];
   readonly soporteEstado = signal('');
@@ -950,16 +974,33 @@ export class Manifiestos {
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 
+  // «Ver PDF»: el manifiesto y, en otra pestaña del visor, la remesa (si el RNDC la aceptó)
   async verPdf(v: Viaje) {
+    const docs = [{ id: 'manifiesto', titulo: `Manifiesto ${v.manifiesto.numero}`, ruta: `/reportes/manifiesto/${v._id}` }];
+    if (v.remesa?.numero && (v.remesa.estado === 'aceptado' || v.estado === 'cumplido')) docs.push({ id: 'remesa', titulo: `Remesa ${v.remesa.numero}`, ruta: `/reportes/remesa/${v._id}` });
+    this.cerrarPdf();
     const movil = window.matchMedia('(max-width: 700px)').matches;
-    const ventana = movil ? window.open('', '_blank') : null;      // se abre ya para que el navegador no la bloquee
+    this.pdfVisto.set({ titulo: `Viaje ${v.numero}`, url: '', seguro: null, docs, activa: '', movil });
+    await this.cambiarDoc('manifiesto');
+  }
+  async cambiarDoc(id: string) {
+    const pv = this.pdfVisto();
+    const d = pv?.docs?.find(x => x.id === id);
+    if (!pv || !d) return;
+    // En el celular el visor integrado no muestra PDF: se abre en otra pestaña (abierta ya para que no la bloqueen)
+    const ventana = pv.movil ? window.open('', '_blank') : null;
+    this.pdfVisto.set({ ...pv, activa: id, cargando: !this.pdfsViaje.has(id) && !pv.movil });
     try {
-      const blob = await this.api.archivo(`/reportes/manifiesto/${v._id}`);
-      const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
-      if (ventana) { ventana.location.href = url; return; }
-      this.cerrarPdf();
-      this.pdfVisto.set({ titulo: `Manifiesto ${v.manifiesto.numero}`, url, seguro: this.sanitizer.bypassSecurityTrustResourceUrl(url) });
-    } catch (e) { ventana?.close(); this.avisos.error(e); }
+      let url = this.pdfsViaje.get(id);
+      if (!url) {
+        const blob = await this.api.archivo(d.ruta);
+        url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+        this.pdfsViaje.set(id, url);
+      }
+      if (ventana) { ventana.location.href = url; this.pdfVisto.update(p => p && { ...p, cargando: false }); return; }
+      if (this.pdfVisto()?.activa !== id) return;
+      this.pdfVisto.update(p => p && { ...p, url: url!, seguro: this.sanitizer.bypassSecurityTrustResourceUrl(url!), cargando: false });
+    } catch (e) { ventana?.close(); this.pdfVisto.update(p => p && { ...p, cargando: false }); this.avisos.error(e); }
   }
   // Remesa con el formato del RNDC y el recuadro «Para el cumplido» (soporte interno, no se envía).
   // Desde el cumplido se abre en otra pestaña para no cerrar el formulario.
@@ -976,7 +1017,9 @@ export class Manifiestos {
   }
   cerrarPdf() {
     const p = this.pdfVisto();
-    if (p) URL.revokeObjectURL(p.url);
+    if (p?.url && !this.pdfsViaje.size) URL.revokeObjectURL(p.url);
+    for (const u of this.pdfsViaje.values()) URL.revokeObjectURL(u);
+    this.pdfsViaje.clear();
     this.pdfVisto.set(null);
   }
 

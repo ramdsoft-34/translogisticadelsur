@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { AfterViewInit, Component, ElementRef, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -201,7 +202,7 @@ const hace = (h: string | Date | null | undefined) => {
                           <button type="button" class="texto pequeno enlace-mapa" (click)="verEntrega(c, i)"><app-icono nombre="ubicacion" [tam]="14" />{{ c.entrega.aproximada ? 'Lugar aproximado' : 'Lugar de la entrega' }}</button>
                         } @else { <small class="sutil d-bloque">Sin ubicación registrada</small> }
                         @if (c.entrega?.fotos?.length) {
-                          <span class="fotos">@for (f of c.entrega.fotos; track f) { <a [href]="f" target="_blank" rel="noopener"><img [src]="f" alt="Foto de la entrega" loading="lazy" /></a> }</span>
+                          <span class="fotos">@for (f of c.entrega.fotos; track f) { <a [href]="urlFoto(f)" target="_blank" rel="noopener"><img [src]="urlFoto(f)" alt="Foto de la entrega" loading="lazy" /></a> }</span>
                         }
                       }
                     </span>
@@ -465,11 +466,14 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
   }
   private marcadoresEntrega = new Map<string, L.Marker>();
   private esc(t: any) { return String(t ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[ch]); }
+  // Fotos privadas de la app nueva: las sirve la API de la plataforma con la sesión del usuario
+  urlFoto(f: string) { return String(f || '').startsWith('/api/') ? this.api.base + String(f).slice(4) : f; }
+
   private popupEntrega(c: any) {
     const e = c.entrega || {};
     const hora = c.fechaEntrega ? new Date(c.fechaEntrega).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '';
     const pesos = (v: number) => '$ ' + Math.round(v || 0).toLocaleString('es-CO');
-    const fotos = (e.fotos || []).slice(0, 5).map((u: string) => `<a href="${this.esc(u)}" target="_blank" rel="noopener"><img src="${this.esc(u)}" alt="Foto de la entrega" style="width:52px;height:52px;object-fit:cover;border-radius:6px;margin:4px 4px 0 0"></a>`).join('');
+    const fotos = (e.fotos || []).slice(0, 5).map((f: string) => this.urlFoto(f)).map((u: string) => `<a href="${this.esc(u)}" target="_blank" rel="noopener"><img src="${this.esc(u)}" alt="Foto de la entrega" style="width:52px;height:52px;object-fit:cover;border-radius:6px;margin:4px 4px 0 0"></a>`).join('');
     return `<strong>${this.esc(c.nombre)}</strong><br><span style="color:#666">${this.esc(c.direccion || '')}</span><br>`
       + `<b>${this.textoEntrega(c.estadoEntrega)}</b>${hora ? ' · ' + hora : ''}`
       + (c.estadoEntrega !== 'pendiente' ? `<br>Recibido: ${pesos(c.valorRecibido)}${c.valor ? ' de ' + pesos(c.valor) : ''}` : '')
@@ -505,16 +509,19 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
   readonly historialTotal = signal(0);
   readonly cargandoHistorial = signal(false);
   private paginaHistorial = 1;
+  private turnoHistorial = new Turno();
   async cargarHistorial(mas = false) {
+    const vigente = this.turnoHistorial.tomar();
     this.cargandoHistorial.set(true);
     try {
       const pagina = mas ? this.paginaHistorial + 1 : 1;
       const r = await this.api.get<any>('/rastreo/historial', { ...this.h, placa: this.h.placa.toUpperCase(), pagina, limite: 30 });
+      if (!vigente()) return;
       this.paginaHistorial = pagina;
       this.historialItems.set(mas ? [...this.historialItems(), ...r.items] : r.items);
       this.historialTotal.set(r.total); if (r.limiteVelocidad) this.limiteVelocidad.set(r.limiteVelocidad);
-    } catch (e) { this.avisos.error(e); }
-    finally { this.cargandoHistorial.set(false); }
+    } catch (e) { if (vigente()) this.avisos.error(e); }
+    finally { if (vigente()) this.cargandoHistorial.set(false); }
   }
 
   readonly detalle = signal<any>(null);

@@ -2,6 +2,7 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Avisos } from '../core/avisos.service';
+import { Auth } from '../core/auth.service';
 import { Modal } from './modal';
 import { Confirmar } from './confirmar';
 import { filtrar } from './filtro';
@@ -154,12 +155,33 @@ const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/)
             <div class="campo"><label for="ec-cc">Con copia (CC)</label><textarea id="ec-cc" name="cc" rows="2" [(ngModel)]="f.ccTexto"></textarea></div>
           </div>
           <fieldset style="margin-top:14px"><legend>Relaciones de viajes</legend>
-            <p class="sutil" style="margin-top:0">A quién se envía la relación de viajes del periodo (Programación por placa → Informes → Enviar relación por correo). Puede ser distinto de los manifiestos.</p>
+            <p class="sutil" style="margin-top:0">A quién se envía la relación de cobro (Relaciones → Relaciones generadas → Correo). Puede ser distinto de los manifiestos.</p>
             <div class="rejilla">
               <div class="campo ancho2"><label for="ec-rpara">Destinatarios de relaciones</label>
                 <textarea id="ec-rpara" name="rpara" rows="2" [(ngModel)]="f.relParaTexto" placeholder="facturacion@cliente.com"></textarea></div>
               <div class="campo"><label for="ec-rcc">Con copia (CC)</label><textarea id="ec-rcc" name="rcc" rows="2" [(ngModel)]="f.relCcTexto"></textarea></div>
             </div>
+            <!-- Fase 11: asunto y mensaje propios de la empresa, con datos que se llenan solos -->
+            <h4 class="sub-rel">Asunto y mensaje del correo de {{ f.nombre }}</h4>
+            <p class="sutil" style="margin:0 0 6px">Toque un dato para ponerlo en el mensaje. La plataforma lo cambia por el valor real al enviar. Vacío = la plantilla general.</p>
+            <div class="datos-rel">@for (v of VARIABLES_REL; track v) { <button type="button" class="pequeno" (click)="insertarRel(v)">{{ '{' + v + '}' }}</button> }</div>
+            <div class="campo"><label for="ec-ras">Asunto</label><input id="ec-ras" name="ras" maxlength="200" [(ngModel)]="f.relAsunto" (focus)="campoRel = 'ec-ras'" /></div>
+            <div class="campo" style="margin-top:8px"><label for="ec-rcu">Mensaje</label>
+              <textarea id="ec-rcu" name="rcu" rows="9" maxlength="3000" [(ngModel)]="f.relCuerpo" (focus)="campoRel = 'ec-rcu'"></textarea></div>
+            <div class="previa-rel"><strong>Así le llega (relación quincenal de ejemplo):</strong>
+              <div><b>Asunto:</b> {{ verRel(f.relAsunto, f.nombre) }}</div><div class="cuerpo-rel">{{ verRel(f.relCuerpo, f.nombre) }}</div></div>
+            <button type="button" class="texto" (click)="relGeneral()">Usar la plantilla general</button>
+            <!-- Fase 11: contactos de WhatsApp de la empresa -->
+            <h4 class="sub-rel">Contactos de WhatsApp para la relación</h4>
+            @for (k of f.contactos; track $index) {
+              <div class="contacto-rel">
+                <input [name]="'kn' + $index" [(ngModel)]="k.nombre" placeholder="Nombre" maxlength="60" />
+                <input [name]="'kc' + $index" [(ngModel)]="k.cargo" placeholder="Cargo (opcional)" maxlength="60" />
+                <input [name]="'kt' + $index" [(ngModel)]="k.celular" placeholder="Celular" maxlength="20" inputmode="tel" />
+                <button type="button" class="texto peligro" (click)="f.contactos.splice($index, 1)">Quitar</button>
+              </div>
+            }
+            @if (f.contactos.length < 10) { <button type="button" class="texto" (click)="f.contactos.push({ nombre: '', cargo: '', celular: '' })">+ Agregar contacto</button> }
           </fieldset>
           <fieldset style="margin-top:14px"><legend>Documentos</legend>
             <label class="casilla"><input type="checkbox" name="dman" [(ngModel)]="f.documentos.manifiesto" />PDF del manifiesto de carga</label>
@@ -185,6 +207,12 @@ const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/)
       </ng-container>
     </app-modal>`,
   styles: [`
+    .sub-rel { margin: 16px 0 6px; font-size: 14px; } .datos-rel { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+    .datos-rel button { background: #fff8e1; border-color: #f6d77a; font-weight: 600; }
+    .previa-rel { background: var(--gris-1, #f6f7f9); border-radius: 10px; padding: 10px 12px; margin: 10px 0 6px; font-size: 13px; }
+    .cuerpo-rel { white-space: pre-line; margin-top: 6px; line-height: 1.5; }
+    .contacto-rel { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; gap: 8px; margin-bottom: 6px; }
+    @media (max-width: 700px) { .contacto-rel { grid-template-columns: 1fr 1fr; } }
     :host { display: flex; flex-direction: column; gap: 16px; }
     .titulo-cuenta { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
     .ayuda { gap: 8px; border-color: var(--primario-borde); }
@@ -335,8 +363,35 @@ export class ConfigCorreo {
       destinatariosTexto: (e.destinatarios?.length ? e.destinatarios : cl.correos || []).join(', '), ccTexto: (e.cc || []).join(', '),
       documentos: { manifiesto: e.documentos?.manifiesto ?? true, salida: !!e.documentos?.salida },
       salida: { asunto: e.salida?.asunto || this.salidaBase.asunto, cuerpo: e.salida?.cuerpo || this.salidaBase.cuerpo },
-      relParaTexto: (cl.enviosRelaciones?.destinatarios || []).join(', '), relCcTexto: (cl.enviosRelaciones?.cc || []).join(', ') });
+      relParaTexto: (cl.enviosRelaciones?.destinatarios || []).join(', '), relCcTexto: (cl.enviosRelaciones?.cc || []).join(', '),
+      relAsunto: cl.enviosRelaciones?.plantilla?.asunto || this.relBase.asunto, relCuerpo: cl.enviosRelaciones?.plantilla?.cuerpo || this.relBase.cuerpo,
+      contactos: (cl.contactosWhatsapp || []).map((k: any) => ({ ...k })) });
     this.vista.set(null); this.previa();
+  }
+
+  private auth = inject(Auth);
+  // ── Fase 11: plantilla del correo de relaciones ──
+  readonly VARIABLES_REL = ['saludo', 'empresa', 'periodo', 'año', 'grupo', 'numero', 'viajes', 'total', 'usuario', 'transportadora', 'enlace'];
+  relBase = { asunto: 'Relación de fletes {empresa} {periodo}',
+    cuerpo: '{saludo}.\n\nEnvío la respectiva relación de fletes de {empresa}, correspondiente al periodo {periodo}.\n\nQuedo atento a sus comentarios.\n\nGracias.\n\n{usuario}\n{transportadora}' };
+  campoRel = 'ec-rcu';
+  relGeneral() { this.form.update(f => ({ ...f, relAsunto: this.relBase.asunto, relCuerpo: this.relBase.cuerpo })); }
+  insertarRel(v: string) {
+    const el = document.getElementById(this.campoRel) as HTMLInputElement | HTMLTextAreaElement | null;
+    const clave = this.campoRel === 'ec-ras' ? 'relAsunto' : 'relCuerpo';
+    const f = this.form(); const t = String(f[clave] || ''); const i = el?.selectionStart ?? t.length; const j = el?.selectionEnd ?? t.length;
+    this.form.set({ ...f, [clave]: t.slice(0, i) + `{${v}}` + t.slice(j) });
+  }
+  // Vista con datos de ejemplo de la quincena actual
+  verRel(t: string, empresa: string) {
+    const h = new Date(); const q = h.getDate() <= 15; const fin = new Date(h.getFullYear(), h.getMonth() + 1, 0).getDate();
+    const mes = h.toLocaleDateString('es-CO', { month: 'long' });
+    const hr = h.getHours();
+    const datos: Record<string, string> = { saludo: hr < 12 ? 'Buenos días' : hr < 18 ? 'Buenas tardes' : 'Buenas noches', empresa,
+      periodo: q ? `del 1-15 de ${mes} ${h.getFullYear()}` : `del 16-${fin} de ${mes} ${h.getFullYear()}`, año: String(h.getFullYear()), grupo: 'VIAJEROS',
+      numero: 'XX-' + h.getFullYear() + '-001', viajes: '57', total: '$ 38.161.000', usuario: this.auth.usuario()?.nombre || 'Su nombre',
+      transportadora: this.auth.usuario()?.empresa?.nombre || 'Su empresa', enlace: 'https://…/r/…' };
+    return String(t || '').replace(/\{(\w+)\}/g, (m, k) => datos[k] ?? m);
   }
 
   restablecer() { this.form.update(f => ({ ...f, salida: { ...this.salidaBase } })); this.previa(); }
@@ -366,7 +421,10 @@ export class ConfigCorreo {
     try {
       await this.api.put(`/correo/clientes/${f._id}`, { activo: f.activo, destinatarios: listaCorreos(f.destinatariosTexto), cc: listaCorreos(f.ccTexto),
         documentos: f.documentos, salida: f.salida });
-      await this.api.put(`/correo/clientes/${f._id}/relaciones`, { destinatarios: listaCorreos(f.relParaTexto), cc: listaCorreos(f.relCcTexto) });
+      const general = f.relAsunto.trim() === this.relBase.asunto && f.relCuerpo.trim() === this.relBase.cuerpo;
+      await this.api.put(`/correo/clientes/${f._id}/relaciones`, { destinatarios: listaCorreos(f.relParaTexto), cc: listaCorreos(f.relCcTexto),
+        plantilla: general ? { asunto: '', cuerpo: '' } : { asunto: f.relAsunto, cuerpo: f.relCuerpo },
+        contactosWhatsapp: (f.contactos || []).filter((k: any) => (k.nombre || '').trim() || (k.celular || '').trim()) });
       this.avisos.ok(`Envío de documentos de ${f.nombre} guardado`);
       this.form.set(null); this.cargar();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }

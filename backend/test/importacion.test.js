@@ -188,6 +188,55 @@ test('Reporte de WhatsApp con la estructura del Excel y valores en pesos', async
   assert.equal((await s.b.post('/api/viajes/reporte-whatsapp/marcar', { viajes: m.viajes })).body.marcados, 0);
 });
 
+test('Corregir el cliente de un viaje con documentos anulados: el reporte de WhatsApp sale con el cliente nuevo', async () => {
+  const viaje = (await s.a.get('/api/viajes/reporte-whatsapp?fecha=2026-10-11&incluirReportados=1')).body.viajes[0];
+  const nuevo = (await s.a.post('/api/maestros/clientes', { nombre: 'Cliente Corregido', tipoId: 'N', nit: '901222333', dv: '4' })).body;
+  const tarifa = (await s.a.post('/api/maestros/tarifas', { cliente: nuevo._id, destino: 'Linares', codMunicipio: '52411000', tarifaCliente: 800000 })).body;
+  const Viaje = mongoose.model('Viaje');
+  const antes = { estado: 'manifestado', remesa: { numero: 'R1', estado: 'aceptado' }, manifiesto: { numero: 'M1', estado: 'aceptado' } };
+  await Viaje.collection.updateOne({ _id: new mongoose.Types.ObjectId(viaje._id) }, { $set: { ...antes, destinatario: { tipoId: 'N', numId: '8909009431', sede: '27' }, 'ajustesRndc.remesa': { X: '1' } } });
+  // Con documentos vigentes no se cambia
+  assert.equal((await s.a.put(`/api/rndc/viajes/${viaje._id}/datos`, { cliente: nuevo._id })).status, 409);
+  await Viaje.collection.updateOne({ _id: new mongoose.Types.ObjectId(viaje._id) }, { $set: { estado: 'registrado', historico: false, 'remesa.estado': 'anulado', 'manifiesto.estado': 'anulado' } });
+  // Otra empresa no puede usar sus clientes ni tocar el viaje
+  assert.equal((await s.b.put(`/api/rndc/viajes/${viaje._id}/datos`, { cliente: nuevo._id })).status, 404);
+  const r = await s.a.put(`/api/rndc/viajes/${viaje._id}/datos`, { cliente: nuevo._id, tarifaRef: tarifa._id, destinatario: { tipoId: '', numId: '', sede: '' } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  const v = (await s.a.get(`/api/viajes/${viaje._id}`)).body;
+  assert.equal(v.cliente._id, nuevo._id);
+  assert.equal(v.destino, 'Linares');
+  assert.equal(v.codDestino, '52411000');
+  assert.equal(v.tarifa, 800000);
+  assert.equal(v.destinatario.numId, '');
+  assert.equal(v.reporteWhatsapp.fecha, null);
+  // Vuelve a salir por reportar, en el mensaje del cliente corregido
+  const m = (await s.a.get('/api/viajes/reporte-whatsapp?fecha=2026-10-11')).body.mensajes;
+  assert.deepEqual(m.map(x => x.cliente), ['Cliente Corregido']);
+  // Origen: al cambiar de cliente no queda el del cliente anterior
+  assert.equal(v.codOrigen, '');
+  // Destino editado en Clientes y tarifas: el viaje sin documentos vigentes toma el nombre y el municipio nuevos
+  const ed = await s.a.put(`/api/maestros/tarifas/${tarifa._id}`, { destino: 'Tumaco', codMunicipio: '52835000', auxiliarPagado: 90000 });
+  assert.equal(ed.body.viajesActualizados, 1);
+  const v2 = (await s.a.get(`/api/viajes/${viaje._id}`)).body;
+  assert.equal(v2.destino, 'Tumaco');
+  assert.equal(v2.codDestino, '52835000');
+  // Observaciones del manifiesto: sin auxiliar no se agrega nada; con auxiliar, días y valor del viaje
+  const obs = async () => Object.fromEntries((await s.a.get(`/api/rndc/viajes/${viaje._id}/vista-previa`)).body.manifiesto.variables).OBSERVACIONES;
+  await s.a.put(`/api/viajes/${viaje._id}`, { conAuxiliar: false, observaciones: 'Llamar al llegar' });
+  assert.equal(await obs(), '');
+  await s.a.put(`/api/viajes/${viaje._id}`, { conAuxiliar: true, diasAuxiliar: 2 });
+  assert.equal(await obs(), 'Auxiliar 2 días $180.000.');
+  await s.a.put(`/api/viajes/${viaje._id}`, { diasAuxiliar: 1, observaciones: '' });
+  assert.equal(await obs(), 'Auxiliar 1 día $90.000.');
+  // «Por enviar» en Manifiestos: solo aparece después de reportarlo por WhatsApp
+  await Viaje.collection.updateOne({ _id: new mongoose.Types.ObjectId(viaje._id) }, { $set: { 'remesa.estado': '', 'manifiesto.estado': '', anuladoBase: {} } });
+  const porEnviar = async () => (await s.a.get('/api/viajes?estado=registrado,remesa&anulados=0&reportados=1&limite=200')).body.viajes.map(x => x._id);
+  assert.ok(!(await porEnviar()).includes(viaje._id));
+  await s.a.post('/api/viajes/reporte-whatsapp/marcar', { viajes: [viaje._id] });
+  assert.ok((await porEnviar()).includes(viaje._id));
+  await Viaje.collection.updateOne({ _id: new mongoose.Types.ObjectId(viaje._id) }, { $set: { historico: true } });
+});
+
 test('Importación de vehículos y terceros desde Excel: simular, errores por fila y aplicar', async () => {
   const pl = await s.a.get('/api/importaciones/plantillas/terceros').buffer(true).parse((res, cb) => { const p = []; res.on('data', c => p.push(c)); res.on('end', () => cb(null, Buffer.concat(p))); });
   assert.equal(pl.status, 200);

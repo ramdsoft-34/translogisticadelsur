@@ -50,6 +50,7 @@ export const tarifaSchema = z.object({
   minutosPactoCargue: minutos, minutosPactoDescargue: minutos, minutosViaje: minutos, minutosEspera: minutos,
   kmRuta: z.coerce.number().min(0).max(3000).nullable().optional(),
   cargueMonitoreado: z.boolean().optional(), descargueMonitoreado: z.boolean().optional(),
+  grupoRelacion: z.string().trim().max(30).optional(),   // fase 11: Viajeros, TAT…
 });
 
 const placaLibre = z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^[A-Z0-9]{5,6}$/, 'placa inválida'));
@@ -57,7 +58,8 @@ export const ROLES_TERCERO = ['conductor', 'propietario', 'tenedor', 'titular', 
 export const terceroSchema = z.object({
   tipoId,
   numId: z.string().trim().transform(v => v.replace(/[.\s,-]/g, '')).pipe(z.string().min(5, 'mínimo 5 dígitos').max(15)),
-  nombres: z.string().trim().min(2).max(100),
+  // Nombres y apellidos los trae el RNDC; si no los tiene quedan opcionales
+  nombres: z.string().trim().max(100).optional().default(''),
   apellido1: t(100), apellido2: t(100),
   sede: z.object({ codigo: t(6), nombre: t(20) }).optional(),
   telefono: digitos(7), celular: digitos(10),
@@ -72,7 +74,6 @@ export const terceroSchema = z.object({
   activo: z.boolean().optional(),
 }).superRefine((d, ctx) => {
   if (d.tipoId === 'N' && d.numId.length > 10) ctx.addIssue({ path: ['numId'], code: 'custom', message: 'NIT de máximo 10 dígitos (incluye dígito de verificación)' });
-  if (d.tipoId !== 'N' && !d.apellido1) ctx.addIssue({ path: ['apellido1'], code: 'custom', message: 'obligatorio para personas naturales' });
   // La placa principal es una de sus placas (si no está en la lista, se agrega)
   if (d.placaPrincipal && !d.placas.includes(d.placaPrincipal)) d.placas.unshift(d.placaPrincipal);
   d.placas = [...new Set(d.placas)];

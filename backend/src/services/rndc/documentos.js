@@ -90,6 +90,13 @@ export function huella(variables) {
   return crypto.createHash('sha256').update(base).digest('hex');
 }
 
+// Auxiliares del viaje para las observaciones del manifiesto (días y valor pagado del registro del viaje)
+export function textoAuxiliar(dias, valor) {
+  if (!(Number(valor) > 0)) return '';
+  const pesos = String(Math.round(Number(valor))).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `Auxiliar ${dias} ${Number(dias) === 1 ? 'día' : 'días'} $${pesos}.`;
+}
+
 // ── Contexto común de un viaje ──────────────────────────────────────────────
 // viaje con cliente, conductor, titular y tarifaRef poblados; vehiculo opcional.
 export function contextoViaje(empresa, viaje, vehiculo) {
@@ -134,6 +141,8 @@ export function contextoViaje(empresa, viaje, vehiculo) {
     FOPAT: numero(v.fopat),
     OPERACION: viaje.tarifaRef?.operacion || cfg.operacion || 'G',
     OBSERVACIONES: txt(viaje.observaciones).slice(0, 200),
+    // En el manifiesto solo va el auxiliar del viaje (días y valor); las observaciones escritas son internas
+    OBSERVACIONES_MANIFIESTO: txt(viaje.textoAuxiliar),
     REMESA: viaje.remesa?.numero || '',
     MANIFIESTO: viaje.manifiesto?.numero || '',
   };
@@ -246,7 +255,7 @@ export function variablesManifiesto(empresa, viaje, ctx, consecutivo) {
     ['CODRESPONSABLEPAGODESCARGUE', cfg.responsablePagoDescargue || 'E'],
     ['ACEPTACIONELECTRONICA', cfg.aceptacionElectronica ? 'SI' : 'NO'],
     ['NITMONITOREOFLOTA', cfg.nitMonitoreoFlota],
-    ['OBSERVACIONES', ctx.OBSERVACIONES],
+    ['OBSERVACIONES', ctx.OBSERVACIONES_MANIFIESTO],
   ];
   if (cfg.aplicarFopat) v.push(['RETENCIONFOPAT', ctx.FOPAT]);
   return aplicarExtras(v, empresa, 4, { ...ctx, MANIFIESTO: consecutivo });

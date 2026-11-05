@@ -342,3 +342,12 @@ export async function enviarManual(empresaId, { para, cc = [], asunto, texto, vi
     html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(cuerpo)}</div>`,
     attachments: [...docs, ...adjuntosManuales(adjuntos)] } });
 }
+
+// Fase 11: relación de cobro guardada (asunto y mensaje ya armados con la plantilla de la empresa) con su Excel y PDF
+export async function enviarDocumentoRelacion(empresaId, { cliente, documento, usuario = null, para, cc = [], asunto, cuerpo, archivos = [], adjuntos = [] }) {
+  await cuentaCorreo(empresaId);
+  return enviarYRegistrar(empresaId, { tipo: 'relacion', cliente, documento, usuario, mensaje: {
+    to: para, cc, subject: asunto, text: cuerpo,
+    html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(cuerpo)}</div>`,
+    attachments: [...archivos, ...adjuntosManuales(adjuntos)] } });
+}

@@ -214,10 +214,40 @@ const clienteSchema = new Schema({
     salida: { asunto: str(), cuerpo: str({ maxlength: 3000 }) },
   },
   // Correos de relaciones de viajes (aparte de los de manifiestos)
-  enviosRelaciones: { destinatarios: { type: [String], default: [] }, cc: { type: [String], default: [] } },
+  enviosRelaciones: { destinatarios: { type: [String], default: [] }, cc: { type: [String], default: [] },
+    // Fase 11: asunto y mensaje propios de la empresa (vacío = la plantilla general), con datos como {empresa} y {periodo}
+    plantilla: { asunto: str({ maxlength: 200 }), cuerpo: str({ maxlength: 3000 }) } },
+  // Fase 11: contactos de la empresa para mandarles la relación por WhatsApp
+  contactosWhatsapp: { type: [{ _id: false, nombre: str(), cargo: str(), celular: str() }], default: [] },
 }, { timestamps: true });
 clienteSchema.plugin(tenantPlugin);
 clienteSchema.index({ empresa: 1, nombre: 1 }, { unique: true, collation: { locale: 'es', strength: 1 } });
+
+// ── Fase 11: relación de cobro guardada (lo que se le cobra a una empresa en un periodo) ──
+// borrador → enviada → facturada. Facturada = cerrada: sus viajes no se editan ni se cobran en otra relación.
+const relacionClienteSchema = new Schema({
+  numero: str({ required: true }),                 // p. ej. NP-2026-020
+  cliente: { type: Schema.Types.ObjectId, ref: 'Cliente', required: true },
+  desde: { type: Date, required: true }, hasta: { type: Date, required: true },
+  grupo: str(),                                    // '' = todos los destinos; si no, el grupo de la tarifa (Viajeros, TAT…)
+  titulo: str({ maxlength: 250 }),
+  viajes: { type: [{ type: Schema.Types.ObjectId, ref: 'Viaje' }], default: [] },
+  totales: { viajes: { type: Number, default: 0 }, vehiculos: { type: Number, default: 0 }, tarifa: { type: Number, default: 0 },
+    auxiliar: { type: Number, default: 0 }, total: { type: Number, default: 0 } },
+  estado: { type: String, enum: ['borrador', 'enviada', 'facturada'], default: 'borrador' },
+  factura: { numero: str(), fecha, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null } },
+  envios: { type: [{ _id: false, canal: { type: String, enum: ['correo', 'whatsapp'] }, fecha: Date, para: [String], estado: String, error: String,
+    usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null } }], default: [] },
+  // Enlace público para ver y descargar la relación (va en el WhatsApp y en el correo)
+  token: str(), abierto: fecha, ultimaApertura: fecha, aperturas: { type: Number, default: 0 },
+  reaperturas: { type: [{ _id: false, fecha: Date, motivo: String, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null } }], default: [] },
+  creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+  actualizadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+relacionClienteSchema.plugin(tenantPlugin);
+relacionClienteSchema.index({ empresa: 1, numero: 1 }, { unique: true });
+relacionClienteSchema.index({ empresa: 1, viajes: 1 });
+relacionClienteSchema.index({ token: 1 }, { partialFilterExpression: { token: { $gt: '' } } });
 
 // ── Destino / tarifa de un cliente ──────────────────────────────────────────
 const tarifaSchema = new Schema({
@@ -244,6 +274,8 @@ const tarifaSchema = new Schema({
   kmRuta: { type: Number, default: null },         // km de la ruta (SICETAC) para revisar la velocidad máxima de 90 km/h
   // ¿La empresa de monitoreo de flota reporta cada punto? No: sede sin coordenadas o novedad (RNMM) → la empresa escribe llegada y salida
   cargueMonitoreado: { type: Boolean, default: true }, descargueMonitoreado: { type: Boolean, default: true },
+  // Fase 11: grupo de la relación de cobro (p. ej. Viajeros o TAT). Vacío = sin grupo.
+  grupoRelacion: str({ maxlength: 30 }),
   activo: { type: Boolean, default: true },
 }, { timestamps: true });
 tarifaSchema.plugin(tenantPlugin);
@@ -269,7 +301,7 @@ const personaSst = { tipo: { type: String, enum: ['tercero', 'empleado'], defaul
 const terceroSchema = new Schema({
   tipoId: str({ required: true, uppercase: true }),   // C N P E T U
   numId: str({ required: true }),
-  nombres: str({ required: true }),                   // o razón social
+  nombres: str(),                                     // o razón social (lo trae el RNDC; puede quedar vacío)
   apellido1: str(), apellido2: str(),
   sede: { codigo: str(), nombre: str() },
   telefono: str(), celular: str(), direccion: str(), codMunicipio: str(),
@@ -392,6 +424,7 @@ const viajeSchema = new Schema({
     activo: { type: Boolean, default: false },
     estado: { type: String, enum: ['', 'esperando', 'en_ruta', 'detenido', 'sin_senal', 'finalizado', 'error'], default: '' },
     origen: str(),                  // 'translogistica' (activado aquí) o 'cooespatrans' (enlazado desde allá)
+    servidor: str(),                // 'app' (servidor de la app nueva) o '' (Cooespatrans, la app anterior)
     externoId: str(), codigoExterno: str(),
     activado: fecha, activadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
     finalizado: fecha, error: str(),
@@ -417,6 +450,7 @@ const viajeSchema = new Schema({
   // Importado de la plantilla de Excel: sus documentos RNDC se gestionaron fuera de la
   // plataforma, por eso no aparece en «Por enviar» hasta que un usuario lo habilite.
   historico: { type: Boolean, default: false },
+  registroMasivo: { type: Boolean, default: false },   // fase 11: creado con el registro masivo
   // Fase 9: el manifiesto que recibe el conductor (enlace propio, WhatsApp y Sur Track)
   envioConductor: { token: str(), creado: fecha, whatsapp: fecha, whatsappPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
     abierto: fecha, ultimaApertura: fecha, aperturas: { type: Number, default: 0 }, surtrack: fecha },
@@ -579,6 +613,8 @@ const liquidacionConductorSchema = new Schema({
   empresas: str(), agrupacion: { type: String, enum: ['conductor', 'placa_empresa'], default: 'conductor' },
   pagado: { type: Number, default: 0 },
   estado: { type: String, enum: ['VIGENTE', 'ANULADA'], default: 'VIGENTE' },
+  // Última vez que se envió a la app Sur Track del conductor (si es anterior al último cambio, se reenvía)
+  appEnviada: { type: Date, default: null },
   creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
 }, { timestamps: true });
 liquidacionConductorSchema.plugin(tenantPlugin);
@@ -838,6 +874,7 @@ export const Empresa = modelo('Empresa', empresaSchema);
 export const Usuario = modelo('Usuario', usuarioSchema);
 export const Municipio = modelo('Municipio', municipioSchema);
 export const Cliente = modelo('Cliente', clienteSchema);
+export const RelacionCliente = modelo('RelacionCliente', relacionClienteSchema);
 export const Tarifa = modelo('Tarifa', tarifaSchema);
 export const Tercero = modelo('Tercero', terceroSchema);
 export const Vehiculo = modelo('Vehiculo', vehiculoSchema);

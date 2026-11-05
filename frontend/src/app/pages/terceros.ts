@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { Router } from '@angular/router';
@@ -19,6 +20,8 @@ import { ActualizarVehiculos } from '../shared/actualizar-vehiculos';
 import { CargarMas } from '../shared/cargar-mas';
 import { mensajeError } from '../core/api.service';
 import { VistaRndc } from '../shared/vista-rndc';
+import { CuentaAppConductor } from '../shared/cuenta-app-conductor';
+import { Rastreo } from '../core/rastreo.service';
 
 type TipoNuevo = 'conductor' | 'persona' | 'empresa' | 'sede' | 'vehiculo' | 'remolque';
 
@@ -42,7 +45,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
 
 @Component({
   selector: 'app-terceros',
-  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, VistaRndc, PerfilSst, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, VistaRndc, PerfilSst, CuentaAppConductor, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Conductores y terceros</h1><p class="sutil">Conductores, titulares, propietarios, tenedores y destinatarios que se registran en el RNDC.</p></div>
@@ -60,9 +63,10 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
     <app-importar-excel tipo="terceros" titulo="conductores y terceros" [abierto]="importar()" (cerrar)="importar.set(false)" (importado)="cargar()" />
     <app-actualizar-vehiculos tipo="terceros" [abierto]="actualizar()" (cerrar)="actualizar.set(false); cargar()" (actualizados)="cargar()" />
     <app-traer-rndc tipo="terceros" [abierto]="traer()" (cerrar)="traer.set(false)" (traidos)="cargar()" />
+    <app-cuenta-app-conductor #cuentaApp />
     <div class="pestanas" role="tablist" aria-label="Tipo de tercero">
       @for (p of PESTANAS_LISTA; track p[0]) {
-        <button type="button" role="tab" [class.activa]="rol === p[0]" [attr.aria-selected]="rol === p[0]" (click)="rol = p[0]; cargar()">{{ p[1] }}</button>
+        <button type="button" role="tab" [class.activa]="rol === p[0]" [attr.aria-selected]="rol === p[0]" (click)="irRol(p[0])">{{ p[1] }}</button>
       }
     </div>
     <div class="barra">
@@ -93,6 +97,9 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
               <td><div class="acciones" style="justify-content:flex-end">
                 <button class="pequeno" (click)="editar(t)">{{ puedeEditar ? 'Editar' : 'Ver' }}</button>
                 @if (verSst && t.roles?.includes('conductor')) { <button class="pequeno" (click)="perfilSst().abrir('tercero', t._id)" title="Exámenes, EPP, comparendos, checklists y excesos de velocidad"><app-icono nombre="escudo" [tam]="15" />SST</button> }
+                @if (appConductores() && t.roles.includes('conductor') && t.tipoId === 'C') {
+                  <button class="pequeno" (click)="cuentaApp.abrir(t)" title="Cuenta del conductor en la app Sur Track"><app-icono nombre="ubicacion" [tam]="15" />App</button>
+                }
                 @if (puedeRndc) { <button class="pequeno" (click)="enviar(t)" [disabled]="trabajando()" title="Registrar o actualizar en el RNDC"><app-icono nombre="enviar" [tam]="15" />RNDC</button> }
               </div></td>
             </tr>
@@ -154,9 +161,9 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
             @for (x of tipos; track x[0]) { <option [value]="x[0]">{{ x[1] }}</option> }</select></div>
           <div class="campo" [hidden]="soloFaltantes()"><label for="tn">Número</label><input id="tn" name="numId" [(ngModel)]="f.numId" [disabled]="editando() || !!origen()" required />
             @if (f.tipoId === 'N') { <small>NIT con dígito de verificación, sin guion.</small> }</div>
-          <div class="campo" [hidden]="!ver('nombres')" [class.falta]="falta('nombres')"><label for="tno">{{ f.tipoId === 'N' ? 'Razón social' : 'Nombres' }}</label><input id="tno" name="nombres" [(ngModel)]="f.nombres" required /></div>
+          <div class="campo" [hidden]="!ver('nombres')" [class.falta]="falta('nombres')"><label for="tno">{{ f.tipoId === 'N' ? 'Razón social' : 'Nombres' }}</label><input id="tno" name="nombres" [(ngModel)]="f.nombres" /></div>
           @if (f.tipoId !== 'N') {
-            <div class="campo" [hidden]="!ver('apellido1')" [class.falta]="falta('apellido1')"><label for="ta1">Primer apellido</label><input id="ta1" name="ap1" [(ngModel)]="f.apellido1" required /></div>
+            <div class="campo" [hidden]="!ver('apellido1')" [class.falta]="falta('apellido1')"><label for="ta1">Primer apellido</label><input id="ta1" name="ap1" [(ngModel)]="f.apellido1" /></div>
             <div class="campo" [hidden]="soloFaltantes()"><label for="ta2">Segundo apellido</label><input id="ta2" name="ap2" [(ngModel)]="f.apellido2" /></div>
           } @else {
             <div class="campo" [hidden]="!ver('sede.codigo')" [class.falta]="falta('sede.codigo')"><label for="ts">Código de sede</label><input id="ts" name="sede" maxlength="6" [(ngModel)]="f.sede.codigo" /></div>
@@ -164,8 +171,8 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
           }
           <div class="campo" [hidden]="!ver('celular')" [class.falta]="falta('celular')"><label for="tcel">Celular</label><input id="tcel" name="cel" maxlength="10" [(ngModel)]="f.celular" /></div>
           <div class="campo" [hidden]="!ver('telefono')" [class.falta]="falta('telefono')"><label for="ttel">Teléfono fijo</label><input id="ttel" name="tel" maxlength="7" [(ngModel)]="f.telefono" /></div>
-          <div class="campo" [hidden]="!ver('direccion')" [class.falta]="falta('direccion')"><label for="tdir">Dirección</label><input id="tdir" name="dir" maxlength="60" [(ngModel)]="f.direccion" /></div>
-          @if (ver('codMunicipio')) { <app-municipio etiqueta="Municipio" [(codigo)]="f.codMunicipio" [class.falta]="falta('codMunicipio')" /> }
+          <div class="campo" [hidden]="!ver('direccion')" [class.falta]="falta('direccion')"><label for="tdir">Dirección <span class="obligatorio">*</span></label><input id="tdir" name="dir" maxlength="60" [(ngModel)]="f.direccion" required /></div>
+          @if (ver('codMunicipio')) { <app-municipio etiqueta="Municipio *" [(codigo)]="f.codMunicipio" [class.falta]="falta('codMunicipio')" /> }
           <div class="campo ancho" [hidden]="soloFaltantes()"><span class="etiqueta">Roles</span><div class="acciones">
             @for (r of roles; track r[0]) { <label class="casilla"><input type="checkbox" [checked]="f.roles.includes(r[0])" (change)="alternarRol(r[0])" />{{ r[1] }}</label> }
           </div></div>
@@ -200,7 +207,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
       </form>
       <app-vista-rndc [variables]="vistaRndc()" (cerrar)="vistaRndc.set(null)" />
       <ng-container pie>
-        <button type="button" class="texto" style="margin-right:auto" (click)="verVista()" title="Solo muestra las variables del RNDC; no guarda ni envía nada">Solo mostrar lo que se enviaría</button>
+        <button type="button" class="texto" (click)="verVista()" title="Solo muestra las variables del RNDC; no guarda ni envía nada">Solo mostrar lo que se enviaría</button>
         <button type="button" (click)="abierto.set(false)">Cancelar</button>
         @if (puedeEditar) { <button class="primario" type="submit" form="form-tercero" [disabled]="trabajando()">{{ sincronizar && puedeRndc ? 'Guardar y registrar en el RNDC' : 'Guardar' }}</button> }
       </ng-container>
@@ -226,13 +233,13 @@ export class Terceros {
     { v: 'conductor', t: 'Conductor', d: 'Persona con licencia de conducción que maneja los vehículos.', icono: 'usuario' },
     { v: 'persona', t: 'Titular o tenedor', d: 'Persona propietaria, tenedora o titular de manifiestos (sin licencia).', icono: 'personas' },
     { v: 'empresa', t: 'Empresa', d: 'Empresa con NIT (cliente, remitente o destinatario) con su primera sede.', icono: 'edificio' },
-    { v: 'sede', t: 'Sede', d: 'Otra sede de una empresa ya registrada: se asigna el código de la próxima sede.', icono: 'edificio' },
+    { v: 'sede', t: 'Sede', d: 'Las sedes de clientes y destinatarios se crean en Clientes y tarifas.', icono: 'edificio' },
     { v: 'vehiculo', t: 'Vehículo', d: 'Camión o tractocamión: se crea en Vehículos.', icono: 'camion' },
     { v: 'remolque', t: 'Remolque', d: 'Remolque o semirremolque: se crea en Vehículos.', icono: 'camion' },
   ];
   // Pestañas de la lista: agrupan por el papel que cumple cada tercero
   readonly PESTANAS_LISTA: [string, string][] = [['', 'Todos'], ['conductor', 'Conductores'], ['titular', 'Titulares'], ['propietario', 'Propietarios'],
-    ['tenedor', 'Tenedores'], ['remitente', 'Remitentes'], ['destinatario', 'Destinatarios y sedes']];
+    ['tenedor', 'Tenedores']];
   descripcionTipo() { return this.TIPOS_NUEVO.find(o => o.v === this.tipoNuevo())?.d || ''; }
   readonly tipoNuevo = signal<TipoNuevo>('conductor');
   readonly sedesEmpresa = signal<any[]>([]);
@@ -273,7 +280,11 @@ export class Terceros {
   // Cambios de otros usuarios: la pantalla se actualiza sola
   private enVivo = inject(EnVivo).al(['maestros', 'rndc', 'rastreo'], () => this.cargar());
 
-  constructor() { this.cargar(); }
+  // App de conductores: el botón «App» solo aparece si el servidor y la empresa la tienen habilitada
+  private rastreo = inject(Rastreo);
+  readonly appConductores = computed(() => !!this.rastreo.estado()?.appConductores);
+
+  constructor() { this.cargar(); if (this.auth.tiene(P.VIAJES_VER)) this.rastreo.cargar(); }
 
 
   // ── Paginación con carga progresiva ──
@@ -285,20 +296,25 @@ export class Terceros {
 
   rndc = '';
   activos = '';
+  irRol(rol: string) { this.rol = rol; this.lista.set([]); this.total.set(0); this.cargar(); }
+  private turno = new Turno();
   async cargar() {
+    const vigente = this.turno.tomar();
     this.cargando.set(true);
     this.pagina = 1;
     try {
       const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, pagina: 1, limite: 50 });
-      this.lista.set(r.items); this.total.set(r.total);
-    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
+      if (vigente()) { this.lista.set(r.items); this.total.set(r.total); }
+    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
   }
 
   async cargarMas() {
     if (this.cargandoMas() || this.lista().length >= this.total()) return;
     this.cargandoMas.set(true);
+    const vigente = this.turno.actual();
     try {
       const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, pagina: this.pagina + 1, limite: 50 });
+      if (!vigente()) return;
       this.pagina += 1;
       this.lista.update(l => [...l, ...r.items]);
     } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }
@@ -328,12 +344,13 @@ export class Terceros {
     this.verificando.set(true);
   }
   elegirTipo(t: TipoNuevo) {
+    if (t === 'sede') { this.verificando.set(false); this.router.navigate(['/clientes']); return; }
     if (t === 'vehiculo' || t === 'remolque') { this.verificando.set(false); this.router.navigate(['/vehiculos'], { queryParams: { nuevo: t } }); return; }
     this.tipoNuevo.set(t);
     const conf = ({ conductor: ['C', 'conductor'], persona: ['C', 'titular'], empresa: ['N', 'destinatario'], sede: ['N', 'destinatario'] } as Record<string, string[]>)[t];
     // Conserva el rol de la pestaña cuando corresponde al tipo elegido (p. ej. «Tenedores» → persona tenedor)
     const rolPestana = t === 'persona' && ['titular', 'propietario', 'tenedor'].includes(this.rol) ? this.rol
-      : (t === 'empresa' || t === 'sede') && Terceros.EMPRESA.includes(this.rol) ? this.rol : conf[1];
+      : t === 'empresa' && Terceros.EMPRESA.includes(this.rol) ? this.rol : conf[1];
     this.buscar = { ...this.buscar, tipoId: conf[0], rol: rolPestana };
   }
 
@@ -423,6 +440,9 @@ export class Terceros {
 
   async guardar() {
     const f = this.form();
+    // Solo la dirección y el municipio son obligatorios; lo demás lo trae el RNDC o es opcional
+    const faltan = [!String(f.direccion || '').trim() && 'la dirección', !f.codMunicipio && 'el municipio'].filter(Boolean);
+    if (faltan.length) { this.avisos.mostrar(`Escriba ${faltan.join(' y ')}`, 'error'); return; }
     const cuerpo = this.cuerpo();
     this.trabajando.set(true);
     try {

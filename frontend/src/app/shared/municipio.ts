@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, model, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, model, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 
@@ -31,13 +31,20 @@ export class SelectorMunicipio {
   readonly texto = computed(() => this.escrito() ?? (this.codigo() ? `${this.codigo()}${this.nombreConocido() ? ' · ' + this.nombreConocido() : ''}` : ''));
   private temporizador: ReturnType<typeof setTimeout> | undefined;
 
-  async ngOnInit() {
-    if (this.codigo()) {
-      const r = await this.api.get<Municipio[]>('/maestros/municipios', { q: this.codigo() }).catch(() => []);
-      const m = r.find(x => x.codigo === this.codigo());
-      if (m) this.nombreConocido.set(`${m.nombre} (${m.departamento})`);
-    }
-  }
+  // El código también puede cambiar desde afuera (p. ej. al cambiar el cliente o el destino): se busca su nombre
+  private codigoDelNombre = '';
+  private nombreDelCodigo = effect(() => {
+    const c = this.codigo();
+    untracked(async () => {
+      if (c === this.codigoDelNombre) return;
+      this.codigoDelNombre = c; this.nombreConocido.set('');
+      if (!c) return;
+      if (!this.escrito()?.trim().startsWith(c)) this.escrito.set(null);
+      const r = await this.api.get<Municipio[]>('/maestros/municipios', { q: c }).catch(() => []);
+      const m = r.find(x => x.codigo === c);
+      if (m && this.codigo() === c) this.nombreConocido.set(`${m.nombre} (${m.departamento})`);
+    });
+  });
 
   escribir(v: string) {
     this.escrito.set(v);
@@ -45,7 +52,7 @@ export class SelectorMunicipio {
     if (cod) {
       this.codigo.set(cod);
       const m = this.opciones().find(x => x.codigo === cod);
-      if (m) { this.nombreConocido.set(`${m.nombre} (${m.departamento})`); this.escrito.set(null); }
+      if (m) { this.codigoDelNombre = cod; this.nombreConocido.set(`${m.nombre} (${m.departamento})`); this.escrito.set(null); }
       return;
     }
     if (!v.trim()) { this.codigo.set(''); this.escrito.set(null); return; }

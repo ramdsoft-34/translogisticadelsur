@@ -57,7 +57,7 @@ r.post('/config/probar', gestionar, async (req, res) => {
 
 // ── Envío por cliente ───────────────────────────────────────────────────────
 r.get('/clientes', gestionar, async (req, res) => {
-  const lista = await Cliente.find(deEmpresa(req)).select('nombre activo envios enviosRelaciones correos').sort({ nombre: 1 }).lean();
+  const lista = await Cliente.find(deEmpresa(req)).select('nombre activo envios enviosRelaciones correos contactosWhatsapp').sort({ nombre: 1 }).lean();
   res.json({ clientes: lista, salidaBase: SALIDA_BASE, marcadores: MARCADORES_SALIDA });
 });
 
@@ -81,8 +81,15 @@ r.put('/clientes/:id', gestionar, async (req, res) => {
 
 // Destinatarios de las relaciones de viajes del cliente (aparte de los de manifiestos)
 r.put('/clientes/:id/relaciones', gestionar, async (req, res) => {
-  const d = z.object({ destinatarios: z.array(correo).max(30), cc: z.array(correo).max(30).optional().default([]) }).parse(req.body);
-  const c = await Cliente.findOneAndUpdate(deEmpresa(req, { _id: id(req.params.id) }), { $set: { enviosRelaciones: d } }, { new: true }).lean();
+  const d = z.object({ destinatarios: z.array(correo).max(30), cc: z.array(correo).max(30).optional().default([]),
+    // Fase 11: asunto y mensaje propios (vacío = la plantilla general) y contactos de WhatsApp de la empresa
+    plantilla: z.object({ asunto: z.string().trim().max(200).optional().default(''), cuerpo: z.string().trim().max(3000).optional().default('') }).optional(),
+    contactosWhatsapp: z.array(z.object({ nombre: z.string().trim().max(60), cargo: z.string().trim().max(60).optional().default(''),
+      celular: z.string().trim().max(20) })).max(10).optional() }).parse(req.body);
+  const set = { 'enviosRelaciones.destinatarios': d.destinatarios, 'enviosRelaciones.cc': d.cc };
+  if (d.plantilla) set['enviosRelaciones.plantilla'] = d.plantilla;
+  if (d.contactosWhatsapp) set.contactosWhatsapp = d.contactosWhatsapp.filter(x => x.nombre || x.celular);
+  const c = await Cliente.findOneAndUpdate(deEmpresa(req, { _id: id(req.params.id) }), { $set: set }, { new: true }).lean();
   if (!c) throw new ErrorHttp(404, 'Cliente no encontrado');
   await auditar(req, 'editar_envios_relaciones', { entidad: 'Cliente', entidadId: c._id, detalle: { cliente: c.nombre, ...d } });
   res.json(c);

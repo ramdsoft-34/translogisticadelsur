@@ -1,28 +1,44 @@
-// Rastreo GPS con la app Sur Track. Hasta mayo de 2027 el GPS llega al servidor de Cooespatrans
-// y Translogística lo consulta por su puerta de integración (/api/integracion, clave compartida).
-// El viaje de Translogística es la única fuente: el rastreo es una sección del mismo viaje.
+// Rastreo GPS con la app Sur Track. Hay dos servidores con la misma puerta de integración
+// (/api/integracion, clave compartida):
+//  - 'app': el servidor de la app nueva, para conductores que ya activaron su cuenta.
+//  - 'cooespatrans': el de la app anterior, para los demás (hasta mayo de 2027).
+// Cada viaje guarda en rastreo.servidor a cuál se envió. El viaje de Translogística es la única fuente.
 import { env } from '../../config/env.js';
-import { Empresa, Viaje, Vehiculo, Tercero, Cliente, RecorridoRastreo, InspeccionSst } from '../../models/index.js';
+import { Empresa, Viaje, Vehiculo, Tercero, Cliente, RecorridoRastreo, InspeccionSst, LiquidacionConductor } from '../../models/index.js';
+import { liquidacionPdf } from '../reportes/liquidacion.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { enlaceDe, nuevoToken } from '../manifiestoConductor.js';
 
-export const configurado = () => !!(env.surTrack.url && env.surTrack.clave);
+const CONFIG = { cooespatrans: () => env.surTrack, app: () => env.surTrackApp };
+/** Llamada al backend de la app nueva (planillas, avisos, versión). */
+export const llamarApp = (ruta, opciones = {}) => llamar(ruta, { ...opciones, servidor: 'app' });
+export const configuradoServidor = (servidor) => { const c = CONFIG[servidor](); return !!(c.url && c.clave); };
+export const configurado = () => configuradoServidor('cooespatrans') || configuradoServidor('app');
+export const servidorDe = (rastreo) => (rastreo?.servidor === 'app' ? 'app' : 'cooespatrans');
+const SERVIDORES = ['app', 'cooespatrans'];
 
-async function llamar(ruta, { metodo = 'GET', cuerpo } = {}) {
-  if (!configurado()) throw new ErrorHttp(503, 'El rastreo con Sur Track no está configurado en el servidor');
+async function llamar(ruta, { metodo = 'GET', cuerpo, servidor = 'cooespatrans', binario = false, archivo = null } = {}) {
+  if (!configuradoServidor(servidor)) throw new ErrorHttp(503, 'El rastreo con Sur Track no está configurado en el servidor');
+  const conf = CONFIG[servidor]();
   let r;
   try {
-    r = await fetch(env.surTrack.url + ruta, {
+    r = await fetch(conf.url + ruta, {
       method: metodo,
-      headers: { 'content-type': 'application/json', 'x-integracion-clave': env.surTrack.clave },
-      body: cuerpo ? JSON.stringify(cuerpo) : undefined,
-      signal: AbortSignal.timeout(env.surTrack.timeoutMs),
+      headers: { 'content-type': archivo ? archivo.tipo : 'application/json', 'x-integracion-clave': conf.clave },
+      body: archivo ? archivo.datos : cuerpo ? JSON.stringify(cuerpo) : undefined,
+      signal: AbortSignal.timeout(conf.timeoutMs),
     });
   } catch {
     throw new ErrorHttp(502, 'No se pudo conectar con Sur Track. Intente de nuevo en unos minutos.');
   }
+  if (r.status === 204) return {};
+  if (binario && r.ok) return { tipo: r.headers.get('content-type') || 'application/octet-stream', datos: Buffer.from(await r.arrayBuffer()) };
   const datos = await r.json().catch(() => ({}));
-  if (!r.ok) throw new ErrorHttp(r.status === 409 || r.status === 404 || r.status === 400 ? r.status : 502, datos.mensaje || `Sur Track respondió ${r.status}`);
+  if (!r.ok) {
+    const e = new ErrorHttp(r.status === 409 || r.status === 404 || r.status === 400 ? r.status : 502, datos.mensaje || datos.error || `Sur Track respondió ${r.status}`);
+    e.codigo = datos.codigo || '';
+    throw e;
+  }
   return datos;
 }
 
@@ -147,15 +163,22 @@ export async function activar(empresaId, viajeId, usuarioId, opciones = {}) {
     if (!v.envioConductor?.token) { v.set('envioConductor.token', nuevoToken()); v.set('envioConductor.creado', new Date()); }
     manifiestoUrl = enlaceDe(v.envioConductor.token);
   }
-  const r = await llamar('/viajes', { metodo: 'POST', cuerpo: {
+  const cuerpo = {
     referencia: `tls:${empresaId}:${v._id}`, codigo: v.manifiesto?.numero || `V-${v.numero}`, placa: v.placa, cedula: cond?.numId || '',
     valorFlete: Math.max(1, Number(v.flete) || 0), anticipo: Number(v.anticipo) || 0, empresa: cli?.nombre || '',
     ...(manifiestoUrl ? { manifiesto: { numero: v.manifiesto.numero, url: manifiestoUrl } } : {}),
     ...(await paradasParaSurTrack(paradas)),
-  } });
+  };
+  // Conductor con la app nueva activada → servidor nuevo. Si no tiene cuenta, sigue con la app anterior.
+  let servidor = 'cooespatrans'; let r = null;
+  if (configuradoServidor('app') && cuerpo.cedula) {
+    try { r = await llamar('/viajes', { metodo: 'POST', cuerpo, servidor: 'app' }); servidor = 'app'; }
+    catch (e) { if (e.codigo !== 'sin_conductor' || !configuradoServidor('cooespatrans')) throw e; }
+  }
+  r ??= await llamar('/viajes', { metodo: 'POST', cuerpo });
   (r.clientes || []).forEach(x => { const c = paradas.clientes[Number(x.referencia)]; if (c) c.externoId = x.clienteId; });
   if (manifiestoUrl) v.set('envioConductor.surtrack', new Date());
-  v.rastreo = { activo: true, estado: 'esperando', origen: 'translogistica', externoId: r.viajeId, codigoExterno: r.codigo,
+  v.rastreo = { activo: true, estado: 'esperando', origen: 'translogistica', servidor: servidor === 'app' ? 'app' : '', externoId: r.viajeId, codigoExterno: r.codigo,
     activado: new Date(), activadoPor: usuarioId, finalizado: null, error: '', ...paradas,
     eventos: [evento('activado', paradas.modalidad === 'clientes' ? `Con ${paradas.clientes.length} cliente(s)` : `Destino: ${paradas.destino.nombre || v.destino}`)] };
   await v.save();
@@ -169,7 +192,7 @@ export async function actualizarParadas(empresaId, viajeId, opciones) {
   if (!v?.rastreo?.activo) throw new ErrorHttp(404, 'Este viaje no tiene rastreo activo');
   const paradas = normalizarParadas(opciones, v);
   if (v.rastreo.origen === 'translogistica') {
-    const r = await llamar(`/viajes/${v.rastreo.externoId}/clientes`, { metodo: 'PUT', cuerpo: await paradasParaSurTrack(paradas) });
+    const r = await llamar(`/viajes/${v.rastreo.externoId}/clientes`, { metodo: 'PUT', cuerpo: await paradasParaSurTrack(paradas), servidor: servidorDe(v.rastreo) });
     (r.clientes || []).forEach(x => { const c = paradas.clientes[Number(x.referencia)]; if (c) c.externoId = x.clienteId; });
   } else if (paradas.modalidad === 'clientes') {
     throw new ErrorHttp(409, 'Este rastreo viene de Cooespatrans: sus clientes se manejan allá');
@@ -187,7 +210,7 @@ export async function finalizar(empresaId, viajeId) {
   if (!v.rastreo?.activo) return v.rastreo;
   // Solo se finaliza en Sur Track lo que se creó desde aquí; lo enlazado desde Cooespatrans lo cierra Cooespatrans
   if (v.rastreo.origen === 'translogistica' && v.rastreo.externoId) {
-    try { await llamar(`/viajes/${v.rastreo.externoId}/finalizar`, { metodo: 'POST' }); }
+    try { await llamar(`/viajes/${v.rastreo.externoId}/finalizar`, { metodo: 'POST', servidor: servidorDe(v.rastreo) }); }
     catch (e) { if (e.status !== 404) throw e; }
   }
   await guardarRecorrido(empresaId, v).catch(() => { /* si Sur Track no responde, el historial queda con lo último conocido */ });
@@ -204,7 +227,7 @@ export async function enlazar(empresaId, viajeId, externoId) {
   const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId });
   if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
   if (v.rastreo?.activo) throw new ErrorHttp(409, 'Este viaje ya tiene rastreo');
-  if (await Viaje.exists({ empresa: empresaId, 'rastreo.externoId': String(externoId), 'rastreo.activo': true })) {
+  if (await Viaje.exists({ empresa: empresaId, 'rastreo.externoId': String(externoId), 'rastreo.activo': true, 'rastreo.servidor': { $ne: 'app' } })) {
     throw new ErrorHttp(409, 'Ese rastreo ya está enlazado con otro viaje');
   }
   const r = await llamar(`/rastreo/${encodeURIComponent(externoId)}`);
@@ -224,12 +247,24 @@ const kmh = (ms) => Math.round((Number(ms) || 0) * 3.6);   // Sur Track envía l
 
 export async function enVivo(empresaId) {
   const conf = await exigirHabilitado(empresaId);
-  const [activos, viajesExt] = await Promise.all([
-    enCache('activos', 10000, () => llamar('/rastreo/activos')),
-    enCache('viajes', 30000, () => llamar(`/viajes?desde=${new Date(Date.now() - 3 * 86400000).toISOString()}`)),
-  ]);
-  const posicion = new Map(activos.map(a => [String(a.viajeId), a]));
-  const estadoExt = new Map(viajesExt.map(x => [x.viajeId, x]));
+  const desde = new Date(Date.now() - 3 * 86400000).toISOString();
+  const posicion = new Map(); const estadoExt = new Map(); const sinRespuesta = new Set();
+  let activos = [];   // los de Cooespatrans sirven para proponer enlaces
+  const usados = SERVIDORES.filter(configuradoServidor);
+  await Promise.all(usados.map(async (s) => {
+    try {
+      const [act, ext] = await Promise.all([
+        enCache(`activos:${s}`, 10000, () => llamar('/rastreo/activos', { servidor: s })),
+        enCache(`viajes:${s}`, 30000, () => llamar(`/viajes?desde=${desde}`, { servidor: s })),
+      ]);
+      act.forEach(a => posicion.set(`${s}:${a.viajeId}`, a));
+      ext.forEach(x => estadoExt.set(`${s}:${x.viajeId}`, x));
+      if (s === 'cooespatrans') activos = act;
+    } catch (e) {
+      if (usados.length === 1) throw e;   // un solo servidor: el error se muestra como antes
+      sinRespuesta.add(s);                // con dos, el otro sigue funcionando
+    }
+  }));
   const viajes = await Viaje.find({ empresa: empresaId, 'rastreo.activo': true })
     .select('numero fecha placa conductorNombre destino estado cliente rastreo').populate({ path: 'cliente', select: 'nombre', match: { empresa: empresaId } }).lean();
   const limiteSenal = (conf.minutosSinSenal || 10) * 60000;
@@ -240,10 +275,12 @@ export async function enVivo(empresaId) {
       try { await finalizar(empresaId, v._id); } catch { /* se reintenta en la próxima consulta */ }
       continue;
     }
-    const p = posicion.get(v.rastreo.externoId);
-    const ext = estadoExt.get(v.rastreo.externoId);
+    const clave = `${servidorDe(v.rastreo)}:${v.rastreo.externoId}`;
+    const p = posicion.get(clave);
+    const ext = estadoExt.get(clave);
     let estado = v.rastreo.estado;
-    if (ext?.estado === 'completado') estado = 'llego';
+    if (sinRespuesta.has(servidorDe(v.rastreo))) { /* sin datos nuevos: queda el último estado guardado */ }
+    else if (ext?.estado === 'completado') estado = 'llego';
     else if (p) estado = Date.now() - new Date(p.hora) > limiteSenal ? 'sin_senal' : kmh(p.velocidad) < 3 ? 'detenido' : 'en_ruta';
     else if (ext?.estado === 'aceptado') estado = 'sin_senal';
     else estado = 'esperando';
@@ -271,11 +308,11 @@ export async function enVivo(empresaId) {
       clientes: (v.rastreo.clientes || []).length, entregados });
   }
   // Rastreos de Cooespatrans con señal reciente que aún no están enlazados a un viaje de esta empresa
-  const enlazados = new Set(viajes.map(v => v.rastreo.externoId));
+  const enlazados = new Set(viajes.filter(v => servidorDe(v.rastreo) === 'cooespatrans').map(v => v.rastreo.externoId));
   const placasEmpresa = new Set((await Vehiculo.find({ empresa: empresaId }).select('placa').lean()).map(v => v.placa));
   const externos = activos
     .filter(a => !enlazados.has(String(a.viajeId)) && Date.now() - new Date(a.hora) < 2 * 3600000)
-    .map(a => { const ext = estadoExt.get(String(a.viajeId)); return { externoId: String(a.viajeId), codigo: a.codigo || ext?.codigo || '',
+    .map(a => { const ext = estadoExt.get(`cooespatrans:${a.viajeId}`); return { externoId: String(a.viajeId), codigo: a.codigo || ext?.codigo || '',
       conductor: a.chofer || ext?.chofer?.nombre || '', placa: ext?.chofer?.placa || '', estado: ext?.estado || '',
       ultima: { lat: a.lat, lng: a.lng, velocidad: kmh(a.velocidad), rumbo: a.rumbo, hora: a.hora } }; })
     .filter(x => !x.placa || placasEmpresa.has(x.placa));
@@ -294,7 +331,8 @@ export async function recorrido(empresaId, viajeId) {
       resumen: v.rastreo.resumen?.puntos !== undefined ? v.rastreo.resumen : resumenDe(puntos), eventos: v.rastreo.eventos || [], modalidad: v.rastreo.modalidad || 'destino' };
   }
   await exigirHabilitado(empresaId);
-  const r = await enCache(`rec:${v.rastreo.externoId}`, 10000, () => llamar(`/rastreo/${encodeURIComponent(v.rastreo.externoId)}`));
+  const servidor = servidorDe(v.rastreo);
+  const r = await enCache(`rec:${servidor}:${v.rastreo.externoId}`, 10000, () => llamar(`/rastreo/${encodeURIComponent(v.rastreo.externoId)}`, { servidor }));
   const puntos = r.puntos.map(p => ({ ...p, velocidad: kmh(p.velocidad) }));
   const clientes = await sincronizarEntregas(empresaId, v, r.clientes || []);
   const ultima = r.ultima ? { ...r.ultima, velocidad: kmh(r.ultima.velocidad) } : null;
@@ -332,7 +370,7 @@ async function sincronizarEntregas(empresaId, v, externos) {
     const e = externos.find(x => x.clienteId === c.externoId) || externos.find(x => x.nombre === c.nombre);
     if (!e) continue;
     const det = e.entrega ? { lat: e.entrega.lugar?.lat, lng: e.entrega.lugar?.lng, aproximada: !!e.entrega.lugar?.aproximada,
-      observacion: e.entrega.observacion || '', fotos: e.entrega.fotos || [], conductor: e.entrega.conductor || '' } : null;
+      observacion: e.entrega.observacion || '', fotos: (e.entrega.fotos || []).map(rutaFoto), conductor: e.entrega.conductor || '' } : null;
     const nuevoEstado = e.estadoEntrega !== c.estadoEntrega;
     if (!nuevoEstado && JSON.stringify(det || null) === JSON.stringify(c.entrega || null)) continue;
     Object.assign(c, { estadoEntrega: e.estadoEntrega, valorRecibido: e.valorRecibido || 0, fechaEntrega: e.fechaEntrega || c.fechaEntrega || new Date(), ...(det ? { entrega: det } : {}) });
@@ -344,10 +382,24 @@ async function sincronizarEntregas(empresaId, v, externos) {
   return lista;
 }
 
+// Las fotos de la app nueva son privadas: se guardan como ruta de Translogística, que las trae con la clave.
+// Las de Cooespatrans son enlaces públicos y quedan igual.
+export const RUTA_FOTOS = '/api/rastreo/fotos/';
+const rutaFoto = (url) => {
+  const m = String(url || '').match(/\/api\/integracion\/fotos\/([a-f0-9]{24})$/i);
+  return m ? RUTA_FOTOS + m[1] : url;
+};
+
+export async function foto(empresaId, fotoId) {
+  if (!/^[a-f0-9]{24}$/i.test(String(fotoId))) throw new ErrorHttp(400, 'Foto no válida');
+  if (!await Viaje.exists({ empresa: empresaId, 'rastreo.clientes.entrega.fotos': RUTA_FOTOS + fotoId })) throw new ErrorHttp(404, 'Foto no encontrada');
+  return llamar(`/fotos/${fotoId}`, { servidor: 'app', binario: true });
+}
+
 // Guarda el recorrido y el resumen en Translogística al terminar el rastreo
 async function guardarRecorrido(empresaId, v) {
-  if (!v.rastreo?.externoId || !configurado()) return;
-  const r = await llamar(`/rastreo/${encodeURIComponent(v.rastreo.externoId)}`);
+  if (!v.rastreo?.externoId || !configuradoServidor(servidorDe(v.rastreo))) return;
+  const r = await llamar(`/rastreo/${encodeURIComponent(v.rastreo.externoId)}`, { servidor: servidorDe(v.rastreo) });
   const puntos = r.puntos.map(p => ({ ...p, velocidad: kmh(p.velocidad) }));
   await sincronizarEntregas(empresaId, v.toObject ? v.toObject() : v, r.clientes || []);
   const fresco = await Viaje.findOne({ empresa: empresaId, _id: v._id }).select('rastreo.clientes').lean();
@@ -432,15 +484,133 @@ function distanciaKm(a, b) {
 
 // ── Checklist preoperacional diario del conductor (lo diligencia en Sur Track) ──
 // La asignación del viaje no lo exige; Sur Track no deja iniciar el viaje sin el checklist del día.
+// Se busca en el servidor del viaje; si el viaje aún no tiene rastreo, primero en la app nueva y luego en la anterior.
 export async function checklistDelViaje(empresaId, viajeId, { conFirma = false } = {}) {
   await exigirHabilitado(empresaId);
-  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('numero placa conductor conductorNombre rastreo.checklistId').lean();
+  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('numero placa conductor conductorNombre rastreo.servidor rastreo.externoId').lean();
   if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
   const cond = v.conductor ? await Tercero.findOne({ empresa: empresaId, _id: v.conductor }).select('numId').lean() : null;
-  const r = await llamar(`/checklist?cedula=${encodeURIComponent(cond?.numId || '')}&placa=${encodeURIComponent(v.placa || '')}`);
+  const orden = v.rastreo?.externoId ? [servidorDe(v.rastreo)] : SERVIDORES.filter(configuradoServidor);
+  let r = null; let servidor = orden[0]; let error = null;
+  for (const s of orden) {
+    try {
+      const x = await llamar(`/checklist?cedula=${encodeURIComponent(cond?.numId || '')}&placa=${encodeURIComponent(v.placa || '')}`, { servidor: s });
+      r = x; servidor = s; error = null;
+      if (x.checklist) break;   // sin checklist aquí: se prueba en el otro servidor
+    } catch (e) { if (e.status !== 404) throw e; error ??= e; }
+  }
+  if (!r) throw error || new ErrorHttp(404, 'El conductor no está registrado en Sur Track');
   let checklist = r.checklist;
-  if (checklist && conFirma) checklist = (await llamar(`/checklist/${checklist.checklistId}`)).checklist;
-  return { viaje: { numero: v.numero, placa: v.placa, conductor: v.conductorNombre }, conductor: r.chofer, checklist };
+  if (checklist && conFirma) checklist = (await llamar(`/checklist/${checklist.checklistId}`, { servidor })).checklist;
+  return { viaje: { numero: v.numero, placa: v.placa, conductor: v.conductorNombre }, conductor: r.chofer, checklist, servidor };
+}
+
+// La oficina autoriza la salida con un preoperacional No apto (solo app nueva). Queda quién y por qué.
+export async function autorizarNoApto(empresaId, viajeId, usuario, motivo) {
+  const d = await checklistDelViaje(empresaId, viajeId);
+  if (d.servidor !== 'app' || !d.checklist) throw new ErrorHttp(409, 'Este preoperacional no se puede autorizar desde aquí');
+  if (d.checklist.resultado !== 'no_apto') throw new ErrorHttp(409, 'Solo se autoriza un preoperacional No apto');
+  const checklist = await llamar(`/checklist/${d.checklist.checklistId}/autorizar`, { metodo: 'POST', servidor: 'app',
+    cuerpo: { por: String(usuario.nombre || usuario.email).slice(0, 120), motivo } });
+  return { ...d, checklist };
+}
+
+// ── Cuentas de conductores en la app nueva (invitar con un código que la oficina le entrega) ──
+async function conductorDe(empresaId, terceroId) {
+  if (!configuradoServidor('app')) throw new ErrorHttp(503, 'La app de conductores no está configurada en el servidor');
+  const t = await Tercero.findOne({ empresa: empresaId, _id: terceroId });
+  if (!t) throw new ErrorHttp(404, 'Tercero no encontrado');
+  if (!(t.roles || []).includes('conductor')) throw new ErrorHttp(400, 'Solo los conductores usan la app');
+  if (digitos(t.numId).length < 5) throw new ErrorHttp(400, 'El conductor no tiene un número de documento válido');
+  return t;
+}
+
+export async function cuentaApp(empresaId, terceroId) {
+  const t = await conductorDe(empresaId, terceroId);
+  const [c] = await llamar(`/conductores?empresaId=${empresaId}&cedulas=${digitos(t.numId)}`, { servidor: 'app' });
+  return { estado: c?.estado || 'sin_cuenta', correo: c?.email || '', invitacionVence: c?.invitacionVence || null, correoTercero: t.correo || '' };
+}
+
+export async function invitarApp(empresaId, terceroId, correo) {
+  const t = await conductorDe(empresaId, terceroId);
+  const email = String(correo || t.correo || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ErrorHttp(400, 'Escriba el correo del conductor');
+  const empresa = await Empresa.findById(empresaId).select('nombre').lean();
+  const nombre = [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ').trim();
+  const r = await llamar('/conductores/invitar', { metodo: 'POST', servidor: 'app', cuerpo: {
+    empresaId: String(empresaId), empresaNombre: empresa?.nombre || 'Empresa', terceroId: String(t._id),
+    cedula: digitos(t.numId), nombre: nombre.length >= 3 ? nombre : `Conductor ${digitos(t.numId)}`, email } });
+  if (!t.correo) { t.correo = email; await t.save(); }   // se guarda si el tercero no tenía correo
+  // Sus liquidaciones del último año quedan en la app desde el primer día
+  await enviarPendientesConductor(empresaId, digitos(t.numId), { desdeMeses: 12 }).catch(() => undefined);
+  return { estado: r.estado, codigo: r.codigo, vence: r.vence, correo: email };
+}
+
+export async function desvincularApp(empresaId, terceroId) {
+  const t = await conductorDe(empresaId, terceroId);
+  try { await llamar('/conductores/desvincular', { metodo: 'POST', servidor: 'app', cuerpo: { empresaId: String(empresaId), cedula: digitos(t.numId) } }); }
+  catch (e) { if (e.status !== 404) throw e; }
+  return { estado: 'sin_cuenta' };
+}
+
+// ── Pago a conductores en la app nueva ──
+// Cada liquidación de un solo conductor se envía con su PDF al crearla, al pagarla (abonos) y al anularla.
+// Si la app no responde, queda pendiente y se reenvía con el siguiente envío del mismo conductor.
+// Nunca bloquea la operación de la oficina.
+async function appHabilitada(empresaId) {
+  if (!configuradoServidor('app')) return false;
+  const e = await Empresa.findById(empresaId).select('rastreo').lean();
+  return !!e?.rastreo?.surTrack;
+}
+
+const valor = (n) => Math.round(Number(n) || 0);
+
+async function enviarUna(empresaId, l, empresa) {
+  const cuerpo = {
+    cedula: l.cedula, fecha: l.fecha, desde: l.desde || null, hasta: l.hasta || null, placa: l.placa || '', estado: l.estado,
+    flete: valor(l.flete), auxiliar: valor(l.auxiliar), anticipo: valor(l.anticipoReconocido ?? l.anticipo), retefuente: valor(l.retefuente),
+    fopat: valor(l.fopat), descuentoPrestamos: valor(l.descuentoPrestamos), neto: valor(l.neto), pagado: valor(l.pagado),
+    lineas: (l.lineas || []).slice(0, 500).map(x => ({ fecha: x.fecha || null, placa: x.placa || '', empresa: x.empresa || '', destino: x.destino || '',
+      manifiesto: x.manifiesto || '', flete: valor(x.flete), auxiliar: valor(x.auxiliar), anticipo: valor(x.anticipoReconocido ?? x.anticipo),
+      retefuente: valor(x.retefuente), fopat: valor(x.fopat),
+      // Igual que el PDF: saldo de cada viaje = flete + auxiliar - anticipo reconocido (las retenciones van en el resumen)
+      saldo: valor(x.flete) + valor(x.auxiliar) - valor(x.anticipoReconocido ?? x.anticipo) })),
+  };
+  const ruta = `/pagos/${empresaId}/${encodeURIComponent(l.numero)}`;
+  try {
+    await llamar(ruta, { metodo: 'PUT', cuerpo, servidor: 'app' });
+  } catch (e) {
+    if (e.codigo === 'sin_conductor') return 'sin_cuenta';   // el conductor no usa la app nueva: no hay nada que reenviar
+    throw e;
+  }
+  await llamar(`${ruta}/pdf`, { metodo: 'PUT', servidor: 'app', archivo: { tipo: 'application/pdf', datos: await liquidacionPdf(empresa, l) } });
+  await LiquidacionConductor.updateOne({ empresa: empresaId, _id: l._id }, { $set: { appEnviada: new Date() } }, { timestamps: false });
+  return 'enviada';
+}
+
+// Pendientes de un conductor: nunca enviadas o cambiadas después del último envío
+export async function enviarPendientesConductor(empresaId, cedula, { desdeMeses = 12, limite = 50 } = {}) {
+  if (!cedula || !await appHabilitada(empresaId)) return { enviadas: 0 };
+  const lista = await LiquidacionConductor.find({ empresa: empresaId, cedula, fecha: { $gte: new Date(Date.now() - desdeMeses * 31 * 86400000) },
+    $or: [{ appEnviada: null }, { $expr: { $gt: ['$updatedAt', '$appEnviada'] } }] }).sort({ fecha: 1 }).limit(limite).lean();
+  if (!lista.length) return { enviadas: 0 };
+  const empresa = await Empresa.findById(empresaId).select('+logo').lean();
+  let enviadas = 0;
+  for (const l of lista) {
+    if (await enviarUna(empresaId, l, empresa) === 'sin_cuenta') break;
+    enviadas += 1;
+  }
+  return { enviadas };
+}
+
+// Llamada después de liquidar, pagar o anular. Los errores solo quedan en el registro del servidor.
+export async function avisarLiquidacion(empresaId, numero) {
+  try {
+    const l = await LiquidacionConductor.findOne({ empresa: empresaId, numero }).select('cedula').lean();
+    if (l?.cedula) await enviarPendientesConductor(empresaId, l.cedula);
+  } catch (e) {
+    console.warn(`No se pudo enviar la liquidación ${numero} a la app de conductores: ${e.message}`);
+  }
 }
 
 // Fase 8: checklist del día de un conductor y una placa (para guardar la copia del SG-SST / PESV)

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { contextoViaje, variablesRemesa, valoresManifiesto } from '../src/services/rndc/documentos.js';
 import { problemasMaestro } from '../src/services/rndc/operaciones.js';
-import { variablesTercero } from '../src/services/rndc/documentos.js';
+import { variablesTercero, variablesVehiculo } from '../src/services/rndc/documentos.js';
 
 const empresa = { nit: '900109959', dv: '2', rndc: {} };
 const cliente = { tipoId: 'N', nit: '8909009431', dv: '', sedeRemitente: '1' };
@@ -18,12 +18,18 @@ test('Remesa: sin destinatario propio, el destinatario es el cliente con su sede
   assert.equal(vars2.CODSEDEDESTINATARIO, '3');
 });
 
-test('Terceros: la licencia solo se exige a conductores', () => {
+test('Maestros RNDC: del tercero solo se exigen dirección y municipio; del vehículo, el peso vacío', () => {
   const titular = { tipoId: 'C', numId: '52532526', nombres: 'LISBETH', apellido1: 'FUERTES', direccion: 'LA UNION', codMunicipio: '52399000', roles: ['titular'] };
   assert.deepEqual(problemasMaestro(11, variablesTercero(empresa, titular), titular), []);
-  const conductor = { ...titular, roles: ['conductor'] };
-  const p = problemasMaestro(11, variablesTercero(empresa, conductor), conductor);
-  assert.ok(p.some(x => x.startsWith('NUMLICENCIACONDUCCION')));
+  // Conductor sin licencia ni apellido: lo trae el RNDC; si no lo tiene, es opcional
+  const conductor = { tipoId: 'C', numId: '52532527', direccion: 'LA UNION', codMunicipio: '52399000', roles: ['conductor'] };
+  assert.deepEqual(problemasMaestro(11, variablesTercero(empresa, conductor), conductor), []);
+  const sinDireccion = { ...conductor, direccion: '', codMunicipio: '' };
+  assert.deepEqual(problemasMaestro(11, variablesTercero(empresa, sinDireccion), sinDireccion).map(p => p.split(':')[0]).sort(),
+    ['CODMUNICIPIORNDC', 'NOMENCLATURADIRECCION']);
+  const vehiculo = { placa: 'ABC123' };
+  assert.deepEqual(problemasMaestro(12, variablesVehiculo(empresa, vehiculo), vehiculo).map(p => p.split(':')[0]), ['PESOVEHICULOVACIO']);
+  assert.deepEqual(problemasMaestro(12, variablesVehiculo(empresa, { placa: 'ABC123', pesoVacio: 5000 }), {}), []);
 });
 
 test('Manifiesto: el destino es el municipio de la sede del destinatario (MAN354)', () => {

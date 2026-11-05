@@ -2,14 +2,15 @@
 // cumplir, anular, registrar maestros y consultar. Cada envío queda en
 // TransaccionRndc. La clave del usuario web service se recibe en cada
 // operación y nunca se guarda.
-import { Empresa, Viaje, Vehiculo, Tercero, Municipio, TransaccionRndc, Contador, proximo, pob } from '../../models/index.js';
+import { Empresa, Viaje, Vehiculo, Tercero, Municipio, Tarifa, TransaccionRndc, Contador, proximo, pob } from '../../models/index.js';
+import { lineaLiquidacion, respaldosAuxiliar } from '../calculos.js';
 import { buscadorMunicipios } from '../importacion/excel.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { enviar, registrarTransaccion } from './cliente.js';
 import { xmlRegistro, xmlConsulta, bloqueRemesas, interpretarRegistro, interpretarConsulta, validarVariables, ocultarClave } from './xml.js';
 import {
   contextoViaje, variablesRemesa, variablesManifiesto, variablesCumplidoRemesa, variablesCumplidoManifiesto,
-  variablesAnulacion, variablesTercero, variablesVehiculo, huella, idCliente, destinoIgualOrigen, PROBLEMA_DESTINO, valoresManifiesto,
+  variablesAnulacion, variablesTercero, variablesVehiculo, huella, idCliente, destinoIgualOrigen, PROBLEMA_DESTINO, valoresManifiesto, textoAuxiliar,
 } from './documentos.js';
 import { TIPOS_ID_CONDUCTOR, MOTIVOS_REEMPLAZO } from './catalogos.js';
 import { validarTiempos, parametrosTiempo } from './tiemposCumplido.js';
@@ -47,6 +48,12 @@ export async function cargarViaje(empresaId, viajeId) {
     .populate(['cliente', 'conductor', 'titular', 'tarifaRef'].map(x => pob(empresaId, x))).lean();
   if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
   const vehiculo = await Vehiculo.findOne({ empresa: empresaId, placa: v.placa }).lean();
+  // Auxiliares registrados en el viaje: el mismo valor pagado que muestra el reporte de viajes
+  if (v.conAuxiliar) {
+    const tarifas = await Tarifa.find({ empresa: empresaId, cliente: v.cliente?._id }).lean();
+    const { totalAuxiliarPagado } = lineaLiquidacion(v, v.tarifaRef, { respaldo: respaldosAuxiliar(tarifas).get(String(v.cliente?._id)) });
+    v.textoAuxiliar = textoAuxiliar(Number(v.diasAuxiliar) > 0 ? Number(v.diasAuxiliar) : (Number(v.cantidad) || 1), totalAuxiliarPagado);
+  }
   // Sin destinatario en el viaje ni en la tarifa: la sede del cliente en el municipio de destino
   if (!v.destinatario?.numId && !v.tarifaRef?.destinatario?.numId && v.cliente) {
     const codDestino = v.codDestino || v.tarifaRef?.codMunicipio;
@@ -146,21 +153,18 @@ const CAMPOS_VEHICULO = {
   CODTIPOIDTENEDOR: ['tenedor.tipoId', 'Tipo de documento del tenedor'], NUMIDTENEDOR: ['tenedor.numId', 'Documento del tenedor'],
 };
 
-// Problemas según el diccionario oficial, más dos condiciones del manual:
-// los conductores llevan número y categoría de licencia, y las personas naturales, apellido.
+// Datos que la empresa debe escribir: del tercero solo dirección y municipio; del vehículo, solo el peso vacío.
+// Lo demás lo trae el RNDC (consulta oficial) y, si no lo tiene, es opcional: lo vacío no se envía en el XML.
+export const OBLIGATORIOS_MAESTRO = {
+  11: ['NUMNITEMPRESATRANSPORTE', 'CODTIPOIDTERCERO', 'NUMIDTERCERO', 'NOMENCLATURADIRECCION', 'CODMUNICIPIORNDC'],
+  12: ['NUMNITEMPRESATRANSPORTE', 'NUMPLACA', 'PESOVEHICULOVACIO'],
+};
+
+// Problemas según el diccionario oficial (tamaño y formato de lo que se envía), exigiendo solo los obligatorios de arriba.
 export function problemasMaestro(proceso, variables, doc) {
+  const obligatorios = OBLIGATORIOS_MAESTRO[proceso];
   let problemas = validarVariables(proceso, variables);
-  if (proceso === 11) {
-    // El diccionario marca la fecha de la licencia como obligatoria, pero el RNDC registra
-    // terceros sin licencia (titulares, propietarios): solo se exige a quien conduce o la tiene.
-    const conLicencia = (doc.roles || []).includes('conductor') || txt(doc.licencia?.numero);
-    if (!conLicencia) problemas = problemas.filter(p => !/LICENCIA/.test(p));
-    if ((doc.roles || []).includes('conductor')) {
-      if (!txt(doc.licencia?.numero)) problemas.push('NUMLICENCIACONDUCCION: es obligatorio para conductores');
-      if (!txt(doc.licencia?.categoria)) problemas.push('CODCATEGORIALICENCIACONDUCCION: es obligatorio para conductores');
-    }
-    if (doc.tipoId !== 'N' && !txt(doc.apellido1)) problemas.push('PRIMERAPELLIDOIDTERCERO: es obligatorio');
-  }
+  if (obligatorios) problemas = problemas.filter(p => !/: es obligatorio$/.test(p) || obligatorios.includes(p.split(':')[0]));
   return [...new Set(problemas)];
 }
 

@@ -8,6 +8,7 @@ import { Empresa } from '../models/index.js';
 import { abrirEnlace } from '../services/manifiestoConductor.js';
 import { z } from 'zod';
 import * as FR from '../services/sst/firmaRemota.js';
+import * as REL from '../services/gestion/relaciones.js';
 import { datosManifiesto, manifiestoPdf, nombreArchivo } from '../services/reportes/manifiesto.js';
 
 const r = Router();
@@ -35,6 +36,22 @@ r.get('/manifiestos/:token/pdf', async (req, res) => {
   res.setHeader('Content-Disposition', `${req.query.descargar === '1' ? 'attachment' : 'inline'}; filename="${nombreArchivo(m).replace(/[^\w.-]/g, '_')}"`);
   res.setHeader('Cache-Control', 'no-store');
   res.send(await manifiestoPdf(m));
+});
+
+// Fase 11: enlace de una relación de cobro (lo recibe la empresa por WhatsApp): resumen y descarga del PDF y el Excel
+r.get('/relaciones/:token', async (req, res) => {
+  const rel = await REL.porToken(req.params.token);
+  if (!rel) throw new ErrorHttp(404, 'El enlace no existe');
+  res.json(await REL.resumenPublico(rel));
+});
+r.get('/relaciones/:token/archivo', async (req, res) => {
+  const rel = await REL.porToken(req.params.token, { anotar: false });
+  if (!rel) throw new ErrorHttp(404, 'El enlace no existe');
+  const a = await REL.archivos(rel.empresa, rel._id);
+  const pdf = req.query.formato !== 'xlsx';
+  res.setHeader('Content-Type', pdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `${pdf && req.query.descargar !== '1' ? 'inline' : 'attachment'}; filename="${a.nombre}.${pdf ? 'pdf' : 'xlsx'}"`);
+  res.send(pdf ? a.pdf : a.xlsx);
 });
 
 // Fase 10: firma de la asistencia a una capacitación desde el celular

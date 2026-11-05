@@ -27,7 +27,7 @@ export const MODULOS: Modulo[] = [
     { ruta: '/contabilidad', texto: 'Contabilidad', icono: 'lista', permisos: [P.CONTABILIDAD_VER], descripcion: 'Facturas, cobros, pagos, libros, auxiliares, saldos iniciales y cierre de mes', claves: 'factura asiento cierre balance' },
   ] },
   { id: 'datos', nombre: 'Datos', icono: 'edificio', paginas: [
-    { ruta: '/clientes', texto: 'Clientes y tarifas', icono: 'edificio', permisos: [P.MAESTROS_VER], descripcion: 'Clientes, destinos, tarifas y sedes de descargue', claves: 'destino tarifa sede' },
+    { ruta: '/clientes', texto: 'Clientes y tarifas', icono: 'edificio', permisos: [P.MAESTROS_VER], descripcion: 'Clientes (remitentes), sus sedes y destinos con tarifa', claves: 'destino tarifa sede remitente destinatario' },
     { ruta: '/conductores', texto: 'Conductores y terceros', icono: 'personas', permisos: [P.MAESTROS_VER], descripcion: 'Conductores, titulares, tenedores y empresas', claves: 'cedula licencia tercero' },
     { ruta: '/vehiculos', texto: 'Vehículos', icono: 'camion', permisos: [P.MAESTROS_VER], descripcion: 'Placas, SOAT, tecnomecánica y propietarios', claves: 'placa soat tecnomecanica' },
     { ruta: '/revision', texto: 'Revisión de datos', icono: 'alerta', permisos: [P.MAESTROS_VER], descripcion: 'Datos por corregir antes de expedir' },
@@ -36,6 +36,7 @@ export const MODULOS: Modulo[] = [
   { id: 'sst', nombre: 'SG-SST y PESV', icono: 'escudo', paginas: [
     { ruta: '/sst', texto: 'Tablero SST y PESV', icono: 'escudo', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Vencimientos, checklists del día, indicadores del PESV con Sur Track y capacitaciones', claves: 'sg-sst pesv seguridad vial salud trabajo 0312 40595 velocidad fatiga' },
     { ruta: '/sst/preoperacionales', texto: 'Preoperacionales', icono: 'check', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Checklists de Sur Track guardados, no aptos y PDF para auditoría', claves: 'checklist sur track inspeccion apto' },
+    { ruta: '/sst/planillas', texto: 'Planillas', icono: 'documento', permisos: [P.SST_VER], descripcion: 'Planilla de seguridad social de cada conductor, mes a mes', claves: 'seguridad social eps arl pila planilla' },
     { ruta: '/sst/personas', texto: 'Personas', icono: 'personas', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Conductores y empleados: exámenes, EPP, comparendos y checklists', claves: 'examen medico epp comparendo conductor trabajador' },
     { ruta: '/sst/capacitaciones', texto: 'Capacitaciones', icono: 'lista', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Programa anual y asistencia con firmas', claves: 'cronograma asistencia induccion' },
     { ruta: '/sst/formatos', texto: 'Formatos', icono: 'documento', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Formatos con auto-llenado, firmas y membrete; Word y Excel propios', claves: 'acta plantilla membrete word excel firma' },

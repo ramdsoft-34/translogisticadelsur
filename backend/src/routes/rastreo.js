@@ -23,6 +23,7 @@ const id = (v) => { if (!mongoose.isValidObjectId(v)) throw new ErrorHttp(400, '
 r.get('/estado', permitir(P.VIAJES_VER), async (req, res) => {
   const e = await Empresa.findById(req.empresaId).select('rastreo').lean();
   res.json({ habilitado: !!e?.rastreo?.surTrack && st.configurado(), configuradoServidor: st.configurado(),
+    appConductores: !!e?.rastreo?.surTrack && st.configuradoServidor('app'),
     velocidadMaxima: e?.rastreo?.velocidadMaxima ?? 80, minutosSinSenal: e?.rastreo?.minutosSinSenal ?? 10, surTrack: !!e?.rastreo?.surTrack,
     enviarManifiesto: !!e?.rastreo?.enviarManifiesto });
 });
@@ -125,6 +126,40 @@ r.get('/viajes/:id/checklist/pdf', permitir(P.VIAJES_VER), async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `${req.query.ver === '1' ? 'inline' : 'attachment'}; filename="${Ck.nombreChecklist(v.placa, d.checklist.fecha)}"`);
   res.send(buf);
+});
+
+// Autorizar la salida con un preoperacional No apto (decisión de seguridad: solo el administrador)
+r.post('/viajes/:id/checklist/autorizar', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const { motivo } = z.object({ motivo: z.string().trim().min(10, 'Escriba el motivo (mínimo 10 caracteres)').max(500) }).parse(req.body);
+  const d = await st.autorizarNoApto(req.empresaId, id(req.params.id), req.usuario, motivo);
+  await auditar(req, 'autorizar_preoperacional_no_apto', { entidad: 'Viaje', entidadId: req.params.id, detalle: { placa: d.viaje.placa, motivo } });
+  res.json(d);
+});
+
+// Fotos de las entregas de la app nueva: son privadas y se traen con la clave de integración
+r.get('/fotos/:fotoId', permitir(P.VIAJES_VER), async (req, res) => {
+  const f = await st.foto(req.empresaId, req.params.fotoId);
+  res.set('Cache-Control', 'private, max-age=86400').type(f.tipo).send(f.datos);
+});
+
+// Cuenta del conductor en la app nueva: estado, invitar (da un código de un solo uso) y quitar acceso
+r.get('/conductores/:terceroId/app', permitir(P.MAESTROS_VER), async (req, res) => {
+  await st.exigirHabilitado(req.empresaId);
+  res.json(await st.cuentaApp(req.empresaId, id(req.params.terceroId)));
+});
+r.post('/conductores/:terceroId/app/invitar', permitir(P.MAESTROS_EDITAR), async (req, res) => {
+  await st.exigirHabilitado(req.empresaId);
+  const { correo } = z.object({ correo: z.string().trim().max(200).optional() }).parse(req.body || {});
+  const r2 = await st.invitarApp(req.empresaId, id(req.params.terceroId), correo);
+  // El código no se guarda en la auditoría
+  await auditar(req, 'invitar_conductor_app', { entidad: 'Tercero', entidadId: req.params.terceroId, detalle: { correo: r2.correo, vence: r2.vence } });
+  res.status(201).json(r2);
+});
+r.post('/conductores/:terceroId/app/desvincular', permitir(P.MAESTROS_EDITAR), async (req, res) => {
+  await st.exigirHabilitado(req.empresaId);
+  const r2 = await st.desvincularApp(req.empresaId, id(req.params.terceroId));
+  await auditar(req, 'desvincular_conductor_app', { entidad: 'Tercero', entidadId: req.params.terceroId });
+  res.json(r2);
 });
 
 r.post('/viajes/:id/finalizar', permitir(P.VIAJES_REGISTRAR), async (req, res) => {

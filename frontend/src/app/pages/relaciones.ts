@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -16,6 +17,8 @@ import { VisorPdf } from '../shared/visor-pdf';
 import { ExportarViajes, rangoPeriodo } from '../shared/exportar-viajes';
 import { leerArchivos } from '../shared/adjuntos';
 import { AutorizacionAdmin } from '../core/autorizacion.service';
+import { RelacionGenerar } from '../shared/relacion-generar';
+import { RelacionesGeneradas } from '../shared/relaciones-generadas';
 
 type Periodo = 'hoy' | 'semana' | 'quincena' | 'mes' | 'otro';
 const finQuincena = () => rangoPeriodo('quincena')!.hasta;
@@ -25,11 +28,11 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
 // registro masivo de un vehículo para varios días, relación en Excel/PDF, pago a conductores e informe de utilidad.
 @Component({
   selector: 'app-relaciones',
-  imports: [MenuAcciones, FormsModule, RouterLink, Icono, Modal, Confirmar, BuscarTercero, VisorPdf, ExportarViajes, ...FORMATOS],
+  imports: [MenuAcciones, FormsModule, RouterLink, Icono, Modal, Confirmar, BuscarTercero, VisorPdf, ExportarViajes, RelacionGenerar, RelacionesGeneradas, ...FORMATOS],
   template: `
     <div class="pagina-cab">
-      <div><h1>Programación por placa</h1>
-        <p class="sutil">Revise los viajes por empresa y placa, regístrelos en bloque y saque la relación, el pago y la utilidad.</p></div>
+      <div><h1>Relaciones</h1>
+        <p class="sutil">Viajes por placa o conductor, registro masivo, la relación de cobro de cada empresa y su historial.</p></div>
       <div class="acciones">
         <app-menu-acciones texto="Informes">
           <button (click)="exportador().abrir({ cliente: f.cliente })"><app-icono nombre="descargar" [tam]="16" />Relación en Excel o PDF<small>Viajes por empresa o por placa</small></button>
@@ -39,19 +42,29 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
           <hr />
           <a routerLink="/pago-conductores"><app-icono nombre="dinero" [tam]="16" />Ir a Pago a conductores</a>
         </app-menu-acciones>
-        @if (puedeRegistrar) { <button class="primario" (click)="abrirMasivo()"><app-icono nombre="mas" [tam]="16" />Registro masivo</button> }
       </div>
     </div>
     <app-visor-pdf />
     <app-exportar-viajes [clientes]="clientes()" />
 
+    <!-- Fase 11: pestañas del módulo -->
+    <nav class="pestanas" role="tablist" aria-label="Relaciones">
+      <button type="button" role="tab" [class.activa]="pestana() === 'placa'" (click)="pestana.set('placa')">Programación por placa</button>
+      @if (puedeRegistrar) { <button type="button" role="tab" (click)="abrirMasivo()">Registro masivo</button> }
+      <button type="button" role="tab" [class.activa]="pestana() === 'generar'" (click)="pestana.set('generar')">Generar relación</button>
+      <button type="button" role="tab" [class.activa]="pestana() === 'generadas'" (click)="pestana.set('generadas')">Relaciones generadas</button>
+    </nav>
+    @if (pestana() === 'generar') { <app-relacion-generar [clientes]="clientesActivos()" (guardada)="pestana.set('generadas')" /> }
+    @if (pestana() === 'generadas') { <app-relaciones-generadas [clientes]="clientes()" (generar)="pestana.set('generar')" /> }
+
+    @if (pestana() === 'placa') {
     <section class="barra" aria-label="Filtros">
       <div class="campo"><label for="rl-cli">Empresa</label>
         <select id="rl-cli" [(ngModel)]="f.cliente" (change)="cargar()"><option value="">Todas</option>
           @for (c of clientes(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }</select></div>
-      <div class="campo"><label for="rl-placa">Placa</label>
-        <input id="rl-placa" list="rl-placas" placeholder="Todas" maxlength="7" [(ngModel)]="f.placa" (change)="cargar()" (keyup.enter)="cargar()" />
-        <datalist id="rl-placas">@for (p of placas(); track p) { <option [value]="p"></option> }</datalist></div>
+      <div class="campo"><label for="rl-placa">Placa o conductor</label>
+        <input id="rl-placa" list="rl-placas" placeholder="Todas" maxlength="60" [(ngModel)]="f.placa" (change)="cargar()" (keyup.enter)="cargar()" />
+        <datalist id="rl-placas">@for (p of sugerencias(); track p) { <option [value]="p"></option> }</datalist></div>
       <div class="campo"><span class="etiqueta">Periodo</span><div class="segmentos">
         @for (o of PERIODOS; track o.v) { <button type="button" [class.activo]="periodo() === o.v" (click)="elegirPeriodo(o.v)">{{ o.t }}</button> }</div></div>
       <div class="campo"><label for="rl-d">Desde</label><input id="rl-d" type="date" [(ngModel)]="f.desde" (change)="periodo.set('otro'); cargar()" /></div>
@@ -69,7 +82,7 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
 
       <div class="tabla-caja">
         <table class="tabla-movil">
-          <thead><tr><th>N°</th><th>Fecha</th><th>Empresa</th><th>Placa</th><th>Conductor</th><th>Destino</th><th>Planilla</th>
+          <thead><tr><th>N°</th><th>Fecha</th><th>Empresa</th><th>Placa</th><th>Conductor</th><th>Destino</th><th>Planilla</th><th>Cómo llegó</th><th>Reportado</th>
             <th class="num">Tarifa</th><th class="num">Flete</th><th>Fact.</th><th></th></tr></thead>
           <tbody>
             @for (x of d.filas; track x._id) {
@@ -81,6 +94,8 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
                 <td data-etiqueta="Conductor">{{ x.conductor }}</td>
                 <td data-etiqueta="Destino">{{ x.destino }}</td>
                 <td data-etiqueta="Planilla">{{ x.planilla || '—' }}</td>
+                <td data-etiqueta="Cómo llegó"><span class="chip sin-punto" [class.info]="x.origen === 'RNDC'">{{ x.origen }}</span>@if (x.manifiesto) { <small class="d-bloque sutil">{{ x.manifiesto }}</small> }</td>
+                <td data-etiqueta="Reportado">{{ x.reportado | dia }}@if (tarde(x)) { <small class="d-bloque tarde">{{ tarde(x) }} días después</small> }</td>
                 <td data-etiqueta="Tarifa" class="num">{{ x.tarifa | pesos }}</td>
                 <td data-etiqueta="Flete" class="num">{{ x.flete | pesos }}</td>
                 <td data-etiqueta="Facturado">@if (x.facturado) { <span class="chip ok">Sí</span> } @else { <span class="chip sin-punto">No</span> }</td>
@@ -98,10 +113,11 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
                   }
                 </td>
               </tr>
-            } @empty { <tr><td colspan="11" class="vacio">No hay viajes con estos filtros</td></tr> }
+            } @empty { <tr><td colspan="13" class="vacio">No hay viajes con estos filtros</td></tr> }
           </tbody>
         </table>
       </div>
+    }
     }
 
     <!-- Relación por correo -->
@@ -151,15 +167,35 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
 
       @if (previa(); as pv) {
         <h3 class="sub">Días del rango · {{ elegidos().size }} por registrar</h3>
-        <div class="dias">
-          @for (x of pv.dias; track x.fecha) {
-            <label class="dia" [class.omitido]="!x.registrar" [class.elegido]="elegidos().has(x.fecha)">
-              <input type="checkbox" [checked]="elegidos().has(x.fecha)" [disabled]="x.motivo === 'ya tiene viaje'" (change)="alternarDia(x.fecha)" />
-              <span class="fecha"><strong>{{ x.fecha | dia }}</strong><small>{{ x.dia }}</small></span>
-              @if (x.motivo) { <span class="chip sin-punto" [class.alerta]="x.motivo.startsWith('festivo')">{{ x.motivo }}</span> }
-            </label>
-          }
+        <!-- Fase 11: los días en filas; cada fila con su destino -->
+        <div class="acciones-dias">
+          <button type="button" class="pequeno" (click)="marcarHabiles()">Marcar hábiles</button>
+          <button type="button" class="pequeno" (click)="desmarcarTodo()">Desmarcar todo</button>
+          <span class="crece"></span>
+          <label class="todos">Destino para todos los marcados
+            <select [(ngModel)]="destinoMarcados" (change)="destinoATodos()"><option value="">—</option>
+              @for (t of tarifasCliente(); track t._id) { <option [value]="t._id">{{ t.destino }}</option> }</select></label>
         </div>
+        <div class="tabla-caja tabla-dias"><table>
+          <thead><tr><th class="ck"></th><th>Fecha</th><th>Día</th><th>Destino</th><th>Novedad</th></tr></thead>
+          <tbody>
+            @for (x of pv.dias; track x.fecha) {
+              <tr [class.elegido]="elegidos().has(x.fecha)" [class.omitido]="!elegidos().has(x.fecha)">
+                <td class="ck"><input type="checkbox" [checked]="elegidos().has(x.fecha)" [disabled]="x.motivo === 'ya tiene viaje'" (change)="alternarDia(x.fecha)"
+                  [attr.aria-label]="'Registrar el ' + x.fecha" /></td>
+                <td><strong>{{ x.fecha | dia }}</strong></td>
+                <td class="cap">{{ x.dia }}</td>
+                <td>@if (elegidos().has(x.fecha)) {
+                    <select class="destino-fila" [class.cambiado]="destinosDia()[x.fecha]" [ngModel]="destinosDia()[x.fecha] || m.tarifaRef" (ngModelChange)="destinoFila(x.fecha, $event)"
+                      [attr.aria-label]="'Destino del ' + x.fecha">
+                      @for (t of tarifasCliente(); track t._id) { <option [value]="t._id">{{ t.destino }}</option> }</select>
+                  } @else { <span class="sutil">—</span> }</td>
+                <td>@if (x.motivo) { <span class="chip sin-punto" [class.alerta]="x.motivo.startsWith('festivo')">{{ x.motivo }}</span> }
+                  @else if (!elegidos().has(x.fecha)) { <span class="sutil">Quitado a mano</span> }</td>
+              </tr>
+            }
+          </tbody>
+        </table></div>
       }
 
       <ng-container pie>
@@ -171,6 +207,10 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
     </app-modal>`,
   styles: [`
     .acciones { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tarde { color: var(--ambar-texto, #b45309); font-size: 11.5px; }
+    .destino-dia { margin-left: auto; font-size: 12px; color: var(--gris-6); } .destino-dia.cambiado { color: var(--ambar-texto, #b45309); font-weight: 700; }
+    .dia button.marcado { background: var(--primario-suave, #fff4d6); }
+    .otro-destino { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-top: 12px; } .otro-destino .campo { min-width: 260px; }
     .cifras { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--gris-2); border: 1px solid var(--gris-2);
       border-radius: var(--radio); overflow: hidden; margin: 14px 0; }
     .cifras > div { background: var(--gris-0); padding: 12px 16px; display: flex; flex-direction: column; gap: 2px; }
@@ -180,6 +220,12 @@ const hoy = () => rangoPeriodo('hoy')!.desde;
     .copiar { display: inline-flex; gap: 6px; align-items: center; } .copiar input { width: 150px; }
     .rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
     .sub { font-size: 14px; margin: 18px 0 8px; }
+    .acciones-dias { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; } .acciones-dias .crece { flex: 1; }
+    .acciones-dias .todos { display: flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 600; } .acciones-dias select { min-width: 200px; }
+    .tabla-dias table { width: 100%; border-collapse: collapse; } .tabla-dias th, .tabla-dias td { padding: 6px 10px; border-bottom: 1px solid var(--gris-15, #f0f1f3); text-align: left; }
+    .tabla-dias th { font-size: 12px; color: var(--gris-5); } .tabla-dias .ck { width: 36px; } .tabla-dias .cap { text-transform: capitalize; }
+    .tabla-dias tr.elegido td { background: var(--primario-claro, #fffaeb); } .tabla-dias tr.omitido td { color: var(--gris-5); }
+    .destino-fila { min-width: 220px; padding: 3px 8px; min-height: 0; height: 32px; } .tabla-dias td { padding-top: 4px; padding-bottom: 4px; } .destino-fila.cambiado { border-color: var(--primario-borde); font-weight: 700; }
     .dias { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; }
     .dia { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--gris-2); border-radius: 10px; cursor: pointer; }
     .dia.elegido { border-color: var(--primario-borde); background: var(--primario-claro); }
@@ -195,6 +241,10 @@ export class Relaciones {
   readonly exportador = viewChild.required(ExportarViajes);
   private visor = viewChild.required(VisorPdf);
 
+  // Fase 11: pestañas del módulo
+  readonly pestana = signal<'placa' | 'generar' | 'generadas'>('placa');
+  readonly sugerencias = computed(() => [...new Set<string>([...(this.datos()?.filas || []).map((x: any) => x.placa), ...(this.datos()?.filas || []).map((x: any) => x.conductor)].filter(Boolean))].sort());
+  tarde(x: any) { const d = Math.floor((new Date(x.reportado).getTime() - new Date(x.fecha).getTime()) / 864e5); return x.reportado && d > 3 ? d : 0; }
   readonly PERIODOS: { v: Periodo; t: string }[] = [{ v: 'hoy', t: 'Hoy' }, { v: 'semana', t: 'Semana' }, { v: 'quincena', t: 'Quincena' }, { v: 'mes', t: 'Mes' }];
   readonly periodo = signal<Periodo>('quincena');
   f = { cliente: '', placa: '', ...rangoPeriodo('quincena')! };
@@ -221,9 +271,15 @@ export class Relaciones {
     this.cargar();
   }
 
+  private turno = new Turno();
   async cargar() {
-    try { this.datos.set(await this.api.get('/gestion/relaciones/viajes', { agrupar: 'empresa', ...this.f, placa: this.f.placa.toUpperCase() })); }
-    catch (e) { this.avisos.error(e); }
+    const vigente = this.turno.tomar();
+    try {
+      // «Placa o conductor»: una placa (ABC123) busca por placa; lo demás, por el nombre del conductor
+      const b = String(this.f.placa || '').trim(); const esPlaca = /^[A-Za-z]{3}[\s-]?\d{2,3}[A-Za-z]?$/.test(b) || /^[A-Za-z0-9]{5,6}$/.test(b) && /\d/.test(b);
+      const d = await this.api.get('/gestion/relaciones/viajes', { agrupar: 'empresa', ...this.f, placa: esPlaca ? b.toUpperCase() : '', conductor: esPlaca ? '' : b });
+      if (vigente()) this.datos.set(d as any);
+    } catch (e) { if (vigente()) this.avisos.error(e); }
   }
 
   elegirPeriodo(p: Periodo) { this.periodo.set(p); this.f = { ...this.f, ...rangoPeriodo(p)! }; this.cargar(); }
@@ -283,7 +339,8 @@ export class Relaciones {
 
   abrirMasivo() {
     this.m = { cliente: this.f.cliente, tarifaRef: '', destino: '', conductor: '', placa: this.f.placa.toUpperCase(), desde: hoy(), hasta: finQuincena(),
-      cantidad: 1, planilla: '', incluirSabados: true, conAuxiliar: false, diasAuxiliar: null, requiereManifiesto: false };
+      cantidad: 1, planilla: '', incluirSabados: false, conAuxiliar: false, diasAuxiliar: null, requiereManifiesto: false };
+    this.destinosDia.set({}); this.marcadosDestino.set(new Set()); this.destinoMarcados = '';
     this.mCliente.set(this.m.cliente);
     this.previa.set(null); this.placasConductor.set([]);
     this.masivoAbierto.set(true);
@@ -313,6 +370,21 @@ export class Relaciones {
     } catch (e) { this.avisos.error(e); }
     finally { this.ocupado.set(false); }
   }
+  // Fase 11: otro destino para algunos días (como «Destino para los marcados» de la plantilla)
+  readonly destinosDia = signal<Record<string, string>>({});
+  readonly marcadosDestino = signal(new Set<string>());
+  destinoMarcados = '';
+  destinoDe(f: string) { const id = this.destinosDia()[f]; return id ? `✎ ${this.tarifasCliente().find(t => t._id === id)?.destino || ''}` : this.m.destino; }
+  marcarDestino(f: string) { const s = new Set(this.marcadosDestino()); if (s.has(f)) s.delete(f); else s.add(f); this.marcadosDestino.set(s); }
+  aplicarDestino() {
+    const d = { ...this.destinosDia() };
+    for (const f of this.marcadosDestino()) { if (this.destinoMarcados && this.destinoMarcados !== this.m.tarifaRef) d[f] = this.destinoMarcados; else delete d[f]; }
+    this.destinosDia.set(d); this.marcadosDestino.set(new Set());
+  }
+  destinoFila(f: string, id: string) { const d = { ...this.destinosDia() }; if (id && id !== this.m.tarifaRef) d[f] = id; else delete d[f]; this.destinosDia.set(d); }
+  destinoATodos() { if (!this.destinoMarcados) return; for (const f of this.elegidos()) this.destinoFila(f, this.destinoMarcados); setTimeout(() => (this.destinoMarcados = ''), 0); }
+  desmarcarTodo() { this.elegidos.set(new Set()); }
+  marcarHabiles() { this.elegidos.set(new Set((this.previa()?.dias || []).filter((x: any) => x.registrar).map((x: any) => x.fecha))); }
   alternarDia(f: string) {
     const s = new Set(this.elegidos());
     if (s.has(f)) s.delete(f); else s.add(f);
@@ -321,7 +393,9 @@ export class Relaciones {
   async registrarMasivo() {
     this.ocupado.set(true);
     try {
-      const cuerpo = { ...this.cuerpo(), dias: [...this.elegidos()] };
+      const dias = [...this.elegidos()];
+      const destinos = Object.fromEntries(Object.entries(this.destinosDia()).filter(([f]) => dias.includes(f)));
+      const cuerpo = { ...this.cuerpo(), dias, destinos };
       let r: any;
       try { r = await this.api.post<any>('/gestion/relaciones/masivo', cuerpo); }
       catch (e) {

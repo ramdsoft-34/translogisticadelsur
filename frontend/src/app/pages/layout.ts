@@ -2,8 +2,8 @@ import { Component, DestroyRef, ElementRef, HostListener, computed, inject, sign
 import { EnVivo } from '../core/en-vivo.service';
 import { environment } from '../../environments/environment';
 import { Avisos } from '../core/avisos.service';
+import { Router, RouterLink, RouterLinkActive, RouterOutlet, NavigationEnd, NavigationStart, NavigationCancel, NavigationError } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router, RouterLink, RouterLinkActive, RouterOutlet, NavigationEnd } from '@angular/router';
 import { Auth } from '../core/auth.service';
 import { RndcClave } from '../core/rndc-clave.service';
 import { Icono } from '../shared/icono';
@@ -85,6 +85,7 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
       </div>
     </aside>
 
+    @if (navegando()) { <div class="barra-navegacion" role="progressbar" aria-label="Cargando la página"></div> }
     <main id="contenido"><router-outlet /></main>
 
     <!-- Buscador de páginas (Ctrl + K) -->
@@ -137,7 +138,7 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
     .lat-nav a:focus-visible { box-shadow: inset 0 0 0 2px var(--primario); }
     .lat-pie { border-top: 1px solid rgba(255,255,255,.07); padding: 12px 12px 14px; display: flex; flex-direction: column; gap: 10px; }
     .ambiente { display: inline-flex; align-items: center; gap: 7px; padding: 0 8px; font-size: 12px; color: var(--tinta-tenue); white-space: nowrap; }
-    .ambiente i { width: 8px; height: 8px; border-radius: 50%; background: #ffa04d; box-shadow: 0 0 0 3px rgba(255,160,77,.18); }
+    .ambiente i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #ffa04d; box-shadow: 0 0 0 3px rgba(255,160,77,.18); }
     .ambiente.prod i { background: #4fd18b; box-shadow: 0 0 0 3px rgba(79,209,139,.18); }
     .ico-btn { min-height: 0; width: 38px; height: 38px; padding: 0; border-radius: 10px; border: 0; background: transparent; color: inherit; box-shadow: none; }
     .ico-btn:hover:not(:disabled) { background: var(--tinta-3); }
@@ -174,6 +175,8 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
     .desplegable .cerrar, .desplegable .cerrar app-icono { color: var(--rojo); }
     .desplegable .cerrar:hover:not(:disabled) { background: var(--rojo-claro); }
 
+    .barra-navegacion { position: fixed; inset: 0 0 auto 0; height: 3px; z-index: 1000; background: var(--primario); transform-origin: left; animation: navegar 1.2s ease-out infinite; }
+    @keyframes navegar { from { transform: scaleX(0); } to { transform: scaleX(1); opacity: .35; } }
     main { margin-left: var(--ancho-lateral); padding: 28px 32px 56px; animation: entrar .22s ease-out; }
     main > :not(router-outlet) { display: block; max-width: var(--ancho-pagina); margin-left: auto; margin-right: auto; }
     @keyframes entrar { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -206,18 +209,36 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
     .fijar { width: 32px; height: 32px; color: var(--tinta-tenue); }
     .fijar[aria-pressed="true"] { color: var(--primario); }
     @media (min-width: 961px) {
+      /* Recogido y abierto usan la misma distribución: los íconos no se mueven; solo cambia el ancho
+         y los textos se desvanecen (sin centrar ni ocultar de golpe). */
       :host(.suelto) { --ancho-lateral: 72px; }
-      :host(.suelto) .lateral { transition: width .2s ease, box-shadow .2s ease; overflow: hidden; }
+      :host(.suelto) .lateral { overflow: hidden; transition: width .26s cubic-bezier(.2, .8, .2, 1), box-shadow .26s ease; will-change: width; }
       :host(.suelto) .lateral:not(.recogido) { width: 252px; box-shadow: 18px 0 40px -20px rgba(0,0,0,.6); }
+      :host(.suelto) .lat-cab { justify-content: flex-start; gap: 10px; padding: 18px 12px 14px 16px; }
+      /* Cerrado: solo el monograma TS. Abierto: solo el nombre. Se reemplazan uno al otro en el mismo sitio */
+      :host(.suelto) .marca { position: relative; min-height: 40px; }
+      :host(.suelto) .marca .logo { display: block; position: absolute; left: 0; top: 50%; transform: translateY(-50%); transition: opacity .18s ease; }
+      :host(.suelto) .lateral:not(.recogido) .marca .logo { opacity: 0; }
+      :host(.suelto) .marca .nombre { width: 150px; }
+      :host(.suelto) .fijar { margin-left: auto; flex: none; }
+      :host(.suelto) .buscador { width: calc(100% - 28px); padding-left: 14px; overflow: hidden; }
+      /* Cada opción mide 44 px de alto con el ícono centrado en el cuadro (también el cuadro amarillo de la activa);
+         sin barra de desplazamiento visible, que le quitaba ancho y corría el ícono */
+      :host(.suelto) .lat-nav { overflow-x: hidden; padding-left: 14px; padding-right: 14px; scrollbar-width: none; }
+      :host(.suelto) .lat-nav::-webkit-scrollbar { display: none; }
+      :host(.suelto) .lat-nav a { padding: 0 0 0 13.5px; height: 40px; min-width: 44px; gap: 13px; }
+      :host(.suelto) .lat-nav a app-icono { flex: none; }
+      :host(.suelto) .lat-nav h3 { white-space: nowrap; overflow: hidden; }
+      :host(.suelto) .disparador { padding-left: 8px; overflow: hidden; }
+      :host(.suelto) .ambiente { padding-left: 20px; }
+      :host(.suelto) .ambiente i { flex: none; }
+      :host(.suelto) .marca .nombre, :host(.suelto) .fijar, :host(.suelto) .txt-buscar, :host(.suelto) .buscador kbd, :host(.suelto) .lat-nav a span,
+      :host(.suelto) .lat-nav h3, :host(.suelto) .quien, :host(.suelto) .flecha, :host(.suelto) .ambiente span {
+        transition: opacity .18s ease .08s; }
       :host(.suelto) .recogido .marca .nombre, :host(.suelto) .recogido .fijar, :host(.suelto) .recogido .txt-buscar, :host(.suelto) .recogido .buscador kbd,
-      :host(.suelto) .recogido .lat-nav a span, :host(.suelto) .recogido .quien, :host(.suelto) .recogido .flecha, :host(.suelto) .recogido .ambiente span { display: none; }
-      :host(.suelto) .recogido .marca .logo { display: block; }
-      :host(.suelto) .recogido .lat-cab { padding: 18px 0 14px; justify-content: center; }
-      :host(.suelto) .recogido .buscador { width: 44px; padding: 0; justify-content: center; margin: 0 auto 10px; }
-      :host(.suelto) .recogido .lat-nav a { justify-content: center; padding: 9px 0; }
-      :host(.suelto) .recogido .lat-nav h3 { font-size: 0; height: 1px; margin: 4px 14px 8px; padding: 0; background: rgba(255,255,255,.1); }
-      :host(.suelto) .recogido .disparador { justify-content: center; padding: 6px 0; border-color: transparent; background: transparent; }
-      :host(.suelto) .recogido .ambiente { justify-content: center; padding: 0; }
+      :host(.suelto) .recogido .lat-nav a span, :host(.suelto) .recogido .lat-nav h3, :host(.suelto) .recogido .quien, :host(.suelto) .recogido .flecha,
+      :host(.suelto) .recogido .ambiente span { opacity: 0; pointer-events: none; transition-delay: 0s; transition-duration: .1s; }
+      :host(.suelto) .recogido .disparador { border-color: transparent; background: transparent; }
     }
 
     @media (max-width: 960px) {
@@ -231,7 +252,7 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
       .solo-movil { display: inline-flex; }
       main { margin-left: 0; padding: 18px 14px 40px; }
     }
-    @media (prefers-reduced-motion: reduce) { .lateral { transition: none; } }
+    @media (prefers-reduced-motion: reduce) { .lateral, .lateral * { transition: none !important; } }
   `],
 })
 export class Layout {
@@ -258,6 +279,11 @@ export class Layout {
   readonly indice = signal(0);
   private entrada = viewChild<ElementRef<HTMLInputElement>>('entrada');
   private readonly url = signal(this.router.url);
+  readonly navegando = signal(false);
+  private navegacion = this.router.events.pipe(takeUntilDestroyed()).subscribe(e => {
+    if (e instanceof NavigationStart) this.navegando.set(true);
+    else if (e instanceof NavigationEnd || e instanceof NavigationCancel || e instanceof NavigationError) this.navegando.set(false);
+  });
 
   // Módulos y páginas que el rol puede ver
   readonly modulos = computed(() => {

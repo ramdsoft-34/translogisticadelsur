@@ -20,6 +20,7 @@ export const autorizacionSchema = z.object({ email: z.string().trim().max(120), 
   motivo: z.string().trim().max(300) }).optional();
 import * as rastreo from '../services/rastreo/surtrack.js';
 import { asegurarSoporte } from '../services/gestion/soporteInterno.js';
+import { exigirNoFacturado } from '../services/gestion/relaciones.js';
 import { datosManifiesto } from '../services/reportes/manifiesto.js';
 import * as MC from '../services/manifiestoConductor.js';
 
@@ -58,6 +59,22 @@ export async function titularDePlaca(empresaId, placa) {
   const v = await Vehiculo.findOne({ empresa: empresaId, placa }).select('titularHabitual').lean();
   return v?.titularHabitual || null;
 }
+// Cliente o destino corregidos (sin documentos vigentes en el RNDC): lo anterior no pasa al nuevo.
+// Con otro cliente, el origen vuelve a salir de su sede y el viaje queda por reportar,
+// para que salga en el mensaje del cliente correcto.
+export function corregirCliente(v, d) {
+  const cambiaCliente = !!d.cliente && d.cliente !== String(v.cliente);
+  const cambiaDestino = d.tarifaRef !== undefined && String(d.tarifaRef || '') !== String(v.tarifaRef || '');
+  if (!cambiaCliente && !cambiaDestino) return;
+  if (d.destinatario === undefined) d.destinatario = { tipoId: '', numId: '', sede: '' };
+  d.codDestinoManifiesto = '';
+  d['ajustesRndc.remesa'] = {};
+  if (!cambiaCliente) return;
+  if (d.tarifaRef === undefined) d.tarifaRef = null;
+  d.codOrigen = '';
+  d['reporteWhatsapp.fecha'] = null;
+  d['reporteWhatsapp.usuario'] = null;
+}
 // Después de expedir documentos en el RNDC solo se pueden cambiar datos internos.
 const CAMPOS_INTERNOS = ['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa', 'historico', 'licencia'];
 // «Manifiesto» del formulario → número manual del manifiesto para el RNDC
@@ -89,6 +106,10 @@ async function validarReferencias(req, d) {
   if (malos.length) throw new ErrorHttp(400, `Datos que no pertenecen a su empresa: ${malos.join(', ')}`);
 }
 
+// «Por enviar» en Manifiestos: solo lo ya reportado por WhatsApp. También lo creado desde Manifiestos
+// y lo que ya tiene la remesa aceptada, que no se puede dejar sin terminar.
+const LISTOS_PARA_MANIFIESTO = [{ 'reporteWhatsapp.fecha': { $ne: null } }, { origen: 'manifiesto' }, { 'remesa.estado': 'aceptado' }];
+
 function filtroLista(req) {
   const f = deEmpresa(req);
   const desde = parseFecha(req.query.desde); const hasta = parseFecha(req.query.hasta);
@@ -109,6 +130,7 @@ function filtroLista(req) {
   const anulado = [{ 'remesa.estado': 'anulado' }, { 'manifiesto.estado': 'anulado' },
     { 'anuladoBase.remesa': { $nin: ['', null] }, 'remesa.estado': { $ne: 'aceptado' } },
     { 'anuladoBase.manifiesto': { $nin: ['', null] }, 'manifiesto.estado': { $ne: 'aceptado' } }];
+  if (req.query.reportados === '1') (f.$and ||= []).push({ $or: LISTOS_PARA_MANIFIESTO });
   if (req.query.anulados === '0') f.$nor = anulado;
   if (req.query.anulados === '1') (f.$and ||= []).push({ $or: anulado });
   if (req.query.q) {
@@ -174,8 +196,8 @@ r.get('/resumen', permitir(P.VIAJES_VER), async (req, res) => {
   const [hoyN, porEstado, mes] = await Promise.all([
     Viaje.countDocuments(deEmpresa(req, { fecha: hoy })),
     // Los históricos importados del Excel no cuentan como pendientes de RNDC
-    // Igual que «Por enviar» en Manifiestos RNDC: sin históricos, sin los que no requieren manifiesto y sin anulados
-    Viaje.aggregate([{ $match: { ...base, historico: { $ne: true }, requiereManifiesto: { $ne: false },
+    // Igual que «Por enviar» en Manifiestos RNDC: reportados, sin históricos, sin los que no requieren manifiesto y sin anulados
+    Viaje.aggregate([{ $match: { ...base, historico: { $ne: true }, requiereManifiesto: { $ne: false }, $or: LISTOS_PARA_MANIFIESTO,
       $nor: [{ 'remesa.estado': 'anulado' }, { 'manifiesto.estado': 'anulado' }] } }, { $group: { _id: '$estado', n: { $sum: 1 } } }]),
     Viaje.aggregate([{ $match: { ...base, fecha: { $gte: inicioMes }, estado: { $ne: 'anulado' } } },
       { $group: { _id: null, viajes: { $sum: 1 }, tarifa: { $sum: '$tarifa' }, flete: { $sum: '$flete' }, anticipo: { $sum: '$anticipo' } } }]),
@@ -363,6 +385,12 @@ r.post('/', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   if (d.numeroManifiesto) d.numerosManuales = { remesa: '', manifiesto: d.numeroManifiesto };
   delete d.numeroManifiesto;
   await validarReferencias(req, d);
+  // Fase 11: la misma placa ya tiene viaje ese día → se pregunta antes de registrar (para no cobrar dos veces el mismo viaje)
+  if (req.body?.confirmarRepetido !== true && d.origen !== 'manifiesto' && d.placa && d.fecha) {
+    const mismos = await Viaje.find(deEmpresa(req, { placa: d.placa, fecha: d.fecha, estado: { $ne: 'anulado' } })).select('numero destino manifiesto soporteInterno').lean();
+    if (mismos.length) throw new ErrorHttp(428, `La placa ${d.placa} ya tiene ${mismos.length === 1 ? 'un viaje' : `${mismos.length} viajes`} ese día. Si es el mismo viaje, no lo registre otra vez.`,
+      mismos.map(x => `N° ${x.numero} · ${x.destino} · ${x.manifiesto?.numero || x.soporteInterno?.mc || 'sin documento'}`));
+  }
   // Mes cerrado y documentos del viaje (licencia, SOAT y tecnomecánica vencidos no dejan registrar sin autorización del administrador)
   await asegurarMesAbierto(req.empresaId, d.fecha);
   const { avisos: avisosDocumentos, autorizado } = await exigirDocumentosVigentes(req.empresaId, { conductor: d.conductor, placa: d.placa }, autorizacion);
@@ -415,6 +443,8 @@ async function viajeEditable(req) {
 r.put('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const v = await viajeEditable(req);
   let d = viajeSchema.partial().parse(req.body);
+  // Fase 11: un viaje de una relación facturada solo deja cambiar las observaciones
+  if (Object.keys(d).some(k => !['observaciones', 'licencia'].includes(k))) await exigirNoFacturado(req.empresaId, [v._id]);
   if (d.numeroManifiesto !== undefined && v.manifiesto?.estado === 'aceptado') delete d.numeroManifiesto;
   numeroManifiestoA(d);
   if (d.fecha) await asegurarMesAbierto(req.empresaId, d.fecha);
@@ -427,6 +457,7 @@ r.put('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   await validarReferencias(req, { ...d, cliente: d.cliente || (d.tarifaRef ? String(v.cliente) : undefined) });
   if (d.historico !== undefined && !tienePermiso(req.usuario.rol, P.VIAJES_EDITAR_TODOS)) throw new ErrorHttp(403, 'No puede cambiar el estado histórico del viaje');
   const antes = v.toObject();
+  corregirCliente(v, d);
   if (d.conductor) {
     const cond = await Tercero.findOne(deEmpresa(req, { _id: d.conductor })).select('nombres apellido1 apellido2').lean();
     d.conductorNombre = nombreTercero(cond);
@@ -445,6 +476,7 @@ r.put('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
 // Solo se eliminan viajes sin documentos en el RNDC.
 r.delete('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const v = await viajeEditable(req);
+  await exigirNoFacturado(req.empresaId, [v._id]);
   if (v.estado !== 'registrado' || v.remesa?.radicado || v.manifiesto?.radicado) {
     throw new ErrorHttp(409, 'El viaje tiene documentos en el RNDC; debe anularlos en lugar de eliminar el viaje');
   }

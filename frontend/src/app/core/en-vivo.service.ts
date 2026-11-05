@@ -12,27 +12,46 @@ export const ID_PESTANA = (() => { try { return crypto.randomUUID(); } catch { r
 @Injectable({ providedIn: 'root' })
 export class EnVivo {
   private auth = inject(Auth);
-  private oyentes = new Set<{ recursos: string[]; fn: (c: Cambio) => void }>();
+  private oyentes = new Set<{ recursos: string[]; fn: (c: Cambio) => void; alVolver: boolean }>();
+  private ocultaDesde = 0;
   private control: AbortController | null = null;
   private espera = 1000;
   private versionTimer: ReturnType<typeof setInterval> | undefined;
 
   // Una pantalla se suscribe a los recursos que muestra (p. ej. ['viajes', 'rndc']); se cancela al salir de ella.
   // Varios avisos seguidos se agrupan en una sola recarga.
-  al(recursos: string[], fn: () => void, retraso = 600) {
+  // alVolver: también se actualiza al regresar a la pestaña del navegador (no en pantallas con edición sin guardar).
+  al(recursos: string[], fn: () => void, retraso = 600, alVolver = true) {
     let t: ReturnType<typeof setTimeout> | undefined;
-    const oyente = { recursos, fn: () => { clearTimeout(t); t = setTimeout(fn, retraso); } };
+    const oyente = { recursos, alVolver, fn: () => { clearTimeout(t); t = setTimeout(fn, retraso); } };
     this.oyentes.add(oyente);
     inject(DestroyRef).onDestroy(() => { clearTimeout(t); this.oyentes.delete(oyente); });
   }
 
   iniciar() {
-    if (this.control || !this.auth.usuario()) return;
-    this.conectar();
+    if (!this.auth.usuario()) return;
+    document.addEventListener('visibilitychange', this.alCambiarVisibilidad);
+    if (this.conCanal() && !this.control && !document.hidden) this.conectar();
     this.vigilarVersion();
   }
 
-  detener() { this.control?.abort(); this.control = null; clearInterval(this.versionTimer); this.versionTimer = undefined; }
+  detener() {
+    document.removeEventListener('visibilitychange', this.alCambiarVisibilidad);
+    this.control?.abort(); this.control = null; clearInterval(this.versionTimer); this.versionTimer = undefined;
+  }
+
+  // El canal en vivo es por empresa: el superadministrador no tiene (el servidor lo rechazaría como acceso denegado)
+  private conCanal() { return !!this.auth.usuario() && !this.auth.esSuper(); }
+
+  // El navegador permite pocas conexiones por sitio (HTTP/1.1: 6): cada pestaña abierta con su canal en vivo
+  // las agotaría y las consultas quedarían esperando. Solo la pestaña visible lo mantiene; al volver se actualiza.
+  private alCambiarVisibilidad = () => {
+    if (!this.conCanal()) return;
+    if (document.hidden) { this.ocultaDesde = Date.now(); this.control?.abort(); this.control = null; return; }
+    if (!this.control) this.conectar();
+    if (this.ocultaDesde && Date.now() - this.ocultaDesde >= 15000) for (const o of this.oyentes) if (o.alVolver) o.fn({} as Cambio);
+    this.ocultaDesde = 0;
+  };
 
   private async conectar() {
     const control = this.control = new AbortController();
@@ -60,7 +79,7 @@ export class EnVivo {
     if (this.control !== control || control.signal.aborted) return;
     // Reconexión con espera creciente (máx. 30 s)
     this.control = null;
-    setTimeout(() => { if (this.auth.usuario()) this.conectar(); }, this.espera);
+    setTimeout(() => { if (this.conCanal() && !this.control && !document.hidden) this.conectar(); }, this.espera);
     this.espera = Math.min(this.espera * 2, 30000);
   }
 

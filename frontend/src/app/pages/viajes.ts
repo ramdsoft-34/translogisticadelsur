@@ -1,3 +1,5 @@
+import { HttpErrorResponse } from '@angular/common/http';
+import { Turno } from '../core/turno';
 import { Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -25,7 +27,7 @@ import { RouterLink } from '@angular/router';
 import { AutorizacionAdmin } from '../core/autorizacion.service';
 
 interface Formulario {
-  licencia?: string; numeroManifiesto?: string;
+  licencia?: string; conLicencia?: boolean; numeroManifiesto?: string;
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
   placa: string; remolque: string; conductor: string; titular: string;
   pesoKg: number | null; cantidad: number | null; conAuxiliar: boolean; diasAuxiliar: number | null; planilla: string;
@@ -131,7 +133,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       <div class="registro-columnas">
       <div class="col-form">
       @let f = form();
-      @if (bloqueado()) { <div class="mensaje info compacto-msj">Este viaje ya tiene documentos en el RNDC: solo puede cambiar observaciones, auxiliar, tarifa y licencia.</div> }
+      @if (bloqueado()) { <div class="mensaje info compacto-msj">Este viaje ya tiene documentos en el RNDC: solo puede cambiar observaciones, auxiliar, tarifa y licencia. Para cambiar el cliente, anule el manifiesto y la remesa.</div> }
       @if (f.historico && puedeEditarTodos) {
         <label class="casilla compacto-msj"><input type="checkbox" name="habilitar" [(ngModel)]="habilitarRndc" />Viaje histórico del Excel: habilitarlo para expedir en el RNDC</label>
       }
@@ -144,7 +146,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
         <span class="etq">Conductor:</span>
         <div>
-          <app-buscar-tercero etiqueta="" rol="conductor" [conPlacas]="true" [(valor)]="f.conductor" (elegido)="elegirConductor($event)"
+          <app-buscar-tercero id="v-cond" etiqueta="" rol="conductor" [conPlacas]="true" [(valor)]="f.conductor" (elegido)="elegirConductor($event)"
             [deshabilitado]="bloqueado()" placeholder="Nombre, apellido o cédula" />
           @if (documentos(); as dc) {
             @if (dc.vencidos.length) { <span class="chip error sin-punto" [title]="dc.vencidos.join('; ')">Documentos vencidos: se pedirá autorización</span> }
@@ -154,7 +156,10 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         </div>
 
         <label for="v-lic">Licencia:</label>
-        <input id="v-lic" name="licencia" [(ngModel)]="f.licencia" placeholder="Categoría-número" />
+        <div class="con-casilla">
+          <input id="v-lic" name="licencia" [(ngModel)]="f.licencia" placeholder="Categoría-número" />
+          <input type="checkbox" name="conLicencia" [(ngModel)]="f.conLicencia" title="Incluir la licencia en el reporte de WhatsApp" aria-label="Incluir la licencia en el reporte de WhatsApp" />
+        </div>
 
         <label for="v-placa">Placa:</label>
         <div>
@@ -217,14 +222,9 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         <label for="v-fecha">Fecha:</label>
         <input id="v-fecha" type="date" class="corto" name="fecha" [(ngModel)]="f.fecha" (ngModelChange)="fechaFormulario($event)" [disabled]="bloqueado()" required />
       </form>
-      </div>
-      <aside class="col-wa" aria-label="Reporte por WhatsApp">
-        <h3>Reporte por WhatsApp</h3>
-        <ng-container [ngTemplateOutlet]="panelWa" [ngTemplateOutletContext]="{ enFormulario: true }" />
-      </aside>
-      </div>
-      <ng-container pie>
-        @if (form()._id && !bloqueado() && puedeRegistrar) { <button class="peligro" type="button" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()" style="margin-right:auto">Eliminar</button> }
+      <!-- Botones debajo del formulario (no en el pie de la ventana) -->
+      <div class="acciones-registro">
+        @if (form()._id && !bloqueado() && puedeRegistrar) { <button class="peligro" type="button" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()">Eliminar</button> }
         @if (form()._id && rastreoHabilitado() && puedeRegistrar) {
           <button type="button" (click)="rastreoForm()?.activo ? null : activarRastreo()" [disabled]="guardando() || rastreoForm()?.activo"
             [title]="rastreoForm()?.activo ? 'El viaje ya se está rastreando' : 'Rastrear este viaje con Sur Track'"><app-icono nombre="ubicacion" [tam]="15" />{{ rastreoForm()?.activo ? 'Rastreo activo' : 'Rastrear' }}</button>
@@ -243,7 +243,13 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             </div>
           }
         }
-      </ng-container>
+      </div>
+      </div>
+      <aside class="col-wa" aria-label="Reporte por WhatsApp">
+        <h3>Reporte por WhatsApp</h3>
+        <ng-container [ngTemplateOutlet]="panelWa" [ngTemplateOutletContext]="{ enFormulario: true }" />
+      </aside>
+      </div>
     </app-modal>
 
     <app-modal titulo="Reporte de vehículos por WhatsApp" [abierto]="waAbierto()" (cerrar)="waAbierto.set(false)" [ancho]="true">
@@ -306,8 +312,8 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
               <pre class="wa-texto">{{ m.texto }}</pre>
               <div class="acciones">
                 <button class="pequeno" (click)="copiar(m.texto)">Copiar</button>
-                <a class="boton pequeno wa" [href]="m.enlace" target="_blank" rel="noopener noreferrer"><app-icono nombre="enviar" [tam]="15" />Abrir en WhatsApp</a>
-                @if (puedeRegistrar) { <button class="pequeno" (click)="marcarReportado(m)">Marcar como reportado</button> }
+                <a class="boton pequeno wa" [href]="m.enlace" target="_blank" rel="noopener noreferrer" (click)="puedeRegistrar && marcarReportado(m)"><app-icono nombre="enviar" [tam]="15" />Reportar por WhatsApp</a>
+                @if (puedeRegistrar) { <button class="pequeno" (click)="marcarReportado(m)" title="Lo marca como reportado sin abrir WhatsApp; pasa a Manifiestos">Marcar como reportado</button> }
               </div>
             </div>
           } @empty {
@@ -333,6 +339,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     a.chip.gps { text-decoration: none; }
     .placas-conductor { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
     .registro-columnas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 16px; align-items: start; }
+    .acciones-registro { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--gris-2); }
     .col-form { padding: 12px 14px; border: 1px solid var(--gris-2); border-radius: var(--radio-l); background: var(--gris-0); }
     .registro { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 6px 10px; align-items: center; font-size: 13.5px; }
     .registro > label, .registro > .etq { font-weight: 700; white-space: nowrap; }
@@ -498,22 +505,27 @@ export class Viajes {
   }
 
   // Primera página (reinicia la lista)
+  private turno = new Turno();
   async cargar() {
+    const vigente = this.turno.tomar();
     this.cargando.set(true);
     this.pagina = 1;
     try {
       const r = await this.api.get<any>('/viajes', { ...this.filtro, pagina: 1, limite: POR_PAGINA });
+      if (!vigente()) return;
       this.viajes.set(r.viajes); this.total.set(r.total);
       if (r.sumas) this.sumas.set(r.sumas);
-    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
+    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
   }
 
   // Páginas siguientes (carga progresiva)
   async cargarMas() {
     if (this.cargandoMas() || this.viajes().length >= this.total()) return;
     this.cargandoMas.set(true);
+    const vigente = this.turno.actual();
     try {
       const r = await this.api.get<any>('/viajes', { ...this.filtro, pagina: this.pagina + 1, limite: POR_PAGINA });
+      if (!vigente()) return;
       this.pagina += 1;
       this.viajes.update(l => [...l, ...r.viajes]);
     } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }
@@ -548,7 +560,7 @@ export class Viajes {
       titular: v.titular?._id || '', pesoKg: v.pesoKg, cantidad: v.cantidad, conAuxiliar: v.conAuxiliar, diasAuxiliar: v.diasAuxiliar || null, planilla: v.planilla || '', tarifa: v.tarifa,
       flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones, estado: v.estado, historico: !!v.historico,
       requiereManifiesto: v.requiereManifiesto !== false,
-      licencia: (v as any).licencia || '', numeroManifiesto: (v as any).numerosManuales?.manifiesto || '',
+      licencia: (v as any).licencia || '', conLicencia: !!(v as any).licencia, numeroManifiesto: (v as any).numerosManuales?.manifiesto || '',
     });
     this.preguntarManifiesto.set(false);
     this.habilitarRndc = false;
@@ -593,10 +605,11 @@ export class Viajes {
     if (lic) this.form.update(f => ({ ...f, licencia: lic }));
     const placas: string[] = t?.placas || [];
     this.placasConductor.set(placas);
+    // Con Enter sobre el conductor se sigue en el destino (sin empresa elegida, en la empresa)
+    setTimeout(() => document.getElementById(this.form().cliente ? 'v-dest' : 'v-cli')?.focus(), 30);
     if (!placas.length) return;
     // La primera es la placa principal del conductor (si la tiene)
     this.form.update(f => ({ ...f, placa: placas[0], remolque: f.remolque || t.remolque || '' }));
-    setTimeout(() => document.getElementById('v-peso')?.focus(), 30);
     this.revisarDocumentos();
   }
 
@@ -645,7 +658,8 @@ export class Viajes {
     if (!f._id) f.requiereManifiesto = !!requiere;
     if (!f.conductor && !this.bloqueado()) { this.avisos.mostrar('Seleccione el conductor', 'error'); return; }
     const cuerpo: any = { ...f, placa: f.placa.toUpperCase(), remolque: (f.remolque || '').toUpperCase(), tarifaRef: f.tarifaRef || null,
-      licencia: (f.licencia || '').trim(), numeroManifiesto: (f.numeroManifiesto || '').trim().toUpperCase() };
+      licencia: f.conLicencia ? (f.licencia || '').trim() : '', numeroManifiesto: (f.numeroManifiesto || '').trim().toUpperCase() };
+    delete cuerpo.conLicencia;
     delete cuerpo._id; delete cuerpo.estado; delete cuerpo.titular;
     if (!cuerpo.numeroManifiesto && !f._id) delete cuerpo.numeroManifiesto;
     for (const k of ['pesoKg', 'cantidad', 'diasAuxiliar', 'tarifa', 'flete', 'anticipo']) if (cuerpo[k] === null || cuerpo[k] === '') delete cuerpo[k];
@@ -658,8 +672,10 @@ export class Viajes {
     try {
       if (f._id) {
         // Al editar, el viaje se actualiza y la ventana sigue abierta (se cierra con «Cerrar»)
-        await this.api.put(`/viajes/${f._id}`, cuerpo);
+        const r = await this.api.put<any>(`/viajes/${f._id}`, cuerpo);
         this.avisos.ok(`Viaje N° ${this.numeroEditado()} actualizado`);
+        if ((this.viajeRastreo as any)?.reporteWhatsapp?.fecha && !r.reporteWhatsapp?.fecha) this.avisos.mostrar('El viaje vuelve a quedar por reportar: sale en el mensaje de WhatsApp del cliente corregido.', 'info', 9000);
+        if (this.viajeRastreo) (this.viajeRastreo as any).reporteWhatsapp = r.reporteWhatsapp;
         this.cargarWhatsapp();
         this.registradosTanda.update(l => l.length ? l : [{ numero: this.numeroEditado(), placa: f.placa, sinManifiesto: f.requiereManifiesto === false }]);
         return;
@@ -668,6 +684,20 @@ export class Viajes {
         let v: Viaje;
         try { v = await this.api.post<Viaje>('/viajes', cuerpo); }
         catch (e) {
+          // Fase 11: la placa ya tiene viaje ese día → se confirma para no registrar (ni cobrar) dos veces el mismo viaje
+          if (e instanceof HttpErrorResponse && e.status === 428) {
+            const det = Array.isArray(e.error?.detalles) ? `\n\n${e.error.detalles.join('\n')}` : '';
+            if (!confirm(`${e.error?.error || 'La placa ya tiene viaje ese día.'}${det}\n\n¿Es otro viaje distinto y lo registra de todas formas?`)) return;
+            cuerpo.confirmarRepetido = true;
+            try { v = await this.api.post<Viaje>('/viajes', cuerpo); }
+            catch (e2) {
+              const venc = AutorizacionAdmin.vencidosDe(e2);
+              if (!venc) throw e2;
+              const aut = await this.autorizacion.pedir(venc);
+              if (!aut) return;
+              v = await this.api.post<Viaje>('/viajes', { ...cuerpo, autorizacion: aut });
+            }
+          } else {
           // Documentos vencidos: solo con la autorización del administrador (CA-06)
           const vencidos = AutorizacionAdmin.vencidosDe(e);
           if (!vencidos) throw e;
@@ -675,6 +705,7 @@ export class Viajes {
           if (!aut) return;
           v = await this.api.post<Viaje>('/viajes', { ...cuerpo, autorizacion: aut });
           this.avisos.ok('Viaje autorizado por el administrador');
+          }
         }
         this.avisos.ok(`Viaje N° ${v.numero} registrado${requiere ? '' : ' (sin manifiesto)'}`);
         const avisosDoc: string[] = (v as any).avisosDocumentos || [];
@@ -690,6 +721,7 @@ export class Viajes {
           this.registradosTanda.update(l => [...l, { numero: v.numero, placa: v.placa, sinManifiesto: !requiere }]);
           this.form.set({ ...vacio(), fecha: f.fecha });
           this.placasConductor.set([]); this.rastrear.set(false); this.preguntarManifiesto.set(false); this.cargarSiguienteNumero();
+          this.enfocarConductor();
           return;
         }
         if (this.seguirRegistrando()) {
@@ -699,7 +731,7 @@ export class Viajes {
           this.form.set({ ...f, tarifaRef: '', destino: '', codDestino: '', tarifa: null, flete: null, anticipo: null, pesoKg: null, cantidad: 1,
             conAuxiliar: false, diasAuxiliar: null, planilla: '', placa: '', remolque: '', conductor: '', titular: '', observaciones: '', requiereManifiesto: true });
           this.placasConductor.set([]); this.preguntarManifiesto.set(false); this.cargarSiguienteNumero();
-          setTimeout(() => document.getElementById('v-dest')?.focus(), 50);
+          this.enfocarConductor();
           return;
         }
       }
@@ -708,6 +740,9 @@ export class Viajes {
       this.cargar();
     } catch (e) { this.avisos.error(e); } finally { this.guardando.set(false); }
   }
+
+  // Después de guardar se sigue con el conductor del próximo viaje
+  private enfocarConductor() { setTimeout(() => document.querySelector<HTMLInputElement>('#v-cond input')?.focus(), 50); }
 
   async eliminar() {
     try {
@@ -731,11 +766,14 @@ export class Viajes {
   }
 
   // reiniciar: al cambiar la fecha o el filtro se quita la selección
+  private turnoWa = new Turno();
   async cargarWhatsapp(reiniciar = false) {
+    const vigente = this.turnoWa.tomar();
     if (reiniciar) { this.waSeleccion.set(new Set()); this.waUnificados.set(new Set()); }
     try {
       const r = await this.api.get<{ mensajes: any[]; viajes: any[] }>('/viajes/reporte-whatsapp', { fecha: this.waFecha, incluirReportados: this.waIncluir ? 1 : 0,
         plantilla: this.waPlantilla, seleccion: 1, viajes: [...this.waSeleccion()].join(','), unificar: [...this.waUnificados()].join(',') });
+      if (!vigente()) return;
       this.waViajes.set(r.viajes);
       // Lo elegido que ya no está en la lista (p. ej. marcado como reportado) se quita de la selección
       const ids = new Set(r.viajes.map(x => x._id));

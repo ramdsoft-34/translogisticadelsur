@@ -2,14 +2,16 @@
 // (conductores, propietarios, tenedores…), vehículos y el catálogo DIVIPOLA.
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { Cliente, Tarifa, Tercero, Vehiculo, Municipio, Viaje, Empresa, pob } from '../models/index.js';
+import { z } from 'zod';
+import { Cliente, Tarifa, Tercero, Vehiculo, Municipio, Viaje, Empresa, Liquidacion, FacturaCont, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { auditar, cambios } from '../services/auditoria.js';
 import { normalizar, escaparRegex, quitarTildes } from '../utils/texto.js';
 import { clienteSchema, tarifaSchema, terceroSchema, vehiculoSchema } from '../validaciones/maestros.js';
-import { variablesTercero, variablesVehiculo, huella } from '../services/rndc/documentos.js';
+import { variablesTercero, variablesVehiculo, huella, idCliente } from '../services/rndc/documentos.js';
 import { reglasDe, pesoPorTamano } from '../services/gestion/reglas.js';
+import { sincronizarDestinoViajes } from '../services/gestion/sincronizarDestino.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -51,10 +53,39 @@ r.get('/clientes', ver, async (req, res) => {
   if (req.query.activos === '1') filtro.activo = true;
   res.json(await Cliente.find(filtro).sort({ nombre: 1 }).lean());
 });
+// El cliente es la empresa remitente: al crearlo se registra también su sede principal (lugar de cargue)
+// como tercero del RNDC, si ese NIT aún no tiene sedes en la plataforma.
+const sedeNueva = z.object({ nombre: z.string().trim().max(20).optional().default(''), direccion: z.string().trim().min(3, 'escriba la dirección').max(60),
+  codMunicipio: z.string().trim().regex(/^\d{8}$/, 'elija el municipio') });
 r.post('/clientes', editarTarifas, async (req, res) => {
-  const c = await Cliente.create({ ...clienteSchema.parse(req.body), empresa: req.empresaId });
-  await auditar(req, 'crear_cliente', { entidad: 'Cliente', entidadId: c._id, detalle: { nombre: c.nombre } });
+  const d = clienteSchema.parse(req.body);
+  const sede = req.body?.sede ? sedeNueva.parse(req.body.sede) : null;
+  const numId = idCliente(d);
+  if (sede && numId && !(await Tercero.exists(deEmpresa(req, { numId })))) {
+    const codigo = d.sedeRemitente || '1';
+    await Tercero.create({ empresa: req.empresaId, tipoId: d.tipoId, numId, nombres: d.razonSocial || d.nombre, sede: { codigo, nombre: (sede.nombre || 'PRINCIPAL').toUpperCase() },
+      direccion: sede.direccion, codMunicipio: sede.codMunicipio, roles: ['remitente'] });
+    d.sedeRemitente = codigo;
+  }
+  const c = await Cliente.create({ ...d, empresa: req.empresaId });
+  await auditar(req, 'crear_cliente', { entidad: 'Cliente', entidadId: c._id, detalle: { nombre: c.nombre, sede: d.sedeRemitente } });
   res.status(201).json(c);
+});
+
+// Nueva sede de una empresa (del cliente o de un destinatario): el código es el siguiente libre de ese NIT
+r.post('/sedes', editarTarifas, async (req, res) => {
+  const d = z.object({ tipoId: z.string().trim().max(1).optional().default('N'), numId: z.string().trim().transform(v => v.replace(/\D/g, '')).pipe(z.string().min(5).max(15)),
+    nombreEmpresa: z.string().trim().max(100).optional().default(''), rol: z.enum(['remitente', 'destinatario']).optional().default('destinatario') })
+    .merge(sedeNueva).parse(req.body);
+  const existentes = await Tercero.find(deEmpresa(req, { numId: d.numId })).select('nombres apellido1 tipoId sede').lean();
+  const nombres = existentes[0]?.nombres || d.nombreEmpresa;
+  if (!nombres) throw new ErrorHttp(400, 'Escriba el nombre de la empresa');
+  const codigos = existentes.map(t => Number(t.sede?.codigo)).filter(Number.isFinite);
+  const codigo = String(codigos.length ? Math.max(...codigos) + 1 : 1);
+  const x = await Tercero.create({ empresa: req.empresaId, tipoId: existentes[0]?.tipoId || d.tipoId, numId: d.numId, nombres,
+    sede: { codigo, nombre: (d.nombre || `SEDE ${codigo}`).toUpperCase() }, direccion: d.direccion, codMunicipio: d.codMunicipio, roles: [d.rol] });
+  await auditar(req, 'crear_sede', { entidad: 'Tercero', entidadId: x._id, detalle: { numId: d.numId, sede: codigo } });
+  res.status(201).json(x.toJSON());
 });
 r.put('/clientes/:id', editarTarifas, async (req, res) => {
   const d = clienteSchema.partial().parse(req.body);
@@ -63,6 +94,20 @@ r.put('/clientes/:id', editarTarifas, async (req, res) => {
   const c = await Cliente.findOneAndUpdate(deEmpresa(req, { _id: req.params.id }), { $set: d }, { new: true, runValidators: true });
   await auditar(req, 'editar_cliente', { entidad: 'Cliente', entidadId: c._id, detalle: { cambios: cambios(antes, c.toObject(), Object.keys(d)) } });
   res.json(c);
+});
+
+// Solo se elimina un cliente sin viajes, liquidaciones ni facturas (con historial se desactiva); sus destinos se eliminan con él.
+r.delete('/clientes/:id', editarTarifas, async (req, res) => {
+  const c = await Cliente.findOne(deEmpresa(req, { _id: req.params.id })).lean();
+  if (!c) throw new ErrorHttp(404, 'Cliente no encontrado');
+  const [viajes, liquidaciones, facturas] = await Promise.all([Viaje.countDocuments(deEmpresa(req, { cliente: c._id })),
+    Liquidacion.countDocuments(deEmpresa(req, { cliente: c._id })), FacturaCont.countDocuments(deEmpresa(req, { cliente: c._id }))]);
+  const usos = [viajes && `${viajes} viaje(s)`, liquidaciones && `${liquidaciones} liquidación(es)`, facturas && `${facturas} factura(s)`].filter(Boolean);
+  if (usos.length) throw new ErrorHttp(409, `${c.nombre} tiene ${usos.join(', ')}: no se puede eliminar. Desactívelo en «Editar cliente».`);
+  const { deletedCount: destinos } = await Tarifa.deleteMany(deEmpresa(req, { cliente: c._id }));
+  await Cliente.deleteOne(deEmpresa(req, { _id: c._id }));
+  await auditar(req, 'eliminar_cliente', { entidad: 'Cliente', entidadId: c._id, detalle: { nombre: c.nombre, nit: c.nit, destinos } });
+  res.json({ ok: true, destinos });
 });
 
 // ── Destinos y tarifas ──────────────────────────────────────────────────────
@@ -76,14 +121,15 @@ r.get('/tarifas', ver, async (req, res) => {
   const filtro = deEmpresa(req);
   if (req.query.cliente) filtro.cliente = req.query.cliente;
   if (req.query.activos === '1') filtro.activo = true;
-  const tarifas = await Tarifa.find(filtro).sort({ destino: 1 }).populate(pob(req.empresaId, 'cliente', 'nombre nit')).lean();
+  const tarifas = await Tarifa.find(filtro).sort({ destino: 1 }).populate(pob(req.empresaId, 'cliente', 'nombre nit dv tipoId')).lean();
   // Nombre de la sede del destinatario (código y nombre, como en el RNDC); sin destinatario = el mismo cliente
-  const docDe = (t) => String(t.destinatario?.numId || t.cliente?.nit || '').replace(/\D/g, '');
-  const docs = [...new Set(tarifas.filter(t => t.destinatario?.sede).map(docDe).filter(Boolean))];
-  const sedes = new Map((docs.length ? await Tercero.find(deEmpresa(req, { numId: { $in: docs }, 'sede.codigo': { $ne: '' } })).select('numId sede codMunicipio').lean() : [])
+  const docsDe = (t) => (t.destinatario?.numId ? [String(t.destinatario.numId).replace(/\D/g, '')]
+    : t.cliente ? [idCliente(t.cliente), String(t.cliente.nit || '').replace(/\D/g, '')] : []).filter(Boolean);
+  const docs = [...new Set(tarifas.filter(t => t.destinatario?.sede).flatMap(docsDe))];
+  const sedes = new Map((docs.length ? await Tercero.find(deEmpresa(req, { numId: { $in: docs }, 'sede.codigo': { $ne: '' } })).select('numId nombres sede codMunicipio direccion').lean() : [])
     .map(s => [`${s.numId}|${s.sede.codigo}`, s]));
-  res.json(tarifas.map(t => { const s = t.destinatario?.sede ? sedes.get(`${docDe(t)}|${t.destinatario.sede}`) : null;
-    return s ? { ...t, sedeNombre: s.sede.nombre, sedeMunicipio: s.codMunicipio } : t; }));
+  res.json(tarifas.map(t => { const s = t.destinatario?.sede ? docsDe(t).map(d => sedes.get(`${d}|${t.destinatario.sede}`)).find(Boolean) : null;
+    return s ? { ...t, sedeNombre: s.sede.nombre, sedeMunicipio: s.codMunicipio, sedeDireccion: s.direccion, destinatarioNombre: s.nombres } : t; }));
 });
 r.post('/tarifas', editarTarifas, async (req, res) => {
   const d = tarifaSchema.parse(req.body);
@@ -105,9 +151,30 @@ r.put('/tarifas/:id', editarTarifas, async (req, res) => {
     if (kg) d.pesoKg = kg;
   }
   const x = await Tarifa.findOneAndUpdate(deEmpresa(req, { _id: req.params.id }), { $set: d }, { new: true, runValidators: true });
-  await auditar(req, 'editar_tarifa', { entidad: 'Tarifa', entidadId: x._id, detalle: { destino: x.destino, cambios: cambios(antes, x.toObject(), Object.keys(d)) } });
-  res.json(x);
+  const viajesActualizados = ('destino' in d || 'codMunicipio' in d) ? await sincronizarDestinoViajes(req.empresaId, x) : 0;
+  await auditar(req, 'editar_tarifa', { entidad: 'Tarifa', entidadId: x._id, detalle: { destino: x.destino, viajesActualizados, cambios: cambios(antes, x.toObject(), Object.keys(d)) } });
+  res.json({ ...x.toJSON(), viajesActualizados });
 });
+
+// Solo se elimina un destino que ningún viaje usa (con viajes se desactiva, así el historial conserva su tarifa).
+r.delete('/tarifas/:id', editarTarifas, async (req, res) => {
+  const t = await Tarifa.findOne(deEmpresa(req, { _id: req.params.id })).lean();
+  if (!t) throw new ErrorHttp(404, 'Destino no encontrado');
+  const viajes = await Viaje.countDocuments(deEmpresa(req, { tarifaRef: t._id }));
+  if (viajes) throw new ErrorHttp(409, `El destino ${t.destino} tiene ${viajes} viaje(s) registrados: no se puede eliminar. Desactívelo en «Editar».`);
+  await Tarifa.deleteOne(deEmpresa(req, { _id: t._id }));
+  await auditar(req, 'eliminar_tarifa', { entidad: 'Tarifa', entidadId: t._id, detalle: { destino: t.destino, cliente: String(t.cliente) } });
+  res.json({ ok: true });
+});
+
+// Lo único que se exige al crear (lo demás lo trae el RNDC o es opcional)
+function exigirDatosTercero(d) {
+  const faltan = [!String(d.direccion || '').trim() && 'dirección', !d.codMunicipio && 'municipio'].filter(Boolean);
+  if (faltan.length) throw new ErrorHttp(400, `Escriba ${faltan.join(' y ')} del tercero`);
+}
+function exigirDatosVehiculo(d) {
+  if (!(Number(d.pesoVacio) > 0)) throw new ErrorHttp(400, 'Escriba el peso vacío del vehículo (kg)');
+}
 
 // ── Terceros ────────────────────────────────────────────────────────────────
 
@@ -190,7 +257,9 @@ r.post('/vehiculos/vista-rndc', ver, async (req, res) => {
 });
 
 r.post('/terceros', editar, async (req, res) => {
-  const x = await Tercero.create({ ...terceroSchema.parse(req.body), empresa: req.empresaId });
+  const d = terceroSchema.parse(req.body);
+  exigirDatosTercero(d);
+  const x = await Tercero.create({ ...d, empresa: req.empresaId });
   await auditar(req, 'crear_tercero', { entidad: 'Tercero', entidadId: x._id, detalle: { numId: x.numId } });
   res.status(201).json(x.toJSON());
 });
@@ -228,6 +297,7 @@ r.get('/vehiculos', ver, async (req, res) => {
 });
 r.post('/vehiculos', editar, async (req, res) => {
   const d = vehiculoSchema.parse(req.body);
+  exigirDatosVehiculo(d);
   await validarConductor(req, d.conductorHabitual);
   await validarConductor(req, d.titularHabitual);
   const x = await Vehiculo.create({ ...d, empresa: req.empresaId });

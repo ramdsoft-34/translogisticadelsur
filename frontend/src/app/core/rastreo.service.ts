@@ -1,7 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { Api } from './api.service';
 
-export interface EstadoRastreo { habilitado: boolean; configuradoServidor: boolean; surTrack: boolean; velocidadMaxima: number; minutosSinSenal: number }
+export interface EstadoRastreo { habilitado: boolean; configuradoServidor: boolean; appConductores?: boolean; surTrack: boolean; velocidadMaxima: number; minutosSinSenal: number }
 
 export const ESTADOS_RASTREO: Record<string, { texto: string; clase: string }> = {
   esperando: { texto: 'Esperando inicio', clase: 'info' },

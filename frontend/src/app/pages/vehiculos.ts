@@ -1,3 +1,4 @@
+import { Turno } from '../core/turno';
 import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -140,7 +141,7 @@ const vacio = () => ({
           <div class="campo" [hidden]="!ver('carroceria')" [class.falta]="falta('carroceria')"><label for="vca">Código carrocería RNDC</label><input id="vca" name="carroceria" [(ngModel)]="f.carroceria" /></div>
           <div class="campo" [hidden]="!ver('combustible')" [class.falta]="falta('combustible')"><label for="vcb">Código combustible RNDC</label><input id="vcb" name="comb" [(ngModel)]="f.combustible" /></div>
           <div class="campo" [hidden]="!ver('ejes')" [class.falta]="falta('ejes')"><label for="vej">Ejes</label><input id="vej" type="number" name="ejes" [(ngModel)]="f.ejes" /></div>
-          <div class="campo" [hidden]="!ver('pesoVacio')" [class.falta]="falta('pesoVacio')"><label for="vpv">Peso vacío (kg)</label><input id="vpv" type="number" name="pv" [(ngModel)]="f.pesoVacio" /></div>
+          <div class="campo" [hidden]="!ver('pesoVacio')" [class.falta]="falta('pesoVacio')"><label for="vpv">Peso vacío (kg) <span class="obligatorio">*</span></label><input id="vpv" type="number" min="1" name="pv" [(ngModel)]="f.pesoVacio" required /></div>
           <div class="campo" [hidden]="soloFaltantes()"><label for="vpb">Peso bruto vehicular (kg)</label><input id="vpb" type="number" name="pbv" [(ngModel)]="f.pbv" /></div>
           <div class="campo" [hidden]="!ver('capacidad')" [class.falta]="falta('capacidad')"><label for="vcp">Capacidad (kg)</label><input id="vcp" type="number" name="cap" [(ngModel)]="f.capacidad" /></div>
           @if (!soloFaltantes()) {
@@ -166,7 +167,7 @@ const vacio = () => ({
       </form>
       <app-vista-rndc [variables]="vistaRndc()" (cerrar)="vistaRndc.set(null)" />
       <ng-container pie>
-        <button type="button" class="texto" style="margin-right:auto" (click)="verVista()" title="Solo muestra las variables del RNDC; no guarda ni envía nada">Solo mostrar lo que se enviaría</button>
+        <button type="button" class="texto" (click)="verVista()" title="Solo muestra las variables del RNDC; no guarda ni envía nada">Solo mostrar lo que se enviaría</button>
         <button type="button" (click)="abierto.set(false)">Cancelar</button>
         @if (puedeEditar) { <button class="primario" type="submit" form="form-veh" [disabled]="trabajando()">{{ sincronizar && puedeRndc ? 'Guardar y registrar en el RNDC' : 'Guardar' }}</button> }
       </ng-container>
@@ -254,20 +255,24 @@ export class Vehiculos {
   clase = '';
   soat = '';
   activos = '';
+  private turno = new Turno();
   async cargar() {
+    const vigente = this.turno.tomar();
     this.cargando.set(true);
     this.pagina = 1;
     try {
       const r = await this.api.get<any>('/maestros/vehiculos', { q: this.q, clase: this.clase, soat: this.soat, activos: this.activos, pagina: 1, limite: 50 });
-      this.lista.set(r.items); this.total.set(r.total);
-    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
+      if (vigente()) { this.lista.set(r.items); this.total.set(r.total); }
+    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
   }
 
   async cargarMas() {
     if (this.cargandoMas() || this.lista().length >= this.total()) return;
     this.cargandoMas.set(true);
+    const vigente = this.turno.actual();
     try {
       const r = await this.api.get<any>('/maestros/vehiculos', { q: this.q, clase: this.clase, soat: this.soat, activos: this.activos, pagina: this.pagina + 1, limite: 50 });
+      if (!vigente()) return;
       this.pagina += 1;
       this.lista.update(l => [...l, ...r.items]);
     } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }
@@ -341,6 +346,8 @@ export class Vehiculos {
 
   async guardar() {
     const f = this.form();
+    // El peso vacío es lo único obligatorio; lo demás lo trae el RNDC o es opcional
+    if (!(Number(f.pesoVacio) > 0)) { this.avisos.mostrar('Escriba el peso vacío del vehículo (kg)', 'error'); return; }
     const cuerpo = this.cuerpo();
     this.trabajando.set(true);
     try {

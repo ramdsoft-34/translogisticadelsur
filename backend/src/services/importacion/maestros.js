@@ -3,6 +3,7 @@
 // Flujo: 1) simular → muestra nuevos, actualizados y errores por fila; 2) aplicar.
 // Solo se escriben datos de la empresa del usuario; las filas existentes se
 // actualizan únicamente con las celdas que traen valor (no se borra nada).
+import { sincronizarDestinoViajes } from '../gestion/sincronizarDestino.js';
 import ExcelJS from 'exceljs';
 import { marcarLibro } from '../reportes/comun.js';
 import { Cliente, Tarifa, Tercero, Vehiculo, Municipio, Empresa } from '../../models/index.js';
@@ -250,7 +251,10 @@ export async function importarMaestros(tipo, empresaId, buffer, { simular = true
       const cambia = Object.entries(set).some(([ruta, v]) => JSON.stringify(ruta.split('.').reduce((o, p) => o?.[p], ex) ?? null) !== JSON.stringify(v ?? null));
       if (!cambia) { res.sinCambios += 1; continue; }
       res.actualizados += 1;
-      if (!simular) await Tarifa.updateOne({ empresa: E, _id: ex._id }, { $set: set }, { runValidators: true });
+      if (!simular) {
+        await Tarifa.updateOne({ empresa: E, _id: ex._id }, { $set: set }, { runValidators: true });
+        if ('destino' in set || 'codMunicipio' in set) await sincronizarDestinoViajes(E, { _id: ex._id, destino: combinado.destino, codMunicipio: combinado.codMunicipio });
+      }
     } catch (e) {
       res.errores.push({ fila: n + 1, errores: errores(e) });
     }

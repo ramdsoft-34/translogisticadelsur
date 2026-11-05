@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import mongoose from 'mongoose';
-import { Empresa, Tercero, Vehiculo, Viaje, TransaccionRndc, Usuario, proximo, Contador } from '../models/index.js';
+import { Empresa, Tercero, Vehiculo, Viaje, TransaccionRndc, Usuario, proximo, Contador, Cliente, Tarifa } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P, tienePermiso } from '../config/permisos.js';
 import { auditar, cambios } from '../services/auditoria.js';
@@ -12,7 +12,8 @@ import * as op from '../services/rndc/operaciones.js';
 import * as cat from '../services/rndc/catalogos.js';
 import { env } from '../config/env.js';
 import { parseFecha } from '../utils/texto.js';
-import { titularDePlaca } from './viajes.js';
+import { titularDePlaca, corregirCliente } from './viajes.js';
+import { asegurarMesAbierto } from '../services/gestion/cierre.js';
 import { asegurarSoporte } from '../services/gestion/soporteInterno.js';
 import * as masiva from '../services/rndc/actualizacionVehiculos.js';
 import { programarEnvios, enviarPendientes } from '../services/correo.js';
@@ -217,6 +218,8 @@ const datosExpedicion = z.object({
   placa: z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^[A-Z0-9]{5,6}$/, 'placa inválida')).optional(),
   remolque: z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^([A-Z0-9]{5,6})?$/, 'remolque inválido')).optional(),
   conductor: oid.optional(), titular: oid.nullable().optional(),
+  // Cliente y destino se corrigen mientras no haya remesa ni manifiesto vigentes
+  cliente: oid.optional(), tarifaRef: oid.nullable().optional(),
   pesoKg: z.coerce.number().min(0).optional(),
   destinatario: z.object({ tipoId: t(1), numId: t(15), sede: t(6) }).optional(),
   flete: z.coerce.number().min(0).optional(), anticipo: z.coerce.number().min(0).optional(),
@@ -244,6 +247,20 @@ r.put('/viajes/:id/datos', operar, async (req, res) => {
     throw new ErrorHttp(403, 'Su rol no puede cambiar el flete ni el anticipo');
   }
   if (('flete' in d || 'anticipo' in d) && v.liquidacion) throw new ErrorHttp(409, 'El viaje ya está en una liquidación de fletes: no se cambian sus valores');
+  const cambiaCliente = !!d.cliente && d.cliente !== String(v.cliente);
+  if (cambiaCliente || (d.tarifaRef !== undefined && String(d.tarifaRef || '') !== String(v.tarifaRef || ''))) {
+    if (!tienePermiso(req.usuario.rol, P.VIAJES_EDITAR_TODOS)) throw new ErrorHttp(403, 'Su rol no puede cambiar el cliente ni el destino del viaje');
+    if (v.remesa?.estado === 'aceptado' || v.manifiesto?.estado === 'aceptado') throw new ErrorHttp(409, 'Anule primero el manifiesto y la remesa para cambiar el cliente o el destino');
+    if (v.liquidacion || v.liquidacionConductor) throw new ErrorHttp(409, 'El viaje ya está liquidado: anule la liquidación para cambiar el cliente o el destino');
+    await asegurarMesAbierto(req.empresaId, v.fecha);
+    if (cambiaCliente && !(await Cliente.exists(deEmpresa(req, { _id: d.cliente })))) throw new ErrorHttp(400, 'El cliente indicado no pertenece a su empresa');
+    if (d.tarifaRef) {
+      const t = await Tarifa.findOne(deEmpresa(req, { _id: d.tarifaRef, cliente: d.cliente || v.cliente })).select('destino codMunicipio tarifaCliente').lean();
+      if (!t) throw new ErrorHttp(400, 'El destino indicado no es de ese cliente');
+      d.destino = t.destino; d.tarifa = t.tarifaCliente;
+      if (t.codMunicipio) d.codDestino = t.codMunicipio;
+    }
+  }
   for (const k of ['conductor', 'titular']) {
     if (d[k] && !(await Tercero.exists(deEmpresa(req, { _id: d[k] })))) throw new ErrorHttp(400, `El ${k} indicado no pertenece a su empresa`);
   }
@@ -286,6 +303,7 @@ r.put('/viajes/:id/datos', operar, async (req, res) => {
     delete d.ajustes;
   }
   const antes = v.toObject();
+  corregirCliente(v, d);
   if (d.conductor) {
     const c = await Tercero.findOne(deEmpresa(req, { _id: d.conductor })).select('nombres apellido1 apellido2').lean();
     d.conductorNombre = [c.nombres, c.apellido1, c.apellido2].filter(Boolean).join(' ');
