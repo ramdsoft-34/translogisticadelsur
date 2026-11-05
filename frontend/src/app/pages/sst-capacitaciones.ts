@@ -62,7 +62,9 @@ const EJE: Record<string, string> = { sst: 'SST', pesv: 'Seguridad vial', ambos:
                 <select name="sel" [(ngModel)]="seleccion"><option value="">Seleccione…</option>
                   @for (p of disponibles(); track p._id) { <option [value]="p._id">{{ p.nombre }} · {{ p.cargo }}</option> }</select></div>
                 <button type="button" (click)="agregar()" [disabled]="!seleccion">Agregar</button>
-                <button type="button" (click)="agregarTodos()">Agregar todos los conductores</button></div>
+                <button type="button" (click)="agregarTodos()">Agregar todos los conductores</button>
+                @if (c._id) { <button type="button" class="whatsapp" (click)="enviarFirmas(null)" [disabled]="trabajando() || !sinFirma(c)" title="Cada asistente firma desde su celular con un enlace propio">Firmar por WhatsApp ({{ sinFirma(c) }})</button> }</div>
+              @if (!c._id) { <p class="sutil" style="margin:6px 0 0">Guarde la capacitación para poder enviar los enlaces de firma por WhatsApp.</p> }
             }
             <div class="asistentes">
               @for (a of c.asistentes; track $index; let i = $index) {
@@ -70,7 +72,16 @@ const EJE: Record<string, string> = { sst: 'SST', pesv: 'Seguridad vial', ambos:
                   <div class="cab-a"><strong>{{ a.nombre }}</strong><span class="sutil">{{ a.documento }}</span>
                     <label class="casilla"><input type="checkbox" [(ngModel)]="a.asistio" [name]="'as' + i" [disabled]="!gestiona" />Asistió</label>
                     @if (gestiona) { <button type="button" class="pequeno texto" (click)="c.asistentes.splice(i, 1)" aria-label="Quitar"><app-icono nombre="x" [tam]="14" /></button> }</div>
-                  @if (a.asistio) { <app-firma [valor]="a.firma?.imagen || ''" (cambio)="a.firma = $event ? { rol: 'asistente', nombre: a.nombre, documento: a.documento, imagen: $event } : null" [etiqueta]="a.nombre" /> }
+                  @if (a.remota?.firmado) {
+                    <div class="firmada"><img [src]="a.firma?.imagen" alt="Firma" /><span class="chip ok sin-punto">Firmó desde el celular · {{ a.remota.firmado | fechaHora }}</span></div>
+                  } @else if (a.asistio) {
+                    <app-firma [valor]="a.firma?.imagen || ''" (cambio)="a.firma = $event ? { rol: 'asistente', nombre: a.nombre, documento: a.documento, imagen: $event } : null" [etiqueta]="a.nombre" />
+                    @if (c._id && a._id && gestiona) {
+                      <div class="remota">@if (a.remota?.enviado) { <span class="chip info sin-punto">Enlace enviado {{ a.remota.enviado | fechaHora }}</span> }
+                        @if (a.remota?.abierto) { <span class="chip sin-punto">Lo abrió</span> }
+                        <button type="button" class="pequeno whatsapp" (click)="enviarFirmas([a._id])" [disabled]="trabajando()">{{ a.remota?.enviado ? 'Reenviar enlace' : 'Firmar por WhatsApp' }}</button></div>
+                    }
+                  }
                 </div>
               } @empty { <p class="sutil">Agregue a los asistentes; cada uno firma en la pantalla (celular o tableta) al terminar la sesión.</p> }
             </div>
@@ -79,6 +90,30 @@ const EJE: Record<string, string> = { sst: 'SST', pesv: 'Seguridad vial', ambos:
       }
       <ng-container pie><button type="button" (click)="actual.set(null)">Cerrar</button>
         @if (gestiona) { <button type="submit" form="form-cap" class="primario">Guardar</button> }</ng-container>
+    </app-modal>
+
+    <!-- Fase 10: enlaces de firma por WhatsApp (un clic por asistente: sin la API de WhatsApp no salen solos) -->
+    <app-modal titulo="Firmar la asistencia por WhatsApp" [abierto]="!!waLista()" (cerrar)="cerrarWa()" [ancho]="true">
+      @if (waLista(); as lista) {
+        <p class="sutil" style="margin-top:0">Cada asistente recibe un enlace propio. Para firmar escribe los 4 últimos números de su documento, confirma que asistió y firma con el dedo. Queda la fecha, la hora y el celular desde donde firmó (Ley 527 de 1999).</p>
+        <div class="lista-wa">
+          @for (x of lista; track x._id) {
+            <div class="dest-wa">
+              <div class="crece"><strong>{{ x.nombre }}</strong><span class="sutil"> · {{ x.documento }}</span>
+                @if (x.error) { <small class="linea-wa error-wa">{{ x.error }}</small> } @else { <small class="linea-wa sutil">Celular {{ x.celular }}</small> }
+                <span class="estado-wa">
+                  @if (x.firmado) { <span class="chip ok sin-punto">Firmó {{ x.firmado | fechaHora }}</span> }
+                  @else if (x.enviado) { <span class="chip info sin-punto">Enviado {{ x.enviado | fechaHora }}</span> }
+                  @if (x.abierto && !x.firmado) { <span class="chip sin-punto">Lo abrió</span> }
+                </span>
+                <span class="enlace-wa"><code>{{ x.enlace }}</code><button type="button" class="pequeno" (click)="copiar(x.enlace)">Copiar</button></span>
+              </div>
+              @if (x.wa && !x.firmado) { <a class="boton whatsapp" [href]="x.wa" target="_blank" rel="noopener" (click)="marcarEnviado(x)">{{ x.enviado ? 'Enviar otra vez' : 'Enviar por WhatsApp' }}</a> }
+            </div>
+          } @empty { <p class="sutil">Todos los asistentes ya firmaron.</p> }
+        </div>
+      }
+      <ng-container pie><span class="sutil" style="margin-right:auto;font-size:12.5px">Se abre WhatsApp con el mensaje listo; usted oprime enviar.</span><button type="button" class="primario" (click)="cerrarWa()">Listo</button></ng-container>
     </app-modal>`,
   styles: [`
     .resumen { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
@@ -89,6 +124,13 @@ const EJE: Record<string, string> = { sst: 'SST', pesv: 'Seguridad vial', ambos:
     .asistentes { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-top: 10px; }
     .asis { border: 1px solid var(--gris-2); border-radius: var(--radio-l); padding: 10px; background: var(--gris-0); } .asis.no { opacity: .6; }
     .cab-a { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; } .cab-a .casilla { margin-left: auto; }
+    .firmada { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; border: 1px solid var(--verde-borde); border-radius: var(--radio); padding: 8px; } .firmada img { max-height: 80px; max-width: 100%; }
+    .remota { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; } .remota button { margin-left: auto; }
+    button.whatsapp, a.boton.whatsapp { background: var(--whatsapp, #1fa855); border-color: var(--whatsapp, #1fa855); color: #fff; }
+    a.boton.whatsapp { display: inline-flex; align-items: center; padding: 9px 14px; border-radius: 10px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+    .lista-wa { display: flex; flex-direction: column; gap: 10px; } .dest-wa { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--gris-2); border-radius: var(--radio-l); }
+    .dest-wa .crece { flex: 1; min-width: 0; } .linea-wa { display: block; font-size: 12px; margin-top: 3px; } .error-wa { color: var(--rojo-texto); }
+    .estado-wa { display: flex; gap: 6px; margin-top: 4px; } .enlace-wa { display: flex; gap: 8px; align-items: center; margin-top: 6px; } .enlace-wa code { font-size: 12px; color: var(--gris-6); }
   `],
 })
 export class SstCapacitaciones {
@@ -100,6 +142,25 @@ export class SstCapacitaciones {
   readonly colaboradores = signal<any[]>([]);
   readonly actual = signal<any>(null);
   seleccion = '';
+  readonly trabajando = signal(false);
+  readonly waLista = signal<any[] | null>(null);
+  sinFirma = (c: any) => (c.asistentes || []).filter((a: any) => a._id && !a.firma?.imagen).length;
+  // Fase 10: enlaces para firmar desde el celular
+  async enviarFirmas(ids: string[] | null) {
+    const c = this.actual(); if (!c?._id) return;
+    this.trabajando.set(true);
+    try {
+      await this.api.put(`/sst/capacitaciones/${c._id}`, this.cuerpo(c));   // primero se guarda lo que haya cambiado en pantalla
+      this.waLista.set(await this.api.post<any[]>(`/sst/capacitaciones/${c._id}/firma-remota`, ids ? { asistentes: ids } : {}));
+    }
+    catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+  async marcarEnviado(x: any) {
+    try { const r: any = await this.api.put(`/sst/capacitaciones/${this.actual()._id}/firma-remota/${x._id}/enviado`, {}); this.waLista.update(l => (l || []).map(y => (y._id === x._id ? { ...y, enviado: r.enviado } : y))); }
+    catch (e) { this.avisos.error(e); }
+  }
+  async cerrarWa() { this.waLista.set(null); const c = this.actual(); if (c?._id) await this.abrir(c); }
+  async copiar(t: string) { try { await navigator.clipboard.writeText(t); this.avisos.ok('Enlace copiado'); } catch { this.avisos.error('No se pudo copiar'); } }
   readonly ejecutadas = computed(() => this.lista().filter(c => c.estado === 'ejecutada').length);
   readonly horas = computed(() => this.lista().filter(c => c.estado === 'ejecutada').reduce((a, c) => a + (c.horas || 0), 0));
   readonly disponibles = computed(() => { const ya = new Set((this.actual()?.asistentes || []).map((a: any) => String(a.persona?.id))); return this.colaboradores().filter(c => !ya.has(String(c._id))); });
@@ -129,11 +190,14 @@ export class SstCapacitaciones {
   }
   async guardar() {
     const c = this.actual();
-    const cuerpo = { tema: c.tema, eje: c.eje, fecha: c.fecha, horas: c.horas, facilitador: c.facilitador, dirigidoA: c.dirigidoA, estado: c.estado,
-      asistentes: c.asistentes.map((a: any) => ({ persona: a.persona?.id ? { tipo: a.persona.tipo, id: a.persona.id } : { tipo: 'tercero', id: null }, nombre: a.nombre, documento: a.documento, asistio: a.asistio, firma: a.firma || null })) };
+    const cuerpo = this.cuerpo(c);
     try {
       if (c._id) await this.api.put(`/sst/capacitaciones/${c._id}`, cuerpo); else await this.api.post('/sst/capacitaciones', cuerpo);
       this.avisos.ok('Capacitación guardada'); this.actual.set(null); this.cargar();
     } catch (e) { this.avisos.error(e); }
+  }
+  private cuerpo(c: any) {
+    return { tema: c.tema, eje: c.eje, fecha: c.fecha, horas: c.horas, facilitador: c.facilitador, dirigidoA: c.dirigidoA, estado: c.estado,
+      asistentes: c.asistentes.map((a: any) => ({ ...(a._id ? { _id: a._id } : {}), persona: a.persona?.id ? { tipo: a.persona.tipo, id: a.persona.id } : { tipo: 'tercero', id: null }, nombre: a.nombre, documento: a.documento, asistio: a.asistio, firma: a.firma || null })) };
   }
 }

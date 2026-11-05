@@ -776,10 +776,14 @@ const capacitacionSstSchema = new Schema({
   dirigidoA: str(), fecha: { type: Date, required: true }, horas: { type: Number, default: 1 }, facilitador: str(),
   estado: { type: String, enum: ['programada', 'ejecutada', 'cancelada'], default: 'programada' },
   asistentes: { type: [{ persona: { type: personaSst, default: () => ({}) }, nombre: str(), documento: str(),
-    asistio: { type: Boolean, default: true }, firma: { type: firmaSst, default: null } }], default: [] },
+    asistio: { type: Boolean, default: true }, firma: { type: firmaSst, default: null },
+    // Fase 10: firma desde el celular con un enlace propio (WhatsApp). Evidencia de la firma electrónica (Ley 527 de 1999)
+    remota: { token: str(), creado: fecha, enviado: fecha, abierto: fecha, firmado: fecha, intentos: { type: Number, default: 0 },
+      ip: str(), agente: str(), huella: str(), ubicacion: { lat: { type: Number, default: null }, lng: { type: Number, default: null } } } }], default: [] },
 }, { timestamps: true });
 capacitacionSstSchema.plugin(tenantPlugin);
 capacitacionSstSchema.index({ empresa: 1, fecha: -1 });
+capacitacionSstSchema.index({ 'asistentes.remota.token': 1 }, { partialFilterExpression: { 'asistentes.remota.token': { $gt: '' } } });
 
 const mantenimientoSchema = new Schema({
   vehiculo: { type: Schema.Types.ObjectId, ref: 'Vehiculo', required: true }, placa: str({ uppercase: true }),

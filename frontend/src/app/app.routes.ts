@@ -8,6 +8,7 @@ export const routes: Routes = [
   // Pública: el QR del soporte interno lleva aquí
   { path: 'verificar/:codigo', loadComponent: () => import('./pages/verificar').then(m => m.Verificar) },
   { path: 'm/:token', loadComponent: () => import('./pages/manifiesto-conductor').then(m => m.ManifiestoConductor) },
+  { path: 'f/:token', loadComponent: () => import('./pages/firma-capacitacion').then(m => m.FirmaCapacitacion) },
   // Página pública de la empresa; con sesión iniciada lleva directo a la plataforma
   { path: '', pathMatch: 'full', canActivate: [sinSesion], loadComponent: () => import('./pages/landing').then(m => m.Landing) },
   { path: 'ingresar', canActivate: [sinSesion], loadComponent: () => import('./pages/ingresar').then(m => m.Ingresar) },

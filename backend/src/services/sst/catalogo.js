@@ -77,6 +77,7 @@ export const PLANTILLAS = [
         { id: 'asistentes', tipo: 'tabla', etiqueta: 'Asistentes', columnas: [
           { id: 'nombre', etiqueta: 'Nombre completo', tipo: 'texto' }, { id: 'documento', etiqueta: 'Documento', tipo: 'texto' },
           { id: 'cargo', etiqueta: 'Cargo', tipo: 'texto' }, { id: 'firma', etiqueta: 'Firma', tipo: 'firma' }] },
+        { id: 'firmasElectronicas', tipo: 'textoLargo', etiqueta: 'Firmas electrónicas desde el celular (Ley 527 de 1999)' },
       ] },
     ],
   },

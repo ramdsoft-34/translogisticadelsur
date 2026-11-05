@@ -6,6 +6,8 @@ import { verificarSoporte } from '../services/gestion/soporteInterno.js';
 import { ErrorHttp } from '../middleware/auth.js';
 import { Empresa } from '../models/index.js';
 import { abrirEnlace } from '../services/manifiestoConductor.js';
+import { z } from 'zod';
+import * as FR from '../services/sst/firmaRemota.js';
 import { datosManifiesto, manifiestoPdf, nombreArchivo } from '../services/reportes/manifiesto.js';
 
 const r = Router();
@@ -33,6 +35,18 @@ r.get('/manifiestos/:token/pdf', async (req, res) => {
   res.setHeader('Content-Disposition', `${req.query.descargar === '1' ? 'attachment' : 'inline'}; filename="${nombreArchivo(m).replace(/[^\w.-]/g, '_')}"`);
   res.setHeader('Cache-Control', 'no-store');
   res.send(await manifiestoPdf(m));
+});
+
+// Fase 10: firma de la asistencia a una capacitación desde el celular
+r.get('/firmas/:token', async (req, res) => {
+  const d = await FR.verEnlace(req.params.token);
+  if (!d) throw new ErrorHttp(404, 'El enlace no existe');
+  res.json(d);
+});
+r.post('/firmas/:token', async (req, res) => {
+  const d = z.object({ ultimos4: z.string().max(8), imagen: z.string().max(200_000), acepto: z.boolean(),
+    ubicacion: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).nullable().optional() }).parse(req.body || {});
+  res.json(await FR.firmar(req.params.token, d, { ip: req.ip, agente: req.get('user-agent') }));
 });
 
 export default r;

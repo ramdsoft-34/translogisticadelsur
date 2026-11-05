@@ -14,6 +14,7 @@ import * as A from '../services/sst/autollenado.js';
 import { alertas, resumen, proximoMantenimiento, kmRecorridos, kmEstimado } from '../services/sst/vencimientos.js';
 import * as Pesv from '../services/sst/pesv.js';
 import * as Ck from '../services/sst/checklistSurTrack.js';
+import * as FR from '../services/sst/firmaRemota.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -329,7 +330,7 @@ r.post('/flota/:id/mantenimientos', gestionar, async (req, res) => {
 // ── Capacitaciones ──────────────────────────────────────────────────────────
 const capZ = z.object({ tema: z.string().trim().min(3).max(200), eje: z.enum(['sst', 'pesv', 'ambos']).default('sst'), dirigidoA: texto(150), fecha: fechaZ,
   horas: z.coerce.number().min(0.5).max(200).default(1), facilitador: texto(150), estado: z.enum(['programada', 'ejecutada', 'cancelada']).default('programada'),
-  asistentes: z.array(z.object({ persona: z.object({ tipo: tipoZ, id: oid.nullable() }).optional().default({ tipo: 'tercero', id: null }), nombre: texto(120), documento: texto(20),
+  asistentes: z.array(z.object({ _id: oid.optional(), persona: z.object({ tipo: tipoZ, id: oid.nullable() }).optional().default({ tipo: 'tercero', id: null }), nombre: texto(120), documento: texto(20),
     asistio: z.boolean().default(true), firma: firmaZ.nullable().optional().default(null) })).max(300).default([]) });
 r.get('/capacitaciones', ver, async (req, res) => res.json(await CapacitacionSst.find(deEmpresa(req)).select('-asistentes.firma').sort({ fecha: 1 }).lean()));
 r.get('/capacitaciones/:id', ver, async (req, res) => {
@@ -346,11 +347,27 @@ r.post('/capacitaciones', gestionar, async (req, res) => {
 });
 r.put('/capacitaciones/:id', gestionar, async (req, res) => {
   const d = capZ.parse(req.body);
-  const c = await CapacitacionSst.findOneAndUpdate(deEmpresa(req, { _id: oid.parse(req.params.id) }), { $set: d }, { new: true });
+  const antes = await CapacitacionSst.findOne(deEmpresa(req, { _id: oid.parse(req.params.id) })).select('asistentes').lean();
+  if (!antes) throw new ErrorHttp(404, 'Capacitación no encontrada');
+  d.asistentes = FR.conservarRemotas(antes.asistentes, d.asistentes);   // las firmas que llegaron por WhatsApp no se pierden
+  const c = await CapacitacionSst.findOneAndUpdate(deEmpresa(req, { _id: req.params.id }), { $set: d }, { new: true });
   if (!c) throw new ErrorHttp(404, 'Capacitación no encontrada');
   await auditar(req, 'sst_capacitacion_editar', { entidad: 'CapacitacionSst', entidadId: c._id });
   res.json(c);
 });
+// Fase 10: firma de la asistencia desde el celular (enlace por WhatsApp)
+r.post('/capacitaciones/:id/firma-remota', gestionar, async (req, res) => {
+  const { asistentes } = z.object({ asistentes: z.array(oid).max(300).optional() }).parse(req.body || {});
+  res.json(await FR.prepararEnvios(req.empresaId, oid.parse(req.params.id), asistentes || null));
+});
+r.put('/capacitaciones/:id/firma-remota/:aid/enviado', gestionar, async (req, res) => {
+  const r2 = await CapacitacionSst.updateOne(deEmpresa(req, { _id: oid.parse(req.params.id), asistentes: { $elemMatch: { _id: oid.parse(req.params.aid), 'remota.token': { $gt: '' } } } }),
+    { $set: { 'asistentes.$.remota.enviado': new Date() } });
+  if (!r2.matchedCount) throw new ErrorHttp(404, 'Primero genere el enlace');
+  await auditar(req, 'sst_firma_whatsapp', { entidad: 'CapacitacionSst', entidadId: req.params.id, detalle: { asistente: req.params.aid } });
+  res.json({ enviado: new Date() });
+});
+
 // La planilla de asistencia (SST-FOR-07) sale de la capacitación, con el membrete y las firmas de los asistentes
 r.get('/capacitaciones/:id/asistencia.pdf', ver, async (req, res) => {
   const c = await CapacitacionSst.findOne(deEmpresa(req, { _id: oid.parse(req.params.id) })).lean();
@@ -359,7 +376,8 @@ r.get('/capacitaciones/:id/asistencia.pdf', ver, async (req, res) => {
   const { e, numVehiculos } = await empresaCompleta(req);
   const ctx = ctxDe(req, e, numVehiculos, p);
   const datos = { tema: c.tema, fecha: c.fecha?.toISOString().slice(0, 10), duracion: c.horas, facilitador: c.facilitador, dirigido: c.dirigidoA,
-    asistentes: c.asistentes.filter(a => a.asistio).map(a => ({ nombre: a.nombre, documento: a.documento, cargo: '', firma: a.firma?.imagen || '' })) };
+    asistentes: c.asistentes.filter(a => a.asistio).map(a => ({ nombre: a.nombre, documento: a.documento, cargo: '', firma: a.firma?.imagen || '' })),
+    firmasElectronicas: FR.evidenciaFirmas(c.asistentes) };
   enviar(res, await A.pdfFormato({ plantilla: p, datos, ctx, membrete: e.membrete || {}, logo: e.logo }), `Asistencia_${c.fecha?.toISOString().slice(0, 10)}.pdf`, 'pdf', true);
 });
 
