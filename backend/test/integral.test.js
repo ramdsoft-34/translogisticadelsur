@@ -1404,16 +1404,13 @@ test('App nueva: invitar al conductor, viaje al servidor nuevo, fotos privadas y
   assert.equal(lq2.status, 201, JSON.stringify(lq2.body));
   assert.equal(appSt.pagos.size, antes);
   appSt.cuentas.set('12345678', { estado: 'activo', email: 'pedro@conductor.test' });
-  // Planillas de seguridad social: Translogística manda los conductores activos y la oficina consulta y decide
+  // Planillas de seguridad social (solo conductores con la app): la oficina consulta y decide
   appSt.empresaPlanillas = String(empA);
   appSt.planillas = [{ id: 'e'.repeat(24), nombre: 'PEDRO PÉREZ GÓMEZ', cedula: '12345678', estado: 'pendiente', cantidadVersiones: 0 }];
   const lp = await adm.get('/api/sst/planillas?periodo=2026-12&estado=pendiente');
   assert.equal(lp.status, 200, JSON.stringify(lp.body));
   assert.equal(lp.body.items.length, 1);
   assert.deepEqual([appSt.ultimaConsulta.periodo, appSt.ultimaConsulta.estado, appSt.ultimaConsulta.empresaId], ['2026-12', 'pendiente', String(empA)]);
-  assert.ok(appSt.padron.conductores.some(c => c.cedula === '12345678' && /PEDRO/i.test(c.nombre)), 'el conductor activo va en la lista');
-  assert.ok(appSt.padron.conductores.every(c => c.cedula.length >= 5));
-  assert.equal(appSt.padron.empresaId, String(empA));
   await M.Usuario.create({ nombre: 'Consulta App', email: 'consulta.app@a.test', rol: 'consulta', empresa: empA, passwordHash: await bcrypt.hash(CLAVE, 10) });
   const consulta = con(await login('consulta.app@a.test'));
   assert.equal((await consulta.get('/api/sst/planillas')).status, 200, 'consulta ve planillas');

@@ -41,7 +41,7 @@ const enDias = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Amer
   template: `
     <div class="pagina-cab">
       <div><h1>Planillas de seguridad social</h1>
-        <p class="sutil">Un PDF por conductor y por mes. La app la recibe del día 1 al 5; después queda vencida y solo la oficina habilita una carga tardía.</p></div>
+        <p class="sutil">Se pide a los conductores que tienen la app: un PDF por mes, del día 1 al 5. Después queda vencida y solo la oficina habilita una carga tardía.</p></div>
       <div class="acciones"><button (click)="exportar()" [disabled]="!datos()?.items?.length"><app-icono nombre="descargar" />Exportar a Excel</button></div>
     </div>
 
@@ -60,7 +60,7 @@ const enDias = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Amer
         <article class="kpi"><header><span>Excluidas</span><app-icono nombre="x" [tam]="18" /></header><strong>{{ d.indicadores.excluidas }}</strong><footer>Este mes no aplica</footer></article>
       </section>
       @if (d.indicadores.porDecidir) {
-        <div class="mensaje alerta" role="status"><strong>{{ d.indicadores.porDecidir }} conductor(es) entraron después del día 5.</strong>
+        <div class="mensaje alerta" role="status"><strong>{{ d.indicadores.porDecidir }} conductor(es) activaron la app después del día 5.</strong>
           Decida en cada uno si habilita la carga tardía o lo excluye este mes.</div>
       }
     }
@@ -76,10 +76,10 @@ const enDias = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Amer
           @for (p of datos()?.items ?? []; track p.id) {
             <tr>
               <td><div class="celda-doble"><strong>{{ p.nombre || '—' }}</strong>
-                <small>C.C. {{ p.cedula }}@if (!p.tieneApp) { · <span class="sin-app">sin la app</span> }</small></div></td>
+                <small>C.C. {{ p.cedula }}@if (!p.tieneApp) { · <span class="sin-app">ya no tiene la app</span> }</small></div></td>
               <td><div class="celda-doble">
                 <span class="chip" [class]="CHIP[p.estado].c">{{ CHIP[p.estado].t }}</span>
-                @if (p.ingresoTardio) { <small class="decidir">Entró después del día 5: por decidir</small> }
+                @if (p.ingresoTardio) { <small class="decidir">Activó la app después del día 5: por decidir</small> }
                 @else if (p.estado === 'pendiente' && p.diasRestantes !== null) { <small>{{ p.diasRestantes === 0 ? 'Último día' : 'Faltan ' + p.diasRestantes + ' día(s)' }}</small> }
                 @else if (p.estado === 'tardia_habilitada' && p.cierra) { <small>Hasta {{ p.cierra | dia }}</small> }
                 @else if (p.exclusion) { <small>{{ p.exclusion.motivo }}</small> }
@@ -101,7 +101,7 @@ const enDias = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Amer
           } @empty {
             @if (cargando()) { @for (i of [1, 2, 3]; track i) { <tr><td colspan="4"><span class="esqueleto"></span></td></tr> } }
             @else if (error()) { <tr><td colspan="4" class="vacio"><strong>No se pudo consultar</strong>{{ error() }} <button class="pequeno" (click)="cargar()">Reintentar</button></td></tr> }
-            @else { <tr><td colspan="4" class="vacio"><strong>Sin planillas</strong>{{ estado() || q ? 'Ningún conductor con ese filtro.' : 'No hay conductores activos con la app este mes.' }}</td></tr> }
+            @else { <tr><td colspan="4" class="vacio"><strong>Sin planillas</strong>{{ estado() || q ? 'Ningún conductor con ese filtro.' : 'Ningún conductor tiene la app activada todavía. Invítelos desde Conductores y terceros → App.' }}</td></tr> }
           }
         </tbody>
       </table>

@@ -39,7 +39,7 @@ r.get('/planillas/exportar', ver, async (req, res) => {
     subtitulo: `Recibidas ${d.indicadores.recibidas} de ${d.indicadores.total - d.indicadores.excluidas} · Cumplimiento ${d.indicadores.cumplimiento ?? '—'} %`,
     columnas: [['Conductor', 34], ['Cédula', 14], ['Estado', 22], ['Fecha de carga', 18], ['Subida desde', 14], ['Versiones', 10], ['Observación', 40]].map(([titulo, ancho]) => ({ titulo, ancho })),
     filas: d.items.map(p => [p.nombre, p.cedula, TEXTO_ESTADO[p.estado] || p.estado, fecha(p.recibida?.subidoEn), p.recibida ? (p.recibida.origen === 'web' ? 'Web' : 'App') : '',
-      p.cantidadVersiones, p.exclusion ? `Excluido: ${p.exclusion.motivo}` : p.cargaTardia ? `Carga tardía hasta ${fecha(p.cargaTardia.hasta)}: ${p.cargaTardia.motivo}` : p.ingresoTardio ? 'Ingresó después del día 5: por decidir' : ''])
+      p.cantidadVersiones, p.exclusion ? `Excluido: ${p.exclusion.motivo}` : p.cargaTardia ? `Carga tardía hasta ${fecha(p.cargaTardia.hasta)}: ${p.cargaTardia.motivo}` : p.ingresoTardio ? 'Activó la app después del día 5: por decidir' : ''])
   });
   await auditar(req, 'exportar_planillas', { detalle: { periodo: d.periodo, filas: d.items.length } });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
