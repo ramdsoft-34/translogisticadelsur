@@ -21,6 +21,12 @@ export const env = {
     clave: process.env.COOESPATRANS_INTEGRACION_CLAVE || '',
     timeoutMs: Number(process.env.COOESPATRANS_INTEGRACION_TIMEOUT_MS) || 10000,
   },
+  // Servidor propio de la app Sur Track nueva (conductores con cuenta activada); vacío = solo Cooespatrans
+  surTrackApp: {
+    url: process.env.SURTRACK_APP_INTEGRACION_URL || '',
+    clave: process.env.SURTRACK_APP_INTEGRACION_CLAVE || '',
+    timeoutMs: Number(process.env.SURTRACK_APP_INTEGRACION_TIMEOUT_MS) || 10000,
+  },
   // Rutas sugeridas (OSRM del servidor) y búsqueda de direcciones (Nominatim de OpenStreetMap)
   mapas: {
     osrmUrl: process.env.OSRM_URL || 'http://127.0.0.1:5050',

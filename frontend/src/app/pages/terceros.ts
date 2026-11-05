@@ -19,6 +19,8 @@ import { ActualizarVehiculos } from '../shared/actualizar-vehiculos';
 import { CargarMas } from '../shared/cargar-mas';
 import { mensajeError } from '../core/api.service';
 import { VistaRndc } from '../shared/vista-rndc';
+import { CuentaAppConductor } from '../shared/cuenta-app-conductor';
+import { Rastreo } from '../core/rastreo.service';
 
 type TipoNuevo = 'conductor' | 'persona' | 'empresa' | 'sede' | 'vehiculo' | 'remolque';
 
@@ -42,7 +44,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
 
 @Component({
   selector: 'app-terceros',
-  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, VistaRndc, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, VistaRndc, CuentaAppConductor, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Conductores y terceros</h1><p class="sutil">Conductores, titulares, propietarios, tenedores y destinatarios que se registran en el RNDC.</p></div>
@@ -60,6 +62,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
     <app-importar-excel tipo="terceros" titulo="conductores y terceros" [abierto]="importar()" (cerrar)="importar.set(false)" (importado)="cargar()" />
     <app-actualizar-vehiculos tipo="terceros" [abierto]="actualizar()" (cerrar)="actualizar.set(false); cargar()" (actualizados)="cargar()" />
     <app-traer-rndc tipo="terceros" [abierto]="traer()" (cerrar)="traer.set(false)" (traidos)="cargar()" />
+    <app-cuenta-app-conductor #cuentaApp />
     <div class="pestanas" role="tablist" aria-label="Tipo de tercero">
       @for (p of PESTANAS_LISTA; track p[0]) {
         <button type="button" role="tab" [class.activa]="rol === p[0]" [attr.aria-selected]="rol === p[0]" (click)="irRol(p[0])">{{ p[1] }}</button>
@@ -92,6 +95,9 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
               <td><span class="chip" [class]="chip(t.rndc?.estado)" [title]="t.rndc?.mensaje || ''">{{ estadoRndc(t.rndc?.estado) }}</span></td>
               <td><div class="acciones" style="justify-content:flex-end">
                 <button class="pequeno" (click)="editar(t)">{{ puedeEditar ? 'Editar' : 'Ver' }}</button>
+                @if (appConductores() && t.roles.includes('conductor') && t.tipoId === 'C') {
+                  <button class="pequeno" (click)="cuentaApp.abrir(t)" title="Cuenta del conductor en la app Sur Track"><app-icono nombre="ubicacion" [tam]="15" />App</button>
+                }
                 @if (puedeRndc) { <button class="pequeno" (click)="enviar(t)" [disabled]="trabajando()" title="Registrar o actualizar en el RNDC"><app-icono nombre="enviar" [tam]="15" />RNDC</button> }
               </div></td>
             </tr>
@@ -268,7 +274,11 @@ export class Terceros {
   // Cambios de otros usuarios: la pantalla se actualiza sola
   private enVivo = inject(EnVivo).al(['maestros', 'rndc', 'rastreo'], () => this.cargar());
 
-  constructor() { this.cargar(); }
+  // App de conductores: el botón «App» solo aparece si el servidor y la empresa la tienen habilitada
+  private rastreo = inject(Rastreo);
+  readonly appConductores = computed(() => !!this.rastreo.estado()?.appConductores);
+
+  constructor() { this.cargar(); if (this.auth.tiene(P.VIAJES_VER)) this.rastreo.cargar(); }
 
 
   // ── Paginación con carga progresiva ──

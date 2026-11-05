@@ -76,6 +76,60 @@ process.env.COOESPATRANS_INTEGRACION_CLAVE = surTrack.clave;
 process.env.OSRM_URL = `http://127.0.0.1:${surTrack.servidor.address().port}`;
 process.env.NOMINATIM_URL = `http://127.0.0.1:${surTrack.servidor.address().port}`;
 
+// Servidor de la app Sur Track nueva, simulado: solo recibe viajes de conductores con la cuenta activada
+const appSt = { viajes: new Map(), activos: [], cuentas: new Map(), autorizado: null, clave: crypto.randomBytes(24).toString('hex') };
+const FOTO = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+appSt.servidor = http.createServer((req, res) => {
+  let cuerpo = '';
+  req.on('data', c => { cuerpo += c; });
+  req.on('end', () => {
+    const json = (st, b) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
+    if (req.headers['x-integracion-clave'] !== appSt.clave) return json(401, { error: 'clave' });
+    const url = new URL(req.url, 'http://x'); const ruta = url.pathname.replace('/api/integracion', '');
+    const b = cuerpo ? JSON.parse(cuerpo) : {};
+    if (ruta === '/conductores' && req.method === 'GET') {
+      return json(200, url.searchParams.get('cedulas').split(',').filter(c => appSt.cuentas.has(c)).map(c => ({ cedula: c, ...appSt.cuentas.get(c) })));
+    }
+    if (ruta === '/conductores/invitar') {
+      appSt.cuentas.set(b.cedula, { estado: 'invitado', email: b.email, invitacionVence: new Date(Date.now() + 72 * 3600000).toISOString() });
+      appSt.ultimaInvitacion = b;
+      return json(201, { conductorId: 'x', estado: 'invitado', codigo: 'K7P2QX9M', vence: appSt.cuentas.get(b.cedula).invitacionVence });
+    }
+    if (ruta === '/conductores/desvincular') { appSt.cuentas.delete(b.cedula); res.writeHead(204); return res.end(); }
+    if (ruta === '/rastreo/activos') return json(200, appSt.activos);
+    if (ruta === '/viajes' && req.method === 'GET') return json(200, [...appSt.viajes.values()].map(v => ({ viajeId: v.viajeId, codigo: v.codigo, estado: v.estado })));
+    if (ruta === '/viajes' && req.method === 'POST') {
+      if (appSt.cuentas.get(b.cedula)?.estado !== 'activo') return json(404, { error: 'El conductor no tiene cuenta activa en la app para esta empresa.', codigo: 'sin_conductor' });
+      const viajeId = crypto.randomBytes(12).toString('hex');
+      const clientes = (b.clientes || []).map(c => ({ ...c, clienteId: crypto.randomBytes(12).toString('hex') }));
+      appSt.viajes.set(viajeId, { viajeId, codigo: b.codigo, estado: 'pendiente', clientes });
+      return json(201, { viajeId, codigo: b.codigo, estado: 'pendiente', clientes: clientes.map(c => ({ clienteId: c.clienteId, referencia: c.referencia })) });
+    }
+    let m = ruta.match(/^\/viajes\/([a-f0-9]{24})\/finalizar$/);
+    if (m) { const v = appSt.viajes.get(m[1]); if (!v) return json(404, {}); v.estado = 'completado'; return json(200, { viajeId: m[1], estado: v.estado }); }
+    m = ruta.match(/^\/rastreo\/([a-f0-9]{24})$/);
+    if (m) {
+      const v = appSt.viajes.get(m[1]); if (!v) return json(404, { error: 'no' });
+      return json(200, { viaje: { viajeId: v.viajeId, codigo: v.codigo, estado: v.estado }, ultima: null, ruta: null, puntos: [],
+        clientes: v.clientes.map(c => ({ clienteId: c.clienteId, nombre: c.nombre, estadoEntrega: c.entrega ? 'entregado' : 'pendiente', valorRecibido: 0,
+          entrega: c.entrega || null })) });
+    }
+    if (ruta === '/fotos/' + 'a'.repeat(24)) { res.writeHead(200, { 'content-type': 'image/jpeg' }); return res.end(FOTO); }
+    const ck = { checklistId: 'd'.repeat(24), fecha: new Date().toISOString(), placa: 'ABC123', kilometraje: 184520, completo: true, vigente: !!appSt.autorizado,
+      resultado: 'no_apto', criticosMal: ['luces'], autorizacion: appSt.autorizado,
+      detalle: [{ grupo: 'equipos', clave: 'luces', nombre: 'Luces', critico: true, valor: 'mal', observacion: 'Direccional dañada' },
+        { grupo: 'documentos', clave: 'seguroSOAT', nombre: 'SOAT', critico: true, valor: 'bien', observacion: '' }],
+      firma: { nombre: 'Pedro', cedula: '12345678', fecha: new Date().toISOString() } };
+    if (ruta === '/checklist') return appSt.cuentas.get(url.searchParams.get('cedula'))?.estado === 'activo' ? json(200, { chofer: { nombre: 'Pedro' }, checklist: ck }) : json(404, { error: 'no' });
+    if (ruta === '/checklist/' + 'd'.repeat(24)) return json(200, { chofer: { nombre: 'Pedro' }, checklist: ck });
+    if (ruta === `/checklist/${'d'.repeat(24)}/autorizar`) { appSt.autorizado = { ...b, fecha: new Date().toISOString() }; return json(200, { ...ck, vigente: true, autorizacion: appSt.autorizado }); }
+    json(404, { error: 'ruta' });
+  });
+});
+await new Promise(r => appSt.servidor.listen(0, '127.0.0.1', r));
+process.env.SURTRACK_APP_INTEGRACION_URL = `http://127.0.0.1:${appSt.servidor.address().port}/api/integracion`;
+process.env.SURTRACK_APP_INTEGRACION_CLAVE = appSt.clave;
+
 const { default: request } = await import('supertest');
 const mongoose = (await import('mongoose')).default;
 const bcrypt = (await import('bcryptjs')).default;
@@ -115,6 +169,7 @@ after(async () => {
   await mongoose.disconnect();
   sim.servidor.close();
   surTrack.servidor.close();
+  appSt.servidor.close();
 });
 
 test('SuperAdmin crea dos empresas con su administrador', async () => {
@@ -1229,6 +1284,77 @@ test('Rastreo: modalidad solo destino (ruta sugerida) y con clientes (Excel, ent
   const pdf = await adm.get(`/api/rastreo/viajes/${v1._id}/checklist/pdf`).buffer(true).parse((res, cb) => { const d = []; res.on('data', c => d.push(c)); res.on('end', () => cb(null, Buffer.concat(d))); });
   assert.equal(pdf.status, 200); assert.equal(pdf.headers['content-type'], 'application/pdf'); assert.equal(pdf.body.subarray(0, 4).toString(), '%PDF');
   await adm.post(`/api/rastreo/viajes/${v1._id}/finalizar`);
+});
+
+test('App nueva: invitar al conductor, viaje al servidor nuevo, fotos privadas y No apto autorizado por el administrador', async () => {
+  const adm = s.adminA;
+  const { limpiarCache } = await import('../src/services/rastreo/surtrack.js');
+  assert.equal((await adm.get('/api/rastreo/estado')).body.appConductores, true);
+  const empA = (await M.Empresa.findOne({ nit: '900111222' }))._id;   // usuario sin permiso para editar maestros ni para autorizar
+  await M.Usuario.create({ nombre: 'Reportero App', email: 'reportero.app@a.test', rol: 'reportero', empresa: empA, passwordHash: await bcrypt.hash(CLAVE, 10) });
+  const rep = con(await login('reportero.app@a.test'));
+  const cuenta = () => adm.get(`/api/rastreo/conductores/${s.conductor}/app`);
+  assert.equal((await cuenta()).body.estado, 'sin_cuenta');
+  // Invitar: solo quien edita maestros; el código se muestra una vez y no queda en la auditoría
+  assert.equal((await rep.post(`/api/rastreo/conductores/${s.conductor}/app/invitar`, { correo: 'pedro@conductor.test' })).status, 403);
+  assert.equal((await adm.post(`/api/rastreo/conductores/${s.conductor}/app/invitar`, { correo: 'no-es-correo' })).status, 400);
+  const inv = await adm.post(`/api/rastreo/conductores/${s.conductor}/app/invitar`, { correo: 'pedro@conductor.test' });
+  assert.equal(inv.status, 201, JSON.stringify(inv.body));
+  assert.equal(inv.body.codigo, 'K7P2QX9M');
+  assert.equal(appSt.ultimaInvitacion.cedula, '12345678'); assert.match(appSt.ultimaInvitacion.nombre, /Pedro/i);
+  const aud = await M.Auditoria.findOne({ accion: 'invitar_conductor_app' }).lean();
+  assert.ok(aud && !JSON.stringify(aud).includes('K7P2QX9M'), 'el código no se guarda');
+  assert.equal((await cuenta()).body.estado, 'invitado');
+  const nuevo = () => adm.post('/api/viajes', { fecha: '2026-11-22', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Ipiales', placa: 'ABC123',
+    conductor: s.conductor, requiereManifiesto: false });
+  // Invitado que no ha activado: el viaje sigue yendo a la app anterior (Cooespatrans)
+  const v1 = (await nuevo()).body;
+  const a1 = await adm.post(`/api/rastreo/viajes/${v1._id}/activar`, { modalidad: 'destino', destino: { nombre: 'Ipiales', lat: 0.83, lng: -77.64 } });
+  assert.equal(a1.status, 200, JSON.stringify(a1.body)); assert.equal(a1.body.servidor, '');
+  assert.ok(surTrack.viajes.has(a1.body.externoId));
+  await adm.post(`/api/rastreo/viajes/${v1._id}/finalizar`);
+  // Con la cuenta activada, el viaje va al servidor nuevo
+  appSt.cuentas.get('12345678').estado = 'activo';
+  assert.equal((await cuenta()).body.estado, 'activo');
+  const v2 = (await nuevo()).body;
+  const a2 = await adm.post(`/api/rastreo/viajes/${v2._id}/activar`, { modalidad: 'clientes', clientes: [{ nombre: 'Tienda Uno', valor: 50000 }] });
+  assert.equal(a2.status, 200, JSON.stringify(a2.body)); assert.equal(a2.body.servidor, 'app');
+  assert.ok(appSt.viajes.has(a2.body.externoId)); assert.ok(!surTrack.viajes.has(a2.body.externoId));
+  // En vivo junta los dos servidores
+  appSt.viajes.get(a2.body.externoId).estado = 'aceptado';
+  appSt.activos = [{ viajeId: a2.body.externoId, lat: 1.2, lng: -77.3, velocidad: 10, rumbo: 0, hora: new Date().toISOString() }];
+  limpiarCache();
+  const vivo = (await adm.get('/api/rastreo/en-vivo')).body;
+  assert.equal(vivo.viajes.find(x => x._id === v2._id).estado, 'en_ruta');
+  // Si el servidor nuevo no responde, el otro sigue funcionando y el viaje queda con su último estado
+  const clave = appSt.clave; appSt.clave = 'otra'; limpiarCache();
+  const caido = await adm.get('/api/rastreo/en-vivo');
+  assert.equal(caido.status, 200); assert.equal(caido.body.viajes.find(x => x._id === v2._id).estado, 'en_ruta');
+  appSt.clave = clave; limpiarCache();
+  // Entrega con foto privada: la web la ve por una ruta propia, solo la empresa del viaje
+  appSt.viajes.get(a2.body.externoId).clientes[0].entrega = { observacion: 'Recibió', fotos: [`/api/integracion/fotos/${'a'.repeat(24)}`], conductor: 'Pedro' };
+  const rec = (await adm.get(`/api/rastreo/viajes/${v2._id}/recorrido`)).body;
+  assert.deepEqual(rec.clientes[0].entrega.fotos, [`/api/rastreo/fotos/${'a'.repeat(24)}`]);
+  const foto = await adm.get(`/api/rastreo/fotos/${'a'.repeat(24)}`);
+  assert.equal(foto.status, 200); assert.equal(foto.headers['content-type'], 'image/jpeg'); assert.equal(foto.body.length, FOTO.length);
+  assert.ok([403, 404].includes((await s.adminB.get(`/api/rastreo/fotos/${'a'.repeat(24)}`)).status), 'otra empresa no la ve');
+  assert.equal((await adm.get(`/api/rastreo/fotos/${'b'.repeat(24)}`)).status, 404, 'solo fotos de sus viajes');
+  assert.equal((await adm.get('/api/rastreo/fotos/..%2Fsecreto')).status, 400);
+  // Preoperacional No apto: se ve con Bien/Mal/N/A, sale en PDF y solo el administrador autoriza la salida, con motivo
+  const ck = (await adm.get(`/api/rastreo/viajes/${v2._id}/checklist`)).body;
+  assert.equal(ck.servidor, 'app'); assert.equal(ck.checklist.resultado, 'no_apto');
+  const pdf = await adm.get(`/api/rastreo/viajes/${v2._id}/checklist/pdf`);
+  assert.equal(pdf.status, 200); assert.equal(pdf.headers['content-type'], 'application/pdf');
+  assert.equal((await rep.post(`/api/rastreo/viajes/${v2._id}/checklist/autorizar`, { motivo: 'Se cambia la direccional en ruta' })).status, 403);
+  assert.equal((await adm.post(`/api/rastreo/viajes/${v2._id}/checklist/autorizar`, { motivo: 'corto' })).status, 400);
+  const aut = await adm.post(`/api/rastreo/viajes/${v2._id}/checklist/autorizar`, { motivo: 'Se cambia la direccional en ruta' });
+  assert.equal(aut.status, 200, JSON.stringify(aut.body));
+  assert.equal(aut.body.checklist.autorizacion.motivo, 'Se cambia la direccional en ruta'); assert.ok(appSt.autorizado.por.length >= 3);
+  // Finalizar cierra en el servidor nuevo; quitar acceso deja al conductor sin cuenta en esta empresa
+  await adm.post(`/api/rastreo/viajes/${v2._id}/finalizar`);
+  assert.equal(appSt.viajes.get(a2.body.externoId).estado, 'completado');
+  assert.equal((await adm.post(`/api/rastreo/conductores/${s.conductor}/app/desvincular`)).body.estado, 'sin_cuenta');
+  assert.equal((await cuenta()).body.estado, 'sin_cuenta');
 });
 
 test('Cambios en vivo: un cambio de una empresa llega por el canal SSE solo a esa empresa', async () => {

@@ -310,6 +310,7 @@ const viajeSchema = new Schema({
     activo: { type: Boolean, default: false },
     estado: { type: String, enum: ['', 'esperando', 'en_ruta', 'detenido', 'sin_senal', 'finalizado', 'error'], default: '' },
     origen: str(),                  // 'translogistica' (activado aquí) o 'cooespatrans' (enlazado desde allá)
+    servidor: str(),                // 'app' (servidor de la app nueva) o '' (Cooespatrans, la app anterior)
     externoId: str(), codigoExterno: str(),
     activado: fecha, activadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
     finalizado: fecha, error: str(),
