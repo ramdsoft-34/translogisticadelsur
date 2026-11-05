@@ -4,7 +4,8 @@
 //  - 'cooespatrans': el de la app anterior, para los demás (hasta mayo de 2027).
 // Cada viaje guarda en rastreo.servidor a cuál se envió. El viaje de Translogística es la única fuente.
 import { env } from '../../config/env.js';
-import { Empresa, Viaje, Vehiculo, Tercero, Cliente, RecorridoRastreo } from '../../models/index.js';
+import { Empresa, Viaje, Vehiculo, Tercero, Cliente, RecorridoRastreo, LiquidacionConductor } from '../../models/index.js';
+import { liquidacionPdf } from '../reportes/liquidacion.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 
 const CONFIG = { cooespatrans: () => env.surTrack, app: () => env.surTrackApp };
@@ -13,20 +14,21 @@ export const configurado = () => configuradoServidor('cooespatrans') || configur
 export const servidorDe = (rastreo) => (rastreo?.servidor === 'app' ? 'app' : 'cooespatrans');
 const SERVIDORES = ['app', 'cooespatrans'];
 
-async function llamar(ruta, { metodo = 'GET', cuerpo, servidor = 'cooespatrans', binario = false } = {}) {
+async function llamar(ruta, { metodo = 'GET', cuerpo, servidor = 'cooespatrans', binario = false, archivo = null } = {}) {
   if (!configuradoServidor(servidor)) throw new ErrorHttp(503, 'El rastreo con Sur Track no está configurado en el servidor');
   const conf = CONFIG[servidor]();
   let r;
   try {
     r = await fetch(conf.url + ruta, {
       method: metodo,
-      headers: { 'content-type': 'application/json', 'x-integracion-clave': conf.clave },
-      body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+      headers: { 'content-type': archivo ? archivo.tipo : 'application/json', 'x-integracion-clave': conf.clave },
+      body: archivo ? archivo.datos : cuerpo ? JSON.stringify(cuerpo) : undefined,
       signal: AbortSignal.timeout(conf.timeoutMs),
     });
   } catch {
     throw new ErrorHttp(502, 'No se pudo conectar con Sur Track. Intente de nuevo en unos minutos.');
   }
+  if (r.status === 204) return {};
   if (binario && r.ok) return { tipo: r.headers.get('content-type') || 'application/octet-stream', datos: Buffer.from(await r.arrayBuffer()) };
   const datos = await r.json().catch(() => ({}));
   if (!r.ok) {
@@ -515,6 +517,8 @@ export async function invitarApp(empresaId, terceroId, correo) {
     empresaId: String(empresaId), empresaNombre: empresa?.nombre || 'Empresa', terceroId: String(t._id),
     cedula: digitos(t.numId), nombre: nombre.length >= 3 ? nombre : `Conductor ${digitos(t.numId)}`, email } });
   if (!t.correo) { t.correo = email; await t.save(); }   // se guarda si el tercero no tenía correo
+  // Sus liquidaciones del último año quedan en la app desde el primer día
+  await enviarPendientesConductor(empresaId, digitos(t.numId), { desdeMeses: 12 }).catch(() => undefined);
   return { estado: r.estado, codigo: r.codigo, vence: r.vence, correo: email };
 }
 
@@ -523,4 +527,64 @@ export async function desvincularApp(empresaId, terceroId) {
   try { await llamar('/conductores/desvincular', { metodo: 'POST', servidor: 'app', cuerpo: { empresaId: String(empresaId), cedula: digitos(t.numId) } }); }
   catch (e) { if (e.status !== 404) throw e; }
   return { estado: 'sin_cuenta' };
+}
+
+// ── Pago a conductores en la app nueva ──
+// Cada liquidación de un solo conductor se envía con su PDF al crearla, al pagarla (abonos) y al anularla.
+// Si la app no responde, queda pendiente y se reenvía con el siguiente envío del mismo conductor.
+// Nunca bloquea la operación de la oficina.
+async function appHabilitada(empresaId) {
+  if (!configuradoServidor('app')) return false;
+  const e = await Empresa.findById(empresaId).select('rastreo').lean();
+  return !!e?.rastreo?.surTrack;
+}
+
+const valor = (n) => Math.round(Number(n) || 0);
+
+async function enviarUna(empresaId, l, empresa) {
+  const cuerpo = {
+    cedula: l.cedula, fecha: l.fecha, desde: l.desde || null, hasta: l.hasta || null, placa: l.placa || '', estado: l.estado,
+    flete: valor(l.flete), auxiliar: valor(l.auxiliar), anticipo: valor(l.anticipoReconocido ?? l.anticipo), retefuente: valor(l.retefuente),
+    fopat: valor(l.fopat), descuentoPrestamos: valor(l.descuentoPrestamos), neto: valor(l.neto), pagado: valor(l.pagado),
+    lineas: (l.lineas || []).slice(0, 500).map(x => ({ fecha: x.fecha || null, placa: x.placa || '', empresa: x.empresa || '', destino: x.destino || '',
+      manifiesto: x.manifiesto || '', flete: valor(x.flete), auxiliar: valor(x.auxiliar), anticipo: valor(x.anticipoReconocido ?? x.anticipo),
+      retefuente: valor(x.retefuente), fopat: valor(x.fopat),
+      // Igual que el PDF: saldo de cada viaje = flete + auxiliar - anticipo reconocido (las retenciones van en el resumen)
+      saldo: valor(x.flete) + valor(x.auxiliar) - valor(x.anticipoReconocido ?? x.anticipo) })),
+  };
+  const ruta = `/pagos/${empresaId}/${encodeURIComponent(l.numero)}`;
+  try {
+    await llamar(ruta, { metodo: 'PUT', cuerpo, servidor: 'app' });
+  } catch (e) {
+    if (e.codigo === 'sin_conductor') return 'sin_cuenta';   // el conductor no usa la app nueva: no hay nada que reenviar
+    throw e;
+  }
+  await llamar(`${ruta}/pdf`, { metodo: 'PUT', servidor: 'app', archivo: { tipo: 'application/pdf', datos: await liquidacionPdf(empresa, l) } });
+  await LiquidacionConductor.updateOne({ empresa: empresaId, _id: l._id }, { $set: { appEnviada: new Date() } }, { timestamps: false });
+  return 'enviada';
+}
+
+// Pendientes de un conductor: nunca enviadas o cambiadas después del último envío
+export async function enviarPendientesConductor(empresaId, cedula, { desdeMeses = 12, limite = 50 } = {}) {
+  if (!cedula || !await appHabilitada(empresaId)) return { enviadas: 0 };
+  const lista = await LiquidacionConductor.find({ empresa: empresaId, cedula, fecha: { $gte: new Date(Date.now() - desdeMeses * 31 * 86400000) },
+    $or: [{ appEnviada: null }, { $expr: { $gt: ['$updatedAt', '$appEnviada'] } }] }).sort({ fecha: 1 }).limit(limite).lean();
+  if (!lista.length) return { enviadas: 0 };
+  const empresa = await Empresa.findById(empresaId).select('+logo').lean();
+  let enviadas = 0;
+  for (const l of lista) {
+    if (await enviarUna(empresaId, l, empresa) === 'sin_cuenta') break;
+    enviadas += 1;
+  }
+  return { enviadas };
+}
+
+// Llamada después de liquidar, pagar o anular. Los errores solo quedan en el registro del servidor.
+export async function avisarLiquidacion(empresaId, numero) {
+  try {
+    const l = await LiquidacionConductor.findOne({ empresa: empresaId, numero }).select('cedula').lean();
+    if (l?.cedula) await enviarPendientesConductor(empresaId, l.cedula);
+  } catch (e) {
+    console.warn(`No se pudo enviar la liquidación ${numero} a la app de conductores: ${e.message}`);
+  }
 }

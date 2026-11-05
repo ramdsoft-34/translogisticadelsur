@@ -77,16 +77,31 @@ process.env.OSRM_URL = `http://127.0.0.1:${surTrack.servidor.address().port}`;
 process.env.NOMINATIM_URL = `http://127.0.0.1:${surTrack.servidor.address().port}`;
 
 // Servidor de la app Sur Track nueva, simulado: solo recibe viajes de conductores con la cuenta activada
-const appSt = { viajes: new Map(), activos: [], cuentas: new Map(), autorizado: null, clave: crypto.randomBytes(24).toString('hex') };
+const appSt = { viajes: new Map(), activos: [], cuentas: new Map(), autorizado: null, pagos: new Map(), clave: crypto.randomBytes(24).toString('hex') };
 const FOTO = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
 appSt.servidor = http.createServer((req, res) => {
-  let cuerpo = '';
-  req.on('data', c => { cuerpo += c; });
+  const partes = [];
+  req.on('data', c => { partes.push(c); });
   req.on('end', () => {
     const json = (st, b) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
     if (req.headers['x-integracion-clave'] !== appSt.clave) return json(401, { error: 'clave' });
     const url = new URL(req.url, 'http://x'); const ruta = url.pathname.replace('/api/integracion', '');
+    const crudo = Buffer.concat(partes);
+    let mp = ruta.match(/^\/pagos\/([^/]+)\/([^/]+)\/pdf$/);
+    if (mp && req.method === 'PUT') {
+      const pg = appSt.pagos.get(decodeURIComponent(mp[2])); if (!pg) return json(404, { error: 'no' });
+      if (req.headers['content-type'] !== 'application/pdf' || crudo.subarray(0, 5).toString() !== '%PDF-') return json(415, { error: 'pdf' });
+      pg.pdf = crudo.length; res.writeHead(204); return res.end();
+    }
+    const cuerpo = crudo.toString();
     const b = cuerpo ? JSON.parse(cuerpo) : {};
+    mp = ruta.match(/^\/pagos\/([^/]+)\/([^/]+)$/);
+    if (mp && req.method === 'PUT') {
+      if (!appSt.cuentas.has(b.cedula)) return json(404, { error: 'sin cuenta', codigo: 'sin_conductor' });
+      const num = decodeURIComponent(mp[2]); const nuevo = !appSt.pagos.has(num);
+      appSt.pagos.set(num, { ...appSt.pagos.get(num), ...b, empresaId: mp[1] });
+      return json(nuevo ? 201 : 200, { pagoId: 'p-' + num });
+    }
     if (ruta === '/conductores' && req.method === 'GET') {
       return json(200, url.searchParams.get('cedulas').split(',').filter(c => appSt.cuentas.has(c)).map(c => ({ cedula: c, ...appSt.cuentas.get(c) })));
     }
@@ -1350,6 +1365,35 @@ test('App nueva: invitar al conductor, viaje al servidor nuevo, fotos privadas y
   const aut = await adm.post(`/api/rastreo/viajes/${v2._id}/checklist/autorizar`, { motivo: 'Se cambia la direccional en ruta' });
   assert.equal(aut.status, 200, JSON.stringify(aut.body));
   assert.equal(aut.body.checklist.autorizacion.motivo, 'Se cambia la direccional en ruta'); assert.ok(appSt.autorizado.por.length >= 3);
+  // Pago a conductores: al invitar se envían sus liquidaciones del último año; luego cada una al crearla y al pagarla
+  const { LiquidacionConductor } = M;
+  const previa = await LiquidacionConductor.findOne({ empresa: empA, cedula: '12345678' }).sort({ fecha: 1 }).lean();
+  assert.ok(previa && appSt.pagos.has(previa.numero), 'la liquidación anterior llegó al invitar');
+  assert.ok(appSt.pagos.get(previa.numero).pdf > 500, 'con su PDF');
+  assert.equal(appSt.pagos.get(previa.numero).cedula, '12345678');
+  await M.Usuario.create({ nombre: 'Conta App', email: 'conta.app@a.test', rol: 'contabilidad', empresa: empA, passwordHash: await bcrypt.hash(CLAVE, 10) });
+  const conta = con(await login('conta.app@a.test'));
+  const lq = await conta.post('/api/gestion/liq-conductores', { viajes: [v1._id], desde: '2026-11-22', hasta: '2026-11-22' });
+  assert.equal(lq.status, 201, JSON.stringify(lq.body));
+  const num = lq.body.liquidacion.numero;
+  assert.ok(appSt.pagos.has(num)); assert.equal(appSt.pagos.get(num).estado, 'VIGENTE'); assert.equal(appSt.pagos.get(num).pagado, 0);
+  assert.equal(appSt.pagos.get(num).lineas.length, 1); assert.ok(appSt.pagos.get(num).pdf > 500);
+  // Si la app no responde, la oficina sigue trabajando y se reenvía con el siguiente envío del conductor
+  appSt.clave = 'caida';
+  assert.equal((await conta.post('/api/gestion/contabilidad/pagos', { liquidacion: num, valor: 100000 })).status, 200);
+  appSt.clave = clave;
+  assert.equal(appSt.pagos.get(num).pagado, 0, 'no llegó mientras estaba caída');
+  const pend = await LiquidacionConductor.findOne({ empresa: empA, numero: num }).lean();
+  assert.ok(pend.updatedAt > pend.appEnviada, 'queda pendiente');
+  assert.equal((await conta.post('/api/gestion/contabilidad/pagos', { liquidacion: num })).status, 200);
+  assert.equal(appSt.pagos.get(num).pagado, appSt.pagos.get(num).neto, 'pagada completa');
+  // Liquidación de un conductor sin cuenta en la app: no se envía
+  const antes = appSt.pagos.size;
+  appSt.cuentas.delete('12345678');
+  const lq2 = await conta.post('/api/gestion/liq-conductores', { viajes: [v2._id], desde: '2026-11-22', hasta: '2026-11-22' });
+  assert.equal(lq2.status, 201, JSON.stringify(lq2.body));
+  assert.equal(appSt.pagos.size, antes);
+  appSt.cuentas.set('12345678', { estado: 'activo', email: 'pedro@conductor.test' });
   // Finalizar cierra en el servidor nuevo; quitar acceso deja al conductor sin cuenta en esta empresa
   await adm.post(`/api/rastreo/viajes/${v2._id}/finalizar`);
   assert.equal(appSt.viajes.get(a2.body.externoId).estado, 'completado');

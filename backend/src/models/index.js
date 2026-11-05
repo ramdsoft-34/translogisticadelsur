@@ -494,6 +494,8 @@ const liquidacionConductorSchema = new Schema({
   empresas: str(), agrupacion: { type: String, enum: ['conductor', 'placa_empresa'], default: 'conductor' },
   pagado: { type: Number, default: 0 },
   estado: { type: String, enum: ['VIGENTE', 'ANULADA'], default: 'VIGENTE' },
+  // Última vez que se envió a la app Sur Track del conductor (si es anterior al último cambio, se reenvía)
+  appEnviada: { type: Date, default: null },
   creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
 }, { timestamps: true });
 liquidacionConductorSchema.plugin(tenantPlugin);

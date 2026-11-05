@@ -20,6 +20,7 @@ import { soporteInterno, asegurarSoporte, soporteDeEjemplo, cumplirSoporte as so
 import { manifiestoPdf, ajusteLogo } from '../services/reportes/manifiesto.js';
 import { liquidacionPdf, liquidacionesMediaHoja } from '../services/reportes/liquidacion.js';
 import * as dulces from '../services/gestion/remesasDulces.js';
+import { avisarLiquidacion } from '../services/rastreo/surtrack.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -73,6 +74,7 @@ r.post('/liq-conductores', gestionar, async (req, res) => {
     descuentoPrestamos: z.coerce.number().min(0).nullable().optional(), agrupacion: z.enum(['conductor', 'placa_empresa']).optional().default('conductor') }).parse(req.body);
   const r1 = await liq.liquidar(req.empresaId, { ...d, desde: parseFecha(d.desde), hasta: finDia(parseFecha(d.hasta)), usuario: req.usuario._id });
   await auditar(req, 'liquidar_conductor', { entidad: 'LiquidacionConductor', entidadId: r1.liquidacion._id, detalle: { numero: r1.liquidacion.numero, neto: r1.liquidacion.neto } });
+  await avisarLiquidacion(req.empresaId, r1.liquidacion.numero);   // el conductor la ve en la app
   res.status(201).json(r1);
 });
 
@@ -85,6 +87,7 @@ r.get('/liq-conductores', verLiq, async (req, res) => {
 r.post('/liq-conductores/:numero/anular', gestionar, async (req, res) => {
   const l = await liq.anularLiquidacion(req.empresaId, req.params.numero);
   await auditar(req, 'anular_liquidacion_conductor', { entidad: 'LiquidacionConductor', entidadId: l._id, detalle: { numero: l.numero } });
+  await avisarLiquidacion(req.empresaId, l.numero);
   res.json(l);
 });
 
@@ -240,7 +243,9 @@ r.post('/contabilidad/cobros', gestionar, async (req, res) => {
 });
 r.post('/contabilidad/pagos', gestionar, async (req, res) => {
   const d = z.object({ liquidacion: z.string(), valor: z.coerce.number().min(0).optional(), fecha: z.string().optional(), cuenta: z.enum(['1110', '1105']).default('1110') }).parse(req.body);
-  res.json(await cont.pagarLiquidacion(req.empresaId, { ...d, fecha: parseFecha(d.fecha) || hoy(), usuario: req.usuario._id }));
+  const pago = await cont.pagarLiquidacion(req.empresaId, { ...d, fecha: parseFecha(d.fecha) || hoy(), usuario: req.usuario._id });
+  await avisarLiquidacion(req.empresaId, pago.liquidacion.numero);
+  res.json(pago);
 });
 r.post('/contabilidad/gastos', gestionar, async (req, res) => {
   const d = z.object({ fecha: z.string(), cuenta: z.string(), concepto: z.string().trim().min(3).max(200), valor: z.coerce.number().positive(),
