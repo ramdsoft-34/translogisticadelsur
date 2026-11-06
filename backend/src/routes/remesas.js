@@ -1,0 +1,152 @@
+// Fase 12: remesas de los clientes (base de viajes VPL del cliente, consecutivo de la cooperativa e impresión con su formato).
+// Se monta dentro de /api/gestion (ya autenticado).
+import express, { Router } from 'express';
+import mongoose from 'mongoose';
+import { z } from 'zod';
+import { permitir, ErrorHttp } from '../middleware/auth.js';
+import { P } from '../config/permisos.js';
+import { auditar } from '../services/auditoria.js';
+import { RemesaDulces, Empresa, Cliente } from '../models/index.js';
+import * as R from '../services/gestion/remesasDulces.js';
+
+const r = Router();
+const ver = permitir(P.VIAJES_VER);
+const gestionar = permitir(P.VIAJES_REGISTRAR);
+const id = z.string().refine(v => mongoose.isValidObjectId(v), 'identificador inválido');
+const clienteDe = (v) => (v ? id.parse(String(v)) : null);
+const nombreArchivo = (req) => { try { return decodeURIComponent(String(req.get('x-nombre-archivo') || '')).slice(0, 150); } catch { return ''; } };
+const logoZ = z.string().max(900_000, 'El logo es muy pesado (máximo 650 KB)').refine(v => v === '' || /^data:image\/(png|jpe?g);base64,[A-Za-z0-9+/=]+$/.test(v), 'El logo debe ser PNG o JPG');
+const texto = (n) => z.string().trim().max(n).optional();
+const crudo = express.raw({ type: '*/*', limit: '15mb' });
+
+async function clienteValido(req, cliente) {
+  if (!cliente) return null;
+  if (!(await Cliente.exists({ _id: cliente, empresa: req.empresaId }))) throw new ErrorHttp(404, 'Empresa (cliente) no encontrada');
+  return cliente;
+}
+
+// Lista: por cliente, mes (AAAA-MM) y estado (pendientes | impresas)
+r.get('/remesas', ver, async (req, res) => {
+  const f = { empresa: req.empresaId };
+  if (req.query.cliente) f.cliente = clienteDe(req.query.cliente);
+  if (/^\d{4}-\d{2}$/.test(String(req.query.mes || ''))) {
+    const [y, m] = String(req.query.mes).split('-').map(Number);
+    f.fecha = { $gte: new Date(Date.UTC(y, m - 1, 1)), $lt: new Date(Date.UTC(y, m, 1)) };
+  }
+  if (req.query.estado === 'pendientes') f.impreso = null;
+  if (req.query.estado === 'impresas') f.impreso = { $ne: null };
+  const lista = await RemesaDulces.find(f).sort({ remesaNum: 1, vpl: 1 }).limit(3000)
+    .populate({ path: 'viaje', select: 'numero destino', match: { empresa: req.empresaId } }).lean();
+  res.json(lista);
+});
+
+// Formato: encabezado de la empresa + datos fijos del cliente (con los logos, para la vista previa)
+r.get('/remesas/formato', ver, async (req, res) => res.json(await R.formato(req.empresaId, await clienteValido(req, clienteDe(req.query.cliente)))));
+
+r.put('/remesas/formato/empresa', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const d = z.object({ logo: logoZ.optional(), nombre1: texto(80), nombre2: texto(80), nit: texto(40), lema: texto(120), resolucion: texto(300),
+    siguiente: z.coerce.number().int().min(1).max(99_999_999).optional(), porHoja: z.coerce.number().int().refine(v => v === 1 || v === 2).optional(), linea: z.boolean().optional() }).parse(req.body || {});
+  const set = Object.fromEntries(Object.entries(d).filter(([, v]) => v !== undefined).map(([k, v]) => [`remesaFormato.${k}`, v]));
+  if (d.siguiente !== undefined) {
+    // No se puede volver a un número que ya se usó
+    const max = await RemesaDulces.findOne({ empresa: req.empresaId, remesaNum: { $ne: null } }).sort({ remesaNum: -1 }).select('remesaNum').lean();
+    if (max && d.siguiente <= max.remesaNum) throw new ErrorHttp(400, `La remesa ${max.remesaNum} ya se usó: el próximo número debe ser mayor`);
+  }
+  await Empresa.updateOne({ _id: req.empresaId }, { $set: set });
+  await auditar(req, 'remesas_formato_empresa', { detalle: { ...d, logo: d.logo ? '(logo)' : undefined } });
+  res.json(await R.formato(req.empresaId, null));
+});
+
+r.put('/remesas/formato/cliente/:id', gestionar, async (req, res) => {
+  const cliente = await clienteValido(req, id.parse(req.params.id));
+  const d = z.object({ logo: logoZ.optional(), remitente: texto(80), ciudadOrigen: texto(60), direccion: texto(80), sector: texto(60), destinatario: texto(80),
+    cantidad: texto(30), clase: texto(30), contenido: texto(60) }).parse(req.body || {});
+  const set = Object.fromEntries(Object.entries(d).filter(([, v]) => v !== undefined).map(([k, v]) => [`remesaFormato.${k}`, v]));
+  await Cliente.updateOne({ _id: cliente, empresa: req.empresaId }, { $set: set });
+  await auditar(req, 'remesas_formato_cliente', { entidad: 'Cliente', entidadId: cliente, detalle: { ...d, logo: d.logo ? '(logo)' : undefined } });
+  res.json(await R.formato(req.empresaId, cliente));
+});
+
+// Carga del Excel: vista previa (no guarda) y guardado con los VPL elegidos
+r.post('/remesas/previa', gestionar, crudo, async (req, res) => {
+  const cliente = await clienteValido(req, clienteDe(req.query.cliente));
+  if (!cliente) throw new ErrorHttp(400, 'Elija la empresa (cliente) de la base');
+  res.json(await R.previa(req.empresaId, cliente, req.body));
+});
+r.post('/remesas/importar', gestionar, crudo, async (req, res) => {
+  const cliente = await clienteValido(req, clienteDe(req.query.cliente));
+  if (!cliente) throw new ErrorHttp(400, 'Elija la empresa (cliente) de la base');
+  const modo = req.query.modo === 'reemplazar' ? 'reemplazar' : 'omitir';
+  let seleccion = null;
+  const h = req.get('x-seleccion');
+  if (h) { try { seleccion = z.array(z.string().max(20)).max(5000).parse(JSON.parse(decodeURIComponent(h))); } catch { throw new ErrorHttp(400, 'Selección de viajes inválida'); } }
+  const x = await R.guardar(req.empresaId, cliente, req.body, { modo, seleccion, archivo: nombreArchivo(req) });
+  await auditar(req, 'remesas_importar', { entidad: 'Cliente', entidadId: cliente, detalle: { ...x, archivo: nombreArchivo(req), modo } });
+  res.json(x);
+});
+
+// Corregir una remesa (la cédula escrita aquí sirve para las próximas del mismo conductor)
+r.put('/remesas/:id', gestionar, async (req, res) => {
+  const d = z.object({ fecha: z.string().optional(), zona: texto(120), peso: z.coerce.number().min(0).max(1e7).optional(), manifiesto: texto(40),
+    conductor: texto(80), cedula: z.string().trim().max(15).regex(/^[0-9.\s]*$/, 'La cédula solo lleva números').optional(), direccion: texto(80),
+    placa: texto(8), remesa: z.string().trim().max(12).regex(/^\d*$/, 'El número de remesa solo lleva números').optional(), costo: z.coerce.number().min(0).max(1e10).optional() }).parse(req.body || {});
+  const x = await RemesaDulces.findOne({ _id: id.parse(req.params.id), empresa: req.empresaId });
+  if (!x) throw new ErrorHttp(404, 'Remesa no encontrada');
+  if (d.remesa && d.remesa !== x.remesa && await RemesaDulces.exists({ empresa: req.empresaId, remesa: d.remesa, _id: { $ne: x._id } })) throw new ErrorHttp(409, `La remesa ${d.remesa} ya la tiene otro viaje`);
+  for (const [k, v] of Object.entries(d)) if (v !== undefined) x[k] = k === 'fecha' ? (R.fechaValida(v) || x.fecha) : k === 'cedula' ? v.replace(/\D/g, '') : k === 'placa' ? v.replace(/[\s-]/g, '').toUpperCase() : v;
+  if (d.remesa !== undefined) x.remesaNum = d.remesa ? Number(d.remesa) : null;
+  await x.save();
+  if (d.remesa) await Empresa.updateOne({ _id: req.empresaId, 'remesaFormato.siguiente': { $lte: Number(d.remesa) } }, { $set: { 'remesaFormato.siguiente': Number(d.remesa) + 1 } });
+  await auditar(req, 'remesa_editar', { entidad: 'RemesaDulces', entidadId: x._id, detalle: { vpl: x.vpl, ...d } });
+  res.json(x);
+});
+
+r.delete('/remesas/:id', gestionar, async (req, res) => {
+  const x = await RemesaDulces.findOne({ _id: id.parse(req.params.id), empresa: req.empresaId });
+  if (!x) throw new ErrorHttp(404, 'Remesa no encontrada');
+  if (x.impreso) throw new ErrorHttp(409, 'La remesa ya se imprimió; no se puede eliminar');
+  await x.deleteOne();
+  await auditar(req, 'remesa_eliminar', { entidad: 'RemesaDulces', entidadId: x._id, detalle: { vpl: x.vpl, remesa: x.remesa } });
+  res.json({ ok: true });
+});
+
+// PDF (ver o imprimir) y .zip con un PDF por remesa
+const salidaZ = z.object({ ids: z.array(id).min(1).max(1000), porHoja: z.coerce.number().int().refine(v => v === 1 || v === 2).optional(),
+  linea: z.boolean().optional(), marcar: z.boolean().optional().default(true) });
+async function paraSalida(req) {
+  const d = salidaZ.parse(req.body || {});
+  const lista = await RemesaDulces.find({ empresa: req.empresaId, _id: { $in: d.ids } }).lean();
+  if (!lista.length) throw new ErrorHttp(404, 'No se encontraron las remesas elegidas');
+  const clientes = [...new Set(lista.map(x => String(x.cliente || '')))];
+  const formatos = new Map();
+  for (const c of clientes) formatos.set(c, await R.formato(req.empresaId, c || null));
+  const f0 = formatos.get(clientes[0]);
+  return { d, lista: R.ordenar(lista), formatos, opciones: { porHoja: d.porHoja || f0.porHoja, linea: d.linea ?? f0.linea } };
+}
+async function marcarImpresas(req, lista) {
+  await RemesaDulces.updateMany({ empresa: req.empresaId, _id: { $in: lista.map(x => x._id) } },
+    { $set: { impreso: new Date(), impresoPor: String(req.usuario?.nombre || req.usuario?.email || '').slice(0, 120) }, $inc: { impresiones: 1 } });
+}
+r.post('/remesas/pdf', gestionar, async (req, res) => {
+  const { d, lista, formatos, opciones } = await paraSalida(req);
+  // Si hay remesas de varios clientes, cada una lleva el formato de su cliente
+  const buf = formatos.size === 1 ? await R.remesasPdf(formatos.values().next().value, lista, opciones)
+    : await R.remesasPdfVarios(lista.map(x => ({ x, f: formatos.get(String(x.cliente || '')) })), opciones);
+  if (d.marcar) await marcarImpresas(req, lista);
+  await auditar(req, 'remesas_pdf', { detalle: { remesas: lista.map(x => x.remesa), ...opciones, marcar: d.marcar } });
+  const nombre = lista.length === 1 ? `Remesa_${lista[0].remesa}_VPL_${lista[0].vpl}.pdf` : 'Remesas.pdf';
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${nombre}"`);
+  res.send(buf);
+});
+r.post('/remesas/zip', gestionar, async (req, res) => {
+  const { d, lista, formatos } = await paraSalida(req);
+  const zip = await R.remesasZipVarios(lista.map(x => ({ x, f: formatos.get(String(x.cliente || '')) })));
+  if (d.marcar) await marcarImpresas(req, lista);
+  await auditar(req, 'remesas_zip', { detalle: { remesas: lista.map(x => x.remesa) } });
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', 'attachment; filename="Remesas.zip"');
+  res.send(zip);
+});
+
+export default r;

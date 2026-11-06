@@ -130,6 +130,13 @@ const empresaSchema = new Schema({
     // PESV con Sur Track: horas de manejo seguido que disparan el aviso de fatiga, y minutos detenido que cuentan como pausa
     horasConduccionContinua: { type: Number, default: 4 }, minutosPausa: { type: Number, default: 15 },
   },
+  // Fase 12: encabezado de la remesa de los clientes (formato de la cooperativa) y su consecutivo
+  remesaFormato: {
+    logo: { type: String, default: '', select: false },      // vacío = el logo del soporte interno
+    nombre1: str(), nombre2: str(), nit: str(), lema: str(), resolucion: str({ maxlength: 300 }),
+    siguiente: { type: Number, default: 1 },                  // próximo N° de remesa (consecutivo único de la empresa)
+    porHoja: { type: Number, enum: [1, 2], default: 2 }, linea: { type: Boolean, default: true },
+  },
   membrete: {
     // Franjas de encabezado y pie (data URL PNG/JPEG); no se cargan salvo que se pidan (+membrete.encabezado)
     encabezado: { type: String, default: '', select: false },
@@ -219,6 +226,12 @@ const clienteSchema = new Schema({
     plantilla: { asunto: str({ maxlength: 200 }), cuerpo: str({ maxlength: 3000 }) } },
   // Fase 11: contactos de la empresa para mandarles la relación por WhatsApp
   contactosWhatsapp: { type: [{ _id: false, nombre: str(), cargo: str(), celular: str() }], default: [] },
+  // Fase 12: datos fijos de la remesa de este cliente (todos editables) y su logo (data URL; no se carga salvo que se pida)
+  remesaFormato: {
+    logo: { type: String, default: '', select: false },
+    remitente: str(), ciudadOrigen: str(), direccion: str(), sector: str(), destinatario: str(),
+    cantidad: str(), clase: str(), contenido: str(),
+  },
 }, { timestamps: true });
 clienteSchema.plugin(tenantPlugin);
 clienteSchema.index({ empresa: 1, nombre: 1 }, { unique: true, collation: { locale: 'es', strength: 1 } });
@@ -798,14 +811,20 @@ const activoFijoSchema = new Schema({
 activoFijoSchema.plugin(tenantPlugin);
 activoFijoSchema.index({ empresa: 1, codigo: 1 }, { unique: true });
 
-// ── Remesas de Dulces & Dulces (base de viajes VPL y su remesa impresa) ────
+// ── Fase 12: remesas de los clientes (base de viajes VPL del cliente y la remesa impresa con el formato de la cooperativa) ──
+// vpl = número interno del cliente (p. ej. Dulces & Dulces) · remesa = consecutivo interno de la cooperativa
 const remesaDulcesSchema = new Schema({
+  cliente: { type: Schema.Types.ObjectId, ref: 'Cliente', default: null },
   vpl: str({ required: true }), fecha, zona: str(), peso: Number, manifiesto: str(),
-  conductor: str(), cedula: str(), placa: str({ uppercase: true }), remesa: str(), costo: Number,
-  impreso: fecha,
+  conductor: str(), cedula: str(), direccion: str(), placa: str({ uppercase: true }), remesa: str(), remesaNum: { type: Number, default: null }, costo: Number,
+  grupo: str(),                          // tabla del Excel de donde salió (p. ej. ECOM)
+  archivo: str(),                        // nombre del Excel con el que se cargó
+  viaje: { type: Schema.Types.ObjectId, ref: 'Viaje', default: null },   // viaje de la bitácora que coincide (misma placa y día)
+  impreso: fecha, impresoPor: str(), impresiones: { type: Number, default: 0 },
 }, { timestamps: true });
 remesaDulcesSchema.plugin(tenantPlugin);
-remesaDulcesSchema.index({ empresa: 1, vpl: 1 }, { unique: true });
+remesaDulcesSchema.index({ empresa: 1, cliente: 1, vpl: 1 }, { unique: true });
+remesaDulcesSchema.index({ empresa: 1, remesaNum: 1 });
 
 const capacitacionSstSchema = new Schema({
   tema: str({ required: true }), eje: { type: String, enum: ['sst', 'pesv', 'ambos'], default: 'sst' },

@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, signal, viewChild } from '@angular/core';
+import { Component, inject, input, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -8,8 +8,6 @@ import { P } from '../core/modelos';
 import { Icono } from '../shared/icono';
 import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
 import { Confirmar } from '../shared/confirmar';
-import { VisorPdf } from '../shared/visor-pdf';
-import { filtrar } from '../shared/filtro';
 
 // ── Cierre de mes ──
 @Component({
@@ -115,58 +113,4 @@ export class CierreMes {
   }
 }
 
-// ── Remesas (base VPL en Excel) ──
-@Component({
-  selector: 'app-remesas-dulces',
-  imports: [FormsModule, Icono, VisorPdf, ...FORMATOS],
-  template: `
-    <div class="pagina-cab"><div><h1>Remesas</h1>
-      <p class="sutil">Cargue la base de viajes (Excel con las columnas VPL, FECHA, ZONA, PESO, MANIFIESTO, CONDUCTOR, PLACA, REMESA y COSTO),
-        elija los VPL e imprima las remesas, dos por hoja. Las cédulas que falten se toman del registro de conductores.</p></div>
-      <div class="acciones">
-        <label class="boton"><app-icono nombre="descargar" />Cargar base de Excel<input type="file" accept=".xlsx,.xlsm,.xls" hidden (change)="importar($event)" /></label>
-      </div>
-    </div>
-    <app-visor-pdf #visor />
-    <section class="barra" aria-label="Filtros">
-      <label class="casilla"><input type="checkbox" [(ngModel)]="soloPendientes" (change)="cargar()" />Solo sin imprimir</label>
-      <div class="campo crece"><label for="rd-q">Buscar</label><input id="rd-q" type="search" placeholder="VPL, zona, conductor, placa o remesa" [ngModel]="q()" (ngModelChange)="q.set($event)" /></div>
-      <button class="primario" [disabled]="!sel().size" (click)="imprimir()"><app-icono nombre="ojo" />Ver remesas ({{ sel().size }})</button>
-    </section>
-    <div class="tabla-caja"><table class="tabla-movil">
-      <thead><tr><th><input type="checkbox" aria-label="Seleccionar todas" [checked]="todas()" (change)="alternarTodas()" /></th>
-        <th>VPL</th><th>Fecha</th><th>Zona</th><th class="num">Peso</th><th>Manifiesto</th><th>Conductor</th><th>Cédula</th><th>Placa</th><th>Remesa</th><th class="num">Costo</th><th>Impresa</th></tr></thead>
-      <tbody>@for (x of visibles(); track x._id) {
-        <tr><td data-etiqueta="Elegir"><input type="checkbox" [checked]="sel().has(x.vpl)" (change)="alternar(x.vpl)" [attr.aria-label]="'VPL ' + x.vpl" /></td>
-          <td data-etiqueta="VPL"><strong>{{ x.vpl }}</strong></td><td data-etiqueta="Fecha">{{ x.fecha | dia }}</td><td data-etiqueta="Zona">{{ x.zona }}</td>
-          <td data-etiqueta="Peso" class="num">{{ x.peso }}</td><td data-etiqueta="Manifiesto">{{ x.manifiesto }}</td><td data-etiqueta="Conductor">{{ x.conductor }}</td>
-          <td data-etiqueta="Cédula">{{ x.cedula }}</td><td data-etiqueta="Placa">{{ x.placa }}</td><td data-etiqueta="Remesa">{{ x.remesa }}</td>
-          <td data-etiqueta="Costo" class="num">{{ x.costo | pesos }}</td><td data-etiqueta="Impresa">{{ x.impreso ? (x.impreso | dia) : '—' }}</td></tr>
-      } @empty { <tr><td colspan="12" class="vacio">Sin remesas. Cargue la base de Excel.</td></tr> }</tbody></table></div>`,
-})
-export class RemesasDulces {
-  private api = inject(Api);
-  private avisos = inject(Avisos);
-  readonly visor = viewChild.required(VisorPdf);
-  soloPendientes = true;
-  readonly lista = signal<any[]>([]);
-  readonly q = signal('');
-  readonly sel = signal(new Set<string>());
-  readonly visibles = computed(() => filtrar<any>(this.lista(), this.q()));
-  readonly todas = computed(() => this.visibles().length > 0 && this.visibles().every(x => this.sel().has(x.vpl)));
-  private enVivo = inject(EnVivo).al(['gestion'], () => this.cargar());
-  constructor() { this.cargar(); }
-  async cargar() { try { this.lista.set(await this.api.get('/gestion/remesas-dulces', this.soloPendientes ? { pendientes: 1 } : {})); this.sel.set(new Set()); } catch (e) { this.avisos.error(e); } }
-  alternar(v: string) { const s = new Set(this.sel()); if (s.has(v)) s.delete(v); else s.add(v); this.sel.set(s); }
-  alternarTodas() { this.sel.set(this.todas() ? new Set() : new Set(this.visibles().map(x => x.vpl))); }
-  async importar(ev: Event) {
-    const input = ev.target as HTMLInputElement; const archivo = input.files?.[0];
-    if (!archivo) return;
-    try { const r = await this.api.subir<any>('/gestion/remesas-dulces/importar', archivo); this.avisos.ok(`${r.leidos} fila(s): ${r.nuevos} nueva(s), ${r.actualizados} actualizada(s)`); this.cargar(); }
-    catch (e) { this.avisos.error(e); } finally { input.value = ''; }
-  }
-  async imprimir() {
-    await this.visor().ver('/gestion/remesas-dulces/pdf', 'Remesas', undefined, { vpls: [...this.sel()] });
-    this.cargar();
-  }
-}
+// ── Remesas: ver pages/remesas.ts (fase 12) ──

@@ -36,7 +36,9 @@ export function crearApp() {
   }));
   // Los correos con archivos adjuntos traen su propio límite (12 MB) en la ruta
   const json = express.json({ limit: '1mb' });
-  app.use((req, res, next) => (/^\/api\/correo\/(relaciones|manual)$/.test(req.path) ? next() : json(req, res, next)));
+  // (también el correo de una relación de cobro, que trae sus archivos adjuntos: fase 11)
+  const conLimitePropio = (p) => /^\/api\/correo\/(relaciones|manual)$/.test(p) || /^\/api\/gestion\/relaciones-cobro\/[a-f0-9]{24}\/correo$/.test(p);
+  app.use((req, res, next) => (conLimitePropio(req.path) ? next() : json(req, res, next)));
   app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false }));
 
   app.get('/api/salud', (_req, res) => res.json({ ok: true }));

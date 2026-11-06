@@ -30,7 +30,7 @@ export const routes: Routes = [
       { path: 'relaciones', ...pagina([P.VIAJES_VER], () => import('./pages/relaciones').then(m => m.Relaciones)) },
       // El cierre de mes ahora es una pestaña de Contabilidad
       { path: 'cierre-mes', ...pagina([P.CONFIG_GESTIONAR, P.LIQUIDACION_VER], () => import('./pages/contabilidad').then(m => m.Contabilidad)), data: { permisos: [P.CONFIG_GESTIONAR, P.LIQUIDACION_VER], tab: 'cierre' } },
-      { path: 'remesas-dulces', ...pagina([P.VIAJES_REGISTRAR], () => import('./pages/gestion-varios').then(m => m.RemesasDulces)) },
+      { path: 'remesas-dulces', ...pagina([P.VIAJES_VER], () => import('./pages/remesas').then(m => m.Remesas)) },
       { path: 'importar', ...pagina([P.MAESTROS_EDITAR, P.TARIFAS_EDITAR, P.CONFIG_GESTIONAR], () => import('./pages/importar').then(m => m.Importar)) },
       { path: 'revision', ...pagina([P.MAESTROS_VER], () => import('./pages/revision').then(m => m.Revision)) },
       { path: 'sst/planillas', ...pagina([P.SST_VER], () => import('./pages/sst-planillas').then(m => m.SstPlanillas)) },

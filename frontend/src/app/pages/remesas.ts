@@ -1,0 +1,525 @@
+import { Component, computed, inject, signal, viewChild } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { DecimalPipe } from '@angular/common';
+import { Api } from '../core/api.service';
+import { Auth } from '../core/auth.service';
+import { Avisos } from '../core/avisos.service';
+import { EnVivo } from '../core/en-vivo.service';
+import { P } from '../core/modelos';
+import { Icono } from '../shared/icono';
+import { Modal } from '../shared/modal';
+import { Confirmar } from '../shared/confirmar';
+import { VisorPdf } from '../shared/visor-pdf';
+import { FORMATOS } from '../shared/formato';
+import { filtrar } from '../shared/filtro';
+
+type Pestana = 'cargar' | 'base' | 'imprimir' | 'formato';
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const mesActual = () => new Date().toISOString().slice(0, 7);
+const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
+  if (!/^image\/(png|jpe?g)$/.test(archivo.type)) { mal(new Error('El logo debe ser PNG o JPG')); return; }
+  if (archivo.size > 650_000) { mal(new Error('El logo es muy pesado (máximo 650 KB)')); return; }
+  const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = () => mal(new Error('No se pudo leer la imagen')); r.readAsDataURL(archivo);
+});
+
+// Fase 12: Remesas de los clientes (como el formulario REMESAS DULCES de la plantilla).
+// Cargar base (Excel del cliente con VPL) → Base de remesas (consecutivo de la cooperativa, cédulas, imprimir una o varias)
+// → Imprimir (1 o 2 por hoja carta con línea para cortar, PDF o un PDF por remesa) → Configuración del formato por empresa.
+@Component({
+  selector: 'app-remesas',
+  imports: [FormsModule, DecimalPipe, Icono, Modal, Confirmar, VisorPdf, ...FORMATOS],
+  template: `
+    <div class="pagina-cab"><div><h1>Remesas</h1>
+      <p class="sutil">Base de viajes del cliente (VPL), consecutivo de remesas de la empresa e impresión con el formato de la remesa.</p></div></div>
+    <app-visor-pdf />
+
+    <nav class="pestanas" role="tablist" aria-label="Remesas">
+      @if (puedeGestionar) { <button type="button" role="tab" [class.activa]="pestana() === 'cargar'" (click)="pestana.set('cargar')">1. Cargar base</button> }
+      <button type="button" role="tab" [class.activa]="pestana() === 'base'" (click)="pestana.set('base')">2. Base de remesas</button>
+      @if (puedeGestionar) { <button type="button" role="tab" [class.activa]="pestana() === 'imprimir'" (click)="pestana.set('imprimir')">3. Imprimir</button>
+        <button type="button" role="tab" [class.activa]="pestana() === 'formato'" (click)="abrirFormato()">⚙ Configuración de la remesa</button> }
+    </nav>
+
+    <!-- ═════ 1. Cargar base ═════ -->
+    @if (pestana() === 'cargar') {
+      <section class="tarjeta">
+        <div class="fila">
+          <div class="campo"><label for="rm-cli">Empresa (cliente)</label>
+            <select id="rm-cli" [(ngModel)]="cargaCliente" (change)="previa.set(null)"><option value="">Seleccione…</option>
+              @for (c of clientes(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }</select></div>
+          <div class="campo crece"><span class="etiqueta">Archivo Excel con los viajes</span>
+            <label class="boton" [class.deshabilitado]="!cargaCliente"><app-icono nombre="descargar" />{{ archivo()?.name || 'Elegir Excel…' }}
+              <input type="file" accept=".xlsx,.xlsm" hidden [disabled]="!cargaCliente" (change)="elegirArchivo($event)" /></label></div>
+        </div>
+        <p class="sutil nota">Del Excel salen el VPL, la fecha, la ruta o zona, el peso, el manifiesto, el conductor, la placa y el flete. La <b>cédula y la dirección del conductor</b>
+          salen del registro de conductores (o de una remesa anterior). El <b>N° de remesa</b> es el consecutivo de la empresa: si viene vacío se asigna.</p>
+      </section>
+      @if (ocupado()) { <p class="sutil">Leyendo el archivo…</p> }
+      @if (previa(); as p) {
+        <section class="tarjeta">
+          <div class="fila centro">
+            <strong>{{ p.resumen.viajes }} viajes en el archivo</strong>
+            <span class="chip ok sin-punto">{{ p.resumen.nuevos }} nuevos</span>
+            @if (p.resumen.existen) { <span class="chip sin-punto">{{ p.resumen.existen }} ya están en la base</span> }
+            @if (p.resumen.cambian) { <span class="chip alerta sin-punto">{{ p.resumen.cambian }} cambiaron</span> }
+            @if (p.resumen.coinciden) { <span class="chip alerta sin-punto">{{ p.resumen.coinciden }} coinciden con la bitácora</span> }
+            <span class="crece"></span><span class="sutil">Total del archivo: <b>{{ p.resumen.total | pesos }}</b></span>
+          </div>
+          @for (a of p.avisos; track $index) {
+            <div class="aviso-rm" [class.ok]="a.nivel === 'ok'" [class.info]="a.nivel === 'info'"><span class="ic">{{ a.nivel === 'aviso' ? '!' : a.nivel === 'ok' ? '✓' : 'i' }}</span><span>{{ a.texto }}</span></div>
+          }
+          <div class="tabla-caja" style="margin-top:10px"><table class="tabla-movil">
+            <thead><tr><th><input type="checkbox" aria-label="Marcar todos" [checked]="todosCarga()" (change)="marcarCarga(todosCarga() ? 'ninguno' : 'todos')" /></th>
+              <th>VPL</th><th>Fecha</th><th>Ruta / zona</th><th class="num">Peso</th><th>Manifiesto</th><th>Conductor</th><th>C.C.</th><th>Placa</th><th>Remesa N°</th><th class="num">Flete</th><th>Bitácora</th><th>Estado</th></tr></thead>
+            <tbody>
+              @for (x of p.filas; track x.vpl + $index) {
+                @if (x.grupo && ($index === 0 || p.filas[$index - 1].grupo !== x.grupo)) { <tr class="grupo-rm"><td colspan="13">{{ x.tabla || x.grupo }}</td></tr> }
+                <tr>
+                  <td data-etiqueta="Pasar"><input type="checkbox" [checked]="selCarga().has(x.vpl)" (change)="alternarCarga(x.vpl)" [attr.aria-label]="'VPL ' + x.vpl" /></td>
+                  <td data-etiqueta="VPL"><strong>{{ x.vpl }}</strong></td><td data-etiqueta="Fecha">{{ x.fecha | dia }}</td><td data-etiqueta="Ruta">{{ x.zona }}</td>
+                  <td data-etiqueta="Peso" class="num">{{ x.peso | number: '1.0-1' : 'es-CO' }}</td><td data-etiqueta="Manifiesto">{{ x.manifiesto }}</td>
+                  <td data-etiqueta="Conductor">{{ x.conductor }}</td><td data-etiqueta="C.C.">{{ x.cedula || '—' }}</td><td data-etiqueta="Placa">{{ x.placa }}</td>
+                  <td data-etiqueta="Remesa" class="rem">{{ x.remesa || 'nueva' }}</td><td data-etiqueta="Flete" class="num">{{ x.costo | pesos }}</td>
+                  <td data-etiqueta="Bitácora">@if (x.bitacora.length) { <span class="chip alerta sin-punto" [title]="'Viaje N° ' + numeros(x.bitacora)">Ya está · N° {{ numeros(x.bitacora) }}</span> } @else { <span class="sutil">No está</span> }</td>
+                  <td data-etiqueta="Estado">
+                    @if (x.estado === 'nuevo') { <span class="chip ok sin-punto">Nuevo</span> }
+                    @else if (x.estado === 'cambio') { <span class="chip alerta sin-punto" [title]="'Cambió: ' + x.cambios.join(', ')">Cambió</span> }
+                    @else { <span class="chip sin-punto">Ya existe</span> }</td>
+                </tr>
+              }
+            </tbody></table></div>
+          <div class="fila centro" style="margin-top:12px">
+            <label class="casilla"><input type="radio" name="rm-modo" value="omitir" [(ngModel)]="modo" />Omitir los que ya existen</label>
+            <label class="casilla"><input type="radio" name="rm-modo" value="reemplazar" [(ngModel)]="modo" />Reemplazar los que ya existen</label>
+            <span class="crece"></span>
+            <button type="button" (click)="marcarCarga('todos')">Marcar todos</button>
+            <button type="button" (click)="marcarCarga('nuevos')">Solo nuevos</button>
+            <button type="button" (click)="marcarCarga('ninguno')">Quitar todos</button>
+            <button type="button" class="primario" (click)="pasar()" [disabled]="!selCarga().size || ocupado()">Pasar a la base ({{ selCarga().size }})</button>
+          </div>
+          <p class="sutil nota">Cada carga queda guardada: no hace falta borrar la base anterior. Próxima remesa sin número: <b>{{ p.siguiente }}</b>.</p>
+        </section>
+      }
+    }
+
+    <!-- ═════ 2. Base de remesas ═════ -->
+    @if (pestana() === 'base') {
+      <section class="barra" aria-label="Filtros">
+        <div class="campo"><label for="rb-cli">Empresa</label><select id="rb-cli" [(ngModel)]="f.cliente" (change)="cargar()"><option value="">(Todas)</option>
+          @for (c of clientes(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }</select></div>
+        <div class="campo"><label for="rb-mes">Mes</label><input id="rb-mes" type="month" [(ngModel)]="f.mes" (change)="cargar()" /></div>
+        <div class="campo"><label for="rb-est">Estado</label><select id="rb-est" [(ngModel)]="f.estado" (change)="cargar()">
+          <option value="">Todas</option><option value="pendientes">Pendientes</option><option value="impresas">Impresas</option></select></div>
+        <div class="campo crece"><label for="rb-q">Buscar</label><input id="rb-q" type="search" placeholder="Remesa, VPL, conductor, placa o ruta" [ngModel]="q()" (ngModelChange)="q.set($event)" /></div>
+      </section>
+      <section class="tarjeta">
+        <div class="fila centro acciones-sel">
+          <button type="button" (click)="seleccionar('todas')">☑ Seleccionar todo</button>
+          <button type="button" (click)="seleccionar('pendientes')">Solo pendientes</button>
+          <button type="button" (click)="seleccionar('ninguna')">Quitar selección</button>
+          <span class="sutil">{{ sel().size }} marcada(s) · {{ visibles().length }} en la lista</span>
+          <span class="crece"></span>
+          @if (puedeGestionar) {
+            <button type="button" (click)="verPdf(marcadas())" [disabled]="!sel().size">PDF de las marcadas</button>
+            <button type="button" class="primario" (click)="imprimir(marcadas())" [disabled]="!sel().size || ocupado()">🖨 Imprimir marcadas</button>
+          }
+        </div>
+        <div class="tabla-caja"><table class="tabla-movil">
+          <thead><tr><th><input type="checkbox" aria-label="Seleccionar todo" [checked]="todasSel()" (change)="seleccionar(todasSel() ? 'ninguna' : 'todas')" /></th>
+            <th>Remesa N°</th><th>VPL</th><th>Fecha</th><th>Ruta / zona</th><th class="num">Peso</th><th>Conductor</th><th>C.C.</th><th>Dirección</th><th>Placa</th><th class="num">Flete</th><th>Bitácora</th><th>Estado</th><th></th></tr></thead>
+          <tbody>
+            @for (x of visibles(); track x._id) {
+              <tr [class.marcada]="sel().has(x._id)">
+                <td data-etiqueta="Elegir"><input type="checkbox" [checked]="sel().has(x._id)" (change)="alternar(x._id)" [attr.aria-label]="'Remesa ' + x.remesa" /></td>
+                <td data-etiqueta="Remesa" class="rem">{{ x.remesa || '—' }}</td><td data-etiqueta="VPL">{{ x.vpl }}</td><td data-etiqueta="Fecha">{{ x.fecha | dia }}</td>
+                <td data-etiqueta="Ruta">{{ x.zona }}</td><td data-etiqueta="Peso" class="num">{{ x.peso | number: '1.0-1' : 'es-CO' }}</td><td data-etiqueta="Conductor">{{ x.conductor }}</td>
+                <td data-etiqueta="C.C.">@if (x.cedula) { {{ x.cedula }} } @else { <span class="chip alerta sin-punto">falta</span> }</td>
+                <td data-etiqueta="Dirección">{{ x.direccion }}</td><td data-etiqueta="Placa">{{ x.placa }}</td><td data-etiqueta="Flete" class="num">{{ x.costo | pesos }}</td>
+                <td data-etiqueta="Bitácora">@if (x.viaje) { <span class="chip alerta sin-punto">N° {{ x.viaje.numero }}</span> } @else { <span class="sutil">—</span> }</td>
+                <td data-etiqueta="Estado">@if (x.impreso) { <span class="chip ok sin-punto" [title]="'Por ' + (x.impresoPor || '') + ' · ' + x.impresiones + ' vez/veces'">Impresa {{ x.impreso | dia }}</span> }
+                  @else { <span class="chip info sin-punto">Pendiente</span> }</td>
+                <td class="acciones-fila">
+                  @if (puedeGestionar) {
+                    <button type="button" class="pequeno" (click)="editar(x)">Editar</button>
+                    <button type="button" class="pequeno" (click)="verPdf([x])">Ver</button>
+                    <button type="button" class="pequeno oscuro" (click)="descargarUna(x)">PDF</button>
+                    <button type="button" class="pequeno primario" [title]="'Imprimir la remesa ' + x.remesa" (click)="imprimirUna(x)">🖨</button>
+                  }
+                </td>
+              </tr>
+            } @empty { <tr><td colspan="14" class="vacio">No hay remesas con estos filtros. Cárguelas en «Cargar base».</td></tr> }
+          </tbody></table></div>
+        <p class="sutil nota">Hoja: <b>{{ hojaTexto() }}</b> (se cambia en «Imprimir»). Con 2 por hoja, el 🖨 de una fila imprime esa remesa arriba y la siguiente pendiente abajo.</p>
+      </section>
+    }
+
+    <!-- ═════ 3. Imprimir ═════ -->
+    @if (pestana() === 'imprimir') {
+      <div class="dos-col">
+        <section class="tarjeta">
+          <h3 class="sub">Qué imprimir</h3>
+          <label class="casilla"><input type="radio" name="rp-que" value="marcadas" [(ngModel)]="imp.que" />Las marcadas en la base ({{ sel().size }})</label>
+          <label class="casilla"><input type="radio" name="rp-que" value="rango" [(ngModel)]="imp.que" />Rango de remesas
+            <input class="corto" inputmode="numeric" [(ngModel)]="imp.desde" placeholder="desde" aria-label="Desde la remesa" /> a <input class="corto" inputmode="numeric" [(ngModel)]="imp.hasta" placeholder="hasta" aria-label="Hasta la remesa" /></label>
+          <label class="casilla"><input type="radio" name="rp-que" value="pendientes" [(ngModel)]="imp.que" />Todas las pendientes de la lista ({{ pendientesLista().length }})</label>
+          <label class="casilla"><input type="radio" name="rp-que" value="una" [(ngModel)]="imp.que" />Una sola remesa <input class="corto" inputmode="numeric" [(ngModel)]="imp.una" placeholder="N°" aria-label="Número de la remesa" /></label>
+          <h3 class="sub">Cómo va en la hoja carta</h3>
+          <div class="hojas">
+            <button type="button" [class.activa]="porHoja() === 2" (click)="porHoja.set(2)"><span class="mini"><i></i><s></s><i class="b"></i></span>2 remesas por hoja<small>distintas, con línea para cortar</small></button>
+            <button type="button" [class.activa]="porHoja() === 1" (click)="porHoja.set(1)"><span class="mini"><i></i><s></s></span>1 remesa por hoja<small>en la mitad de arriba</small></button>
+          </div>
+          <label class="casilla" style="margin-top:10px"><input type="checkbox" [ngModel]="linea()" (ngModelChange)="linea.set($event)" />Imprimir la línea divisoria (cortar aquí)</label>
+          <button type="button" class="primario grande" (click)="imprimir(aImprimir())" [disabled]="!aImprimir().length || ocupado()">🖨 Imprimir {{ aImprimir().length }} remesa(s) · {{ hojas(aImprimir().length) }} hoja(s)</button>
+          <div class="fila" style="margin-top:8px">
+            <button type="button" (click)="verPdf(aImprimir())" [disabled]="!aImprimir().length">Ver PDF</button>
+            <button type="button" class="oscuro" (click)="zip(aImprimir())" [disabled]="!aImprimir().length || ocupado()">Un PDF por remesa (.zip)</button>
+          </div>
+          <p class="sutil nota">Se abre la ventana de impresión para escoger la impresora y las copias. Al imprimir o descargar, las remesas quedan marcadas como <b>Impresas</b>.
+            Para guardar la hoja como predeterminada, cámbiela en «Configuración de la remesa».</p>
+        </section>
+        <section class="tarjeta">
+          <h3 class="sub">Remesas que se van a imprimir</h3>
+          @if (aImprimir().length) {
+            <ol class="lista-imp">@for (x of aImprimir().slice(0, 40); track x._id) { <li><b>{{ x.remesa }}</b> · VPL {{ x.vpl }} · {{ x.conductor }} · {{ x.placa }} @if (x.impreso) { <span class="chip ok sin-punto">ya impresa</span> }</li> }</ol>
+            @if (aImprimir().length > 40) { <p class="sutil">… y {{ aImprimir().length - 40 }} más</p> }
+          } @else { <p class="sutil">Elija qué imprimir. Las remesas salen de la lista de «Base de remesas» (con sus filtros).</p> }
+        </section>
+      </div>
+    }
+
+    <!-- ═════ ⚙ Configuración ═════ -->
+    @if (pestana() === 'formato' && fmt(); as k) {
+      <div class="dos-col cfg">
+        <div>
+          <section class="tarjeta">
+            <h3 class="sub">Encabezado · su empresa</h3>
+            <div class="fila centro"><span class="logo-cfg">@if (k.logo) { <img [src]="k.logo" alt="Logo de la empresa" /> } @else { Sin logo }</span>
+              @if (esAdmin) { <label class="boton">Cambiar logo<input type="file" accept="image/png,image/jpeg" hidden (change)="logo($event, 'logo')" /></label> }</div>
+            <div class="formulario">
+              <div class="campo"><label for="kf-n1">Nombre (línea 1)</label><input id="kf-n1" [(ngModel)]="k.nombre1" maxlength="80" [disabled]="!esAdmin" /></div>
+              <div class="campo"><label for="kf-n2">Nombre (línea 2)</label><input id="kf-n2" [(ngModel)]="k.nombre2" maxlength="80" [disabled]="!esAdmin" /></div>
+              <div class="campo"><label for="kf-nit">NIT</label><input id="kf-nit" [(ngModel)]="k.nit" maxlength="40" [disabled]="!esAdmin" /></div>
+              <div class="campo"><label for="kf-lema">Lema</label><input id="kf-lema" [(ngModel)]="k.lema" maxlength="120" [disabled]="!esAdmin" /></div>
+              <div class="campo ancho"><label for="kf-res">Resolución</label><textarea id="kf-res" rows="2" [(ngModel)]="k.resolucion" maxlength="300" [disabled]="!esAdmin"></textarea></div>
+              <div class="campo"><label for="kf-sig">Próxima remesa N°</label><input id="kf-sig" type="number" min="1" [(ngModel)]="k.siguiente" [disabled]="!esAdmin" />
+                <small>Consecutivo único de la empresa. Sigue solo después de la remesa más alta cargada.</small></div>
+              <div class="campo"><label for="kf-hoja">Hoja por defecto</label><select id="kf-hoja" [(ngModel)]="k.porHoja" [disabled]="!esAdmin"><option [ngValue]="2">2 remesas por hoja</option><option [ngValue]="1">1 remesa por hoja</option></select>
+                <label class="casilla"><input type="checkbox" [(ngModel)]="k.linea" [disabled]="!esAdmin" />Línea para cortar</label></div>
+            </div>
+            @if (esAdmin) { <div class="pie-acc"><button type="button" class="primario" (click)="guardarEmpresa()" [disabled]="ocupado()">Guardar encabezado</button></div> }
+            @else { <p class="sutil nota">Solo el administrador cambia el encabezado y el consecutivo.</p> }
+          </section>
+          <section class="tarjeta">
+            <div class="fila centro"><h3 class="sub crece" style="margin:0">Datos fijos del cliente</h3>
+              <select [(ngModel)]="fmtCliente" (change)="abrirFormato()" aria-label="Empresa (cliente)">@for (c of clientes(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }</select></div>
+            <div class="fila centro" style="margin-top:8px"><span class="logo-cfg">@if (k.logoCliente) { <img [src]="k.logoCliente" alt="Logo del cliente" /> } @else { Sin logo }</span>
+              <label class="boton">Cambiar logo del cliente<input type="file" accept="image/png,image/jpeg" hidden (change)="logo($event, 'logoCliente')" /></label>
+              @if (k.logoCliente) { <button type="button" class="texto" (click)="k.logoCliente = ''; logoQuitado = true">Quitar</button> }</div>
+            <div class="formulario tres">
+              <div class="campo"><label for="kc-rem">Remitente</label><input id="kc-rem" [(ngModel)]="k.remitente" maxlength="80" /></div>
+              <div class="campo"><label for="kc-ciu">Ciudad origen</label><input id="kc-ciu" [(ngModel)]="k.ciudadOrigen" maxlength="60" /></div>
+              <div class="campo"><label for="kc-des">Destinatario</label><input id="kc-des" [(ngModel)]="k.destinatario" maxlength="80" /></div>
+              <div class="campo"><label for="kc-dir">Dirección</label><input id="kc-dir" [(ngModel)]="k.direccion" maxlength="80" /></div>
+              <div class="campo"><label for="kc-sec">Sector / barrio</label><input id="kc-sec" [(ngModel)]="k.sector" maxlength="60" /></div>
+              <div class="campo"><label for="kc-can">Cantidad</label><input id="kc-can" [(ngModel)]="k.cantidad" maxlength="30" /></div>
+              <div class="campo"><label for="kc-cla">Clase</label><input id="kc-cla" [(ngModel)]="k.clase" maxlength="30" /></div>
+              <div class="campo"><label for="kc-con">Contenido</label><input id="kc-con" [(ngModel)]="k.contenido" maxlength="60" /></div>
+            </div>
+            <div class="pie-acc"><button type="button" class="primario" (click)="guardarCliente()" [disabled]="ocupado() || !fmtCliente">Guardar datos del cliente</button></div>
+          </section>
+        </div>
+        <section class="tarjeta previa-cfg"><h3 class="sub">Vista previa</h3>
+          <div class="rm">
+            <div class="cab"><div class="l1">@if (k.logo) { <img [src]="k.logo" alt="" /> }</div>
+              <div class="cen"><b>{{ k.nombre1 }}</b><b>{{ k.nombre2 }}</b><i class="nit">{{ k.nit }}</i><u class="lema">{{ k.lema }}</u><small>{{ k.resolucion }}</small></div>
+              <div class="der"><div class="l2">@if (k.logoCliente) { <img [src]="k.logoCliente" alt="" /> }</div>
+                <div class="caja"><div class="t">REMESA</div><div class="v"><span>VPL No:</span> 12031</div><div class="no">No: {{ k.siguiente }}</div></div></div></div>
+            <div class="b"><div class="g1"><b>FECHA DESPACHO</b><i class="u">{{ ciudad(k.ciudadOrigen) }} {{ hoyLargo() }}</i><b class="der">REMITENTE.</b><i class="u">{{ k.remitente }}</i><i class="c">{{ k.direccion }}</i></div>
+              <div class="g1 b2"><b>DESTINATARIO.</b><i class="u izq">{{ k.destinatario }}</i><b class="der">CIUDAD. ORIGEN</b><i class="u">{{ k.ciudadOrigen }}</i><b>DIRECCIÓN.</b><i class="u">{{ k.sector }}</i></div></div>
+            <table><tr><th colspan="2">BULTOS</th><th>S/G FACTURA VR. M/CIA.$</th><th colspan="2">DETALLE</th><th rowspan="2">FLETE</th></tr>
+              <tr><th>CANTIDAD</th><th>CLASE</th><th>CONTENIDO</th><th>PESO</th><th>MANIFIESTO</th></tr>
+              <tr><td>{{ k.cantidad }}</td><td>{{ k.clase }}</td><td>{{ k.contenido }}</td><td class="d">2584,0</td><td class="c">URBANO</td><td class="d">$ 229.000,0</td></tr>
+              <tr class="v"><td></td><td></td><td></td><td></td><td></td><td></td></tr></table>
+            <div class="b g2"><b>RUTA/ZONA:</b><span>PASTO</span></div>
+            <div class="b g3"><b>CONDUCTOR</b><b>C.C:</b><b>DIRECCION:</b><b>PLACA</b><i>(de la base)</i><i class="d">(registro)</i><i>(registro)</i><i>(de la base)</i></div>
+            <div class="b g4"><b>La Empresa</b><b>Recibí Destinatario C.C. No.</b></div>
+          </div>
+          <p class="sutil nota">Ejemplo. Los datos del viaje salen de la base; los de arriba, de esta configuración.</p>
+        </section>
+      </div>
+    }
+
+    <!-- Corregir una remesa -->
+    <app-modal [titulo]="'Remesa ' + (ed()?.remesa || '') + ' · VPL ' + (ed()?.vpl || '')" [abierto]="!!ed()" (cerrar)="ed.set(null)" [ancho]="true">
+      @if (ed(); as e) {
+        <div class="formulario tres">
+          <div class="campo"><label for="re-rem">Remesa N°</label><input id="re-rem" inputmode="numeric" [(ngModel)]="e.remesa" maxlength="12" /></div>
+          <div class="campo"><label for="re-fe">Fecha despacho</label><input id="re-fe" type="date" [(ngModel)]="e.fecha" /></div>
+          <div class="campo"><label for="re-zo">Ruta / zona</label><input id="re-zo" [(ngModel)]="e.zona" maxlength="120" /></div>
+          <div class="campo"><label for="re-pe">Peso (kg)</label><input id="re-pe" type="number" min="0" [(ngModel)]="e.peso" /></div>
+          <div class="campo"><label for="re-ma">Manifiesto</label><input id="re-ma" [(ngModel)]="e.manifiesto" maxlength="40" /></div>
+          <div class="campo"><label for="re-fl">Flete ($)</label><input id="re-fl" type="number" min="0" [(ngModel)]="e.costo" /></div>
+          <div class="campo"><label for="re-co">Conductor</label><input id="re-co" [(ngModel)]="e.conductor" maxlength="80" /></div>
+          <div class="campo"><label for="re-cc">C.C.</label><input id="re-cc" inputmode="numeric" [(ngModel)]="e.cedula" maxlength="15" />
+            <small>Queda guardada para las próximas remesas de este conductor.</small></div>
+          <div class="campo"><label for="re-di">Dirección del conductor</label><input id="re-di" [(ngModel)]="e.direccion" maxlength="80" /></div>
+          <div class="campo"><label for="re-pl">Placa</label><input id="re-pl" [(ngModel)]="e.placa" maxlength="8" /></div>
+        </div>
+      }
+      <ng-container pie>
+        @if (ed() && !ed().impreso) { <button type="button" class="texto peligro" confirmar="Clic otra vez para eliminar" (confirmado)="eliminar()">Eliminar</button> }
+        <span class="crece"></span>
+        <button type="button" (click)="ed.set(null)">Cancelar</button>
+        <button type="button" class="primario" (click)="guardarEdicion()" [disabled]="ocupado()">Guardar</button>
+      </ng-container>
+    </app-modal>`,
+  styles: [`
+    .tarjeta { background: var(--gris-0, #fff); border: 1px solid var(--gris-2); border-radius: var(--radio-l, 14px); padding: 14px 16px; margin-bottom: 14px; }
+    .fila { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; } .fila.centro { align-items: center; } .crece { flex: 1; }
+    .campo { display: flex; flex-direction: column; gap: 5px; } .nota { margin: 10px 0 0; font-size: 12.5px; }
+    .deshabilitado { opacity: .5; pointer-events: none; }
+    .aviso-rm { display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; border-radius: 10px; margin-top: 8px; background: #fff4e0; font-size: 13px; }
+    .aviso-rm.ok { background: #e8f6ee; } .aviso-rm.info { background: #eef4ff; }
+    .aviso-rm .ic { width: 20px; height: 20px; flex: none; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 12px; background: #c77700; }
+    .aviso-rm.ok .ic { background: #1e8e4f; } .aviso-rm.info .ic { background: #2457c5; }
+    .rem { color: #c00000; font-weight: 700; white-space: nowrap; }
+    tr.grupo-rm td { background: #0d1117; color: #fff; font-weight: 700; font-size: 12px; }
+    tr.marcada td { background: var(--primario-suave, #fff8e1); }
+    .acciones-sel { margin-bottom: 8px; } .acciones-fila { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: nowrap; }
+    button.oscuro { background: #0d1117; color: #fff; border-color: #0d1117; }
+    .dos-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+    .dos-col.cfg { grid-template-columns: minmax(0, 1fr) minmax(0, 660px); }
+    .casilla { display: flex; align-items: center; gap: 8px; padding: 5px 0; flex-wrap: wrap; } input.corto { width: 90px; }
+    .hojas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .hojas button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px; border: 2px solid var(--gris-2); border-radius: 12px; background: #fff; font-weight: 700; }
+    .hojas button.activa { border-color: #0d1117; background: var(--primario-suave, #fff8e1); } .hojas small { font-weight: 500; color: var(--gris-5); }
+    .mini { width: 54px; height: 70px; border: 1px solid #98a2b3; background: #fff; position: relative; display: block; }
+    .mini i { position: absolute; left: 5px; right: 5px; top: 4px; height: 26px; background: #bde3f7; border: 1px solid #6b9fc4; } .mini i.b { top: 39px; }
+    .mini s { position: absolute; left: 0; right: 0; top: 34px; border-top: 1px dashed #333; }
+    button.grande { width: 100%; margin-top: 14px; padding: 12px; font-size: 15px; }
+    .lista-imp { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.8; }
+    .formulario { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-top: 10px; } .formulario.tres { grid-template-columns: repeat(3, 1fr); }
+    .formulario .ancho { grid-column: 1 / -1; } .pie-acc { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .logo-cfg { width: 150px; height: 56px; border: 1px dashed var(--gris-3, #d0d5dd); border-radius: 8px; display: grid; place-items: center; font-size: 12px; color: var(--gris-5); background: #fff; }
+    .logo-cfg img { max-width: 140px; max-height: 50px; }
+    /* Vista previa del formato (a escala) */
+    .rm { font-family: Arial, sans-serif; font-size: 9px; color: #000; background: #fff; border: 1px solid var(--gris-2); padding: 8px; }
+    .rm .cab { display: grid; grid-template-columns: 150px 1fr 120px; gap: 6px; align-items: center; }
+    .rm .l1 img { max-width: 145px; max-height: 58px; } .rm .l2 { height: 34px; display: grid; place-items: center; } .rm .l2 img { max-height: 32px; max-width: 115px; }
+    .rm .cen { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1px; } .rm .cen b { color: #0b1a3a; font-size: 10.5px; }
+    .rm .nit { font-weight: 700; } .rm .lema { font-family: 'Times New Roman', serif; font-weight: 700; font-style: italic; font-size: 10px; } .rm .cen small { font-size: 7px; font-style: italic; }
+    .rm .caja { border: 1px solid #333; } .rm .caja .t { background: #bde3f7; text-align: center; font-weight: 700; font-style: italic; border-bottom: 1px solid #333; }
+    .rm .caja .v { padding: 2px 5px; font-weight: 700; font-style: italic; border-bottom: 1px solid #333; } .rm .caja .v span, .rm .caja .no { color: #c00000; }
+    .rm .caja .no { padding: 3px 5px; font-size: 14px; font-weight: 800; font-style: italic; }
+    .rm .b { border: 1px solid #333; margin-top: 6px; padding: 4px 6px; display: grid; gap: 4px 6px; align-items: end; }
+    .rm .u { border-bottom: 1px solid #777; text-align: center; } .rm .u.izq { text-align: left; }
+    .rm .g1 { display: grid; gap: 6px; align-items: end; grid-template-columns: 82px 1.5fr 62px 1.1fr 1.1fr; } .rm .g1.b2 { grid-template-columns: 82px 1.4fr 78px .9fr 56px 1fr; margin-top: 4px; } .rm .der { text-align: right; } .rm .g2 { grid-template-columns: 80px 1fr; } .rm .g3 { grid-template-columns: 2fr 1fr 1fr 1fr; } .rm .g4 { grid-template-columns: 1fr 1fr; font-style: italic; }
+    .rm table { width: 100%; border-collapse: collapse; margin-top: 6px; } .rm th { background: #bde3f7; border: 1px solid #888; font-size: 8.5px; padding: 2px; text-align: center; color: #000; text-transform: none; letter-spacing: 0; }
+    .rm td { border: 1px solid #bbb; padding: 2px 4px; font-style: italic; height: 13px; font-size: 9px; } .rm tr.v td { background: #eef7fd; } .rm .d { text-align: right; } .rm .c { text-align: center; }
+    @media (max-width: 1100px) { .dos-col, .dos-col.cfg { grid-template-columns: 1fr; } .formulario.tres { grid-template-columns: 1fr 1fr; } }
+  `],
+})
+export class Remesas {
+  private api = inject(Api); private avisos = inject(Avisos); private auth = inject(Auth);
+  readonly visor = viewChild.required(VisorPdf);
+  readonly puedeGestionar = this.auth.tiene(P.VIAJES_REGISTRAR);
+  readonly esAdmin = this.auth.tiene(P.CONFIG_GESTIONAR);
+  readonly pestana = signal<Pestana>(this.puedeGestionar ? 'cargar' : 'base');
+  readonly clientes = signal<any[]>([]);
+  readonly ocupado = signal(false);
+  // Carga
+  cargaCliente = '';
+  modo: 'omitir' | 'reemplazar' = 'omitir';
+  readonly archivo = signal<File | null>(null);
+  readonly previa = signal<any>(null);
+  readonly selCarga = signal(new Set<string>());
+  readonly todosCarga = computed(() => !!this.previa()?.filas.length && this.previa().filas.every((x: any) => this.selCarga().has(x.vpl)));
+  // Base
+  f = { cliente: '', mes: mesActual(), estado: '' };
+  readonly lista = signal<any[]>([]);
+  readonly q = signal('');
+  readonly sel = signal(new Set<string>());
+  readonly visibles = computed(() => filtrar<any>(this.lista(), this.q()));
+  readonly todasSel = computed(() => this.visibles().length > 0 && this.visibles().every(x => this.sel().has(x._id)));
+  readonly marcadas = () => this.lista().filter(x => this.sel().has(x._id));
+  readonly pendientesLista = computed(() => this.visibles().filter(x => !x.impreso));
+  readonly ed = signal<any>(null);
+  // Imprimir
+  imp = { que: 'marcadas', desde: '', hasta: '', una: '' };
+  readonly porHoja = signal<1 | 2>(2);
+  readonly linea = signal(true);
+  readonly hojaTexto = computed(() => (this.porHoja() === 2 ? '2 remesas por hoja' : '1 remesa por hoja'));
+  // Configuración
+  readonly fmt = signal<any>(null);
+  fmtCliente = '';
+  logoQuitado = false;
+  private enVivo = inject(EnVivo).al(['gestion'], () => this.cargar());
+
+  constructor() {
+    this.api.get<any[]>('/maestros/clientes').then(c => {
+      const activos = c.filter(x => x.activo !== false); this.clientes.set(activos);
+      const dulces = activos.find(x => /dulces/i.test(x.nombre));
+      this.cargaCliente = dulces?._id || (activos.length === 1 ? activos[0]._id : '');
+      this.fmtCliente = this.cargaCliente || activos[0]?._id || '';
+    }).catch(e => this.avisos.error(e));
+    this.api.get<any>('/gestion/remesas/formato').then(k => { this.porHoja.set(k.porHoja === 1 ? 1 : 2); this.linea.set(k.linea !== false); }).catch(() => {});
+    this.cargar();
+  }
+
+  numeros = (b: any[]) => b.map(v => v.numero).join(', ');
+  hojas = (n: number) => (this.porHoja() === 2 ? Math.ceil(n / 2) : n);
+  ciudad = (c: string) => (String(c || '').split('-')[0].trim() ? `${String(c).split('-')[0].trim()},` : '');
+  hoyLargo() { const h = new Date(); return `${h.getDate()} de ${MESES[h.getMonth()]} de ${h.getFullYear()}`; }
+
+  // ── Carga ──
+  async elegirArchivo(ev: Event) {
+    const input = ev.target as HTMLInputElement; const a = input.files?.[0]; input.value = '';
+    if (!a || !this.cargaCliente) return;
+    this.archivo.set(a); this.previa.set(null); this.ocupado.set(true);
+    try {
+      const p = await this.api.subir<any>('/gestion/remesas/previa', a, { cliente: this.cargaCliente });
+      this.previa.set(p);
+      this.selCarga.set(new Set(p.filas.filter((x: any) => x.estado !== 'existe').map((x: any) => x.vpl)));
+    } catch (e) { this.avisos.error(e); } finally { this.ocupado.set(false); }
+  }
+  alternarCarga(v: string) { const s = new Set(this.selCarga()); if (s.has(v)) s.delete(v); else s.add(v); this.selCarga.set(s); }
+  marcarCarga(que: 'todos' | 'nuevos' | 'ninguno') {
+    const fs = this.previa()?.filas || [];
+    this.selCarga.set(new Set(que === 'ninguno' ? [] : fs.filter((x: any) => que === 'todos' || x.estado === 'nuevo').map((x: any) => x.vpl)));
+  }
+  async pasar() {
+    const a = this.archivo(); if (!a) return;
+    this.ocupado.set(true);
+    try {
+      const r = await this.api.subirConCabeceras<any>('/gestion/remesas/importar', a, { cliente: this.cargaCliente, modo: this.modo },
+        { 'X-Seleccion': encodeURIComponent(JSON.stringify([...this.selCarga()])) });
+      this.avisos.ok(`${r.nuevos} nueva(s) · ${r.reemplazados} reemplazada(s) · ${r.omitidos} omitida(s) · próxima remesa: ${r.siguiente}`
+        + (r.sinCedula.length ? ` · sin cédula: ${r.sinCedula.join(', ')}` : ''));
+      this.previa.set(null); this.archivo.set(null);
+      this.f.cliente = this.cargaCliente; this.f.estado = 'pendientes'; this.f.mes = '';
+      await this.cargar(); this.pestana.set('base');
+    } catch (e) { this.avisos.error(e); } finally { this.ocupado.set(false); }
+  }
+
+  // ── Base ──
+  async cargar() {
+    try {
+      this.lista.set(await this.api.get<any[]>('/gestion/remesas', { cliente: this.f.cliente, mes: this.f.mes, estado: this.f.estado }));
+      const ids = new Set(this.lista().map(x => x._id)); this.sel.set(new Set([...this.sel()].filter(i => ids.has(i))));
+    } catch (e) { this.avisos.error(e); }
+  }
+  alternar(i: string) { const s = new Set(this.sel()); if (s.has(i)) s.delete(i); else s.add(i); this.sel.set(s); }
+  seleccionar(que: 'todas' | 'pendientes' | 'ninguna') {
+    this.sel.set(new Set(que === 'ninguna' ? [] : this.visibles().filter(x => que === 'todas' || !x.impreso).map(x => x._id)));
+  }
+  editar(x: any) { this.ed.set({ ...x, fecha: x.fecha ? String(x.fecha).slice(0, 10) : '' }); }
+  async guardarEdicion() {
+    const e = this.ed(); this.ocupado.set(true);
+    try {
+      await this.api.put(`/gestion/remesas/${e._id}`, { remesa: String(e.remesa || ''), fecha: e.fecha, zona: e.zona, peso: e.peso, manifiesto: e.manifiesto, costo: e.costo,
+        conductor: e.conductor, cedula: String(e.cedula || ''), direccion: e.direccion, placa: e.placa });
+      this.avisos.ok(`Remesa ${e.remesa} guardada`); this.ed.set(null); this.cargar();
+    } catch (er) { this.avisos.error(er); } finally { this.ocupado.set(false); }
+  }
+  async eliminar() {
+    const e = this.ed();
+    try { await this.api.delete(`/gestion/remesas/${e._id}`); this.avisos.ok('Remesa eliminada'); this.ed.set(null); this.cargar(); } catch (er) { this.avisos.error(er); }
+  }
+
+  // ── Imprimir ──
+  // Lo que se va a imprimir según «Qué imprimir» (se recalcula en cada cambio de la pantalla)
+  aImprimir() {
+    const l = [...this.visibles()].sort((a, b) => (Number(a.remesa) || 1e12) - (Number(b.remesa) || 1e12));
+    const que = this.imp.que;
+    if (que === 'marcadas') return l.filter(x => this.sel().has(x._id));
+    if (que === 'pendientes') return l.filter(x => !x.impreso);
+    if (que === 'una') return l.filter(x => x.remesa && x.remesa === String(this.imp.una).trim());
+    const d = Number(this.imp.desde) || 0; const h = Number(this.imp.hasta) || Infinity;
+    return l.filter(x => Number(x.remesa) >= d && Number(x.remesa) <= h);
+  }
+  private cuerpo(l: any[], marcar = true) { return { ids: l.map(x => x._id), porHoja: this.porHoja(), linea: this.linea(), marcar }; }
+  async verPdf(l: any[]) {
+    if (!l.length) return;
+    // Ver no marca como impresa
+    await this.visor().ver('/gestion/remesas/pdf', l.length === 1 ? `Remesa ${l[0].remesa}` : `Remesas (${l.length})`, undefined, this.cuerpo(l, false));
+  }
+  async descargarUna(x: any) {
+    try {
+      const b = await this.api.archivoPost('/gestion/remesas/pdf', { ids: [x._id], porHoja: 1, linea: false, marcar: false });
+      bajar(b, `Remesa_${x.remesa}_VPL_${x.vpl}.pdf`);
+    } catch (e) { this.avisos.error(e); }
+  }
+  async zip(l: any[]) {
+    this.ocupado.set(true);
+    try { bajar(await this.api.archivoPost('/gestion/remesas/zip', this.cuerpo(l)), `Remesas_${l.length}.zip`); this.avisos.ok(`${l.length} remesa(s) descargadas`); this.cargar(); }
+    catch (e) { this.avisos.error(e); } finally { this.ocupado.set(false); }
+  }
+  // Con 2 por hoja, la de la fila va arriba y la siguiente pendiente abajo
+  imprimirUna(x: any) {
+    if (this.porHoja() === 1) { this.imprimir([x]); return; }
+    const orden = [...this.lista()].sort((a, b) => (Number(a.remesa) || 1e12) - (Number(b.remesa) || 1e12));
+    const sig = orden.find(y => y._id !== x._id && !y.impreso && (Number(y.remesa) || 0) > (Number(x.remesa) || 0));
+    this.imprimir(sig ? [x, sig] : [x]);
+  }
+  async imprimir(l: any[]) {
+    if (!l.length) return;
+    const ya = l.filter(x => x.impreso);
+    if (ya.length && !confirm(`${ya.length === l.length ? (l.length === 1 ? 'Esta remesa ya se imprimió' : `Estas ${l.length} remesas ya se imprimieron`) : `${ya.length} de las ${l.length} remesas ya se imprimieron`} (${ya.slice(0, 6).map(x => x.remesa).join(', ')}${ya.length > 6 ? '…' : ''}).\n\n¿Imprimirlas otra vez?`)) return;
+    this.ocupado.set(true);
+    try {
+      const b = await this.api.archivoPost('/gestion/remesas/pdf', this.cuerpo(l));
+      imprimirPdf(b);
+      this.avisos.ok(`${l.length} remesa(s) listas para imprimir · ${this.hojas(l.length)} hoja(s)`);
+      this.cargar();
+    } catch (e) { this.avisos.error(e); } finally { this.ocupado.set(false); }
+  }
+
+  // ── Configuración ──
+  async abrirFormato() {
+    this.pestana.set('formato'); this.logoQuitado = false;
+    try { this.fmt.set(await this.api.get<any>('/gestion/remesas/formato', { cliente: this.fmtCliente })); } catch (e) { this.avisos.error(e); }
+  }
+  async logo(ev: Event, campo: 'logo' | 'logoCliente') {
+    const input = ev.target as HTMLInputElement; const a = input.files?.[0]; input.value = '';
+    if (!a) return;
+    try { const u = await leerImagen(a); this.fmt.set({ ...this.fmt(), [campo]: u, [`${campo}Nuevo`]: true }); } catch (e) { this.avisos.error(e); }
+  }
+  async guardarEmpresa() {
+    const k = this.fmt(); this.ocupado.set(true);
+    try {
+      const r = await this.api.put<any>('/gestion/remesas/formato/empresa', { nombre1: k.nombre1, nombre2: k.nombre2, nit: k.nit, lema: k.lema, resolucion: k.resolucion,
+        siguiente: Number(k.siguiente), porHoja: Number(k.porHoja), linea: !!k.linea, ...(k.logoNuevo ? { logo: k.logo } : {}) });
+      this.fmt.set({ ...r, ...this.datosCliente(k) }); this.porHoja.set(r.porHoja === 1 ? 1 : 2); this.linea.set(r.linea !== false);
+      this.avisos.ok('Encabezado de la remesa guardado');
+    } catch (e) { this.avisos.error(e); } finally { this.ocupado.set(false); }
+  }
+  private datosCliente(k: any) {
+    return { logoCliente: k.logoCliente, remitente: k.remitente, ciudadOrigen: k.ciudadOrigen, direccion: k.direccion, sector: k.sector, destinatario: k.destinatario,
+      cantidad: k.cantidad, clase: k.clase, contenido: k.contenido };
+  }
+  async guardarCliente() {
+    const k = this.fmt(); this.ocupado.set(true);
+    try {
+      const { logoCliente, ...resto } = this.datosCliente(k);
+      const r = await this.api.put<any>(`/gestion/remesas/formato/cliente/${this.fmtCliente}`, { ...resto, ...(k.logoClienteNuevo || this.logoQuitado ? { logo: logoCliente || '' } : {}) });
+      this.fmt.set(r); this.logoQuitado = false;
+      this.avisos.ok('Datos de la remesa del cliente guardados');
+    } catch (e) { this.avisos.error(e); } finally { this.ocupado.set(false); }
+  }
+}
+
+function bajar(b: Blob, nombre: string) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = nombre; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+// Abre la ventana de impresión con el PDF (en el celular lo abre en otra pestaña para imprimir desde ahí)
+function imprimirPdf(b: Blob) {
+  const url = URL.createObjectURL(new Blob([b], { type: 'application/pdf' }));
+  if (window.matchMedia('(max-width: 700px)').matches) { window.open(url, '_blank'); return; }
+  const f = document.createElement('iframe');
+  f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  f.src = url;
+  f.onload = () => { try { f.contentWindow?.focus(); f.contentWindow?.print(); } catch { window.open(url, '_blank'); } };
+  document.body.appendChild(f);
+  setTimeout(() => { f.remove(); URL.revokeObjectURL(url); }, 120_000);
+}
