@@ -1,5 +1,6 @@
 import { Component, computed, inject, input, model, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { DecimalPipe } from '@angular/common';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -100,7 +101,7 @@ export class AjusteLogoRemesa {
 // → Imprimir (1 o 2 por hoja carta con línea para cortar, PDF o un PDF por remesa) → Configuración del formato por empresa.
 @Component({
   selector: 'app-remesas',
-  imports: [FormsModule, DecimalPipe, Icono, Modal, Confirmar, VisorPdf, AjusteLogoRemesa, ...FORMATOS],
+  imports: [FormsModule, RouterLink, DecimalPipe, Icono, Modal, Confirmar, VisorPdf, AjusteLogoRemesa, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Remesas</h1>
       <p class="sutil">Base de viajes del cliente (VPL), consecutivo de remesas de la empresa e impresión con el formato de la remesa.</p></div></div>
@@ -278,7 +279,8 @@ export class AjusteLogoRemesa {
           <section class="tarjeta">
             <h3 class="sub">Encabezado · su empresa</h3>
             <div class="fila centro"><span class="logo-cfg">@if (k.logo) { <img [src]="k.logo" alt="Logo de la empresa" /> } @else { Sin logo }</span>
-              @if (esAdmin) { <label class="boton">Cambiar logo<input type="file" accept="image/png,image/jpeg" hidden (change)="logo($event, 'logo')" /></label> }</div>
+              <span class="sutil nota-logo">Es el logo de <b>Configuración → Logo de la empresa</b>.
+                @if (esAdmin) { <a routerLink="/configuracion" [queryParams]="{ tab: 'logo-empresa' }">Cambiarlo</a> }</span></div>
             @if (k.logo) { <app-ajuste-logo-remesa nombre="logo de la empresa" [lim]="LIMITES_LOGOS.logo" [valor]="k.ajusteLogo || SIN_AJUSTE" (valorChange)="k.ajusteLogo = $event" [deshabilitado]="!esAdmin" /> }
             <div class="formulario">
               <div class="campo"><label for="kf-n1">Nombre (línea 1)</label><input id="kf-n1" [(ngModel)]="k.nombre1" maxlength="80" [disabled]="!esAdmin" /></div>
@@ -399,6 +401,7 @@ export class AjusteLogoRemesa {
     .rm .cab { position: relative; overflow: hidden; } .rm .cen, .rm .caja { position: relative; z-index: 1; } .rm .l1, .rm .l2 { position: relative; z-index: 0; }
     .rm .l1 img, .rm .l2 img { transform-origin: center; }
     .rm .l1 img { max-width: 145px; max-height: 58px; }
+    .nota-logo { font-size: 12.5px; max-width: 260px; line-height: 1.4; }
     .previa-cfg { position: sticky; top: 12px; align-self: start; } .rm .l2 { height: 34px; display: grid; place-items: center; } .rm .l2 img { max-height: 32px; max-width: 115px; }
     .rm .cen { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1px; } .rm .cen b { color: #0b1a3a; font-size: 10.5px; }
     .rm .nit { font-weight: 700; } .rm .lema { font-family: 'Times New Roman', serif; font-weight: 700; font-style: italic; font-size: 10px; } .rm .cen small { font-size: 7px; font-style: italic; }

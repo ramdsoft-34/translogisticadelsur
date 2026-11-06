@@ -170,7 +170,7 @@ async function viajesQueCoinciden(empresaId, lista) {
 
 async function empresaConFormato(empresaId) {
   // Solo «+»: trae todo el documento más los logos (pedir también «remesaFormato» choca en MongoDB)
-  return Empresa.findById(empresaId).select('+remesaFormato.logo +logo').lean();
+  return Empresa.findById(empresaId).select('+remesaFormato.logo +logoEmpresa').lean();
 }
 
 // Remesa más alta ya usada en la empresa (también las cargadas antes de la fase 12)
@@ -337,7 +337,7 @@ export function ajusteDe(tipo, a) {
 export function formatoPorDefecto(empresa, cliente) {
   const rf = empresa?.remesaFormato || {}; const cf = cliente?.remesaFormato || {};
   return {
-    logo: rf.logo || empresa?.logo || '', nombre1: rf.nombre1 || (empresa?.nombre || '').toUpperCase(), nombre2: rf.nombre2 || '',
+    logo: empresa?.logoEmpresa || rf.logo || '',   // el de «Configuración → Logo de la empresa» (no el del soporte interno) nombre1: rf.nombre1 || (empresa?.nombre || '').toUpperCase(), nombre2: rf.nombre2 || '',
     nit: rf.nit || (empresa?.nit ? `NIT.${empresa.nit}${empresa.dv ? `-${empresa.dv}` : ''}` : ''), lema: rf.lema || '', resolucion: rf.resolucion || '',
     siguiente: rf.siguiente || 1, porHoja: rf.porHoja || 2, linea: rf.linea !== false,
     logoCliente: cf.logo || '', remitente: cf.remitente || cliente?.razonSocial || cliente?.nombre || '', ciudadOrigen: cf.ciudadOrigen || empresa?.ciudad || '',

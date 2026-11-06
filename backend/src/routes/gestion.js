@@ -578,6 +578,23 @@ r.delete('/empresa/logo', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
   await auditar(req, 'logo_empresa', { detalle: { accion: 'quitar' } });
   res.json({ ok: true });
 });
+// Logo de la empresa (encabezado de la remesa de los clientes). El del soporte interno es /empresa/logo.
+r.get('/empresa/logo-principal', permitir(P.VIAJES_VER), async (req, res) => {
+  const e = await Empresa.findById(req.empresaId).select('+logoEmpresa').lean();
+  res.json({ logo: e?.logoEmpresa || '' });
+});
+r.put('/empresa/logo-principal', permitir(P.CONFIG_GESTIONAR), express.json({ limit: '1mb' }), async (req, res) => {
+  const { imagen } = z.object({ imagen: imagenLogo }).parse(req.body || {});
+  await Empresa.updateOne({ _id: req.empresaId }, { $set: { logoEmpresa: imagen } });
+  await auditar(req, 'logo_empresa_principal', { detalle: { accion: 'cambiar', bytes: imagen.length } });
+  res.json({ ok: true });
+});
+r.delete('/empresa/logo-principal', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  await Empresa.updateOne({ _id: req.empresaId }, { $set: { logoEmpresa: '' } });
+  await auditar(req, 'logo_empresa_principal', { detalle: { accion: 'quitar' } });
+  res.json({ ok: true });
+});
+
 // Vista previa del soporte interno con el logo indicado (o el guardado), sin guardar nada
 r.post('/soportes/vista-previa', permitir(P.CONFIG_GESTIONAR), express.json({ limit: '1mb' }), async (req, res) => {
   const e = await Empresa.findById(req.empresaId).select('+logo').lean();

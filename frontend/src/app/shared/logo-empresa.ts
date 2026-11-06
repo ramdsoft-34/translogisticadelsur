@@ -30,10 +30,11 @@ function comprimir(img: HTMLImageElement, esPng: boolean): string {
   template: `
     <div class="logo-cfg">
       <section class="tarjeta lado">
-        <h2>Logo de la empresa</h2>
-        <p class="sutil">Va en el soporte interno (MC/RC) en lugar de los logos del Ministerio. Use una imagen PNG o JPG con fondo blanco o transparente.</p>
+        <h2>Logo del soporte interno</h2>
+        <p class="sutil">Va solo en el soporte interno (MC/RC), en lugar de los logos del Ministerio. Use una imagen PNG o JPG con fondo blanco o transparente.
+          El logo de la empresa (el de la remesa) se cambia en la pestaña «Logo de la empresa».</p>
         <div class="muestra" [class.vacia]="!logoVisible()">
-          @if (logoVisible(); as l) { <img [src]="l" alt="Logo de la empresa" /> } @else { <span>Sin logo: el soporte muestra el nombre de la empresa</span> }
+          @if (logoVisible(); as l) { <img [src]="l" alt="Logo del soporte interno" /> } @else { <span>Sin logo: el soporte muestra el nombre de la empresa</span> }
         </div>
         @if (pendiente()) { <div class="mensaje alerta">Logo nuevo sin guardar. Revise la vista previa y presione «Guardar logo».</div> }
         <div class="acciones">

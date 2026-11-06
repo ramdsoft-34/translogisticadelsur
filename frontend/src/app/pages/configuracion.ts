@@ -14,22 +14,24 @@ import { ReglasEmpresa } from '../shared/reglas-empresa';
 import { Autorizaciones } from '../shared/autorizaciones';
 import { ConfigCorreo } from '../shared/config-correo';
 import { LogoEmpresa } from '../shared/logo-empresa';
+import { LogoPrincipal } from '../shared/logo-principal';
 import { Confirmar } from '../shared/confirmar';
 import { filtrar } from '../shared/filtro';
 import { RndcClave } from '../core/rndc-clave.service';
 
-type Pestana = 'rndc' | 'reglas' | 'correo' | 'logo' | 'rastreo' | 'usuarios' | 'autorizaciones' | 'importar' | 'auditoria';
+type Pestana = 'rndc' | 'reglas' | 'correo' | 'logo-empresa' | 'logo' | 'rastreo' | 'usuarios' | 'autorizaciones' | 'importar' | 'auditoria';
 
 @Component({
   selector: 'app-configuracion',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, VisorAuditoria, ConfigCorreo, LogoEmpresa, ReglasEmpresa, Autorizaciones, Confirmar, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, VisorAuditoria, ConfigCorreo, LogoEmpresa, LogoPrincipal, ReglasEmpresa, Autorizaciones, Confirmar, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Configuración</h1><p class="sutil">{{ auth.usuario()?.empresa?.nombre }}</p></div></div>
     <div class="pestanas">
       @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'rndc'" (click)="ir('rndc')">Conexión RNDC y valores</button> }
       @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'reglas'" (click)="ir('reglas')">Reglas</button> }
       @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'correo'" (click)="ir('correo')">Correo</button> }
-      @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'logo'" (click)="ir('logo')">Logo y soporte interno</button> }
+      @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'logo-empresa'" (click)="ir('logo-empresa')">Logo de la empresa</button> }
+      @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'logo'" (click)="ir('logo')">Soporte interno</button> }
       @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'rastreo'" (click)="ir('rastreo')">Rastreo GPS</button> }
       @if (auth.tiene(P.USUARIOS_GESTIONAR)) { <button [class.activa]="pestana() === 'usuarios'" (click)="ir('usuarios')">Usuarios</button> }
       @if (auth.tiene(P.CONFIG_GESTIONAR)) { <button [class.activa]="pestana() === 'autorizaciones'" (click)="ir('autorizaciones')">Autorizaciones</button> }
@@ -237,6 +239,7 @@ type Pestana = 'rndc' | 'reglas' | 'correo' | 'logo' | 'rastreo' | 'usuarios' | 
       @case ('auditoria') {
         <app-auditoria />
       }
+      @case ('logo-empresa') { <app-logo-principal /> }
       @case ('logo') { <app-logo-empresa /> }
       @case ('rastreo') {
         <div class="tarjeta">
@@ -365,7 +368,7 @@ export class Configuracion {
 
   // Pestaña inicial desde el enlace (p. ej. Importar datos → ?tab=importar)
   readonly tab = input<Pestana | ''>('');
-  ngOnInit() { this.clave.cargarEstado(true); const t = this.tab(); this.ir(t && ['rndc', 'reglas', 'correo', 'logo', 'rastreo', 'usuarios', 'autorizaciones', 'importar', 'auditoria'].includes(t) ? t as Pestana : this.pestana()); }
+  ngOnInit() { this.clave.cargarEstado(true); const t = this.tab(); this.ir(t && ['rndc', 'reglas', 'correo', 'logo-empresa', 'logo', 'rastreo', 'usuarios', 'autorizaciones', 'importar', 'auditoria'].includes(t) ? t as Pestana : this.pestana()); }
 
   constructor() {
     this.api.get<any>('/rndc/catalogos').then(c => this.naturaleza.set(Object.entries(c.naturaleza))).catch(() => {});

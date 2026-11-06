@@ -45,6 +45,14 @@ test('El formato se consulta en MongoDB (antes chocaban los campos pedidos)', as
   assert.equal(f.siguiente, 1);
 });
 
+test('La remesa usa el logo de la empresa, no el del soporte interno', async () => {
+  await nueva();
+  await Empresa.updateOne({ _id: empresa }, { $set: { logo: 'data:image/png;base64,SOPORTE', logoEmpresa: 'data:image/png;base64,EMPRESA' } });
+  assert.equal((await R.formato(empresa, cliente)).logo, 'data:image/png;base64,EMPRESA');
+  await Empresa.updateOne({ _id: empresa }, { $set: { logoEmpresa: '' } });
+  assert.equal((await R.formato(empresa, cliente)).logo, '', 'sin logo de la empresa no se usa el del soporte interno');
+});
+
 test('Nunca repite un número: los vacíos saltan los que trae el archivo y los que ya están en la base', async () => {
   await nueva();
   await R.guardar(empresa, cliente, await libro([fila(101), fila(102, 1), fila(103, 3)]));
