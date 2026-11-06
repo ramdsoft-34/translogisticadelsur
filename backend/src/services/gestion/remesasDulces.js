@@ -322,6 +322,18 @@ export function leerSeleccion(texto, vplsArchivo) {
 }
 
 // ── Formato (encabezado de la empresa + datos fijos del cliente) ──────────
+// Posición y tamaño de los logos (unidades del diseño de la remesa). El logo va debajo de líneas y textos
+// y nunca sale del encabezado (se recorta). dx/dy = desplazamiento; escala = tamaño (1 = el de la caja).
+export const LIMITES_LOGOS = {
+  logo: { dx: [-10, 300], dy: [-10, 40], escala: [0.5, 2] },          // logo de la empresa (izquierda)
+  logoCliente: { dx: [-300, 10], dy: [-5, 55], escala: [0.5, 2] },   // logo del cliente (derecha)
+};
+const acotar = (v, [a, b], def) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Math.min(b, Math.max(a, Number(v))) : def);
+export function ajusteDe(tipo, a) {
+  const L = LIMITES_LOGOS[tipo];
+  return { dx: acotar(a?.dx, L.dx, 0), dy: acotar(a?.dy, L.dy, 0), escala: acotar(a?.escala, L.escala, 1) };
+}
+
 export function formatoPorDefecto(empresa, cliente) {
   const rf = empresa?.remesaFormato || {}; const cf = cliente?.remesaFormato || {};
   return {
@@ -331,6 +343,7 @@ export function formatoPorDefecto(empresa, cliente) {
     logoCliente: cf.logo || '', remitente: cf.remitente || cliente?.razonSocial || cliente?.nombre || '', ciudadOrigen: cf.ciudadOrigen || empresa?.ciudad || '',
     direccion: cf.direccion || '', sector: cf.sector || '', destinatario: cf.destinatario || 'Varios Clientes',
     cantidad: cf.cantidad || 'Lote', clase: cf.clase || 'Cajas', contenido: cf.contenido || 'Varios Productos',
+    ajusteLogo: ajusteDe('logo', rf.ajusteLogo), ajusteLogoCliente: ajusteDe('logoCliente', cf.ajusteLogo),
   };
 }
 export async function formato(empresaId, clienteId) {
@@ -371,8 +384,17 @@ export function dibujarRemesa(doc, x, f, ox, oy, W = 556) {
   const s = W / 556; const X = (v) => ox + v * s; const Y = (v) => oy + v * s;
   const txtEn = (t, x0, y0, o = {}) => doc.text(String(t ?? ''), X(x0), Y(y0), { lineBreak: false, ...o, width: o.width ? o.width * s : undefined });
   doc.save(); doc.lineWidth(0.6).strokeColor('#333333').fillColor('#000000');
+  // Logos primero (quedan debajo de líneas y textos), movidos y escalados, recortados al encabezado
+  const logoEn = (url, a, x0, y0, w, h) => {
+    if (!url) return;
+    const aj = a || { dx: 0, dy: 0, escala: 1 };
+    doc.save(); doc.rect(X(0), Y(0), W, 92 * s).clip();
+    imagenEn(doc, url, X(x0 + aj.dx - (w * (aj.escala - 1)) / 2), Y(y0 + aj.dy - (h * (aj.escala - 1)) / 2), w * aj.escala * s, h * aj.escala * s);
+    doc.restore();
+  };
+  logoEn(f.logo, f.ajusteLogo, 0, 6, 150, 58);
+  logoEn(f.logoCliente, f.ajusteLogoCliente, 446, 0, 110, 34);
   // Encabezado
-  imagenEn(doc, f.logo, X(0), Y(6), 150 * s, 58 * s);
   doc.font('Helvetica-Bold').fontSize(10.5 * s).fillColor(TINTA);
   txtEn(f.nombre1, 150, 4, { width: 290, align: 'center' });
   if (f.nombre2) txtEn(f.nombre2, 150, 17, { width: 290, align: 'center' });
@@ -383,8 +405,7 @@ export function dibujarRemesa(doc, x, f, ox, oy, W = 556) {
     doc.moveTo(x0, Y(52.5)).lineTo(x0 + w, Y(52.5)).lineWidth(0.5).strokeColor('#000000').stroke().lineWidth(0.6).strokeColor('#333333');
   }
   if (f.resolucion) { doc.font('Helvetica-Oblique').fontSize(6 * s); doc.text(f.resolucion, X(150), Y(56), { width: 290 * s, align: 'center', height: 18 * s }); }
-  // Logo del cliente y recuadro de la remesa
-  imagenEn(doc, f.logoCliente, X(446), Y(0), 110 * s, 34 * s);
+  // Recuadro de la remesa
   doc.rect(X(446), Y(38), 110 * s, 12 * s).fillAndStroke(AZUL, '#333333');
   doc.fillColor('#000000').font('Helvetica-BoldOblique').fontSize(8 * s); txtEn('REMESA', 446, 41, { width: 110, align: 'center' });
   doc.rect(X(446), Y(50), 110 * s, 14 * s).stroke();

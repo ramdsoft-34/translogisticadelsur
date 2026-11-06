@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal, viewChild } from '@angular/core';
+import { Component, computed, inject, input, model, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
 import { Api } from '../core/api.service';
@@ -22,12 +22,68 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
   const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = () => mal(new Error('No se pudo leer la imagen')); r.readAsDataURL(archivo);
 });
 
+type Ajuste = { dx: number; dy: number; escala: number };
+type Limites = { dx: readonly number[]; dy: readonly number[]; escala: readonly number[] };
+const SIN_AJUSTE: Ajuste = { dx: 0, dy: 0, escala: 1 };
+// Los mismos límites del servidor (LIMITES_LOGOS): el logo no sale del encabezado
+const LIMITES_LOGOS: Record<'logo' | 'logoCliente', Limites> = {
+  logo: { dx: [-10, 300], dy: [-10, 40], escala: [0.5, 2] },
+  logoCliente: { dx: [-300, 10], dy: [-5, 55], escala: [0.5, 2] },
+};
+
+// Mover y escalar un logo de la remesa (queda debajo de líneas y textos)
+@Component({
+  selector: 'app-ajuste-logo-remesa',
+  template: `
+    <div class="ajuste" role="group" [attr.aria-label]="'Posición y tamaño del ' + nombre()">
+      <h4>Posición y tamaño</h4>
+      <div class="control"><span class="et">Horizontal</span>
+        <button type="button" class="pequeno" (click)="mover('dx', -5)" [disabled]="deshabilitado()" aria-label="Mover a la izquierda">←</button>
+        <input type="range" [min]="lim().dx[0]" [max]="lim().dx[1]" step="1" [value]="valor().dx" [disabled]="deshabilitado()" (input)="cambiar('dx', $any($event.target).value)" aria-label="Posición horizontal" />
+        <button type="button" class="pequeno" (click)="mover('dx', 5)" [disabled]="deshabilitado()" aria-label="Mover a la derecha">→</button></div>
+      <div class="control"><span class="et">Vertical</span>
+        <button type="button" class="pequeno" (click)="mover('dy', -5)" [disabled]="deshabilitado()" aria-label="Subir">↑</button>
+        <input type="range" [min]="lim().dy[0]" [max]="lim().dy[1]" step="1" [value]="valor().dy" [disabled]="deshabilitado()" (input)="cambiar('dy', $any($event.target).value)" aria-label="Posición vertical" />
+        <button type="button" class="pequeno" (click)="mover('dy', 5)" [disabled]="deshabilitado()" aria-label="Bajar">↓</button></div>
+      <div class="control"><span class="et">Tamaño</span>
+        <button type="button" class="pequeno" (click)="mover('escala', -0.1)" [disabled]="deshabilitado()" aria-label="Más pequeño">−</button>
+        <input type="range" [min]="lim().escala[0]" [max]="lim().escala[1]" step="0.05" [value]="valor().escala" [disabled]="deshabilitado()" (input)="cambiar('escala', $any($event.target).value)" aria-label="Tamaño" />
+        <button type="button" class="pequeno" (click)="mover('escala', 0.1)" [disabled]="deshabilitado()" aria-label="Más grande">+</button>
+        <span class="pct">{{ pct() }} %</span></div>
+      <small class="sutil">El logo queda debajo de líneas y textos y no sale del encabezado. Se guarda con «Guardar».</small>
+      <div><button type="button" class="pequeno" (click)="valor.set(sinAjuste)" [disabled]="deshabilitado()">Restablecer</button></div>
+    </div>`,
+  styles: [`
+    .ajuste { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--gris-15); display: flex; flex-direction: column; gap: 10px; }
+    .ajuste h4 { margin: 0; font-size: 14px; }
+    .control { display: grid; grid-template-columns: 74px 32px 1fr 32px auto; gap: 6px; align-items: center; }
+    .control .et { font-size: 13px; font-weight: 600; color: var(--gris-6); }
+    .control input[type=range] { min-height: 0; padding: 0; border: 0; accent-color: var(--primario-borde); box-shadow: none; }
+    .control .pequeno { min-height: 30px; padding: 0; }
+    .pct { font-size: 12px; color: var(--gris-5); min-width: 38px; text-align: right; }
+  `],
+})
+export class AjusteLogoRemesa {
+  readonly lim = input.required<Limites>();
+  readonly valor = model<Ajuste>(SIN_AJUSTE);
+  readonly deshabilitado = input(false);
+  readonly nombre = input('logo');
+  readonly sinAjuste = SIN_AJUSTE;
+  pct() { return Math.round((this.valor()?.escala ?? 1) * 100); }
+  cambiar(k: keyof Ajuste, v: string | number) {
+    const [a, b] = this.lim()[k]; const n = Math.min(b, Math.max(a, Number(v)));
+    if (!Number.isFinite(n)) return;
+    this.valor.set({ ...(this.valor() || SIN_AJUSTE), [k]: k === 'escala' ? Math.round(n * 100) / 100 : Math.round(n) });
+  }
+  mover(k: keyof Ajuste, paso: number) { this.cambiar(k, (this.valor()?.[k] ?? SIN_AJUSTE[k]) + paso); }
+}
+
 // Fase 12: Remesas de los clientes (como el formulario REMESAS DULCES de la plantilla).
 // Cargar base (Excel del cliente con VPL) → Base de remesas (consecutivo de la cooperativa, cédulas, imprimir una o varias)
 // → Imprimir (1 o 2 por hoja carta con línea para cortar, PDF o un PDF por remesa) → Configuración del formato por empresa.
 @Component({
   selector: 'app-remesas',
-  imports: [FormsModule, DecimalPipe, Icono, Modal, Confirmar, VisorPdf, ...FORMATOS],
+  imports: [FormsModule, DecimalPipe, Icono, Modal, Confirmar, VisorPdf, AjusteLogoRemesa, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Remesas</h1>
       <p class="sutil">Base de viajes del cliente (VPL), consecutivo de remesas de la empresa e impresión con el formato de la remesa.</p></div></div>
@@ -206,6 +262,7 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
             <h3 class="sub">Encabezado · su empresa</h3>
             <div class="fila centro"><span class="logo-cfg">@if (k.logo) { <img [src]="k.logo" alt="Logo de la empresa" /> } @else { Sin logo }</span>
               @if (esAdmin) { <label class="boton">Cambiar logo<input type="file" accept="image/png,image/jpeg" hidden (change)="logo($event, 'logo')" /></label> }</div>
+            @if (k.logo) { <app-ajuste-logo-remesa nombre="logo de la empresa" [lim]="LIMITES_LOGOS.logo" [valor]="k.ajusteLogo || SIN_AJUSTE" (valorChange)="k.ajusteLogo = $event" [deshabilitado]="!esAdmin" /> }
             <div class="formulario">
               <div class="campo"><label for="kf-n1">Nombre (línea 1)</label><input id="kf-n1" [(ngModel)]="k.nombre1" maxlength="80" [disabled]="!esAdmin" /></div>
               <div class="campo"><label for="kf-n2">Nombre (línea 2)</label><input id="kf-n2" [(ngModel)]="k.nombre2" maxlength="80" [disabled]="!esAdmin" /></div>
@@ -226,6 +283,7 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
             <div class="fila centro" style="margin-top:8px"><span class="logo-cfg">@if (k.logoCliente) { <img [src]="k.logoCliente" alt="Logo del cliente" /> } @else { Sin logo }</span>
               <label class="boton">Cambiar logo del cliente<input type="file" accept="image/png,image/jpeg" hidden (change)="logo($event, 'logoCliente')" /></label>
               @if (k.logoCliente) { <button type="button" class="texto" (click)="k.logoCliente = ''; logoQuitado = true">Quitar</button> }</div>
+            @if (k.logoCliente) { <app-ajuste-logo-remesa nombre="logo del cliente" [lim]="LIMITES_LOGOS.logoCliente" [valor]="k.ajusteLogoCliente || SIN_AJUSTE" (valorChange)="k.ajusteLogoCliente = $event" /> }
             <div class="formulario tres">
               <div class="campo"><label for="kc-rem">Remitente</label><input id="kc-rem" [(ngModel)]="k.remitente" maxlength="80" /></div>
               <div class="campo"><label for="kc-ciu">Ciudad origen</label><input id="kc-ciu" [(ngModel)]="k.ciudadOrigen" maxlength="60" /></div>
@@ -241,9 +299,9 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
         </div>
         <section class="tarjeta previa-cfg"><h3 class="sub">Vista previa</h3>
           <div class="rm">
-            <div class="cab"><div class="l1">@if (k.logo) { <img [src]="k.logo" alt="" /> }</div>
+            <div class="cab"><div class="l1">@if (k.logo) { <img [src]="k.logo" alt="" [style.transform]="transformar(k.ajusteLogo)" /> }</div>
               <div class="cen"><b>{{ k.nombre1 }}</b><b>{{ k.nombre2 }}</b><i class="nit">{{ k.nit }}</i><u class="lema">{{ k.lema }}</u><small>{{ k.resolucion }}</small></div>
-              <div class="der"><div class="l2">@if (k.logoCliente) { <img [src]="k.logoCliente" alt="" /> }</div>
+              <div class="der"><div class="l2">@if (k.logoCliente) { <img [src]="k.logoCliente" alt="" [style.transform]="transformar(k.ajusteLogoCliente)" /> }</div>
                 <div class="caja"><div class="t">REMESA</div><div class="v"><span>VPL No:</span> 12031</div><div class="no">No: {{ k.siguiente }}</div></div></div></div>
             <div class="b"><div class="g1"><b>FECHA DESPACHO</b><i class="u">{{ ciudad(k.ciudadOrigen) }} {{ hoyLargo() }}</i><b class="der">REMITENTE.</b><i class="u">{{ k.remitente }}</i><i class="c">{{ k.direccion }}</i></div>
               <div class="g1 b2"><b>DESTINATARIO.</b><i class="u izq">{{ k.destinatario }}</i><b class="der">CIUDAD. ORIGEN</b><i class="u">{{ k.ciudadOrigen }}</i><b>DIRECCIÓN.</b><i class="u">{{ k.sector }}</i></div></div>
@@ -255,7 +313,8 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
             <div class="b g3"><b>CONDUCTOR</b><b>C.C:</b><b>DIRECCION:</b><b>PLACA</b><i>(de la base)</i><i class="d">(registro)</i><i>(registro)</i><i>(de la base)</i></div>
             <div class="b g4"><b>La Empresa</b><b>Recibí Destinatario C.C. No.</b></div>
           </div>
-          <p class="sutil nota">Ejemplo. Los datos del viaje salen de la base; los de arriba, de esta configuración.</p>
+          <p class="sutil nota">Ejemplo aproximado. Los datos del viaje salen de la base; los de arriba, de esta configuración.</p>
+          <button type="button" (click)="verMuestra()"><app-icono nombre="ojo" [tam]="15" />Ver cómo queda (PDF)</button>
         </section>
       </div>
     }
@@ -303,7 +362,7 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
     .acciones-sel { margin-bottom: 8px; } .acciones-fila { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: nowrap; }
     button.oscuro { background: #0d1117; color: #fff; border-color: #0d1117; }
     .dos-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
-    .dos-col.cfg { grid-template-columns: minmax(0, 1fr) minmax(0, 660px); }
+    .dos-col.cfg { grid-template-columns: minmax(380px, 1fr) minmax(0, 560px); }
     .casilla { display: flex; align-items: center; gap: 8px; padding: 5px 0; flex-wrap: wrap; } input.corto { width: 90px; }
     .hojas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .hojas button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px; border: 2px solid var(--gris-2); border-radius: 12px; background: #fff; font-weight: 700; }
@@ -320,6 +379,8 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
     /* Vista previa del formato (a escala) */
     .rm { font-family: Arial, sans-serif; font-size: 9px; color: #000; background: #fff; border: 1px solid var(--gris-2); padding: 8px; }
     .rm .cab { display: grid; grid-template-columns: 150px 1fr 120px; gap: 6px; align-items: center; }
+    .rm .cab { position: relative; overflow: hidden; } .rm .cen, .rm .caja { position: relative; z-index: 1; } .rm .l1, .rm .l2 { position: relative; z-index: 0; }
+    .rm .l1 img, .rm .l2 img { transform-origin: center; }
     .rm .l1 img { max-width: 145px; max-height: 58px; } .rm .l2 { height: 34px; display: grid; place-items: center; } .rm .l2 img { max-height: 32px; max-width: 115px; }
     .rm .cen { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1px; } .rm .cen b { color: #0b1a3a; font-size: 10.5px; }
     .rm .nit { font-weight: 700; } .rm .lema { font-family: 'Times New Roman', serif; font-weight: 700; font-style: italic; font-size: 10px; } .rm .cen small { font-size: 7px; font-style: italic; }
@@ -366,6 +427,7 @@ export class Remesas {
   readonly hojaTexto = computed(() => (this.porHoja() === 2 ? '2 remesas por hoja' : '1 remesa por hoja'));
   // Configuración
   readonly fmt = signal<any>(null);
+  readonly LIMITES_LOGOS = LIMITES_LOGOS; readonly SIN_AJUSTE = SIN_AJUSTE;
   fmtCliente = '';
   logoQuitado = false;
   private enVivo = inject(EnVivo).al(['gestion'], () => this.cargar());
@@ -507,20 +569,33 @@ export class Remesas {
     const k = this.fmt(); this.ocupado.set(true);
     try {
       const r = await this.api.put<any>('/gestion/remesas/formato/empresa', { nombre1: k.nombre1, nombre2: k.nombre2, nit: k.nit, lema: k.lema, resolucion: k.resolucion,
-        siguiente: Number(k.siguiente), porHoja: Number(k.porHoja), linea: !!k.linea, ...(k.logoNuevo ? { logo: k.logo } : {}) });
+        siguiente: Number(k.siguiente), porHoja: Number(k.porHoja), linea: !!k.linea, ajusteLogo: k.ajusteLogo || SIN_AJUSTE, ...(k.logoNuevo ? { logo: k.logo } : {}) });
       this.fmt.set({ ...r, ...this.datosCliente(k) }); this.porHoja.set(r.porHoja === 1 ? 1 : 2); this.linea.set(r.linea !== false);
       this.avisos.ok('Encabezado de la remesa guardado');
     } catch (e) { this.avisos.error(e); } finally { this.ocupado.set(false); }
   }
   private datosCliente(k: any) {
     return { logoCliente: k.logoCliente, remitente: k.remitente, ciudadOrigen: k.ciudadOrigen, direccion: k.direccion, sector: k.sector, destinatario: k.destinatario,
-      cantidad: k.cantidad, clase: k.clase, contenido: k.contenido };
+      cantidad: k.cantidad, clase: k.clase, contenido: k.contenido, ajusteLogoCliente: k.ajusteLogoCliente };
+  }
+  // Aproximación en pantalla: 1 unidad del diseño ≈ 1 px en la vista previa
+  transformar(a?: Ajuste) { const x = a || SIN_AJUSTE; return `translate(${x.dx}px, ${x.dy}px) scale(${x.escala})`; }
+  // Muestra exacta en PDF con lo que está en pantalla, sin guardar
+  verMuestra() {
+    const k = this.fmt(); if (!k) return;
+    const { logoCliente, ajusteLogoCliente, ...textos } = this.datosCliente(k);
+    this.visor().ver('/gestion/remesas/formato/muestra', 'Muestra de la remesa', undefined, {
+      cliente: this.fmtCliente || undefined, ...textos, nombre1: k.nombre1, nombre2: k.nombre2, nit: k.nit, lema: k.lema, resolucion: k.resolucion,
+      ajusteLogo: k.ajusteLogo || SIN_AJUSTE, ajusteLogoCliente: ajusteLogoCliente || SIN_AJUSTE,
+      ...(k.logoNuevo ? { logo: k.logo } : {}), ...(k.logoClienteNuevo || this.logoQuitado ? { logoCliente: logoCliente || '' } : {}),
+    }).catch((e: unknown) => this.avisos.error(e));
   }
   async guardarCliente() {
     const k = this.fmt(); this.ocupado.set(true);
     try {
-      const { logoCliente, ...resto } = this.datosCliente(k);
-      const r = await this.api.put<any>(`/gestion/remesas/formato/cliente/${this.fmtCliente}`, { ...resto, ...(k.logoClienteNuevo || this.logoQuitado ? { logo: logoCliente || '' } : {}) });
+      const { logoCliente, ajusteLogoCliente, ...resto } = this.datosCliente(k);
+      const r = await this.api.put<any>(`/gestion/remesas/formato/cliente/${this.fmtCliente}`, { ...resto, ajusteLogo: ajusteLogoCliente || SIN_AJUSTE,
+        ...(k.logoClienteNuevo || this.logoQuitado ? { logo: logoCliente || '' } : {}) });
       this.fmt.set(r); this.logoQuitado = false;
       this.avisos.ok('Datos de la remesa del cliente guardados');
     } catch (e) { this.avisos.error(e); } finally { this.ocupado.set(false); }

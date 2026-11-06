@@ -108,6 +108,7 @@ const empresaSchema = new Schema({
     nombre1: str(), nombre2: str(), nit: str(), lema: str(), resolucion: str({ maxlength: 300 }),
     siguiente: { type: Number, default: 1 },                  // próximo N° de remesa (consecutivo único de la empresa)
     porHoja: { type: Number, enum: [1, 2], default: 2 }, linea: { type: Boolean, default: true },
+    ajusteLogo: { dx: { type: Number, default: 0 }, dy: { type: Number, default: 0 }, escala: { type: Number, default: 1 } },
   },
 }, { timestamps: true });
 empresaSchema.index({ nit: 1 }, { unique: true });
@@ -181,6 +182,7 @@ const clienteSchema = new Schema({
     logo: { type: String, default: '', select: false },
     remitente: str(), ciudadOrigen: str(), direccion: str(), sector: str(), destinatario: str(),
     cantidad: str(), clase: str(), contenido: str(),
+    ajusteLogo: { dx: { type: Number, default: 0 }, dy: { type: Number, default: 0 }, escala: { type: Number, default: 1 } },
   },
 }, { timestamps: true });
 clienteSchema.plugin(tenantPlugin);

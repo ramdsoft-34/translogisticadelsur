@@ -124,3 +124,17 @@ test('PDF: el logo va una sola vez aunque haya muchas remesas', async () => {
   assert.ok(una.length > png.length / 2, 'el logo sí está en el PDF');
   assert.ok(cien.length < una.length * 3, `100 remesas pesan ${cien.length} bytes; una sola ${una.length}`);
 });
+
+test('Posición y tamaño de los logos: dentro de los límites, se guarda y el PDF sale con los logos movidos', async () => {
+  // Fuera de los límites se acota (el logo no sale del encabezado)
+  assert.deepEqual(R.ajusteDe('logo', { dx: 999, dy: -50, escala: 5 }), { dx: 300, dy: -10, escala: 2 });
+  assert.deepEqual(R.ajusteDe('logoCliente', { dx: 'x' }), { dx: 0, dy: 0, escala: 1 });
+  await nueva();
+  await Empresa.updateOne({ _id: empresa }, { $set: { 'remesaFormato.ajusteLogo': { dx: 40, dy: 5, escala: 1.3 }, 'remesaFormato.logo': 'data:image/png;base64,AAAA' } });
+  await Cliente.updateOne({ _id: cliente, empresa }, { $set: { 'remesaFormato.ajusteLogo': { dx: -60, dy: 10, escala: 0.8 } } });
+  const f = await R.formato(empresa, cliente);
+  assert.deepEqual(f.ajusteLogo, { dx: 40, dy: 5, escala: 1.3 });
+  assert.deepEqual(f.ajusteLogoCliente, { dx: -60, dy: 10, escala: 0.8 });
+  const pdf = await R.remesasPdf(f, [{ vpl: '1', remesa: '1', fecha: dia, conductor: 'ANA', placa: 'AAA111', costo: 1, peso: 1 }], { porHoja: 1 });
+  assert.equal(pdf.subarray(0, 4).toString(), '%PDF');
+});

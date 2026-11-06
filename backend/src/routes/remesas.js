@@ -18,6 +18,7 @@ const nombreArchivo = (req) => { try { return decodeURIComponent(String(req.get(
 const logoZ = z.string().max(900_000, 'El logo es muy pesado (máximo 650 KB)').refine(v => v === '' || /^data:image\/(png|jpe?g);base64,[A-Za-z0-9+/=]+$/.test(v), 'El logo debe ser PNG o JPG');
 const texto = (n) => z.string().trim().max(n).optional();
 const crudo = express.raw({ type: '*/*', limit: '15mb' });
+const ajusteZ = z.object({ dx: z.coerce.number(), dy: z.coerce.number(), escala: z.coerce.number() }).partial();
 
 async function clienteValido(req, cliente) {
   if (!cliente) return null;
@@ -46,7 +47,9 @@ r.get('/remesas/formato', ver, async (req, res) => res.json(await R.formato(req.
 
 r.put('/remesas/formato/empresa', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
   const d = z.object({ logo: logoZ.optional(), nombre1: texto(80), nombre2: texto(80), nit: texto(40), lema: texto(120), resolucion: texto(300),
-    siguiente: z.coerce.number().int().min(1).max(99_999_999).optional(), porHoja: z.coerce.number().int().refine(v => v === 1 || v === 2).optional(), linea: z.boolean().optional() }).parse(req.body || {});
+    siguiente: z.coerce.number().int().min(1).max(99_999_999).optional(), porHoja: z.coerce.number().int().refine(v => v === 1 || v === 2).optional(), linea: z.boolean().optional(),
+    ajusteLogo: ajusteZ.optional() }).parse(req.body || {});
+  if (d.ajusteLogo) d.ajusteLogo = R.ajusteDe('logo', d.ajusteLogo);   // dentro de los límites
   const set = Object.fromEntries(Object.entries(d).filter(([, v]) => v !== undefined).map(([k, v]) => [`remesaFormato.${k}`, v]));
   if (d.siguiente !== undefined) {
     // No se puede volver a un número que ya se usó
@@ -62,11 +65,29 @@ r.put('/remesas/formato/empresa', permitir(P.CONFIG_GESTIONAR), async (req, res)
 r.put('/remesas/formato/cliente/:id', gestionar, async (req, res) => {
   const cliente = await clienteValido(req, id.parse(req.params.id));
   const d = z.object({ logo: logoZ.optional(), remitente: texto(80), ciudadOrigen: texto(60), direccion: texto(80), sector: texto(60), destinatario: texto(80),
-    cantidad: texto(30), clase: texto(30), contenido: texto(60) }).parse(req.body || {});
+    cantidad: texto(30), clase: texto(30), contenido: texto(60), ajusteLogo: ajusteZ.optional() }).parse(req.body || {});
+  if (d.ajusteLogo) d.ajusteLogo = R.ajusteDe('logoCliente', d.ajusteLogo);
   const set = Object.fromEntries(Object.entries(d).filter(([, v]) => v !== undefined).map(([k, v]) => [`remesaFormato.${k}`, v]));
   await Cliente.updateOne({ _id: cliente, empresa: req.empresaId }, { $set: set });
   await auditar(req, 'remesas_formato_cliente', { entidad: 'Cliente', entidadId: cliente, detalle: { ...d, logo: d.logo ? '(logo)' : undefined } });
   res.json(await R.formato(req.empresaId, cliente));
+});
+
+// Muestra en PDF de cómo queda la remesa con lo que está en pantalla (sin guardar): textos, logos nuevos y su posición
+r.post('/remesas/formato/muestra', ver, async (req, res) => {
+  const cliente = await clienteValido(req, clienteDe(req.body?.cliente));
+  const d = z.object({ logo: logoZ.optional(), logoCliente: logoZ.optional(), nombre1: texto(80), nombre2: texto(80), nit: texto(40), lema: texto(120), resolucion: texto(300),
+    remitente: texto(80), ciudadOrigen: texto(60), direccion: texto(80), sector: texto(60), destinatario: texto(80), cantidad: texto(30), clase: texto(30), contenido: texto(60),
+    ajusteLogo: ajusteZ.optional(), ajusteLogoCliente: ajusteZ.optional() }).parse(req.body || {});
+  const f = await R.formato(req.empresaId, cliente);
+  for (const [k, v] of Object.entries(d)) if (v !== undefined) f[k] = v;
+  f.ajusteLogo = R.ajusteDe('logo', d.ajusteLogo ?? f.ajusteLogo); f.ajusteLogoCliente = R.ajusteDe('logoCliente', d.ajusteLogoCliente ?? f.ajusteLogoCliente);
+  const ejemplo = { vpl: '12031', remesa: String(f.siguiente), fecha: new Date(), zona: 'PASTO', peso: 2584, manifiesto: 'URBANO', conductor: 'NOMBRE DEL CONDUCTOR',
+    cedula: '12345678', direccion: 'Pasto - Nariño', placa: 'ABC123', costo: 229000 };
+  const buf = await R.remesasPdf(f, [ejemplo], { porHoja: 1, linea: false });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'inline; filename="Muestra_remesa.pdf"');
+  res.send(buf);
 });
 
 // Carga del Excel: vista previa (no guarda) y guardado con los VPL elegidos
