@@ -31,36 +31,51 @@ const LIMITES_LOGOS: Record<'logo' | 'logoCliente', Limites> = {
   logoCliente: { dx: [-300, 10], dy: [-5, 55], escala: [0.5, 2] },
 };
 
-// Mover y escalar un logo de la remesa (queda debajo de líneas y textos)
+// Mover y escalar un logo de la remesa (queda debajo de líneas y textos). Cerrado hasta que se despliega.
 @Component({
   selector: 'app-ajuste-logo-remesa',
+  imports: [Icono],
   template: `
-    <div class="ajuste" role="group" [attr.aria-label]="'Posición y tamaño del ' + nombre()">
-      <h4>Posición y tamaño</h4>
-      <div class="control"><span class="et">Horizontal</span>
-        <button type="button" class="pequeno" (click)="mover('dx', -5)" [disabled]="deshabilitado()" aria-label="Mover a la izquierda">←</button>
-        <input type="range" [min]="lim().dx[0]" [max]="lim().dx[1]" step="1" [value]="valor().dx" [disabled]="deshabilitado()" (input)="cambiar('dx', $any($event.target).value)" aria-label="Posición horizontal" />
-        <button type="button" class="pequeno" (click)="mover('dx', 5)" [disabled]="deshabilitado()" aria-label="Mover a la derecha">→</button></div>
-      <div class="control"><span class="et">Vertical</span>
-        <button type="button" class="pequeno" (click)="mover('dy', -5)" [disabled]="deshabilitado()" aria-label="Subir">↑</button>
-        <input type="range" [min]="lim().dy[0]" [max]="lim().dy[1]" step="1" [value]="valor().dy" [disabled]="deshabilitado()" (input)="cambiar('dy', $any($event.target).value)" aria-label="Posición vertical" />
-        <button type="button" class="pequeno" (click)="mover('dy', 5)" [disabled]="deshabilitado()" aria-label="Bajar">↓</button></div>
-      <div class="control"><span class="et">Tamaño</span>
-        <button type="button" class="pequeno" (click)="mover('escala', -0.1)" [disabled]="deshabilitado()" aria-label="Más pequeño">−</button>
-        <input type="range" [min]="lim().escala[0]" [max]="lim().escala[1]" step="0.05" [value]="valor().escala" [disabled]="deshabilitado()" (input)="cambiar('escala', $any($event.target).value)" aria-label="Tamaño" />
-        <button type="button" class="pequeno" (click)="mover('escala', 0.1)" [disabled]="deshabilitado()" aria-label="Más grande">+</button>
-        <span class="pct">{{ pct() }} %</span></div>
-      <small class="sutil">El logo queda debajo de líneas y textos y no sale del encabezado. Se guarda con «Guardar».</small>
-      <div><button type="button" class="pequeno" (click)="valor.set(sinAjuste)" [disabled]="deshabilitado()">Restablecer</button></div>
+    <div class="ajuste" [class.abierto]="abierto()">
+      <button type="button" class="desplegar" (click)="abierto.set(!abierto())" [attr.aria-expanded]="abierto()">
+        <app-icono nombre="ajustes" [tam]="15" /><span class="tit">Ajustar posición y tamaño</span>
+        <span class="resumen">{{ resumen() }}</span><app-icono class="flecha" nombre="chevron" [tam]="16" />
+      </button>
+      @if (abierto()) {
+        <div class="panel" role="group" [attr.aria-label]="'Posición y tamaño del ' + nombre()">
+          <div class="control"><span class="et">Horizontal</span>
+            <button type="button" class="pequeno" (click)="mover('dx', -5)" [disabled]="deshabilitado()" aria-label="Mover a la izquierda">←</button>
+            <input type="range" [min]="lim().dx[0]" [max]="lim().dx[1]" step="1" [value]="valor().dx" [disabled]="deshabilitado()" (input)="cambiar('dx', $any($event.target).value)" aria-label="Posición horizontal" />
+            <button type="button" class="pequeno" (click)="mover('dx', 5)" [disabled]="deshabilitado()" aria-label="Mover a la derecha">→</button><span></span></div>
+          <div class="control"><span class="et">Vertical</span>
+            <button type="button" class="pequeno" (click)="mover('dy', -5)" [disabled]="deshabilitado()" aria-label="Subir">↑</button>
+            <input type="range" [min]="lim().dy[0]" [max]="lim().dy[1]" step="1" [value]="valor().dy" [disabled]="deshabilitado()" (input)="cambiar('dy', $any($event.target).value)" aria-label="Posición vertical" />
+            <button type="button" class="pequeno" (click)="mover('dy', 5)" [disabled]="deshabilitado()" aria-label="Bajar">↓</button><span></span></div>
+          <div class="control"><span class="et">Tamaño</span>
+            <button type="button" class="pequeno" (click)="mover('escala', -0.1)" [disabled]="deshabilitado()" aria-label="Más pequeño">−</button>
+            <input type="range" [min]="lim().escala[0]" [max]="lim().escala[1]" step="0.05" [value]="valor().escala" [disabled]="deshabilitado()" (input)="cambiar('escala', $any($event.target).value)" aria-label="Tamaño" />
+            <button type="button" class="pequeno" (click)="mover('escala', 0.1)" [disabled]="deshabilitado()" aria-label="Más grande">+</button>
+            <span class="pct">{{ pct() }} %</span></div>
+          <div class="pie">
+            <small class="sutil">Mire la vista previa a la derecha. El logo queda debajo de líneas y textos y no sale del encabezado. Se guarda con «Guardar».</small>
+            <button type="button" class="pequeno" (click)="valor.set(sinAjuste)" [disabled]="deshabilitado()">Restablecer</button>
+          </div>
+        </div>
+      }
     </div>`,
   styles: [`
-    .ajuste { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--gris-15); display: flex; flex-direction: column; gap: 10px; }
-    .ajuste h4 { margin: 0; font-size: 14px; }
-    .control { display: grid; grid-template-columns: 74px 32px 1fr 32px auto; gap: 6px; align-items: center; }
+    .ajuste { margin-top: 10px; border: 1px solid var(--gris-2); border-radius: var(--radio-l, 12px); background: var(--gris-0); }
+    .desplegar { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 12px; border: 0; background: transparent; box-shadow: none; font-size: 13.5px; font-weight: 600; cursor: pointer; text-align: left; }
+    .desplegar .tit { flex: 1; } .desplegar .resumen { font-size: 12px; font-weight: 500; color: var(--gris-5); }
+    .desplegar .flecha { transition: transform .15s ease; } .abierto .desplegar .flecha { transform: rotate(180deg); }
+    .panel { display: flex; flex-direction: column; gap: 8px; padding: 4px 12px 12px; border-top: 1px solid var(--gris-15); padding-top: 12px; }
+    .control { display: grid; grid-template-columns: 70px 28px minmax(0, 240px) 28px 42px; gap: 6px; align-items: center; }
     .control .et { font-size: 13px; font-weight: 600; color: var(--gris-6); }
-    .control input[type=range] { min-height: 0; padding: 0; border: 0; accent-color: var(--primario-borde); box-shadow: none; }
-    .control .pequeno { min-height: 30px; padding: 0; }
-    .pct { font-size: 12px; color: var(--gris-5); min-width: 38px; text-align: right; }
+    .control input[type=range] { min-height: 0; height: 18px; padding: 0; border: 0; accent-color: var(--primario-borde); box-shadow: none; }
+    .control .pequeno { min-height: 28px; height: 28px; padding: 0; font-size: 13px; }
+    .pct { font-size: 12px; color: var(--gris-5); text-align: right; }
+    .pie { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 2px; }
+    .pie small { max-width: 300px; line-height: 1.35; }
   `],
 })
 export class AjusteLogoRemesa {
@@ -69,6 +84,8 @@ export class AjusteLogoRemesa {
   readonly deshabilitado = input(false);
   readonly nombre = input('logo');
   readonly sinAjuste = SIN_AJUSTE;
+  readonly abierto = signal(false);
+  resumen() { const v = this.valor() || SIN_AJUSTE; return v.dx || v.dy || v.escala !== 1 ? `Ajustado · ${this.pct()} %` : 'Sin ajustar'; }
   pct() { return Math.round((this.valor()?.escala ?? 1) * 100); }
   cambiar(k: keyof Ajuste, v: string | number) {
     const [a, b] = this.lim()[k]; const n = Math.min(b, Math.max(a, Number(v)));
@@ -381,7 +398,8 @@ export class AjusteLogoRemesa {
     .rm .cab { display: grid; grid-template-columns: 150px 1fr 120px; gap: 6px; align-items: center; }
     .rm .cab { position: relative; overflow: hidden; } .rm .cen, .rm .caja { position: relative; z-index: 1; } .rm .l1, .rm .l2 { position: relative; z-index: 0; }
     .rm .l1 img, .rm .l2 img { transform-origin: center; }
-    .rm .l1 img { max-width: 145px; max-height: 58px; } .rm .l2 { height: 34px; display: grid; place-items: center; } .rm .l2 img { max-height: 32px; max-width: 115px; }
+    .rm .l1 img { max-width: 145px; max-height: 58px; }
+    .previa-cfg { position: sticky; top: 12px; align-self: start; } .rm .l2 { height: 34px; display: grid; place-items: center; } .rm .l2 img { max-height: 32px; max-width: 115px; }
     .rm .cen { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1px; } .rm .cen b { color: #0b1a3a; font-size: 10.5px; }
     .rm .nit { font-weight: 700; } .rm .lema { font-family: 'Times New Roman', serif; font-weight: 700; font-style: italic; font-size: 10px; } .rm .cen small { font-size: 7px; font-style: italic; }
     .rm .caja { border: 1px solid #333; } .rm .caja .t { background: #bde3f7; text-align: center; font-weight: 700; font-style: italic; border-bottom: 1px solid #333; }
@@ -392,7 +410,7 @@ export class AjusteLogoRemesa {
     .rm .g1 { display: grid; gap: 6px; align-items: end; grid-template-columns: 82px 1.5fr 62px 1.1fr 1.1fr; } .rm .g1.b2 { grid-template-columns: 82px 1.4fr 78px .9fr 56px 1fr; margin-top: 4px; } .rm .der { text-align: right; } .rm .g2 { grid-template-columns: 80px 1fr; } .rm .g3 { grid-template-columns: 2fr 1fr 1fr 1fr; } .rm .g4 { grid-template-columns: 1fr 1fr; font-style: italic; }
     .rm table { width: 100%; border-collapse: collapse; margin-top: 6px; } .rm th { background: #bde3f7; border: 1px solid #888; font-size: 8.5px; padding: 2px; text-align: center; color: #000; text-transform: none; letter-spacing: 0; }
     .rm td { border: 1px solid #bbb; padding: 2px 4px; font-style: italic; height: 13px; font-size: 9px; } .rm tr.v td { background: #eef7fd; } .rm .d { text-align: right; } .rm .c { text-align: center; }
-    @media (max-width: 1100px) { .dos-col, .dos-col.cfg { grid-template-columns: 1fr; } .formulario.tres { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 1100px) { .previa-cfg { position: static; } .dos-col, .dos-col.cfg { grid-template-columns: 1fr; } .formulario.tres { grid-template-columns: 1fr 1fr; } }
   `],
 })
 export class Remesas {
