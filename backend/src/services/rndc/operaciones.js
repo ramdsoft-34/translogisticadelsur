@@ -97,6 +97,12 @@ export async function cargarViaje(empresaId, viajeId) {
 }
 
 // Bloqueo optimista: evita que dos personas envíen el mismo viaje a la vez.
+// Manifiesto y remesa en la app del conductor: se actualizan después de despachar, cumplir o anular.
+// Import dinámico: los reportes PDF importan este archivo.
+function documentosAlaApp(empresaId, viajeId) {
+  import('../rastreo/documentosApp.js').then((m) => m.avisarDocumentosApp(empresaId, viajeId)).catch(() => {});
+}
+
 async function bloquear(empresaId, viajeId) {
   const ahora = new Date();
   const ok = await Viaje.findOneAndUpdate(
@@ -520,6 +526,7 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
     return resultado;
   } finally {
     await desbloquear(empresaId, viajeId);
+    documentosAlaApp(empresaId, viajeId);
   }
 }
 
@@ -554,6 +561,7 @@ export async function cumplir(empresaId, viajeId, clave, usuarioId, datos) {
     return resultado;
   } finally {
     await desbloquear(empresaId, viajeId);
+    documentosAlaApp(empresaId, viajeId);
   }
 }
 
@@ -573,6 +581,7 @@ export async function anular(empresaId, viajeId, clave, usuarioId, datos) {
       mensaje: remesa.ok ? '' : `El manifiesto quedó anulado, pero el RNDC rechazó la anulación de la remesa: ${remesa.mensaje}. Anúlela desde «Anulados».` };
   } finally {
     await desbloquear(empresaId, viajeId);
+    documentosAlaApp(empresaId, viajeId);
   }
 }
 

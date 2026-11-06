@@ -77,7 +77,7 @@ process.env.OSRM_URL = `http://127.0.0.1:${surTrack.servidor.address().port}`;
 process.env.NOMINATIM_URL = `http://127.0.0.1:${surTrack.servidor.address().port}`;
 
 // Servidor de la app Sur Track nueva, simulado: solo recibe viajes de conductores con la cuenta activada
-const appSt = { viajes: new Map(), activos: [], cuentas: new Map(), autorizado: null, pagos: new Map(), padron: null, planillas: [], clave: crypto.randomBytes(24).toString('hex') };
+const appSt = { viajes: new Map(), activos: [], cuentas: new Map(), autorizado: null, pagos: new Map(), padron: null, planillas: [], documentos: new Map(), clave: crypto.randomBytes(24).toString('hex') };
 const FOTO = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
 appSt.servidor = http.createServer((req, res) => {
   const partes = [];
@@ -87,6 +87,13 @@ appSt.servidor = http.createServer((req, res) => {
     if (req.headers['x-integracion-clave'] !== appSt.clave) return json(401, { error: 'clave' });
     const url = new URL(req.url, 'http://x'); const ruta = url.pathname.replace('/api/integracion', '');
     const crudo = Buffer.concat(partes);
+    // Documentos del viaje (manifiesto, remesa, soporte interno) para la app del conductor
+    const md = ruta.match(/^\/viajes\/([^/]+)\/documentos\/([a-z]+)$/);
+    if (md && req.method === 'PUT') {
+      if (crudo.subarray(0, 5).toString() !== '%PDF-') return json(415, { error: 'no es PDF' });
+      appSt.documentos.set(`${md[1]}:${md[2]}`, { numero: url.searchParams.get('numero'), tamano: crudo.length }); return json(201, { tipo: md[2] });
+    }
+    if (md && req.method === 'DELETE') { appSt.documentos.delete(`${md[1]}:${md[2]}`); res.writeHead(204); return res.end(); }
     let mp = ruta.match(/^\/pagos\/([^/]+)\/([^/]+)\/pdf$/);
     if (mp && req.method === 'PUT') {
       const pg = appSt.pagos.get(decodeURIComponent(mp[2])); if (!pg) return json(404, { error: 'no' });
@@ -1354,6 +1361,16 @@ test('App nueva: invitar al conductor, viaje al servidor nuevo, fotos privadas y
   const a2 = await adm.post(`/api/rastreo/viajes/${v2._id}/activar`, { modalidad: 'clientes', clientes: [{ nombre: 'Tienda Uno', valor: 50000 }] });
   assert.equal(a2.status, 200, JSON.stringify(a2.body)); assert.equal(a2.body.servidor, 'app');
   assert.ok(appSt.viajes.has(a2.body.externoId)); assert.ok(!surTrack.viajes.has(a2.body.externoId));
+  // Documentos del viaje: el soporte interno llega a la app al activar; anulado, se quita
+  const esperar = async (cond) => { for (let i = 0; i < 100 && !cond(); i++) await new Promise(r => setTimeout(r, 30)); return cond(); };
+  const doc = () => appSt.documentos.get(`${a2.body.externoId}:soporte`);
+  assert.ok(await esperar(() => !!doc()), 'el soporte interno llega a la app');
+  assert.match(doc().numero, /^MC\d+$/); assert.ok(doc().tamano > 1000);
+  assert.ok(!appSt.documentos.has(`${a2.body.externoId}:manifiesto`), 'sin manifiesto del RNDC no se manda manifiesto');
+  assert.ok(!surTrack.documentos, 'la app anterior no recibe documentos');
+  const anu = await adm.post(`/api/gestion/soportes/viajes/${v2._id}/anular`, { motivo: 'Error en la placa' });
+  assert.equal(anu.status, 200, JSON.stringify(anu.body));
+  assert.ok(await esperar(() => !doc()), 'anulado, deja de verse en la app');
   // En vivo junta los dos servidores
   appSt.viajes.get(a2.body.externoId).estado = 'aceptado';
   appSt.activos = [{ viajeId: a2.body.externoId, lat: 1.2, lng: -77.3, velocidad: 10, rumbo: 0, hora: new Date().toISOString() }];

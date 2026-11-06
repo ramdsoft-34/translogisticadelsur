@@ -88,7 +88,10 @@ export async function asegurarSoporte(empresaId, viajeId) {
   const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('requiereManifiesto soporteInterno manifiesto').lean();
   if (!v || v.requiereManifiesto !== false || v.soporteInterno?.mc || v.manifiesto?.estado === 'aceptado') return v?.soporteInterno || null;
   const empresa = await Empresa.findById(empresaId).lean();
-  return (await soporteInterno(empresa, viajeId)).soporte;
+  const s = (await soporteInterno(empresa, viajeId)).soporte;
+  // Si el viaje ya va a la app nueva, el conductor recibe el soporte (import dinámico: evita un ciclo)
+  import('../rastreo/documentosApp.js').then((m) => m.avisarDocumentosApp(empresaId, viajeId)).catch(() => {});
+  return s;
 }
 
 // Cumplido del soporte interno: la carga se entregó (fecha de llegada, cantidad y observaciones)

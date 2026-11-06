@@ -21,6 +21,7 @@ import { manifiestoPdf, ajusteLogo } from '../services/reportes/manifiesto.js';
 import { liquidacionPdf, liquidacionesMediaHoja } from '../services/reportes/liquidacion.js';
 import * as dulces from '../services/gestion/remesasDulces.js';
 import { avisarLiquidacion } from '../services/rastreo/surtrack.js';
+import { avisarDocumentosApp } from '../services/rastreo/documentosApp.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -589,6 +590,7 @@ r.post('/soportes/viajes/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) =>
   const reemplazar = req.body?.reemplazar === true;
   const d = await soporteInterno(empresa, req.params.id, { reemplazar });
   await auditar(req, reemplazar ? 'soporte_interno_reemplazo' : 'soporte_interno', { entidad: 'Viaje', entidadId: req.params.id, detalle: { mc: d.soporte.mc, rc: d.soporte.rc, codigo: d.soporte.codigo } });
+  avisarDocumentosApp(req.empresaId, req.params.id);
   res.json(d.soporte);
 });
 // Cumplido y anulación del soporte interno (no van al RNDC)
@@ -598,12 +600,14 @@ r.post('/soportes/viajes/:id/cumplir', permitir(P.VIAJES_REGISTRAR), async (req,
   if (d.llegada && !llegada) throw new ErrorHttp(400, 'Fecha de llegada inválida');
   const s = await soporteCumplir(req.empresaId, req.params.id, { llegada, cantidad: d.cantidad ?? null, observaciones: d.observaciones }, req.usuario._id);
   await auditar(req, 'cumplir_soporte_interno', { entidad: 'Viaje', entidadId: req.params.id, detalle: { mc: s.mc, llegada: d.llegada || '', cantidad: d.cantidad ?? null } });
+  avisarDocumentosApp(req.empresaId, req.params.id);
   res.json(s);
 });
 r.post('/soportes/viajes/:id/anular', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const d = z.object({ motivo: z.string().trim().min(3, 'Escriba el motivo').max(300), soloCumplido: z.boolean().optional().default(false) }).parse(req.body || {});
   const s = await soporteAnular(req.empresaId, req.params.id, d, req.usuario._id);
   await auditar(req, d.soloCumplido ? 'anular_cumplido_soporte' : 'anular_soporte_interno', { entidad: 'Viaje', entidadId: req.params.id, detalle: { mc: s.mc, motivo: d.motivo } });
+  avisarDocumentosApp(req.empresaId, req.params.id);
   res.json(s);
 });
 r.get('/soportes/viajes/:id/pdf', permitir(P.VIAJES_VER), async (req, res) => {

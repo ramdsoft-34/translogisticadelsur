@@ -173,6 +173,8 @@ export async function activar(empresaId, viajeId, usuarioId, opciones = {}) {
     eventos: [evento('activado', paradas.modalidad === 'clientes' ? `Con ${paradas.clientes.length} cliente(s)` : `Destino: ${paradas.destino.nombre || v.destino}`)] };
   await v.save();
   limpiarCache();
+  // App nueva: el conductor recibe el manifiesto y la remesa (o el soporte interno) que ya tenga el viaje
+  if (servidor === 'app') import('./documentosApp.js').then((m) => m.avisarDocumentosApp(empresaId, v._id)).catch(() => {});
   return v.rastreo;
 }
 
