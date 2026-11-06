@@ -15,7 +15,7 @@ import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 import { Municipio, Tercero, Vehiculo } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
-import { contextoViaje, variablesRemesa, variablesManifiesto, TIPOS_MANIFIESTO } from '../rndc/documentos.js';
+import { contextoViaje, variablesRemesa, variablesManifiesto, TIPOS_MANIFIESTO, observacionesManifiesto } from '../rndc/documentos.js';
 import { fmtMilManifiesto, numeroALetras, quitarTildes, txt, enColombia, soloDigitos, normalizar } from '../../utils/texto.js';
 import { pdfABuffer } from './comun.js';
 import { lugarRndc } from '../../utils/lugares.js';
@@ -154,7 +154,8 @@ export async function datosManifiesto(empresa, viajeId) {
     flete, rete, ica, fopat, neto, anticipo, saldo: neto - anticipo,
     lugarPago: await lugar(M.CODMUNICIPIOPAGOSALDO), fechaPago: fechaRndc(M.FECHAPAGOSALDOMANIFIESTO),
     carguePor: RESPONSABLE_RNDC[M.CODRESPONSABLEPAGOCARGUE] || '', descarguePor: RESPONSABLE_RNDC[M.CODRESPONSABLEPAGODESCARGUE] || '',
-    observaciones: txt(M.OBSERVACIONES),
+    // Lo enviado al RNDC y, si no iba, las observaciones del viaje (los manifiestos de antes solo llevaban el auxiliar)
+    observaciones: observacionesManifiesto(M.OBSERVACIONES, v.observaciones),
   };
 }
 

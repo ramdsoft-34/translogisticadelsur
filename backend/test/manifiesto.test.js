@@ -36,3 +36,12 @@ test('Municipios: los nombres del RNDC con centro poblado se resuelven al centro
   assert.equal(buscar('CATAMBUCO PASTO NARINO'), '52001001');
   assert.equal(buscar('ARGELIA CAUCA'), '19050000');
 });
+
+test('Observaciones del manifiesto: auxiliar (si va) + observaciones del viaje, sin marcas internas ni repetir, máximo 200', async () => {
+  const { observacionesManifiesto } = await import('../src/services/rndc/documentos.js');
+  assert.equal(observacionesManifiesto('', 'Planillas 16977–16978 Ruta Guaitarilla'), 'Planillas 16977–16978 Ruta Guaitarilla');
+  assert.equal(observacionesManifiesto('Auxiliar 1 día $100.000.', 'Entrega en bodega [NO FACTURAR]'), 'Auxiliar 1 día $100.000. · Entrega en bodega');
+  assert.equal(observacionesManifiesto('Auxiliar 2 días $200.000.', 'Auxiliar 2 días $200.000.'), 'Auxiliar 2 días $200.000.');
+  assert.equal(observacionesManifiesto('', ''), '');
+  assert.equal(observacionesManifiesto('x', 'y'.repeat(300)).length, 200);
+});

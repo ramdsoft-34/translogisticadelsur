@@ -140,8 +140,8 @@ export function contextoViaje(empresa, viaje, vehiculo) {
     FOPAT: numero(v.fopat),
     OPERACION: viaje.tarifaRef?.operacion || cfg.operacion || 'G',
     OBSERVACIONES: txt(viaje.observaciones).slice(0, 200),
-    // En el manifiesto solo va el auxiliar del viaje (días y valor); las observaciones escritas son internas
-    OBSERVACIONES_MANIFIESTO: txt(viaje.textoAuxiliar),
+    // En el manifiesto van el auxiliar del viaje (días y valor) y las observaciones del viaje (sin marcas internas como [NO FACTURAR])
+    OBSERVACIONES_MANIFIESTO: observacionesManifiesto(viaje.textoAuxiliar, viaje.observaciones),
     REMESA: viaje.remesa?.numero || '',
     MANIFIESTO: viaje.manifiesto?.numero || '',
   };
@@ -217,6 +217,14 @@ export function variablesRemesa(empresa, viaje, ctx, consecutivo) {
 }
 
 // ── Manifiesto (proceso 4) ──────────────────────────────────────────────────
+// Observaciones del manifiesto: auxiliar + observaciones del viaje, sin repetir y en el límite del RNDC (200)
+export const limpiarObservaciones = (o) => txt(o).replace(/\[\s*NO\s+FACTURAR\s*\]/gi, '').replace(/\s+/g, ' ').trim();
+export function observacionesManifiesto(...partes) {
+  const l = [];
+  for (const p of partes.map(limpiarObservaciones).filter(Boolean)) if (!l.some(x => x.includes(p))) l.push(p);
+  return l.join(' · ').slice(0, 200);
+}
+
 export function variablesManifiesto(empresa, viaje, ctx, consecutivo) {
   const cfg = empresa.rndc || {};
   const v = [
