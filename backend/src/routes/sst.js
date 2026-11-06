@@ -10,6 +10,8 @@ import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
 import { libroExcel } from '../services/reportes/comun.js';
 import { checklistPdf } from '../services/reportes/checklist.js';
+import { pdfGuardado, cabecerasDocumento } from '../services/documentos/guardados.js';
+import crypto from 'node:crypto';
 import * as pl from '../services/sst/planillas.js';
 import * as datos from '../services/sst/datos.js';
 import * as col from '../services/sst/colaboradores.js';
@@ -192,10 +194,16 @@ r.get('/colaboradores/:id/epp/pdf', ver, async (req, res) => {
   const p = await col.perfil(req.empresaId, id(req.params.id));
   const d = await datos.datosEmpresa(req.empresaId, { conImagenes: true });
   const entregas = await Promise.all(p.eppEntregas.map(async (e) => ({ ...e, firma: e.firmadoEn ? (await col.firmaEpp(req.empresaId, p.id, e.id)).entrega.firma : '' })));
-  const buf = await pdfSst.eppPdf(d, { nombre: p.nombre, documento: p.documento, cargo: p.cargo }, entregas);
-  await auditar(req, 'descarga', { entidad: 'SstColaborador', entidadId: p.id, detalle: { archivo: 'SST-FOR-02' } });
+  const generar = () => pdfSst.eppPdf(d, { nombre: p.nombre, documento: p.documento, cargo: p.cargo }, entregas);
+  // Con entregas firmadas es evidencia: se guarda y una entrega firmada nueva crea otra versión (la anterior queda)
+  const firmadas = entregas.filter(e => e.firmadoEn).map(e => String(e.id)).sort();
+  const g = firmadas.length && entregas.every(e => e.firmadoEn)
+    ? await pdfGuardado(req.empresaId, { tipo: 'sst-epp', ref: p.id, clave: crypto.createHash('sha1').update(firmadas.join(',')).digest('hex').slice(0, 16),
+      nombre: `EPP_${p.documento}.pdf`, generar, usuario: req.usuario._id }) : null;
+  await auditar(req, 'descarga', { entidad: 'SstColaborador', entidadId: p.id, detalle: { archivo: 'SST-FOR-02', ...(g ? { version: g.version } : {}) } });
+  cabecerasDocumento(res, g);
   res.type('application/pdf').setHeader('Content-Disposition', `inline; filename="EPP_${p.documento}.pdf"`);
-  res.send(buf);
+  res.send(g ? g.buffer : await generar());
 });
 r.post('/colaboradores/:id/epp/:epp/pedir-firma', gestionar, async (req, res) => {
   const ok = await sstApp.pedirFirmaEpp(req.empresaId, id(req.params.id), id(req.params.epp));
@@ -317,7 +325,12 @@ r.get('/inspecciones/hoy', ver, async (req, res) => res.json(await insp.hoy(req.
 r.get('/inspecciones/:id', ver, async (req, res) => res.json(await insp.detalle(req.empresaId, id(req.params.id))));
 r.get('/inspecciones/:id/pdf', ver, async (req, res) => {
   const d = await insp.detalle(req.empresaId, id(req.params.id));
-  const buf = await checklistPdf(await Empresa.findById(req.empresaId).lean(), { viaje: { placa: d.checklist.placa }, conductor: d.chofer, checklist: d.checklist });
+  // El preoperacional es evidencia: se guarda; si después se autoriza la salida, esa es otra versión
+  const g = await pdfGuardado(req.empresaId, { tipo: 'preoperacional', ref: req.params.id, clave: d.checklist.autorizacion?.fecha ? 'autorizado' : 'registrado',
+    nombre: `preoperacional_${d.checklist.placa}_${d.checklist.dia || ''}.pdf`, usuario: req.usuario._id,
+    generar: async () => checklistPdf(await Empresa.findById(req.empresaId).lean(), { viaje: { placa: d.checklist.placa }, conductor: d.chofer, checklist: d.checklist }) });
+  const buf = g.buffer;
+  cabecerasDocumento(res, g);
   res.type('application/pdf').setHeader('Content-Disposition', `inline; filename="preoperacional_${d.checklist.placa}_${d.checklist.dia || ''}.pdf"`);
   res.send(buf);
 });
@@ -405,8 +418,14 @@ r.post('/capacitaciones/:id/ejecutada', gestionar, async (req, res) => {
 r.get('/capacitaciones/:id/pdf', ver, async (req, res) => {
   await sstApp.sincronizarFirmas(req.empresaId).catch(() => 0);
   const k = await cap.paraPdf(req.empresaId, id(req.params.id));
-  const buf = await pdfSst.asistenciaPdf(await datos.datosEmpresa(req.empresaId, { conImagenes: true }), k);
-  await auditar(req, 'descarga', { entidad: 'SstCapacitacion', entidadId: k.id, detalle: { archivo: 'SST-FOR-07' } });
+  const generar = async () => pdfSst.asistenciaPdf(await datos.datosEmpresa(req.empresaId, { conImagenes: true }), k);
+  // Ejecutada: se guarda; una firma que llegue después crea otra versión (la anterior queda). Programada: se genera cada vez.
+  const firmas = (k.asistentes || []).filter(a => a.firmado).length;
+  const g = k.ejecutada ? await pdfGuardado(req.empresaId, { tipo: 'sst-asistencia', ref: k.id, clave: `ejecutada:${firmas}`,
+    nombre: `asistencia_${k.id}.pdf`, generar, usuario: req.usuario._id }) : null;
+  const buf = g ? g.buffer : await generar();
+  cabecerasDocumento(res, g);
+  await auditar(req, 'descarga', { entidad: 'SstCapacitacion', entidadId: k.id, detalle: { archivo: 'SST-FOR-07', ...(g ? { version: g.version } : {}) } });
   res.type('application/pdf').setHeader('Content-Disposition', `inline; filename="asistencia_${k.id}.pdf"`);
   res.send(buf);
 });
@@ -454,8 +473,13 @@ r.delete('/diligenciados/:id', gestionar, async (req, res) => {
 });
 r.get('/diligenciados/:id/pdf', ver, async (req, res) => {
   const x = await fmt.obtener(req.empresaId, id(req.params.id), { conFirmas: true });
-  const buf = await pdfSst.formatoPdf(await datos.datosEmpresa(req.empresaId, { conImagenes: true }), fmt.formatoDe(x.codigo), x);
-  await auditar(req, 'descarga', { entidad: 'SstFormato', entidadId: x.id, detalle: { archivo: x.numero } });
+  const generar = async () => pdfSst.formatoPdf(await datos.datosEmpresa(req.empresaId, { conImagenes: true }), fmt.formatoDe(x.codigo), x);
+  // Cada versión final es evidencia y se guarda; el borrador se genera cada vez
+  const g = x.estado === 'final' ? await pdfGuardado(req.empresaId, { tipo: 'sst-formato', ref: x.id, clave: `v${x.version}`,
+    nombre: `${x.numero}_v${x.version}.pdf`, generar, usuario: req.usuario._id }) : null;
+  const buf = g ? g.buffer : await generar();
+  cabecerasDocumento(res, g);
+  await auditar(req, 'descarga', { entidad: 'SstFormato', entidadId: x.id, detalle: { archivo: x.numero, ...(g ? { version: g.version } : {}) } });
   res.type('application/pdf').setHeader('Content-Disposition', `inline; filename="${x.numero}.pdf"`);
   res.send(buf);
 });

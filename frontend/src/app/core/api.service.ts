@@ -50,6 +50,15 @@ export class Api {
     return firstValueFrom(this.http.get(this.base + url, { params: this.params(params), responseType: 'blob' }));
   }
 
+  // Como archivo()/archivoPost(), con los datos del documento guardado (versión y fecha) si el servidor los envía
+  async archivoConInfo(url: string, params?: Params, cuerpo?: unknown): Promise<{ blob: Blob; version: number | null; guardado: string | null }> {
+    const r = cuerpo !== undefined
+      ? await firstValueFrom(this.http.post(this.base + url, cuerpo, { observe: 'response', responseType: 'blob' }))
+      : await firstValueFrom(this.http.get(this.base + url, { params: this.params(params), observe: 'response', responseType: 'blob' }));
+    const v = Number(r.headers.get('X-Documento-Version'));
+    return { blob: r.body as Blob, version: v > 0 ? v : null, guardado: r.headers.get('X-Documento-Guardado') };
+  }
+
   async archivoPost(url: string, cuerpo: unknown): Promise<Blob> {
     return firstValueFrom(this.http.post(this.base + url, cuerpo, { responseType: 'blob' }));
   }

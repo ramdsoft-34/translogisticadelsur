@@ -18,7 +18,8 @@ import * as cont from '../services/gestion/contabilidad.js';
 import * as cierre from '../services/gestion/cierre.js';
 import { soporteInterno, asegurarSoporte, soporteDeEjemplo, cumplirSoporte as soporteCumplir, anularSoporte as soporteAnular } from '../services/gestion/soporteInterno.js';
 import { manifiestoPdf, ajusteLogo } from '../services/reportes/manifiesto.js';
-import { liquidacionPdf, liquidacionesMediaHoja } from '../services/reportes/liquidacion.js';
+import { soporteExpedido, liquidacionConductorExpedida, liquidacionesConductorLote } from '../services/documentos/expedidos.js';
+import { cabecerasDocumento } from '../services/documentos/guardados.js';
 import rutasRemesas from './remesas.js';
 import { avisarLiquidacion } from '../services/rastreo/surtrack.js';
 import { avisarDocumentosApp } from '../services/rastreo/documentosApp.js';
@@ -115,9 +116,11 @@ r.get('/liq-conductores/:numero/:formato', verLiq, async (req, res) => {
       columnas: COL_LC.map((c, i) => ({ ...c, ancho: i > 4 ? 14 : 16, formato: i > 4 ? PESOS : undefined })),
       filas: [...filas, [], ['Descuento préstamos', ...vacio.slice(1), -$(l.descuentoPrestamos)], ['NETO A PAGAR', ...vacio.slice(1), $(l.neto)]], total }), `${l.numero}.xlsx`, XLSX);
   }
+  // El PDF de la liquidación se guarda al crearse y desde ahí se muestra (no se vuelve a generar)
   const empresa = await Empresa.findById(req.empresaId).select('+logo').lean();
-  const buf = await liquidacionPdf(empresa, l);
-  archivo(res, buf, `${l.numero}.pdf`, 'application/pdf', req.query.ver === '1');
+  const d = await liquidacionConductorExpedida(empresa, l, req.usuario._id);
+  cabecerasDocumento(res, d);
+  archivo(res, d.buffer, d.nombre, 'application/pdf', req.query.ver === '1');
 });
 
 // Dos liquidaciones por hoja carta (media hoja cada una, con línea de corte). Una liquidación
@@ -129,7 +132,7 @@ r.get('/liq-conductores-lote/pdf', verLiq, async (req, res) => {
   if (!lista.length) throw new ErrorHttp(404, 'No se encontraron las liquidaciones');
   lista.sort((a, b) => numeros.indexOf(a.numero) - numeros.indexOf(b.numero));
   const empresa = await Empresa.findById(req.empresaId).select('+logo').lean();
-  archivo(res, await liquidacionesMediaHoja(empresa, lista), 'liquidaciones.pdf', 'application/pdf', req.query.ver === '1');
+  archivo(res, await liquidacionesConductorLote(empresa, lista, req.usuario._id), 'liquidaciones.pdf', 'application/pdf', req.query.ver === '1');
 });
 
 // ═════════════ Préstamos ═════════════
@@ -630,8 +633,10 @@ r.post('/soportes/viajes/:id/anular', permitir(P.VIAJES_REGISTRAR), async (req, 
 });
 r.get('/soportes/viajes/:id/pdf', permitir(P.VIAJES_VER), async (req, res) => {
   const empresa = await empresaDe(req);
-  const d = await soporteInterno(empresa, req.params.id, { asignar: false });
-  archivo(res, await manifiestoPdf(d), `${d.numero}.pdf`, 'application/pdf', true);
+  // El soporte expedido se guarda una vez por estado (vigente, cumplido o anulado) y desde ahí se muestra
+  const d = await soporteExpedido(empresa, req.params.id, req.usuario._id);
+  cabecerasDocumento(res, d);
+  archivo(res, d.buffer, d.nombre, 'application/pdf', true);
 });
 
 // Remesas de los clientes (Dulces & Dulces y otros): ver routes/remesas.js (fase 12)

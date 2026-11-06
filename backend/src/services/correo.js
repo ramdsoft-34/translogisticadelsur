@@ -9,7 +9,8 @@ import nodemailer from 'nodemailer';
 import mongoose from 'mongoose';
 import { Empresa, Viaje, Cliente, EnvioCorreo, pob } from '../models/index.js';
 import { fmtFecha } from '../utils/texto.js';
-import { datosManifiesto, manifiestoPdf, nombreArchivo } from './reportes/manifiesto.js';
+import { datosManifiesto, nombreArchivo } from './reportes/manifiesto.js';
+import { manifiestoExpedido, soporteExpedido } from './documentos/expedidos.js';
 import { aplicarPlantilla, saludo } from './whatsapp.js';
 import { descifrar } from '../utils/cifrado.js';
 import { unirPdf } from './reportes/unirPdf.js';
@@ -112,7 +113,7 @@ async function mensaje(empresa, smtp, envio) {
     'Muchas gracias.', '', 'Cordialmente,', datos.empresa_mayus].join('\n');
   return { ...base, subject: `Manifiesto ${datos.manifiesto} - ${datos.cliente}`, text: texto,
     html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(texto)}</div>`,
-    attachments: [{ filename: nombreArchivo(d), content: await manifiestoPdf(d), contentType: 'application/pdf' }] };
+    attachments: [{ filename: nombreArchivo(d), content: (await manifiestoExpedido(empresa, envio.viaje)).buffer, contentType: 'application/pdf' }] };
 }
 
 const esConexion = (e) => ['ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'ECONNREFUSED', 'EDNS'].includes(e?.code);
@@ -200,7 +201,7 @@ async function mensajeGrupo(empresa, smtp, envios) {
   for (const e of envios) {
     const d = await datosManifiesto(empresa, e.viaje);
     lineas.push(`  - Manifiesto ${d.numero}`);
-    adjuntos.push({ filename: nombreArchivo(d), content: await manifiestoPdf(d), contentType: 'application/pdf' });
+    adjuntos.push({ filename: nombreArchivo(d), content: (await manifiestoExpedido(empresa, e.viaje)).buffer, contentType: 'application/pdf' });
   }
   const cliente = await Cliente.findOne({ empresa: empresa._id, _id: envios[0].cliente }).select('nombre').lean();
   const nombre = txt(cliente?.nombre).toUpperCase();
@@ -323,12 +324,14 @@ export async function enviarRelacion(empresaId, { cliente, desde, hasta, destina
 export async function enviarManual(empresaId, { para, cc = [], asunto, texto, viajes = [], soportes = [], unir = false, adjuntos = [], usuario = null }) {
   const { empresa } = await cuentaCorreo(empresaId);
   const pdfs = [];
-  for (const id of viajes) { const d = await datosManifiesto(empresa, id); pdfs.push({ filename: nombreArchivo(d), content: await manifiestoPdf(d), contentType: 'application/pdf', numero: d.numero }); }
+  // Los PDF expedidos se adjuntan tal como quedaron guardados (no se vuelven a generar)
+  for (const id of viajes) { const m = await manifiestoExpedido(empresa, id, usuario); pdfs.push({ filename: m.nombre, content: m.buffer, contentType: 'application/pdf', numero: m.clave }); }
   if (soportes.length) {
     const { soporteInterno } = await import('./gestion/soporteInterno.js');
     for (const id of soportes) {
       const d = await soporteInterno(empresa, id, { asignar: false });
-      pdfs.push({ filename: `Soporte_${d.soporte.mc}.pdf`, content: await manifiestoPdf(d), contentType: 'application/pdf', numero: `${d.soporte.mc}/${d.soporte.rc}` });
+      const s = await soporteExpedido(empresa, id, usuario);
+      pdfs.push({ filename: s.nombre, content: s.buffer, contentType: 'application/pdf', numero: `${d.soporte.mc}/${d.soporte.rc}` });
     }
   }
   const docs = unir && pdfs.length > 1

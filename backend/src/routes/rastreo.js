@@ -11,6 +11,7 @@ import * as st from '../services/rastreo/surtrack.js';
 import { leerLibro, filas, txt, num } from '../services/importacion/excel.js';
 import { libroExcel } from '../services/reportes/comun.js';
 import { checklistPdf } from '../services/reportes/checklist.js';
+import { pdfGuardado, cabecerasDocumento } from '../services/documentos/guardados.js';
 import { normalizar, parseFecha } from '../utils/texto.js';
 
 const r = Router();
@@ -104,7 +105,13 @@ r.get('/viajes/:id/checklist', permitir(P.VIAJES_VER), async (req, res) => res.j
 r.get('/viajes/:id/checklist/pdf', permitir(P.VIAJES_VER), async (req, res) => {
   const d = await st.checklistDelViaje(req.empresaId, id(req.params.id), { conFirma: true });
   if (!d.checklist) throw new ErrorHttp(404, 'El conductor no tiene checklist registrado en Sur Track');
-  const buf = await checklistPdf(await Empresa.findById(req.empresaId).lean(), d);
+  // Mismo PDF guardado que en SG-SST (Flota e inspecciones): se genera una vez por estado
+  const cid = d.checklist.checklistId || d.checklist.id;
+  const generar = async () => checklistPdf(await Empresa.findById(req.empresaId).lean(), d);
+  const g = cid ? await pdfGuardado(req.empresaId, { tipo: 'preoperacional', ref: cid, clave: d.checklist.autorizacion?.fecha ? 'autorizado' : 'registrado',
+    nombre: `preoperacional_${d.viaje.placa}.pdf`, generar, usuario: req.usuario._id }) : null;
+  const buf = g ? g.buffer : await generar();
+  cabecerasDocumento(res, g);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `${req.query.ver === '1' ? 'inline' : 'attachment'}; filename="checklist_${d.viaje.placa}_${new Date(d.checklist.fecha).toISOString().slice(0, 10)}.pdf"`);
   res.send(buf);

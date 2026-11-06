@@ -4,8 +4,8 @@ import mongoose from 'mongoose';
 import { Empresa, Viaje, Liquidacion, Auditoria, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
-import { datosManifiesto, manifiestoPdf, nombreArchivo } from '../services/reportes/manifiesto.js';
-import { datosRemesa, remesaPdf, nombreRemesa } from '../services/reportes/remesa.js';
+import { manifiestoExpedido, remesaExpedida } from '../services/documentos/expedidos.js';
+import { pdfGuardado, cabecerasDocumento } from '../services/documentos/guardados.js';
 import { libroExcel, nuevoPdf, encabezadoPdf, tablaPdf, numerarPaginas, pdfABuffer } from '../services/reportes/comun.js';
 import { parseFecha, fmtFecha, fmtMiles } from '../utils/texto.js';
 import { auditar, verificarCadena } from '../services/auditoria.js';
@@ -26,17 +26,20 @@ const empresaDe = (req) => Empresa.findById(req.empresaId).lean();
 
 r.get('/manifiesto/:id', permitir(P.VIAJES_VER), async (req, res) => {
   const empresa = await empresaDe(req);
-  const d = await datosManifiesto(empresa, req.params.id);
-  await auditar(req, 'descarga', { entidad: 'Viaje', entidadId: req.params.id, detalle: { archivo: nombreArchivo(d) } });
-  enviarArchivo(res, await manifiestoPdf(d), nombreArchivo(d), 'application/pdf');
+  // Manifiesto aceptado: se guarda la primera vez y desde ahí se muestra el mismo archivo
+  const d = await manifiestoExpedido(empresa, req.params.id, req.usuario._id);
+  await auditar(req, 'descarga', { entidad: 'Viaje', entidadId: req.params.id, detalle: { archivo: d.nombre, version: d.version } });
+  cabecerasDocumento(res, d);
+  enviarArchivo(res, d.buffer, d.nombre, 'application/pdf');
 });
 
 // Remesa con el formato del RNDC y el recuadro «Para el cumplido»: soporte interno para revisar, no se envía
 r.get('/remesa/:id', permitir(P.VIAJES_VER), async (req, res) => {
   const empresa = await empresaDe(req);
-  const d = await datosRemesa(empresa, req.params.id);
-  await auditar(req, 'descarga', { entidad: 'Viaje', entidadId: req.params.id, detalle: { archivo: nombreRemesa(d) } });
-  enviarArchivo(res, await remesaPdf(d), nombreRemesa(d), 'application/pdf');
+  const d = await remesaExpedida(empresa, req.params.id, req.usuario._id);
+  await auditar(req, 'descarga', { entidad: 'Viaje', entidadId: req.params.id, detalle: { archivo: d.nombre, version: d.version } });
+  cabecerasDocumento(res, d);
+  enviarArchivo(res, d.buffer, d.nombre, 'application/pdf');
 });
 
 // ── Bitácora ────────────────────────────────────────────────────────────────
@@ -124,13 +127,21 @@ r.get('/liquidacion/:id.xlsx', permitir(P.LIQUIDACION_VER), async (req, res) => 
 
 r.get('/liquidacion/:id.pdf', permitir(P.LIQUIDACION_VER), async (req, res) => {
   const [empresa, l] = await Promise.all([empresaDe(req), liquidacionDe(req)]);
-  const doc = nuevoPdf(`Liquidación ${l.numero}`);
-  encabezadoPdf(doc, { empresa, titulo: `Liquidación de fletes N° ${l.numero} — ${l.cliente?.razonSocial || l.cliente?.nombre}`, subtitulo: `${l.titulo} · Estado: ${l.estado}` });
-  const { filas, total } = filasLiq(l, true);
-  tablaPdf(doc, COL_LIQ, filas, { total });
-  numerarPaginas(doc);
-  await auditar(req, 'descarga', { entidad: 'Liquidacion', entidadId: l._id, detalle: { archivo: `Liquidacion_${l.numero}.pdf` } });
-  enviarArchivo(res, await pdfABuffer(doc), `Liquidacion_${l.numero}.pdf`, 'application/pdf');
+  const generar = async () => {
+    const doc = nuevoPdf(`Liquidación ${l.numero}`);
+    encabezadoPdf(doc, { empresa, titulo: `Liquidación de fletes N° ${l.numero} — ${l.cliente?.razonSocial || l.cliente?.nombre}`, subtitulo: `${l.titulo} · Estado: ${l.estado}` });
+    const { filas, total } = filasLiq(l, true);
+    tablaPdf(doc, COL_LIQ, filas, { total });
+    numerarPaginas(doc);
+    return pdfABuffer(doc);
+  };
+  // Borrador: se genera cada vez. Facturada o anulada: se guarda una vez por estado y desde ahí se muestra.
+  const nombre = `Liquidacion_${l.numero}${l.estado === 'anulada' ? '_ANULADA' : ''}.pdf`;
+  const d = l.estado === 'borrador' ? null
+    : await pdfGuardado(req.empresaId, { tipo: 'liquidacion', ref: l._id, clave: `${l.numero}:${l.estado}`, nombre, generar, usuario: req.usuario._id });
+  await auditar(req, 'descarga', { entidad: 'Liquidacion', entidadId: l._id, detalle: { archivo: nombre, ...(d ? { version: d.version } : {}) } });
+  cabecerasDocumento(res, d);
+  enviarArchivo(res, d ? d.buffer : await generar(), nombre, 'application/pdf');
 });
 
 // ── Auditoría de la empresa ─────────────────────────────────────────────────

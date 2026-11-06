@@ -5,25 +5,19 @@
 //   informes/Utilidad por empresa.xlsx
 //   manifiestos/<cliente>/Manifiesto_<n>.pdf (y soportes internos MC)
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
 import { PassThrough } from 'node:stream';
-import { fileURLToPath } from 'node:url';
 import mongoose from 'mongoose';
 import * as M from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { fmtFecha } from '../../utils/texto.js';
 import { libroExcel } from '../reportes/comun.js';
 import { lineaLiquidacion, respaldosAuxiliar } from '../calculos.js';
-import { datosManifiesto, manifiestoPdf, nombreArchivo } from '../reportes/manifiesto.js';
-import { soporteInterno } from './soporteInterno.js';
 
-const BASE_POR_DEFECTO = process.env.NODE_ENV === 'test'
-  ? path.join(os.tmpdir(), `translogistica-archivo-${process.pid}`)
-  : fileURLToPath(new URL('../../../archivo', import.meta.url));
-export const carpetaBase = () => path.resolve(process.env.ARCHIVO_DIR || BASE_POR_DEFECTO);
+import { carpetaBase } from '../documentos/carpeta.js';
+export { carpetaBase };
 const carpetaEmpresa = (empresaId) => path.join(carpetaBase(), String(empresaId));
 const limpio = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w .-]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80) || 'sin_nombre';
 const rangoMes = (mes) => { const [a, m] = mes.split('-').map(Number); return { desde: new Date(Date.UTC(a, m - 1, 1)), hasta: new Date(Date.UTC(a, m, 0, 23, 59, 59)) }; };
@@ -115,10 +109,11 @@ export async function archivarManifiestos(empresaId, mes) {
   const archivos = []; const errores = [];
   for (const v of viajes) {
     try {
+      // Copia del PDF expedido tal como quedó guardado (no se vuelve a generar)
       const rndc = v.manifiesto?.estado === 'aceptado' || v.estado === 'cumplido';
-      const d = rndc ? await datosManifiesto(empresa, v._id) : await soporteInterno(empresa, v._id, { asignar: false });
-      const nombre = rndc ? nombreArchivo(d) : `Soporte_${limpio(d.numero)}.pdf`;
-      archivos.push(await guardar(empresaId, path.join(mes, 'manifiestos', limpio(v.cliente?.nombre || 'sin cliente'), nombre), await manifiestoPdf(d)));
+      const { manifiestoExpedido, soporteExpedido } = await import('../documentos/expedidos.js');
+      const doc = rndc ? await manifiestoExpedido(empresa, v._id) : await soporteExpedido(empresa, v._id);
+      archivos.push(await guardar(empresaId, path.join(mes, 'manifiestos', limpio(v.cliente?.nombre || 'sin cliente'), limpio(doc.nombre)), doc.buffer));
     } catch (e) { errores.push(`${v.manifiesto?.numero || v.soporteInterno?.mc || v._id}: ${e.message}`); }
   }
   return { archivos, errores };

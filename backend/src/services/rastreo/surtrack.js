@@ -5,7 +5,6 @@
 // Cada viaje guarda en rastreo.servidor a cuál se envió. El viaje de Translogística es la única fuente.
 import { env } from '../../config/env.js';
 import { Empresa, Viaje, Vehiculo, Tercero, Cliente, RecorridoRastreo, LiquidacionConductor } from '../../models/index.js';
-import { liquidacionPdf } from '../reportes/liquidacion.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 
 const CONFIG = { cooespatrans: () => env.surTrack, app: () => env.surTrackApp };
@@ -563,7 +562,9 @@ async function enviarUna(empresaId, l, empresa) {
     if (e.codigo === 'sin_conductor') return 'sin_cuenta';   // el conductor no usa la app nueva: no hay nada que reenviar
     throw e;
   }
-  await llamar(`${ruta}/pdf`, { metodo: 'PUT', servidor: 'app', archivo: { tipo: 'application/pdf', datos: await liquidacionPdf(empresa, l) } });
+  // A la app va el PDF de la liquidación tal como quedó guardado
+  const { liquidacionConductorExpedida } = await import('../documentos/expedidos.js');
+  await llamar(`${ruta}/pdf`, { metodo: 'PUT', servidor: 'app', archivo: { tipo: 'application/pdf', datos: (await liquidacionConductorExpedida(empresa, l)).buffer } });
   await LiquidacionConductor.updateOne({ empresa: empresaId, _id: l._id }, { $set: { appEnviada: new Date() } }, { timestamps: false });
   return 'enviada';
 }

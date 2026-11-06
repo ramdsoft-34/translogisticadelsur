@@ -132,7 +132,7 @@ export function liquidacionPdf(empresa, l) {
 
 // Dos liquidaciones por hoja carta: media hoja cada una, separadas por una línea de corte.
 // Una liquidación con muchos viajes (no caben en media hoja) va sola en la hoja completa.
-const MAX_MEDIA_HOJA = 17;
+export const MAX_MEDIA_HOJA = 17;
 export function liquidacionesMediaHoja(empresa, lista) {
   const doc = nuevoPdf('Liquidaciones de conductores', 'portrait');
   doc.options.margin = 0; doc.page.margins = { top: 0, bottom: 0, left: 0, right: 0 };

@@ -3,9 +3,7 @@
 // Se llama después de cada cambio (activar el rastreo, despachar, cumplir, anular, soporte interno);
 // cada llamada deja en la app exactamente lo vigente: sube lo que hay y quita lo anulado.
 import { Empresa, Viaje } from '../../models/index.js';
-import { datosManifiesto, manifiestoPdf } from '../reportes/manifiesto.js';
-import { datosRemesa, remesaPdf } from '../reportes/remesa.js';
-import { soporteInterno } from '../gestion/soporteInterno.js';
+const expedidos = () => import('../documentos/expedidos.js');
 import { configuradoServidor, llamarApp } from './surtrack.js';
 
 /** Qué documentos tiene vigentes el viaje (mismas reglas que «Ver PDF» de Manifiestos). */
@@ -28,12 +26,10 @@ export async function sincronizarDocumentosApp(empresaId, viajeId) {
   const enviados = []; const quitados = [];
 
   const generar = {
-    manifiesto: async () => { const d = await datosManifiesto(empresa, v._id); return { numero: v.manifiesto.numero, pdf: await manifiestoPdf(d) }; },
-    remesa: async () => { const d = await datosRemesa(empresa, v._id); return { numero: v.remesa.numero, pdf: await remesaPdf(d) }; },
-    soporte: async () => {
-      const d = await soporteInterno(empresa, v._id, { asignar: false });
-      return { numero: v.soporteInterno.mc, pdf: await manifiestoPdf(d) };
-    },
+    // A la app va el mismo PDF expedido y guardado (no se genera otro)
+    manifiesto: async () => ({ numero: v.manifiesto.numero, pdf: (await expedidos().then(x => x.manifiestoExpedido(empresa, v._id))).buffer }),
+    remesa: async () => ({ numero: v.remesa.numero, pdf: (await expedidos().then(x => x.remesaExpedida(empresa, v._id))).buffer }),
+    soporte: async () => ({ numero: v.soporteInterno.mc, pdf: (await expedidos().then(x => x.soporteExpedido(empresa, v._id))).buffer }),
   };
 
   for (const tipo of ['manifiesto', 'remesa', 'soporte']) {

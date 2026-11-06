@@ -220,12 +220,12 @@ test('Corregir el cliente de un viaje con documentos anulados: el reporte de Wha
   const v2 = (await s.a.get(`/api/viajes/${viaje._id}`)).body;
   assert.equal(v2.destino, 'Tumaco');
   assert.equal(v2.codDestino, '52835000');
-  // Observaciones del manifiesto: sin auxiliar no se agrega nada; con auxiliar, días y valor del viaje
+  // Observaciones del manifiesto: las del viaje; con auxiliar, primero los días y el valor y luego las observaciones
   const obs = async () => Object.fromEntries((await s.a.get(`/api/rndc/viajes/${viaje._id}/vista-previa`)).body.manifiesto.variables).OBSERVACIONES;
   await s.a.put(`/api/viajes/${viaje._id}`, { conAuxiliar: false, observaciones: 'Llamar al llegar' });
-  assert.equal(await obs(), '');
+  assert.equal(await obs(), 'Llamar al llegar');
   await s.a.put(`/api/viajes/${viaje._id}`, { conAuxiliar: true, diasAuxiliar: 2 });
-  assert.equal(await obs(), 'Auxiliar 2 días $180.000.');
+  assert.equal(await obs(), 'Auxiliar 2 días $180.000. · Llamar al llegar');
   await s.a.put(`/api/viajes/${viaje._id}`, { diasAuxiliar: 1, observaciones: '' });
   assert.equal(await obs(), 'Auxiliar 1 día $90.000.');
   // «Por enviar» en Manifiestos: solo aparece después de reportarlo por WhatsApp

@@ -8,6 +8,10 @@ import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
 import { RemesaDulces, Empresa, Cliente } from '../models/index.js';
 import * as R from '../services/gestion/remesasDulces.js';
+import crypto from 'node:crypto';
+import JSZip from 'jszip';
+import { pdfGuardado } from '../services/documentos/guardados.js';
+import { componerMediasHojas } from '../services/documentos/componer.js';
 
 const r = Router();
 const ver = permitir(P.VIAJES_VER);
@@ -152,11 +156,30 @@ async function marcarImpresas(req, lista) {
   await RemesaDulces.updateMany({ empresa: req.empresaId, _id: { $in: lista.map(x => x._id) } },
     { $set: { impreso: new Date(), impresoPor: String(req.usuario?.nombre || req.usuario?.email || '').slice(0, 120) }, $inc: { impresiones: 1 } });
 }
+// Cada remesa impresa se guarda una vez (su PDF de media hoja) y desde ahí se vuelve a imprimir, ver o descargar.
+// Si después se corrige un dato de una remesa impresa (p. ej. la cédula), la siguiente impresión es otra versión y la
+// anterior queda guardada. Una remesa sin imprimir (solo «Ver») se genera cada vez: todavía es borrador.
+const huellaRemesa = (x) => crypto.createHash('sha1').update(JSON.stringify([x.vpl, x.remesa, x.fecha ? new Date(x.fecha).toISOString().slice(0, 10) : '', x.zona, x.peso,
+  x.manifiesto, x.conductor, x.cedula, x.direccion, x.placa, x.costo, String(x.cliente || '')])).digest('hex').slice(0, 16);
+async function pdfsDeRemesas(req, lista, formatos, guardarTodas) {
+  const out = [];
+  for (const x of lista) {
+    const f = formatos.get(String(x.cliente || ''));
+    const generar = () => R.remesasPdfVarios([{ x, f }], { porHoja: 1, linea: false });
+    const nombre = `Remesa_${x.remesa || 'sin_numero'}_VPL_${x.vpl}.pdf`.replace(/[^\w.-]/g, '_');
+    if (guardarTodas || x.impreso) {
+      const g = await pdfGuardado(req.empresaId, { tipo: 'remesa-cliente', ref: x._id, clave: `${x.remesa}:${huellaRemesa(x)}`, nombre, generar, usuario: req.usuario._id });
+      out.push({ x, nombre, buffer: g.buffer, guardada: true });
+    } else out.push({ x, nombre, buffer: await generar(), guardada: false });
+  }
+  return out;
+}
 r.post('/remesas/pdf', gestionar, async (req, res) => {
   const { d, lista, formatos, opciones } = await paraSalida(req);
-  // Si hay remesas de varios clientes, cada una lleva el formato de su cliente
-  const buf = formatos.size === 1 ? await R.remesasPdf(formatos.values().next().value, lista, opciones)
-    : await R.remesasPdfVarios(lista.map(x => ({ x, f: formatos.get(String(x.cliente || '')) })), opciones);
+  // Al imprimir (marcar) se guardan; la hoja (1 o 2 por hoja) se arma con esos PDF sin volver a generarlos
+  const pdfs = await pdfsDeRemesas(req, lista, formatos, d.marcar);
+  const buf = await componerMediasHojas(pdfs.map(p => ({ buffer: p.buffer, completa: false })),
+    { desplazamiento: 792 / 2 - 2, linea: opciones.linea, textoLinea: 'cortar aquí', porHoja: opciones.porHoja });
   if (d.marcar) await marcarImpresas(req, lista);
   await auditar(req, 'remesas_pdf', { detalle: { remesas: lista.map(x => x.remesa), ...opciones, marcar: d.marcar } });
   const nombre = (lista.length === 1 ? `Remesa_${lista[0].remesa}_VPL_${lista[0].vpl}.pdf` : 'Remesas.pdf').replace(/[^\w.-]/g, '_');
@@ -168,7 +191,9 @@ r.post('/remesas/zip', gestionar, async (req, res) => {
   const { d, lista, formatos } = await paraSalida(req);
   // Cada PDF del .zip lleva sus logos: más de 100 lo vuelve muy pesado (para muchas, mejor un solo PDF)
   if (lista.length > 100) throw new ErrorHttp(400, 'El .zip va hasta 100 remesas. Para más, use «Ver PDF» o «Imprimir» (un solo PDF).');
-  const zip = await R.remesasZipVarios(lista.map(x => ({ x, f: formatos.get(String(x.cliente || '')) })));
+  const z = new JSZip();
+  for (const p of await pdfsDeRemesas(req, lista, formatos, d.marcar)) z.file(p.nombre, p.buffer);
+  const zip = await z.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
   if (d.marcar) await marcarImpresas(req, lista);
   await auditar(req, 'remesas_zip', { detalle: { remesas: lista.map(x => x.remesa) } });
   res.setHeader('Content-Type', 'application/zip');
