@@ -20,7 +20,7 @@ export const MODULOS: Modulo[] = [
     { ruta: '/manifiestos', texto: 'Manifiestos', icono: 'documento', permisos: [P.RNDC_OPERAR], descripcion: 'Expedir, cumplir y anular remesas y manifiestos, y el soporte interno', claves: 'remesa expedir cumplido anular rndc soporte interno mc rc' },
     // Quien opera manifiestos lo tiene como pestaña dentro de «Manifiestos»
     { ruta: '/soporte-interno', texto: 'Soporte interno', icono: 'documento', permisos: [P.VIAJES_VER], descripcion: 'Viajes sin manifiesto con su soporte MC/RC y QR', claves: 'mc rc qr', ocultarCon: P.RNDC_OPERAR },
-    { ruta: '/remesas-dulces', texto: 'Remesas', icono: 'documento', permisos: [P.VIAJES_REGISTRAR], descripcion: 'Remesas desde la base de viajes en Excel (VPL), dos por hoja', claves: 'vpl remesas imprimir' },
+    { ruta: '/remesas-dulces', texto: 'Remesas', icono: 'documento', permisos: [P.VIAJES_VER], descripcion: 'Base de viajes del cliente (VPL), consecutivo de remesas e impresión con el formato de la empresa', claves: 'vpl remesas imprimir dulces consecutivo' },
   ] },
   { id: 'finanzas', nombre: 'Finanzas', icono: 'dinero', paginas: [
     { ruta: '/liquidaciones', texto: 'Facturación a clientes', icono: 'dinero', permisos: [P.LIQUIDACION_VER], descripcion: 'Liquidar los viajes de cada cliente para facturar', claves: 'liquidacion fletes cobro' },

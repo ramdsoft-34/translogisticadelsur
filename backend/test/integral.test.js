@@ -1174,12 +1174,17 @@ test('Gestión: relaciones, soporte interno MC/RC y remesas Dulces', async () =>
   ws.addRow([5501, new Date('2026-11-10'), 'Ipiales', 1200, 'M1', 'PEDRO PEREZ', 'ABC123', 'RD-1', 450000]);
   ws.addRow([5502, new Date('2026-11-10'), 'Tuquerres', 900, 'M2', 'PEDRO PEREZ GOMEZ', 'ABC123', 'RD-2', 380000]);
   const token = await login('manif@a.test');
-  const imp = await api().post('/api/gestion/remesas-dulces/importar').set('Authorization', `Bearer ${token}`).set('Content-Type', 'application/octet-stream').send(Buffer.from(await wb.xlsx.writeBuffer()));
+  // Fase 12: la base es de un cliente y las remesas salen del consecutivo de la empresa
+  const imp = await api().post(`/api/gestion/remesas/importar?cliente=${s.cliente}`).set('Authorization', `Bearer ${token}`).set('Content-Type', 'application/octet-stream').send(Buffer.from(await wb.xlsx.writeBuffer()));
   assert.equal(imp.status, 200, JSON.stringify(imp.body));
   assert.equal(imp.body.nuevos, 2);
-  const rp = await s.manif.post('/api/gestion/remesas-dulces/pdf', { vpls: ['5501', '5502'] });
+  const pendientes = (await s.manif.get(`/api/gestion/remesas?cliente=${s.cliente}&estado=pendientes`)).body;
+  assert.equal(pendientes.length, 2);
+  assert.notEqual(pendientes[0].remesa, pendientes[1].remesa, 'cada viaje con su número');
+  const rp = await s.manif.post('/api/gestion/remesas/pdf', { ids: pendientes.map(x => x._id) });
   assert.equal(rp.headers['content-type'], 'application/pdf');
-  assert.equal((await s.manif.get('/api/gestion/remesas-dulces?pendientes=1')).body.length, 0, 'quedan marcadas como impresas');
+  assert.equal((await s.manif.get(`/api/gestion/remesas?cliente=${s.cliente}&estado=pendientes`)).body.length, 0, 'quedan marcadas como impresas');
+  assert.equal((await s.manif.get('/api/gestion/remesas/formato')).status, 200, 'el formato se consulta (sin choque de campos en MongoDB)');
 });
 
 test('Gestión: cierre de mes bloquea registrar y modificar ese mes', async () => {

@@ -4,7 +4,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import express from 'express';
-import { Empresa, Viaje, Tarifa, Cliente, LiquidacionConductor, Prestamo, CuentaContable, Asiento, FacturaCont, RemesaDulces, Tercero, Vehiculo, Autorizacion, pob } from '../models/index.js';
+import { Empresa, Viaje, Tarifa, Cliente, LiquidacionConductor, Prestamo, CuentaContable, Asiento, FacturaCont, Tercero, Vehiculo, Autorizacion, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
@@ -19,12 +19,13 @@ import * as cierre from '../services/gestion/cierre.js';
 import { soporteInterno, asegurarSoporte, soporteDeEjemplo, cumplirSoporte as soporteCumplir, anularSoporte as soporteAnular } from '../services/gestion/soporteInterno.js';
 import { manifiestoPdf, ajusteLogo } from '../services/reportes/manifiesto.js';
 import { liquidacionPdf, liquidacionesMediaHoja } from '../services/reportes/liquidacion.js';
-import * as dulces from '../services/gestion/remesasDulces.js';
+import rutasRemesas from './remesas.js';
 import { avisarLiquidacion } from '../services/rastreo/surtrack.js';
 import { avisarDocumentosApp } from '../services/rastreo/documentosApp.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
+r.use(rutasRemesas);           // fase 12: remesas de los clientes con el formato de la cooperativa
 
 const id = z.string().refine(v => mongoose.isValidObjectId(v), 'identificador inválido');
 const fechaQ = (v, def) => parseFecha(v) || def;
@@ -616,35 +617,7 @@ r.get('/soportes/viajes/:id/pdf', permitir(P.VIAJES_VER), async (req, res) => {
   archivo(res, await manifiestoPdf(d), `${d.numero}.pdf`, 'application/pdf', true);
 });
 
-// ═════════════ Remesas Dulces & Dulces ═════════════
-const remDulces = permitir(P.VIAJES_REGISTRAR);
-r.get('/remesas-dulces', permitir(P.VIAJES_VER), async (req, res) => {
-  const f = deEmpresa(req);
-  if (req.query.pendientes === '1') f.impreso = null;
-  res.json(await RemesaDulces.find(f).sort({ fecha: -1, vpl: -1 }).limit(1000).lean());
-});
-r.post('/remesas-dulces/importar', remDulces, express.raw({ type: '*/*', limit: '15mb' }), async (req, res) => {
-  const r1 = await dulces.importarBase(req.empresaId, req.body);
-  await auditar(req, 'importar_remesas_dulces', { detalle: r1 });
-  res.json(r1);
-});
-r.put('/remesas-dulces/:vpl', remDulces, async (req, res) => {
-  const d = z.object({ cedula: z.string().max(15).optional(), conductor: z.string().max(80).optional(), placa: z.string().max(7).optional(), remesa: z.string().max(20).optional() }).parse(req.body);
-  const x = await RemesaDulces.findOneAndUpdate(deEmpresa(req, { vpl: req.params.vpl }), { $set: d }, { new: true });
-  if (!x) throw new ErrorHttp(404, 'VPL no encontrado');
-  res.json(x);
-});
-r.post('/remesas-dulces/pdf', remDulces, async (req, res) => {
-  const { vpls, marcar } = z.object({ vpls: z.array(z.string()).min(1).max(200), marcar: z.boolean().optional().default(true) }).parse(req.body);
-  const empresa = await empresaDe(req);
-  const lista = await RemesaDulces.find(deEmpresa(req, { vpl: { $in: vpls } })).sort({ vpl: 1 }).lean();
-  if (!lista.length) throw new ErrorHttp(404, 'No se encontraron los VPL elegidos');
-  // Cédulas: las que falten se toman del maestro de conductores (por placa o por nombre)
-  for (const x of lista) if (!x.cedula) x.cedula = await dulces.cedulaDe(req.empresaId, x);
-  const buf = await dulces.remesasPdf(empresa, lista);
-  if (marcar) await RemesaDulces.updateMany(deEmpresa(req, { vpl: { $in: lista.map(x => x.vpl) } }), { $set: { impreso: new Date() } });
-  archivo(res, buf, 'remesas_dulces.pdf', 'application/pdf', true);
-});
+// Remesas de los clientes (Dulces & Dulces y otros): ver routes/remesas.js (fase 12)
 
 // ═════════════ Reglas de negocio configurables ═════════════
 const ciudades = z.array(z.string().trim().min(2).max(40)).max(30);
