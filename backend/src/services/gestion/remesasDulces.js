@@ -89,7 +89,7 @@ const dia = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
 const ddmm = (d) => (d ? `${dia(d).slice(8, 10)}/${dia(d).slice(5, 7)}` : '');
 
 // Avisos puros (sin base de datos), a partir de lo leído y de lo que ya está guardado
-export function revisarBase({ filas: fs, sinViaje = [], subtotales = [], total = null }, { usadas = new Map(), siguiente = null } = {}) {
+export function revisarBase({ filas: fs, sinViaje = [], subtotales = [], total = null }, { usadas = new Map(), siguiente = null, enBase = new Set() } = {}) {
   const avisos = [];
   const vplRep = [...new Set(fs.map(x => x.vpl).filter((v, i, a) => a.indexOf(v) !== i))];
   if (vplRep.length) avisos.push({ tipo: 'vpl_repetido', nivel: 'aviso', texto: `VPL repetido en el archivo: ${vplRep.join(', ')}. Solo se guarda una vez cada VPL.` });
@@ -97,12 +97,12 @@ export function revisarBase({ filas: fs, sinViaje = [], subtotales = [], total =
   const remRep = [...new Set(nums.filter((v, i, a) => a.indexOf(v) !== i))];
   if (remRep.length) avisos.push({ tipo: 'remesa_repetida', nivel: 'aviso', texto: `Número de remesa repetido en el archivo: ${remRep.join(', ')}.` });
   const ocupadas = fs.filter(x => x.remesa && usadas.has(x.remesa) && usadas.get(x.remesa) !== x.vpl);
-  if (ocupadas.length) avisos.push({ tipo: 'remesa_usada', nivel: 'aviso', texto: `Remesas que ya tiene otro VPL en la base: ${ocupadas.map(x => `${x.remesa} (VPL ${usadas.get(x.remesa)})`).join(', ')}.` });
+  if (ocupadas.length) avisos.push({ tipo: 'remesa_usada', nivel: 'aviso', texto: `Remesas que ya tiene otro VPL en la base: ${ocupadas.map(x => `${x.remesa} (VPL ${usadas.get(x.remesa)})`).join(', ')}. Esos viajes no se pasan: corrija el número en el Excel o déjelo vacío para asignarle uno nuevo.` });
   if (sinViaje.length) avisos.push({ tipo: 'sin_viaje', nivel: 'aviso', texto: `En el archivo ${sinViaje.length === 1 ? 'está la remesa' : 'están las remesas'} ${sinViaje.join(', ')} sin viaje (salto en el consecutivo). ¿Se anuló?` });
   // Saltos dentro del rango del archivo que no se explican con las filas sin viaje
   const ns = [...new Set(nums.map(Number))].sort((a, b) => a - b);
   const huecos = [];
-  for (let i = 1; i < ns.length; i++) for (let k = ns[i - 1] + 1; k < ns[i] && huecos.length < 20; k++) if (!sinViaje.includes(String(k))) huecos.push(k);
+  for (let i = 1; i < ns.length; i++) for (let k = ns[i - 1] + 1; k < ns[i] && huecos.length < 20; k++) if (!sinViaje.includes(String(k)) && !enBase.has(k)) huecos.push(k);
   if (huecos.length) avisos.push({ tipo: 'salto', nivel: 'aviso', texto: `Faltan en el consecutivo: ${huecos.join(', ')}.` });
   for (const s of subtotales) {
     if (s.dice !== null && s.dice !== undefined && Math.abs(s.dice - s.suma) > 1) {
@@ -113,7 +113,7 @@ export function revisarBase({ filas: fs, sinViaje = [], subtotales = [], total =
     avisos.push({ tipo: 'total', nivel: 'aviso', texto: `El TOTAL del Excel dice ${$(total.dice)}; el total real de los viajes es ${$(total.suma)}.` });
   }
   const sinNumero = fs.filter(x => !x.remesa).length;
-  if (sinNumero) avisos.push({ tipo: 'asignar', nivel: 'info', texto: `${sinNumero} viaje(s) sin número de remesa: se les asigna el consecutivo${siguiente ? ` desde la ${siguiente}` : ''}.` });
+  if (sinNumero) avisos.push({ tipo: 'asignar', nivel: 'info', texto: `${sinNumero} viaje(s) sin número de remesa: se les asigna el consecutivo${siguiente ? ` desde la ${siguiente}` : ''}, sin repetir los números que ya se usaron.` });
   return avisos;
 }
 
@@ -169,37 +169,74 @@ async function viajesQueCoinciden(empresaId, lista) {
 }
 
 async function empresaConFormato(empresaId) {
-  return Empresa.findById(empresaId).select('+remesaFormato.logo +logo nombre nit dv ciudad remesaFormato').lean();
+  // Solo «+»: trae todo el documento más los logos (pedir también «remesaFormato» choca en MongoDB)
+  return Empresa.findById(empresaId).select('+remesaFormato.logo +logo').lean();
+}
+
+// Remesa más alta ya usada en la empresa (también las cargadas antes de la fase 12)
+export async function maxUsado(empresaId) {
+  const x = await RemesaDulces.findOne({ empresa: empresaId, remesaNum: { $ne: null } }).sort({ remesaNum: -1 }).select('remesaNum').lean();
+  return x?.remesaNum || 0;
 }
 
 // ── Vista previa y guardado ────────────────────────────────────────────────
-// Antes de la fase 12 el VPL era único por empresa; ahora es único por empresa y cliente (se quita el índice viejo una vez)
+// Antes de la fase 12 el VPL era único por empresa; ahora es único por empresa y cliente (se quita el índice viejo una vez).
+// Las remesas de antes no tenían remesaNum: se llena desde «remesa» para que el consecutivo las tenga en cuenta.
 let indicesListos = null;
+export function completarNumeros() {
+  return RemesaDulces.collection.updateMany({ remesaNum: null, remesa: { $regex: /^\d{1,9}$/ } },
+    [{ $set: { remesaNum: { $convert: { input: '$remesa', to: 'long', onError: null, onNull: null } } } }]).catch(() => null);
+}
 export function prepararIndices() {
-  indicesListos ||= RemesaDulces.collection.dropIndex('empresa_1_vpl_1').catch(() => null).then(() => RemesaDulces.syncIndexes().catch(() => null));
+  indicesListos ||= RemesaDulces.collection.dropIndex('empresa_1_vpl_1').catch(() => null)
+    .then(() => RemesaDulces.syncIndexes().catch(() => null)).then(completarNumeros);
   return indicesListos;
 }
 
 export async function previa(empresaId, clienteId, buffer) {
   await prepararIndices();
   const base = await leerBase(buffer);
-  const existentes = await RemesaDulces.find({ empresa: empresaId, cliente: clienteId || null, vpl: { $in: base.filas.map(x => x.vpl) } }).lean();
-  const porVpl = new Map(existentes.map(x => [x.vpl, x]));
+  // Los de antes de la fase 12 no tienen cliente: se reconocen por el VPL y se le asignan al cliente al guardar
+  const existentes = await RemesaDulces.find({ empresa: empresaId, cliente: { $in: [clienteId || null, null] }, vpl: { $in: base.filas.map(x => x.vpl) } }).lean();
+  const porVpl = new Map();
+  for (const x of existentes) if (!porVpl.has(x.vpl) || x.cliente) porVpl.set(x.vpl, x);
   const nums = base.filas.map(x => x.remesa).filter(Boolean);
-  const usadasDocs = nums.length ? await RemesaDulces.find({ empresa: empresaId, remesa: { $in: nums } }).select('remesa vpl cliente').lean() : [];
+  const usadasDocs = nums.length ? await RemesaDulces.find({ empresa: empresaId, $or: [{ remesa: { $in: nums } }, { remesaNum: { $in: nums.map(Number) } }] }).select('remesa remesaNum vpl cliente').lean() : [];
+  // Un número es del mismo viaje si es el mismo VPL del cliente (o el registro viejo sin cliente de ese VPL)
+  const delMismo = (u, x) => u.vpl === x.vpl && (!u.cliente || String(u.cliente) === String(clienteId || ''));
   const usadas = new Map();
-  for (const u of usadasDocs) usadas.set(u.remesa, String(u.cliente || '') === String(clienteId || '') ? u.vpl : `${u.vpl} de otro cliente`);
+  for (const u of usadasDocs) {
+    const k = u.remesa || String(u.remesaNum);
+    usadas.set(k, !u.cliente || String(u.cliente) === String(clienteId || '') ? u.vpl : `${u.vpl} de otro cliente`);
+  }
+  const conflictoDe = (x, i) => {
+    if (!x.remesa) return '';
+    const otro = usadasDocs.find(u => (u.remesa === x.remesa || u.remesaNum === Number(x.remesa)) && !delMismo(u, x));
+    if (otro) return `La remesa ${x.remesa} ya la tiene el VPL ${otro.vpl}${otro.cliente && String(otro.cliente) !== String(clienteId || '') ? ' de otro cliente' : ''}`;
+    const antes = base.filas.findIndex(y => y.remesa === x.remesa);
+    if (antes < i && base.filas[antes].vpl !== x.vpl) return `La remesa ${x.remesa} está repetida en el archivo (VPL ${base.filas[antes].vpl})`;
+    return '';
+  };
+  const min = nums.length ? Math.min(...nums.map(Number)) : 0; const max = nums.length ? Math.max(...nums.map(Number)) : 0;
+  const enBase = new Set(nums.length ? (await RemesaDulces.distinct('remesaNum', { empresa: empresaId, remesaNum: { $gte: min, $lte: max } })).map(Number) : []);
   const empresa = await empresaConFormato(empresaId);
+  const siguiente = Math.max(empresa?.remesaFormato?.siguiente || 1, (await maxUsado(empresaId)) + 1);
   const conductor = await directorioConductores(empresaId, base.filas);
   const enBitacora = await viajesQueCoinciden(empresaId, base.filas);
-  const filasOut = base.filas.map(x => {
+  const filasOut = base.filas.map((x, i) => {
     const e = porVpl.get(x.vpl);
     const cambios = e ? CAMPOS.filter(k => (k === 'fecha' ? dia(e.fecha) !== dia(x.fecha) : String(e[k] ?? '') !== String(x[k] ?? ''))).filter(k => !(k === 'remesa' && !x.remesa)) : [];
     const c = conductor(x); const vs = enBitacora(x);
-    return { ...x, fecha: dia(x.fecha), estado: !e ? 'nuevo' : cambios.length ? 'cambio' : 'existe', cambios,
+    const conflicto = conflictoDe(x, i);
+    return { ...x, fecha: dia(x.fecha), estado: conflicto ? 'conflicto' : !e ? 'nuevo' : cambios.length ? 'cambio' : 'existe', cambios, conflicto,
+      remesaActual: e?.remesa || '', impreso: !!e?.impreso, legado: !!e && !e.cliente,
       cedula: e?.cedula || c.cedula, direccion: e?.direccion || c.direccion, bitacora: vs ? vs.map(v => ({ _id: v._id, numero: v.numero, destino: v.destino })) : [] };
   });
-  const avisos = revisarBase(base, { usadas, siguiente: empresa?.remesaFormato?.siguiente || null });
+  const avisos = revisarBase(base, { usadas, siguiente, enBase });
+  const legado = filasOut.filter(x => x.legado).length;
+  if (legado) avisos.push({ tipo: 'legado', nivel: 'info', texto: `${legado} viaje(s) ya estaban en la base de remesas anterior (sin cliente): al pasarlos quedan de este cliente y conservan su número.` });
+  const impresas = filasOut.filter(x => x.impreso && x.estado === 'cambio').length;
+  if (impresas) avisos.push({ tipo: 'impresas', nivel: 'aviso', texto: `${impresas} viaje(s) cambiaron en el Excel pero su remesa ya se imprimió: no se reemplazan. Si hace falta, corríjalos uno por uno en la base.` });
   const coinciden = filasOut.filter(x => x.bitacora.length);
   if (coinciden.length) {
     avisos.unshift({ tipo: 'bitacora', nivel: 'aviso', texto: `${coinciden.length} viaje(s) coinciden con la bitácora de la plataforma (misma placa y mismo día): ${coinciden.slice(0, 12).map(x => `${x.placa} ${ddmm(x.fecha)} (viaje N° ${x.bitacora.map(b => b.numero).join(', ')})`).join(' · ')}${coinciden.length > 12 ? '…' : ''}. Revise que no sea el mismo viaje registrado dos veces.` });
@@ -210,42 +247,78 @@ export async function previa(empresaId, clienteId, buffer) {
   if (sinCed.length) avisos.push({ tipo: 'sin_cedula', nivel: 'aviso', texto: `Sin cédula en el registro: ${sinCed.join(', ')}. Escríbala en la base de remesas y queda guardada para las próximas.` });
   if (!avisos.some(a => a.nivel === 'aviso')) avisos.push({ tipo: 'ok', nivel: 'ok', texto: 'Sin problemas en el archivo' });
   const cuenta = (e) => filasOut.filter(x => x.estado === e).length;
-  return { filas: filasOut, avisos, resumen: { viajes: filasOut.length, nuevos: cuenta('nuevo'), existen: cuenta('existe'), cambian: cuenta('cambio'), coinciden: coinciden.length,
-    total: filasOut.reduce((a, x) => a + x.costo, 0) }, siguiente: empresa?.remesaFormato?.siguiente || 1 };
+  return { filas: filasOut, avisos, resumen: { viajes: filasOut.length, nuevos: cuenta('nuevo'), existen: cuenta('existe'), cambian: cuenta('cambio'), conflictos: cuenta('conflicto'),
+    coinciden: coinciden.length, total: filasOut.reduce((a, x) => a + x.costo, 0) }, siguiente };
 }
 
-// Reserva n números del consecutivo de la empresa (atómico) y devuelve el primero
-async function reservar(empresaId, n) {
-  const e = await Empresa.findByIdAndUpdate(empresaId, { $inc: { 'remesaFormato.siguiente': n } }, { new: false }).select('remesaFormato.siguiente').lean();
-  return e?.remesaFormato?.siguiente || 1;
+// Toma el siguiente número libre del consecutivo (atómico): salta los que ya están en la base o en el archivo
+async function reservar(empresaId, ocupados) {
+  const max = await maxUsado(empresaId);
+  // El consecutivo nunca queda por debajo de una remesa ya usada (por ejemplo, las cargadas antes de la fase 12)
+  await Empresa.updateOne({ _id: empresaId, $or: [{ 'remesaFormato.siguiente': { $lte: max } }, { 'remesaFormato.siguiente': null }] }, { $set: { 'remesaFormato.siguiente': max + 1 } });
+  for (let intentos = 0; intentos < 100000; intentos++) {
+    const e = await Empresa.findByIdAndUpdate(empresaId, { $inc: { 'remesaFormato.siguiente': 1 } }, { new: false }).select('remesaFormato.siguiente').lean();
+    const n = e?.remesaFormato?.siguiente || 1;
+    if (ocupados.has(n)) continue;
+    if (await RemesaDulces.exists({ empresa: empresaId, $or: [{ remesaNum: n }, { remesa: String(n) }] })) continue;
+    return n;
+  }
+  throw new ErrorHttp(500, 'No se pudo asignar el número de remesa');
 }
 
+// seleccion = { excluir: boolean, vpls: Set } (ver leerSeleccion)
 export async function guardar(empresaId, clienteId, buffer, { modo = 'omitir', seleccion = null, archivo = '' } = {}) {
   const p = await previa(empresaId, clienteId, buffer);
   const vistos = new Set();
   let lista = p.filas.filter(x => { if (vistos.has(x.vpl)) return false; vistos.add(x.vpl); return true; });
-  if (Array.isArray(seleccion)) { const s = new Set(seleccion.map(String)); lista = lista.filter(x => s.has(x.vpl)); }
-  const aGuardar = lista.filter(x => x.estado === 'nuevo' || modo === 'reemplazar');
-  const omitidos = lista.length - aGuardar.length;
+  if (seleccion) lista = lista.filter(x => seleccion.vpls.has(x.vpl) !== seleccion.excluir);
+  // No se pasan: los que tienen un número de remesa de otro viaje, ni se reemplazan los que ya se imprimieron
+  const conflictos = lista.filter(x => x.estado === 'conflicto');
+  const impresasSinCambio = lista.filter(x => x.estado !== 'nuevo' && x.estado !== 'conflicto' && x.impreso && modo === 'reemplazar');
+  const aGuardar = lista.filter(x => x.estado !== 'conflicto' && (x.estado === 'nuevo' || (modo === 'reemplazar' && !x.impreso)));
+  const omitidos = lista.length - aGuardar.length - conflictos.length;
+  // Registro actual de cada VPL (del cliente o el de antes de la fase 12 sin cliente)
+  const actuales = new Map();
+  for (const x of await RemesaDulces.find({ empresa: empresaId, cliente: { $in: [clienteId || null, null] }, vpl: { $in: aGuardar.map(x => x.vpl) } }).select('vpl remesa cliente').lean()) {
+    if (!actuales.has(x.vpl) || x.cliente) actuales.set(x.vpl, x);
+  }
   // Consecutivo para los que llegan sin número (los que ya existen conservan el suyo)
-  const existentes = new Map((await RemesaDulces.find({ empresa: empresaId, cliente: clienteId || null, vpl: { $in: aGuardar.map(x => x.vpl) } }).select('vpl remesa').lean()).map(x => [x.vpl, x.remesa]));
-  const faltan = aGuardar.filter(x => !x.remesa && !existentes.get(x.vpl));
-  let n = faltan.length ? await reservar(empresaId, faltan.length) : 0;
-  for (const x of faltan) x.remesa = String(n++);
+  const ocupados = new Set(aGuardar.map(x => Number(x.remesa)).filter(Boolean));
+  for (const x of aGuardar) if (!x.remesa && !actuales.get(x.vpl)?.remesa) x.remesa = String(await reservar(empresaId, ocupados));
   let nuevos = 0; let reemplazados = 0;
   for (const x of aGuardar) {
-    const remesa = x.remesa || existentes.get(x.vpl) || '';
-    const d = { fecha: parseFecha(x.fecha), zona: x.zona, peso: x.peso, manifiesto: x.manifiesto, conductor: x.conductor, placa: x.placa, remesa, remesaNum: remesa ? Number(remesa) : null,
-      costo: x.costo, grupo: x.grupo, archivo: String(archivo || '').slice(0, 150), viaje: x.bitacora[0]?._id || null };
+    const actual = actuales.get(x.vpl);
+    const remesa = x.remesa || actual?.remesa || '';
+    const d = { cliente: clienteId || null, fecha: parseFecha(x.fecha), zona: x.zona, peso: x.peso, manifiesto: x.manifiesto, conductor: x.conductor, placa: x.placa, remesa,
+      remesaNum: remesa ? Number(remesa) : null, costo: x.costo, grupo: x.grupo, archivo: String(archivo || '').slice(0, 150), viaje: x.bitacora[0]?._id || null };
     if (x.cedula) { d.cedula = x.cedula; d.direccion = x.direccion; }
-    const r = await RemesaDulces.updateOne({ empresa: empresaId, cliente: clienteId || null, vpl: x.vpl }, { $set: d }, { upsert: true });
-    if (r.upsertedCount) nuevos += 1; else reemplazados += 1;
+    if (actual) { await RemesaDulces.updateOne({ _id: actual._id, empresa: empresaId }, { $set: d }); reemplazados += 1; }
+    else { await RemesaDulces.create({ empresa: empresaId, vpl: x.vpl, ...d }); nuevos += 1; }
   }
+  // Los de antes de la fase 12 que no se reemplazan (omitidos o ya impresos) igual quedan de este cliente
+  const adoptar = lista.filter(x => x.legado && x.estado !== 'conflicto' && !aGuardar.includes(x)).map(x => x.vpl);
+  if (adoptar.length) await RemesaDulces.updateMany({ empresa: empresaId, cliente: null, vpl: { $in: adoptar } }, { $set: { cliente: clienteId } });
   // El consecutivo sigue después de la remesa más alta guardada
   const max = Math.max(0, ...aGuardar.map(x => Number(x.remesa) || 0));
   if (max) await Empresa.updateOne({ _id: empresaId, 'remesaFormato.siguiente': { $lte: max } }, { $set: { 'remesaFormato.siguiente': max + 1 } });
   const e = await Empresa.findById(empresaId).select('remesaFormato.siguiente').lean();
-  return { leidos: p.filas.length, nuevos, reemplazados, omitidos, sinCedula: [...new Set(aGuardar.filter(x => !x.cedula).map(x => x.conductor))], siguiente: e?.remesaFormato?.siguiente || 1 };
+  return { leidos: p.filas.length, nuevos, reemplazados, omitidos, conflictos: conflictos.map(x => ({ vpl: x.vpl, motivo: x.conflicto })),
+    impresasSinCambio: impresasSinCambio.map(x => x.vpl), sinCedula: [...new Set(aGuardar.filter(x => !x.cedula).map(x => x.conductor))], siguiente: e?.remesaFormato?.siguiente || 1 };
+}
+
+// Selección de viajes que manda la pantalla en la cabecera X-Seleccion, compacta para no pasar el límite de las cabeceras:
+// «i:12400-12417,12430» (pasar solo esos) o «e:12431» (pasar todos menos esos). Un rango a-b son los VPL del archivo entre a y b.
+export function leerSeleccion(texto, vplsArchivo) {
+  const m = /^([ie]):([\d,-]*)$/.exec(String(texto || '').trim());
+  if (!m) throw new ErrorHttp(400, 'Selección de viajes inválida');
+  const vpls = new Set();
+  for (const parte of m[2].split(',').filter(Boolean)) {
+    const [a, b] = parte.split('-');
+    if (!/^\d+$/.test(a) || (b !== undefined && !/^\d+$/.test(b))) throw new ErrorHttp(400, 'Selección de viajes inválida');
+    if (b === undefined) { vpls.add(a); continue; }
+    for (const v of vplsArchivo) if (Number(v) >= Number(a) && Number(v) <= Number(b)) vpls.add(v);
+  }
+  return { excluir: m[1] === 'e', vpls };
 }
 
 // ── Formato (encabezado de la empresa + datos fijos del cliente) ──────────
@@ -261,9 +334,12 @@ export function formatoPorDefecto(empresa, cliente) {
   };
 }
 export async function formato(empresaId, clienteId) {
+  await prepararIndices();
   const empresa = await empresaConFormato(empresaId);
-  const cliente = clienteId ? await Cliente.findOne({ _id: clienteId, empresa: empresaId }).select('+remesaFormato.logo nombre razonSocial remesaFormato').lean() : null;
-  return formatoPorDefecto(empresa, cliente);
+  const cliente = clienteId ? await Cliente.findOne({ _id: clienteId, empresa: empresaId }).select('+remesaFormato.logo').lean() : null;
+  const f = formatoPorDefecto(empresa, cliente);
+  f.siguiente = Math.max(f.siguiente, (await maxUsado(empresaId)) + 1);
+  return f;
 }
 
 // ── PDF con el formato de la remesa ────────────────────────────────────────
@@ -278,9 +354,16 @@ export const fleteTexto = (n) => Number(n || 0).toLocaleString('es-CO', { minimu
 const AZUL = '#BDE3F7'; const CELESTE = '#EEF7FD'; const ROJO = '#C00000'; const TINTA = '#0B1A3A';
 
 function imagenEn(doc, dataUrl, x, y, w, h) {
-  const img = imagenDeDataUrl(dataUrl);
+  if (!dataUrl) return;
+  doc._logosRemesa ||= new Map();
+  let img = doc._logosRemesa.get(dataUrl);
+  if (img === undefined) {
+    const buf = imagenDeDataUrl(dataUrl);
+    try { img = buf ? doc.openImage(buf) : null; } catch { img = null; }   // imagen dañada: se omite
+    doc._logosRemesa.set(dataUrl, img);
+  }
   if (!img) return;
-  try { doc.image(img, x, y, { fit: [w, h], align: 'center', valign: 'center' }); } catch { /* imagen dañada: se omite */ }
+  try { doc.image(img, x, y, { fit: [w, h], align: 'center', valign: 'center' }); } catch { /* se omite */ }
 }
 
 // Dibuja una remesa en (ox, oy) con ancho W (556 pt en hoja carta con márgenes de 28 pt)

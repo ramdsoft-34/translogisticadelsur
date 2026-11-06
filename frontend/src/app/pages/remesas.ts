@@ -15,7 +15,7 @@ import { filtrar } from '../shared/filtro';
 
 type Pestana = 'cargar' | 'base' | 'imprimir' | 'formato';
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-const mesActual = () => new Date().toISOString().slice(0, 7);
+const mesActual = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date()).slice(0, 7);
 const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
   if (!/^image\/(png|jpe?g)$/.test(archivo.type)) { mal(new Error('El logo debe ser PNG o JPG')); return; }
   if (archivo.size > 650_000) { mal(new Error('El logo es muy pesado (máximo 650 KB)')); return; }
@@ -34,10 +34,10 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
     <app-visor-pdf />
 
     <nav class="pestanas" role="tablist" aria-label="Remesas">
-      @if (puedeGestionar) { <button type="button" role="tab" [class.activa]="pestana() === 'cargar'" (click)="pestana.set('cargar')">1. Cargar base</button> }
-      <button type="button" role="tab" [class.activa]="pestana() === 'base'" (click)="pestana.set('base')">2. Base de remesas</button>
-      @if (puedeGestionar) { <button type="button" role="tab" [class.activa]="pestana() === 'imprimir'" (click)="pestana.set('imprimir')">3. Imprimir</button>
-        <button type="button" role="tab" [class.activa]="pestana() === 'formato'" (click)="abrirFormato()">⚙ Configuración de la remesa</button> }
+      @if (puedeGestionar) { <button type="button" role="tab" [class.activa]="pestana() === 'cargar'" [attr.aria-selected]="pestana() === 'cargar'" (click)="pestana.set('cargar')">1. Cargar base</button> }
+      <button type="button" role="tab" [class.activa]="pestana() === 'base'" [attr.aria-selected]="pestana() === 'base'" (click)="pestana.set('base')">2. Base de remesas</button>
+      @if (puedeGestionar) { <button type="button" role="tab" [class.activa]="pestana() === 'imprimir'" [attr.aria-selected]="pestana() === 'imprimir'" (click)="pestana.set('imprimir')">3. Imprimir</button>
+        <button type="button" role="tab" [class.activa]="pestana() === 'formato'" [attr.aria-selected]="pestana() === 'formato'" (click)="abrirFormato()"><app-icono nombre="ajustes" [tam]="15" />Configuración de la remesa</button> }
     </nav>
 
     <!-- ═════ 1. Cargar base ═════ -->
@@ -45,10 +45,10 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
       <section class="tarjeta">
         <div class="fila">
           <div class="campo"><label for="rm-cli">Empresa (cliente)</label>
-            <select id="rm-cli" [(ngModel)]="cargaCliente" (change)="previa.set(null)"><option value="">Seleccione…</option>
+            <select id="rm-cli" [(ngModel)]="cargaCliente" (change)="previa.set(null); recordarCliente()"><option value="">Seleccione…</option>
               @for (c of clientes(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }</select></div>
           <div class="campo crece"><span class="etiqueta">Archivo Excel con los viajes</span>
-            <label class="boton" [class.deshabilitado]="!cargaCliente"><app-icono nombre="descargar" />{{ archivo()?.name || 'Elegir Excel…' }}
+            <label class="boton" [class.deshabilitado]="!cargaCliente"><app-icono nombre="subir" />{{ archivo()?.name || 'Elegir Excel…' }}
               <input type="file" accept=".xlsx,.xlsm" hidden [disabled]="!cargaCliente" (change)="elegirArchivo($event)" /></label></div>
         </div>
         <p class="sutil nota">Del Excel salen el VPL, la fecha, la ruta o zona, el peso, el manifiesto, el conductor, la placa y el flete. La <b>cédula y la dirección del conductor</b>
@@ -62,6 +62,7 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
             <span class="chip ok sin-punto">{{ p.resumen.nuevos }} nuevos</span>
             @if (p.resumen.existen) { <span class="chip sin-punto">{{ p.resumen.existen }} ya están en la base</span> }
             @if (p.resumen.cambian) { <span class="chip alerta sin-punto">{{ p.resumen.cambian }} cambiaron</span> }
+            @if (p.resumen.conflictos) { <span class="chip error sin-punto">{{ p.resumen.conflictos }} con número de otro viaje</span> }
             @if (p.resumen.coinciden) { <span class="chip alerta sin-punto">{{ p.resumen.coinciden }} coinciden con la bitácora</span> }
             <span class="crece"></span><span class="sutil">Total del archivo: <b>{{ p.resumen.total | pesos }}</b></span>
           </div>
@@ -70,21 +71,29 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
           }
           <div class="tabla-caja" style="margin-top:10px"><table class="tabla-movil">
             <thead><tr><th><input type="checkbox" aria-label="Marcar todos" [checked]="todosCarga()" (change)="marcarCarga(todosCarga() ? 'ninguno' : 'todos')" /></th>
-              <th>VPL</th><th>Fecha</th><th>Ruta / zona</th><th class="num">Peso</th><th>Manifiesto</th><th>Conductor</th><th>C.C.</th><th>Placa</th><th>Remesa N°</th><th class="num">Flete</th><th>Bitácora</th><th>Estado</th></tr></thead>
+              <th>VPL</th><th>Ruta / zona</th><th>Conductor</th><th>Remesa N°</th><th class="num">Flete</th><th>Estado</th></tr></thead>
             <tbody>
               @for (x of p.filas; track x.vpl + $index) {
-                @if (x.grupo && ($index === 0 || p.filas[$index - 1].grupo !== x.grupo)) { <tr class="grupo-rm"><td colspan="13">{{ x.tabla || x.grupo }}</td></tr> }
-                <tr>
-                  <td data-etiqueta="Pasar"><input type="checkbox" [checked]="selCarga().has(x.vpl)" (change)="alternarCarga(x.vpl)" [attr.aria-label]="'VPL ' + x.vpl" /></td>
-                  <td data-etiqueta="VPL"><strong>{{ x.vpl }}</strong></td><td data-etiqueta="Fecha">{{ x.fecha | dia }}</td><td data-etiqueta="Ruta">{{ x.zona }}</td>
-                  <td data-etiqueta="Peso" class="num">{{ x.peso | number: '1.0-1' : 'es-CO' }}</td><td data-etiqueta="Manifiesto">{{ x.manifiesto }}</td>
-                  <td data-etiqueta="Conductor">{{ x.conductor }}</td><td data-etiqueta="C.C.">{{ x.cedula || '—' }}</td><td data-etiqueta="Placa">{{ x.placa }}</td>
-                  <td data-etiqueta="Remesa" class="rem">{{ x.remesa || 'nueva' }}</td><td data-etiqueta="Flete" class="num">{{ x.costo | pesos }}</td>
-                  <td data-etiqueta="Bitácora">@if (x.bitacora.length) { <span class="chip alerta sin-punto" [title]="'Viaje N° ' + numeros(x.bitacora)">Ya está · N° {{ numeros(x.bitacora) }}</span> } @else { <span class="sutil">No está</span> }</td>
-                  <td data-etiqueta="Estado">
-                    @if (x.estado === 'nuevo') { <span class="chip ok sin-punto">Nuevo</span> }
-                    @else if (x.estado === 'cambio') { <span class="chip alerta sin-punto" [title]="'Cambió: ' + x.cambios.join(', ')">Cambió</span> }
-                    @else { <span class="chip sin-punto">Ya existe</span> }</td>
+                @if (x.tabla && ($index === 0 || p.filas[$index - 1].tabla !== x.tabla)) { <tr class="grupo-rm"><td colspan="7">{{ x.tabla }}</td></tr> }
+                <tr [class.apagada]="x.estado === 'conflicto'">
+                  <td data-etiqueta="Pasar"><input type="checkbox" [checked]="selCarga().has(x.vpl)" [disabled]="x.estado === 'conflicto'" (change)="alternarCarga(x.vpl)" [attr.aria-label]="'Pasar el VPL ' + x.vpl" /></td>
+                  <td data-etiqueta="VPL"><div class="celda-doble"><strong>{{ x.vpl }}</strong><small>{{ x.fecha | dia }}</small></div></td>
+                  <td data-etiqueta="Ruta / zona"><div class="celda-doble"><span>{{ x.zona }}</span><small>{{ x.peso | number: '1.0-1' : 'es-CO' }} kg@if (x.manifiesto) { · {{ x.manifiesto }} }</small></div></td>
+                  <td data-etiqueta="Conductor"><div class="celda-doble"><span>{{ x.conductor }}</span>
+                    <small>@if (x.cedula) { C.C. {{ x.cedula }} } @else { <span class="falta">sin cédula</span> } · <span class="placa">{{ x.placa }}</span></small></div></td>
+                  <td data-etiqueta="Remesa N°" class="rem">{{ x.remesa || x.remesaActual || 'se asigna' }}</td>
+                  <td data-etiqueta="Flete" class="num">{{ x.costo | pesos }}</td>
+                  <td data-etiqueta="Estado"><div class="celda-doble">
+                    <span>@if (x.estado === 'nuevo') { <span class="chip ok sin-punto">Nuevo</span> }
+                      @else if (x.estado === 'conflicto') { <span class="chip error sin-punto">No se pasa</span> }
+                      @else if (x.estado === 'cambio') { <span class="chip alerta sin-punto">Cambió</span> }
+                      @else { <span class="chip sin-punto">Ya existe</span> }</span>
+                    @if (x.estado === 'cambio') { <small>{{ x.cambios.join(', ') }}</small> }
+                    @if (x.conflicto) { <small class="texto-error">{{ x.conflicto }}</small> }
+                    @if (x.impreso && x.estado !== 'nuevo' && x.estado !== 'conflicto') { <small>Ya impresa: no se reemplaza</small> }
+                    @if (x.legado) { <small>De la base anterior</small> }
+                    @if (x.bitacora.length) { <small class="aviso-texto">En la bitácora: viaje N° {{ numeros(x.bitacora) }}</small> }
+                  </div></td>
                 </tr>
               }
             </tbody></table></div>
@@ -114,42 +123,44 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
       </section>
       <section class="tarjeta">
         <div class="fila centro acciones-sel">
-          <button type="button" (click)="seleccionar('todas')">☑ Seleccionar todo</button>
+          <button type="button" (click)="seleccionar('todas')">Seleccionar todo</button>
           <button type="button" (click)="seleccionar('pendientes')">Solo pendientes</button>
           <button type="button" (click)="seleccionar('ninguna')">Quitar selección</button>
           <span class="sutil">{{ sel().size }} marcada(s) · {{ visibles().length }} en la lista</span>
           <span class="crece"></span>
           @if (puedeGestionar) {
             <button type="button" (click)="verPdf(marcadas())" [disabled]="!sel().size">PDF de las marcadas</button>
-            <button type="button" class="primario" (click)="imprimir(marcadas())" [disabled]="!sel().size || ocupado()">🖨 Imprimir marcadas</button>
+            <button type="button" class="primario" (click)="imprimir(marcadas())" [disabled]="!sel().size || ocupado()"><app-icono nombre="imprimir" [tam]="16" />Imprimir marcadas</button>
           }
         </div>
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th><input type="checkbox" aria-label="Seleccionar todo" [checked]="todasSel()" (change)="seleccionar(todasSel() ? 'ninguna' : 'todas')" /></th>
-            <th>Remesa N°</th><th>VPL</th><th>Fecha</th><th>Ruta / zona</th><th class="num">Peso</th><th>Conductor</th><th>C.C.</th><th>Dirección</th><th>Placa</th><th class="num">Flete</th><th>Bitácora</th><th>Estado</th><th></th></tr></thead>
+            <th>Remesa N°</th><th>Ruta / zona</th><th>Conductor</th><th class="num">Flete</th><th>Estado</th><th class="celda-acciones"><span class="visualmente-oculto">Acciones</span></th></tr></thead>
           <tbody>
             @for (x of visibles(); track x._id) {
               <tr [class.marcada]="sel().has(x._id)">
                 <td data-etiqueta="Elegir"><input type="checkbox" [checked]="sel().has(x._id)" (change)="alternar(x._id)" [attr.aria-label]="'Remesa ' + x.remesa" /></td>
-                <td data-etiqueta="Remesa" class="rem">{{ x.remesa || '—' }}</td><td data-etiqueta="VPL">{{ x.vpl }}</td><td data-etiqueta="Fecha">{{ x.fecha | dia }}</td>
-                <td data-etiqueta="Ruta">{{ x.zona }}</td><td data-etiqueta="Peso" class="num">{{ x.peso | number: '1.0-1' : 'es-CO' }}</td><td data-etiqueta="Conductor">{{ x.conductor }}</td>
-                <td data-etiqueta="C.C.">@if (x.cedula) { {{ x.cedula }} } @else { <span class="chip alerta sin-punto">falta</span> }</td>
-                <td data-etiqueta="Dirección">{{ x.direccion }}</td><td data-etiqueta="Placa">{{ x.placa }}</td><td data-etiqueta="Flete" class="num">{{ x.costo | pesos }}</td>
-                <td data-etiqueta="Bitácora">@if (x.viaje) { <span class="chip alerta sin-punto">N° {{ x.viaje.numero }}</span> } @else { <span class="sutil">—</span> }</td>
-                <td data-etiqueta="Estado">@if (x.impreso) { <span class="chip ok sin-punto" [title]="'Por ' + (x.impresoPor || '') + ' · ' + x.impresiones + ' vez/veces'">Impresa {{ x.impreso | dia }}</span> }
+                <td data-etiqueta="Remesa N°"><div class="celda-doble"><strong class="rem">{{ x.remesa || '—' }}</strong><small>VPL {{ x.vpl }} · {{ x.fecha | dia }}</small></div></td>
+                <td data-etiqueta="Ruta / zona"><div class="celda-doble"><span>{{ x.zona }}</span>
+                  <small>{{ x.peso | number: '1.0-1' : 'es-CO' }} kg@if (x.viaje) { · <span class="aviso-texto">en la bitácora N° {{ x.viaje.numero }}</span> }</small></div></td>
+                <td data-etiqueta="Conductor"><div class="celda-doble"><span>{{ x.conductor }}</span>
+                  <small>@if (x.cedula) { C.C. {{ x.cedula }} } @else { <span class="chip alerta sin-punto">falta C.C.</span> } · <span class="placa">{{ x.placa }}</span></small></div></td>
+                <td data-etiqueta="Flete" class="num">{{ x.costo | pesos }}</td>
+                <td data-etiqueta="Estado">@if (x.impreso) { <div class="celda-doble"><span><span class="chip ok sin-punto">Impresa</span></span>
+                    <small>{{ x.impreso | dia }}@if (x.impresiones > 1) { · {{ x.impresiones }} veces }@if (x.impresoPor) { · {{ x.impresoPor }} }</small></div> }
                   @else { <span class="chip info sin-punto">Pendiente</span> }</td>
-                <td class="acciones-fila">
-                  @if (puedeGestionar) {
-                    <button type="button" class="pequeno" (click)="editar(x)">Editar</button>
-                    <button type="button" class="pequeno" (click)="verPdf([x])">Ver</button>
-                    <button type="button" class="pequeno oscuro" (click)="descargarUna(x)">PDF</button>
-                    <button type="button" class="pequeno primario" [title]="'Imprimir la remesa ' + x.remesa" (click)="imprimirUna(x)">🖨</button>
-                  }
+                <td class="celda-acciones">
+                  @if (puedeGestionar) { <div class="acciones rejilla">
+                    <button type="button" class="pequeno" (click)="editar(x)" [attr.aria-label]="'Editar la remesa ' + x.remesa" title="Editar"><app-icono nombre="editar" [tam]="15" /></button>
+                    <button type="button" class="pequeno" (click)="verPdf([x])" [attr.aria-label]="'Ver la remesa ' + x.remesa" title="Ver"><app-icono nombre="ojo" [tam]="15" /></button>
+                    <button type="button" class="pequeno" (click)="descargarUna(x)" [attr.aria-label]="'Descargar el PDF de la remesa ' + x.remesa" title="Descargar PDF"><app-icono nombre="descargar" [tam]="15" /></button>
+                    <button type="button" class="pequeno primario" (click)="imprimirUna(x)" [attr.aria-label]="'Imprimir la remesa ' + x.remesa" [title]="'Imprimir la remesa ' + x.remesa"><app-icono nombre="imprimir" [tam]="15" /></button>
+                  </div> }
                 </td>
               </tr>
-            } @empty { <tr><td colspan="14" class="vacio">No hay remesas con estos filtros. Cárguelas en «Cargar base».</td></tr> }
+            } @empty { <tr><td colspan="7" class="vacio">No hay remesas con estos filtros. Cárguelas en «Cargar base».</td></tr> }
           </tbody></table></div>
-        <p class="sutil nota">Hoja: <b>{{ hojaTexto() }}</b> (se cambia en «Imprimir»). Con 2 por hoja, el 🖨 de una fila imprime esa remesa arriba y la siguiente pendiente abajo.</p>
+        <p class="sutil nota">Hoja: <b>{{ hojaTexto() }}</b> (se cambia en «Imprimir»). Con 2 por hoja, el botón de imprimir de una fila imprime esa remesa arriba y la siguiente pendiente abajo.</p>
       </section>
     }
 
@@ -169,7 +180,7 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
             <button type="button" [class.activa]="porHoja() === 1" (click)="porHoja.set(1)"><span class="mini"><i></i><s></s></span>1 remesa por hoja<small>en la mitad de arriba</small></button>
           </div>
           <label class="casilla" style="margin-top:10px"><input type="checkbox" [ngModel]="linea()" (ngModelChange)="linea.set($event)" />Imprimir la línea divisoria (cortar aquí)</label>
-          <button type="button" class="primario grande" (click)="imprimir(aImprimir())" [disabled]="!aImprimir().length || ocupado()">🖨 Imprimir {{ aImprimir().length }} remesa(s) · {{ hojas(aImprimir().length) }} hoja(s)</button>
+          <button type="button" class="primario grande" (click)="imprimir(aImprimir())" [disabled]="!aImprimir().length || ocupado()"><app-icono nombre="imprimir" [tam]="16" />Imprimir {{ aImprimir().length }} remesa(s) · {{ hojas(aImprimir().length) }} hoja(s)</button>
           <div class="fila" style="margin-top:8px">
             <button type="button" (click)="verPdf(aImprimir())" [disabled]="!aImprimir().length">Ver PDF</button>
             <button type="button" class="oscuro" (click)="zip(aImprimir())" [disabled]="!aImprimir().length || ocupado()">Un PDF por remesa (.zip)</button>
@@ -282,7 +293,11 @@ const leerImagen = (archivo: File) => new Promise<string>((ok, mal) => {
     .aviso-rm.ok { background: #e8f6ee; } .aviso-rm.info { background: #eef4ff; }
     .aviso-rm .ic { width: 20px; height: 20px; flex: none; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 12px; background: #c77700; }
     .aviso-rm.ok .ic { background: #1e8e4f; } .aviso-rm.info .ic { background: #2457c5; }
-    .rem { color: #c00000; font-weight: 700; white-space: nowrap; }
+    .rem { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    tr.apagada td { opacity: .7; } .falta { color: var(--ambar); font-weight: 600; }
+    .texto-error { color: var(--rojo); } .aviso-texto { color: var(--ambar); font-weight: 600; }
+    @media (min-width: 701px) { .tabla-caja th, .tabla-caja td { padding-left: 10px; padding-right: 10px; } }
+    .acciones.rejilla { display: grid; grid-template-columns: repeat(2, auto); gap: 4px; justify-content: end; }
     tr.grupo-rm td { background: #0d1117; color: #fff; font-weight: 700; font-size: 12px; }
     tr.marcada td { background: var(--primario-suave, #fff8e1); }
     .acciones-sel { margin-bottom: 8px; } .acciones-fila { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: nowrap; }
@@ -358,8 +373,8 @@ export class Remesas {
   constructor() {
     this.api.get<any[]>('/maestros/clientes').then(c => {
       const activos = c.filter(x => x.activo !== false); this.clientes.set(activos);
-      const dulces = activos.find(x => /dulces/i.test(x.nombre));
-      this.cargaCliente = dulces?._id || (activos.length === 1 ? activos[0]._id : '');
+      let ultimo = ''; try { ultimo = localStorage.getItem('remesas.cliente') || ''; } catch { /* sin almacenamiento */ }
+      this.cargaCliente = activos.some(x => x._id === ultimo) ? ultimo : (activos.length === 1 ? activos[0]._id : '');
       this.fmtCliente = this.cargaCliente || activos[0]?._id || '';
     }).catch(e => this.avisos.error(e));
     this.api.get<any>('/gestion/remesas/formato').then(k => { this.porHoja.set(k.porHoja === 1 ? 1 : 2); this.linea.set(k.linea !== false); }).catch(() => {});
@@ -379,21 +394,24 @@ export class Remesas {
     try {
       const p = await this.api.subir<any>('/gestion/remesas/previa', a, { cliente: this.cargaCliente });
       this.previa.set(p);
-      this.selCarga.set(new Set(p.filas.filter((x: any) => x.estado !== 'existe').map((x: any) => x.vpl)));
+      this.selCarga.set(new Set(p.filas.filter((x: any) => x.estado === 'nuevo' || (x.estado === 'cambio' && !x.impreso)).map((x: any) => x.vpl)));
     } catch (e) { this.avisos.error(e); } finally { this.ocupado.set(false); }
   }
+  recordarCliente() { try { localStorage.setItem('remesas.cliente', this.cargaCliente); } catch { /* sin almacenamiento */ } }
   alternarCarga(v: string) { const s = new Set(this.selCarga()); if (s.has(v)) s.delete(v); else s.add(v); this.selCarga.set(s); }
   marcarCarga(que: 'todos' | 'nuevos' | 'ninguno') {
     const fs = this.previa()?.filas || [];
-    this.selCarga.set(new Set(que === 'ninguno' ? [] : fs.filter((x: any) => que === 'todos' || x.estado === 'nuevo').map((x: any) => x.vpl)));
+    this.selCarga.set(new Set(que === 'ninguno' ? [] : fs.filter((x: any) => x.estado !== 'conflicto' && (que === 'todos' || x.estado === 'nuevo')).map((x: any) => x.vpl)));
   }
   async pasar() {
     const a = this.archivo(); if (!a) return;
     this.ocupado.set(true);
     try {
       const r = await this.api.subirConCabeceras<any>('/gestion/remesas/importar', a, { cliente: this.cargaCliente, modo: this.modo },
-        { 'X-Seleccion': encodeURIComponent(JSON.stringify([...this.selCarga()])) });
+        { 'X-Seleccion': seleccionCompacta(this.previa().filas.map((x: any) => x.vpl), this.selCarga()) });
       this.avisos.ok(`${r.nuevos} nueva(s) · ${r.reemplazados} reemplazada(s) · ${r.omitidos} omitida(s) · próxima remesa: ${r.siguiente}`
+        + (r.conflictos?.length ? ` · no se pasaron ${r.conflictos.length} con número de otro viaje (VPL ${r.conflictos.map((c: any) => c.vpl).join(', ')})` : '')
+        + (r.impresasSinCambio?.length ? ` · ${r.impresasSinCambio.length} ya impresa(s) no se reemplazaron` : '')
         + (r.sinCedula.length ? ` · sin cédula: ${r.sinCedula.join(', ')}` : ''));
       this.previa.set(null); this.archivo.set(null);
       this.f.cliente = this.cargaCliente; this.f.estado = 'pendientes'; this.f.mes = '';
@@ -434,8 +452,9 @@ export class Remesas {
     if (que === 'marcadas') return l.filter(x => this.sel().has(x._id));
     if (que === 'pendientes') return l.filter(x => !x.impreso);
     if (que === 'una') return l.filter(x => x.remesa && x.remesa === String(this.imp.una).trim());
-    const d = Number(this.imp.desde) || 0; const h = Number(this.imp.hasta) || Infinity;
-    return l.filter(x => Number(x.remesa) >= d && Number(x.remesa) <= h);
+    const d = Number(this.imp.desde); const h = Number(this.imp.hasta) || d;
+    if (!d) return [];
+    return l.filter(x => x.remesa && Number(x.remesa) >= d && Number(x.remesa) <= h);
   }
   private cuerpo(l: any[], marcar = true) { return { ids: l.map(x => x._id), porHoja: this.porHoja(), linea: this.linea(), marcar }; }
   async verPdf(l: any[]) {
@@ -506,6 +525,21 @@ export class Remesas {
       this.avisos.ok('Datos de la remesa del cliente guardados');
     } catch (e) { this.avisos.error(e); } finally { this.ocupado.set(false); }
   }
+}
+
+// VPL elegidos como rangos de los VPL del archivo («i:» los que pasan o «e:» los que no, lo que sea más corto)
+export function seleccionCompacta(todos: string[], elegidos: Set<string>) {
+  const orden = [...new Set(todos)].sort((a, b) => Number(a) - Number(b));
+  const rangos = (dentro: (v: string) => boolean) => {
+    const out: string[] = []; let ini = -1;
+    orden.forEach((v, i) => {
+      if (dentro(v)) { if (ini < 0) ini = i; }
+      if ((!dentro(v) || i === orden.length - 1) && ini >= 0) { const fin = dentro(v) ? i : i - 1; out.push(fin > ini ? `${orden[ini]}-${orden[fin]}` : orden[ini]); ini = -1; }
+    });
+    return out.join(',');
+  };
+  const incluir = `i:${rangos(v => elegidos.has(v))}`; const excluir = `e:${rangos(v => !elegidos.has(v))}`;
+  return incluir.length <= excluir.length ? incluir : excluir;
 }
 
 function bajar(b: Blob, nombre: string) {

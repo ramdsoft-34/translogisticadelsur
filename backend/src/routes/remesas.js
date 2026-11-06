@@ -27,6 +27,7 @@ async function clienteValido(req, cliente) {
 
 // Lista: por cliente, mes (AAAA-MM) y estado (pendientes | impresas)
 r.get('/remesas', ver, async (req, res) => {
+  await R.prepararIndices();   // las remesas de antes de la fase 12 quedan con su número para el consecutivo
   const f = { empresa: req.empresaId };
   if (req.query.cliente) f.cliente = clienteDe(req.query.cliente);
   if (/^\d{4}-\d{2}$/.test(String(req.query.mes || ''))) {
@@ -49,8 +50,9 @@ r.put('/remesas/formato/empresa', permitir(P.CONFIG_GESTIONAR), async (req, res)
   const set = Object.fromEntries(Object.entries(d).filter(([, v]) => v !== undefined).map(([k, v]) => [`remesaFormato.${k}`, v]));
   if (d.siguiente !== undefined) {
     // No se puede volver a un número que ya se usó
-    const max = await RemesaDulces.findOne({ empresa: req.empresaId, remesaNum: { $ne: null } }).sort({ remesaNum: -1 }).select('remesaNum').lean();
-    if (max && d.siguiente <= max.remesaNum) throw new ErrorHttp(400, `La remesa ${max.remesaNum} ya se usó: el próximo número debe ser mayor`);
+    await R.prepararIndices();
+    const max = await R.maxUsado(req.empresaId);
+    if (max && d.siguiente <= max) throw new ErrorHttp(400, `La remesa ${max} ya se usó: el próximo número debe ser mayor`);
   }
   await Empresa.updateOne({ _id: req.empresaId }, { $set: set });
   await auditar(req, 'remesas_formato_empresa', { detalle: { ...d, logo: d.logo ? '(logo)' : undefined } });
@@ -77,9 +79,10 @@ r.post('/remesas/importar', gestionar, crudo, async (req, res) => {
   const cliente = await clienteValido(req, clienteDe(req.query.cliente));
   if (!cliente) throw new ErrorHttp(400, 'Elija la empresa (cliente) de la base');
   const modo = req.query.modo === 'reemplazar' ? 'reemplazar' : 'omitir';
-  let seleccion = null;
+  // Selección compacta (rangos de VPL): ver R.leerSeleccion
   const h = req.get('x-seleccion');
-  if (h) { try { seleccion = z.array(z.string().max(20)).max(5000).parse(JSON.parse(decodeURIComponent(h))); } catch { throw new ErrorHttp(400, 'Selección de viajes inválida'); } }
+  if (h && h.length > 6000) throw new ErrorHttp(400, 'La selección de viajes es muy larga: use «Marcar todos» o «Solo nuevos» y quite los que no van');
+  const seleccion = h ? R.leerSeleccion(h, (await R.leerBase(req.body)).filas.map(x => x.vpl)) : null;
   const x = await R.guardar(req.empresaId, cliente, req.body, { modo, seleccion, archivo: nombreArchivo(req) });
   await auditar(req, 'remesas_importar', { entidad: 'Cliente', entidadId: cliente, detalle: { ...x, archivo: nombreArchivo(req), modo } });
   res.json(x);
@@ -92,7 +95,8 @@ r.put('/remesas/:id', gestionar, async (req, res) => {
     placa: texto(8), remesa: z.string().trim().max(12).regex(/^\d*$/, 'El número de remesa solo lleva números').optional(), costo: z.coerce.number().min(0).max(1e10).optional() }).parse(req.body || {});
   const x = await RemesaDulces.findOne({ _id: id.parse(req.params.id), empresa: req.empresaId });
   if (!x) throw new ErrorHttp(404, 'Remesa no encontrada');
-  if (d.remesa && d.remesa !== x.remesa && await RemesaDulces.exists({ empresa: req.empresaId, remesa: d.remesa, _id: { $ne: x._id } })) throw new ErrorHttp(409, `La remesa ${d.remesa} ya la tiene otro viaje`);
+  if (d.remesa !== undefined && d.remesa !== (x.remesa || '') && x.impreso) throw new ErrorHttp(409, `La remesa ${x.remesa} ya se imprimió: su número no se cambia`);
+  if (d.remesa && d.remesa !== x.remesa && await RemesaDulces.exists({ empresa: req.empresaId, _id: { $ne: x._id }, $or: [{ remesa: d.remesa }, { remesaNum: Number(d.remesa) }] })) throw new ErrorHttp(409, `La remesa ${d.remesa} ya la tiene otro viaje`);
   for (const [k, v] of Object.entries(d)) if (v !== undefined) x[k] = k === 'fecha' ? (R.fechaValida(v) || x.fecha) : k === 'cedula' ? v.replace(/\D/g, '') : k === 'placa' ? v.replace(/[\s-]/g, '').toUpperCase() : v;
   if (d.remesa !== undefined) x.remesaNum = d.remesa ? Number(d.remesa) : null;
   await x.save();
@@ -134,13 +138,15 @@ r.post('/remesas/pdf', gestionar, async (req, res) => {
     : await R.remesasPdfVarios(lista.map(x => ({ x, f: formatos.get(String(x.cliente || '')) })), opciones);
   if (d.marcar) await marcarImpresas(req, lista);
   await auditar(req, 'remesas_pdf', { detalle: { remesas: lista.map(x => x.remesa), ...opciones, marcar: d.marcar } });
-  const nombre = lista.length === 1 ? `Remesa_${lista[0].remesa}_VPL_${lista[0].vpl}.pdf` : 'Remesas.pdf';
+  const nombre = (lista.length === 1 ? `Remesa_${lista[0].remesa}_VPL_${lista[0].vpl}.pdf` : 'Remesas.pdf').replace(/[^\w.-]/g, '_');
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${nombre}"`);
   res.send(buf);
 });
 r.post('/remesas/zip', gestionar, async (req, res) => {
   const { d, lista, formatos } = await paraSalida(req);
+  // Cada PDF del .zip lleva sus logos: más de 100 lo vuelve muy pesado (para muchas, mejor un solo PDF)
+  if (lista.length > 100) throw new ErrorHttp(400, 'El .zip va hasta 100 remesas. Para más, use «Ver PDF» o «Imprimir» (un solo PDF).');
   const zip = await R.remesasZipVarios(lista.map(x => ({ x, f: formatos.get(String(x.cliente || '')) })));
   if (d.marcar) await marcarImpresas(req, lista);
   await auditar(req, 'remesas_zip', { detalle: { remesas: lista.map(x => x.remesa) } });

@@ -32,6 +32,19 @@ Menú **Documentos → Remesas**. Reemplaza el formulario «REMESAS DULCES» de 
 - El **N° de remesa** es el consecutivo interno de la empresa (uno solo para todos los clientes). Si el Excel lo trae,
   se respeta; si viene vacío se asigna. El próximo número sigue después de la remesa más alta cargada y el administrador
   lo puede ajustar (nunca por debajo de uno ya usado).
+- **Nunca se repite un número.** Los que llegan vacíos saltan los números que ya trae el mismo archivo y los que ya están
+  en la base. Un viaje cuyo número ya tiene otro VPL (o que está repetido en el archivo) sale como «No se pasa» y no se guarda:
+  se corrige el número en el Excel o se deja vacío.
+- **Remesas de antes de la fase 12** (sin cliente): se reconocen por el VPL, no se duplican, conservan su número y al pasarlas
+  quedan del cliente. Su número cuenta para el consecutivo (se llena `remesaNum` una sola vez al arrancar).
+- **Impresas:** «Reemplazar» no cambia una remesa ya impresa (se avisa) y su número no se puede editar; los demás datos sí
+  (por ejemplo, la cédula).
+
+## Notas técnicas
+- La selección de viajes viaja en `X-Seleccion` como rangos de los VPL del archivo (`i:12400-12417,690` para pasar esos o
+  `e:12431` para pasar todos menos esos), para no pasar el límite de tamaño de las cabeceras de nginx.
+- En el PDF cada logo se incrusta una sola vez por documento (100 remesas pesan casi lo mismo que una). El .zip lleva un PDF
+  por remesa, cada uno con sus logos: va hasta 100 remesas.
 
 ## ⚙ Configuración de la remesa
 - **Encabezado de la empresa** (administrador): logo, nombre en dos líneas, NIT, lema, resolución, próximo N° de remesa
