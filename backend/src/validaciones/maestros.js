@@ -42,7 +42,8 @@ export const tarifaSchema = z.object({
 });
 
 const placaLibre = z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^[A-Z0-9]{5,6}$/, 'placa inválida'));
-export const ROLES_TERCERO = ['conductor', 'propietario', 'tenedor', 'titular', 'remitente', 'destinatario'];
+// «empleado»: trabajador directo (SG-SST); no se reporta al RNDC
+export const ROLES_TERCERO = ['conductor', 'propietario', 'tenedor', 'titular', 'remitente', 'destinatario', 'empleado'];
 export const terceroSchema = z.object({
   tipoId,
   numId: z.string().trim().transform(v => v.replace(/[.\s,-]/g, '')).pipe(z.string().min(5, 'mínimo 5 dígitos').max(15)),

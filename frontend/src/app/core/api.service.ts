@@ -38,6 +38,13 @@ export class Api {
     }));
   }
 
+  // Como subir(), con cabeceras extra (p. ej. una descripción).
+  subirConCabeceras<T>(url: string, archivo: File, cabeceras: Record<string, string>) {
+    return firstValueFrom(this.http.post<T>(this.base + url, archivo, {
+      headers: { 'Content-Type': 'application/octet-stream', 'X-Nombre-Archivo': encodeURIComponent(archivo.name).slice(0, 120), ...cabeceras },
+    }));
+  }
+
   // Trae un archivo (p. ej. un PDF) para verlo en pantalla sin descargarlo.
   async archivo(url: string, params?: Params): Promise<Blob> {
     return firstValueFrom(this.http.get(this.base + url, { params: this.params(params), responseType: 'blob' }));

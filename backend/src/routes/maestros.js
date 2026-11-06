@@ -10,6 +10,7 @@ import { auditar, cambios } from '../services/auditoria.js';
 import { normalizar, escaparRegex, quitarTildes } from '../utils/texto.js';
 import { clienteSchema, tarifaSchema, terceroSchema, vehiculoSchema } from '../validaciones/maestros.js';
 import { variablesTercero, variablesVehiculo, huella, idCliente } from '../services/rndc/documentos.js';
+import { documentosPorVencer } from '../services/sst/vencimientos.js';
 import { reglasDe, pesoPorTamano } from '../services/gestion/reglas.js';
 import { sincronizarDestinoViajes } from '../services/gestion/sincronizarDestino.js';
 
@@ -322,20 +323,8 @@ r.put('/vehiculos/:id', editar, async (req, res) => {
 // ── Alertas de documentos por vencer (licencias, SOAT, tecnomecánica) ──────
 r.get('/alertas', ver, async (req, res) => {
   const limite = new Date(Date.now() + (Number(req.query.dias) || 30) * 86400000);
-  const [terceros, vehiculos] = await Promise.all([
-    Tercero.find(deEmpresa(req, { activo: true, roles: 'conductor', 'licencia.vence': { $ne: null, $lte: limite } }))
-      .select('nombres apellido1 numId licencia').lean(),
-    Vehiculo.find(deEmpresa(req, { activo: true, $or: [{ 'soat.vence': { $ne: null, $lte: limite } }, { venceTecnomecanica: { $ne: null, $lte: limite } }] }))
-      .select('placa soat venceTecnomecanica').lean(),
-  ]);
-  const alertas = [];
-  for (const x of terceros) alertas.push({ tipo: 'Licencia', referencia: `${x.nombres} ${x.apellido1}`.trim(), vence: x.licencia.vence });
-  for (const v of vehiculos) {
-    if (v.soat?.vence && v.soat.vence <= limite) alertas.push({ tipo: 'SOAT', referencia: v.placa, vence: v.soat.vence });
-    if (v.venceTecnomecanica && v.venceTecnomecanica <= limite) alertas.push({ tipo: 'Tecnomecánica', referencia: v.placa, vence: v.venceTecnomecanica });
-  }
-  alertas.sort((a, b) => new Date(a.vence) - new Date(b.vence));
-  res.json(alertas);
+  // Misma lógica que Vencimientos de SG-SST
+  res.json(await documentosPorVencer(req.empresaId, limite));
 });
 
 // ── Revisión de datos: lo que puede causar rechazos del RNDC o un manifiesto incompleto ──

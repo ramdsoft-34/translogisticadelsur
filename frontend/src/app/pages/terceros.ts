@@ -25,7 +25,7 @@ import { Rastreo } from '../core/rastreo.service';
 type TipoNuevo = 'conductor' | 'persona' | 'empresa' | 'sede' | 'vehiculo' | 'remolque';
 
 const ROLES: [string, string][] = [['conductor', 'Conductor'], ['titular', 'Titular de manifiesto'], ['propietario', 'Propietario'],
-  ['tenedor', 'Tenedor'], ['remitente', 'Remitente'], ['destinatario', 'Destinatario']];
+  ['tenedor', 'Tenedor'], ['remitente', 'Remitente'], ['destinatario', 'Destinatario'], ['empleado', 'Empleado (SG-SST)']];
 
 const vacio = () => ({
   tipoId: 'C', numId: '', nombres: '', apellido1: '', apellido2: '', sede: { codigo: '', nombre: '' }, telefono: '', celular: '',

@@ -28,6 +28,13 @@ export const MODULOS: Modulo[] = [
     { ruta: '/contabilidad', texto: 'Contabilidad', icono: 'lista', permisos: [P.LIQUIDACION_VER], descripcion: 'Libro diario, facturas, cuentas por pagar, informes y cierre de mes', claves: 'factura asiento cierre balance' },
   ] },
   { id: 'sst', nombre: 'SG-SST y PESV', icono: 'escudo', paginas: [
+    { ruta: '/sst/tablero', texto: 'Tablero SST y PESV', icono: 'escudo', permisos: [P.SST_VER], descripcion: 'Vencimientos, preoperacional de hoy, capacitaciones e indicadores', claves: 'sst pesv tablero indicadores seguridad salud vial' },
+    { ruta: '/sst/colaboradores', texto: 'Colaboradores', icono: 'personas', permisos: [P.SST_VER], descripcion: 'Perfil de SST de cada persona: exámenes, EPP, comparendos y capacitaciones', claves: 'colaborador empleado epp examen comparendo' },
+    { ruta: '/sst/flota', texto: 'Flota e inspecciones', icono: 'camion', permisos: [P.SST_VER], descripcion: 'Hoja de vida, pólizas, mantenimiento y preoperacionales', claves: 'mantenimiento hoja de vida poliza kilometraje inspeccion' },
+    { ruta: '/sst/capacitaciones', texto: 'Capacitaciones', icono: 'lista', permisos: [P.SST_VER], descripcion: 'Programa anual con asistencia firmada', claves: 'capacitacion induccion asistencia programa' },
+    { ruta: '/sst/formatos', texto: 'Formatos', icono: 'documento', permisos: [P.SST_VER], descripcion: 'Formatos con membrete, actas, Word y Excel propios y reportes de incidentes', claves: 'formato acta simulacro incidente epp inspeccion' },
+    { ruta: '/sst/datos', texto: 'Datos y membrete', icono: 'edificio', permisos: [P.SST_VER], descripcion: 'Responsables, ARL, clase de riesgo, autoevaluación y membrete', claves: 'membrete responsable arl riesgo autoevaluacion' },
+    { ruta: '/sst/preoperacional', texto: 'Preoperacional', icono: 'check', permisos: [P.SST_VER], descripcion: 'Inspecciones preoperacionales de los conductores', claves: 'preoperacional checklist no apto' },
     { ruta: '/sst/planillas', texto: 'Planillas', icono: 'documento', permisos: [P.SST_VER], descripcion: 'Planilla de seguridad social de cada conductor, mes a mes', claves: 'seguridad social eps arl pila planilla' },
   ] },
   { id: 'datos', nombre: 'Datos', icono: 'edificio', paginas: [
