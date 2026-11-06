@@ -38,6 +38,7 @@ export const routes: Routes = [
       { path: 'consultas-rndc', ...pagina([P.RNDC_CONSULTAR], () => import('./pages/consultas-rndc').then(m => m.ConsultasRndc)) },
       { path: 'configuracion', ...pagina([P.CONFIG_GESTIONAR, P.USUARIOS_GESTIONAR], () => import('./pages/configuracion').then(m => m.Configuracion)) },
       { path: 'admin/empresas', ...pagina([P.EMPRESAS_GESTIONAR], () => import('./pages/admin-empresas').then(m => m.AdminEmpresas)) },
+      { path: 'admin/app-version', ...pagina([P.EMPRESAS_GESTIONAR], () => import('./pages/admin-app-version').then(m => m.AdminAppVersion)) },
       { path: 'admin/auditoria', ...pagina([P.EMPRESAS_GESTIONAR], () => import('./pages/admin-auditoria').then(m => m.AdminAuditoria)) },
       { path: 'mi-cuenta', loadComponent: () => import('./pages/mi-cuenta').then(m => m.MiCuenta) },
       { path: 'privacidad', loadComponent: () => import('./pages/privacidad').then(m => m.Privacidad) },

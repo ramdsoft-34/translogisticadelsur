@@ -19,6 +19,7 @@ import importaciones from './routes/importaciones.js';
 import rastreo from './routes/rastreo.js';
 import sst from './routes/sst.js';
 import avisosConductores from './routes/avisosConductores.js';
+import appVersion from './routes/appVersion.js';
 import eventos from './routes/eventos.js';
 import { avisarCambios } from './services/eventos.js';
 
@@ -60,6 +61,7 @@ export function crearApp() {
   app.use('/api/rastreo', rastreo);
   app.use('/api/sst', sst);
   app.use('/api/avisos-conductores', avisosConductores);
+  app.use('/api/admin/app-version', appVersion);
 
   app.use(noEncontrado);
   app.use(manejarErrores);

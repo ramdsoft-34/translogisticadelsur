@@ -112,6 +112,9 @@ appSt.servidor = http.createServer((req, res) => {
     if (mp && req.method === 'GET') { if (url.searchParams.get('empresaId') !== appSt.empresaPlanillas) return json(404, { error: 'no' }); res.writeHead(200, { 'content-type': 'application/pdf' }); return res.end(Buffer.from('%PDF-1.4 planilla')); }
     mp = ruta.match(/^\/planillas\/([a-f0-9]{24})\/(excluir|incluir|carga-tardia)$/);
     if (mp && req.method === 'POST') { appSt.ultimaDecision = { accion: mp[2], ...b }; return json(200, { id: mp[1], nombre: 'Pedro', periodo: '2026-12', estado: mp[2] === 'excluir' ? 'excluida' : 'pendiente' }); }
+    // Versión de la app (superadministrador)
+    if (ruta === '/app-version' && req.method === 'GET') return json(200, appSt.version || null);
+    if (ruta === '/app-version' && req.method === 'PUT') { appSt.version = b; return json(200, b); }
     // Avisos a conductores (la lógica real se prueba en el backend de Sur Track)
     if (ruta === '/avisos/conductores') return json(200, [{ id: 'c'.repeat(24), nombre: 'Pedro', cedula: '12345678', terceroId: 'x' }]);
     if (ruta === '/avisos/vista-previa') { appSt.ultimoAviso = b; return json(200, { total: 1, masivo: false, nombres: ['Pedro'] }); }
@@ -1450,6 +1453,13 @@ test('App nueva: invitar al conductor, viaje al servidor nuevo, fotos privadas y
   assert.equal(appSt.ultimoAviso.activa, false);
   assert.equal((await adm.put('/api/avisos-conductores/automaticos/otra-cosa', { activa: false })).status, 400);
   assert.equal((await s.adminB.get('/api/avisos-conductores')).status, 403, 'empresa sin la app de conductores');
+  // Versión de la app: solo el superadministrador
+  assert.equal((await adm.get('/api/admin/app-version')).status, 403, 'el administrador de empresa no la cambia');
+  const ver = await s.sa.put('/api/admin/app-version', { minimo: 27, ultimaCodigo: 28, ultimaNombre: '3.0.1', tipo: 'recomendada', novedades: ['Avisos'] });
+  assert.equal(ver.status, 200, JSON.stringify(ver.body));
+  assert.equal(appSt.version.por.length > 1, true); assert.equal(appSt.version.ultimaCodigo, 28);
+  assert.equal((await s.sa.get('/api/admin/app-version')).body.ultimaNombre, '3.0.1');
+  assert.ok(await M.Auditoria.exists({ accion: 'configurar_version_app' }));
   // Finalizar cierra en el servidor nuevo; quitar acceso deja al conductor sin cuenta en esta empresa
   await adm.post(`/api/rastreo/viajes/${v2._id}/finalizar`);
   assert.equal(appSt.viajes.get(a2.body.externoId).estado, 'completado');
