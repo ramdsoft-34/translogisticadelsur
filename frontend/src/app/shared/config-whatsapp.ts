@@ -11,7 +11,8 @@ Placa: {{4}}
 Ruta: {{5}} a {{6}}
 Remesa: {{7}}
 
-Este número solo envía documentos. Para cualquier novedad, comuníquese con {{8}}.`;
+Este número solo envía documentos. Para cualquier novedad, comuníquese con {{8}}. Gracias.`;
+// Meta no acepta una variable al final del texto: por eso cierra con «Gracias.»
 
 // WhatsApp de la empresa: sale del número de Translogística o de una cuenta propia en Meta.
 @Component({

@@ -8,6 +8,8 @@ export const routes: Routes = [
   // Pública: el QR del soporte interno lleva aquí
   { path: 'verificar/:codigo', loadComponent: () => import('./pages/verificar').then(m => m.Verificar) },
   // Fase 11: enlace de la relación de cobro que recibe la empresa (sin sesión)
+  // Pública: política de privacidad que se registra en Meta (WhatsApp Business)
+  { path: 'politica-privacidad', data: { publica: true }, loadComponent: () => import('./pages/privacidad').then(m => m.Privacidad) },
   { path: 'r/:token', loadComponent: () => import('./pages/relacion-publica').then(m => m.RelacionPublica) },
   // Página pública de la empresa; con sesión iniciada lleva directo a la plataforma
   { path: '', pathMatch: 'full', canActivate: [sinSesion], loadComponent: () => import('./pages/landing').then(m => m.Landing) },

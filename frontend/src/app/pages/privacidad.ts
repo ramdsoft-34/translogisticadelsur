@@ -1,4 +1,5 @@
 import { Component, inject, signal } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { Api } from '../core/api.service';
 
 // Política de tratamiento de datos personales (Ley 1581 de 2012 y Decreto 1377 de 2013).
@@ -6,7 +7,7 @@ import { Api } from '../core/api.service';
 @Component({
   selector: 'app-privacidad',
   template: `
-    <article class="documento">
+    <article class="documento" [class.publica]="publica">
       <h1>Política de privacidad y tratamiento de datos</h1>
       <p class="sutil">Aplica a la información registrada en Translogística del Sur por {{ empresa()?.nombre || 'cada empresa usuaria' }}.</p>
 
@@ -23,6 +24,7 @@ import { Api } from '../core/api.service';
         <li>Conductores, titulares, propietarios y tenedores: identificación, nombres, teléfono, dirección, licencia de conducción y, si se registra, cuenta bancaria para pagos.</li>
         <li>Vehículos: placa, características, SOAT y revisión técnico-mecánica.</li>
         <li>Operación: viajes, fletes, anticipos, remesas, manifiestos y cumplidos.</li>
+        <li>Mensajes de WhatsApp enviados al conductor: número de celular, manifiesto adjunto y estado de entrega (enviado, entregado, leído o fallido).</li>
       </ul>
 
       <h2>3. Finalidades</h2>
@@ -31,7 +33,15 @@ import { Api } from '../core/api.service';
         <li>Reportar la información exigida al Registro Nacional de Despachos de Carga (RNDC) del Ministerio de Transporte.</li>
         <li>Liquidar fletes, pagos a conductores y facturación a clientes.</li>
         <li>Controlar el acceso, mantener la trazabilidad de las operaciones y atender auditorías.</li>
+        <li>Enviar al conductor, por WhatsApp, el manifiesto de carga de su viaje, solo si autorizó recibirlo.</li>
       </ul>
+
+      <h2>WhatsApp Business</h2>
+      <p>Las empresas que lo activan envían el manifiesto de carga al celular del conductor mediante la API de WhatsApp Business de Meta Platforms.
+        Solo se envían documentos de la operación a conductores que autorizaron recibirlos; no se envía publicidad.
+        Para el envío se comparten con Meta el número de celular, el nombre del conductor y los datos del manifiesto, que Meta trata según sus propias condiciones.
+        Los avisos de entrega que devuelve Meta se guardan únicamente para mostrar a la empresa si el mensaje llegó.
+        El conductor puede pedir en cualquier momento a su empresa que deje de enviarle mensajes, y la empresa retira la autorización en la plataforma.</p>
 
       <h2>4. Derechos de los titulares</h2>
       <p>De acuerdo con la Ley 1581 de 2012, los titulares pueden conocer, actualizar y rectificar sus datos, solicitar prueba de la autorización,
@@ -59,12 +69,15 @@ import { Api } from '../core/api.service';
     p, li { color: var(--gris-7); line-height: 1.65; }
     ul { padding-left: 20px; margin: 0; display: grid; gap: 4px; }
     .nota { margin-top: 28px; padding: 12px 14px; border-radius: var(--radio); background: var(--gris-1); font-size: 13px; }
-    @media (max-width: 640px) { .documento { padding: 20px; } }
+    .documento.publica { margin: 32px auto; }
+    @media (max-width: 640px) { .documento { padding: 20px; } .documento.publica { margin: 16px; } }
   `],
 })
 export class Privacidad {
   private api = inject(Api);
   readonly empresa = signal<any>(null);
   contacto(e: any) { const c = [e.correo, e.telefono].filter(Boolean).join(' · '); return c ? ` Contacto: ${c}.` : ''; }
-  constructor() { this.api.get<any>('/auth/mi-cuenta').then(d => this.empresa.set(d.empresa)).catch(() => {}); }
+  // En la ruta pública (la que se registra en Meta) no hay sesión: se muestra el texto general
+  readonly publica = !!inject(ActivatedRoute).snapshot.data['publica'];
+  constructor() { if (!this.publica) this.api.get<any>('/auth/mi-cuenta').then(d => this.empresa.set(d.empresa)).catch(() => {}); }
 }
