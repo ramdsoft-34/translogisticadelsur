@@ -7,7 +7,7 @@ import { Viaje, Vehiculo, Tercero, proximo } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { txt, hoyColombia } from '../../utils/texto.js';
 import { contextoViaje, idCliente } from './documentos.js';
-import { cargarViaje, traerTercero, traerVehiculo, consultar, empresaConRndc } from './operaciones.js';
+import { cargarViaje, traerTercero, traerVehiculo, consultar, empresaConRndc, ultimoDeLaSerie } from './operaciones.js';
 
 export const DIAS_VIGENCIA = 7;
 const reciente = (rndc) => rndc?.verificadoEn && Date.now() - new Date(rndc.verificadoEn).getTime() < DIAS_VIGENCIA * 86400000;
@@ -110,7 +110,8 @@ export async function verificarConsecutivos(empresaId, clave, usuarioId, { dias 
     if (!r.ok && errorClave(r.mensaje)) throw new ErrorHttp(400, `El RNDC no aceptó el usuario o la contraseña: ${r.mensaje}`);
     if (!r.ok && !sinDatos(r.mensaje)) avisos.push(`Listado del RNDC: ${r.mensaje}`);
     const numeros = (r.documentos || []).map(d => txt(d[campo]).match(patron)?.[1]).filter(Boolean).map(Number);
-    let ultimo = numeros.length ? Math.max(...numeros) : null;
+    // Solo la serie de la empresa (un número con un dígito de más, p. ej. R100632601, no es «el último»)
+    let ultimo = ultimoDeLaSerie(numeros);
     // 2. Número por número: ¿ya existe en el RNDC?
     let consultas = 0;
     const existe = async (n) => {

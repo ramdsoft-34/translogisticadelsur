@@ -364,6 +364,8 @@ async function avanzarConsecutivo(empresa, clave, numero) {
   const prefijo = (clave === 'remesa' ? empresa.rndc?.prefijoRemesa : empresa.rndc?.prefijoManifiesto) || '';
   const m = String(numero).match(/^(.*?)(\d+)$/);
   if (!m || m[1] !== prefijo) return;
+  const d = digitosSerie(await radicadosEnPlataforma(empresa, clave));
+  if (d && String(Number(m[2])).length !== d) return;          // fuera de la serie: no mueve la numeración
   await Contador.updateOne({ empresa: empresa._id, clave, valor: { $lt: Number(m[2]) } }, { $set: { valor: Number(m[2]) } });
 }
 
@@ -413,17 +415,41 @@ export async function existeEnRndc(empresa, claveRndc, usuarioId, clave, numero)
   return (q.documentos || []).length > 0;
 }
 
-// Último número de la numeración de la empresa radicado en el RNDC (últimos 30 días)
+// Serie de la empresa: prefijo + la cantidad de dígitos habitual. Un número escrito con un dígito de más o de menos
+// (p. ej. R100632601 en la serie R10063260) no es de la serie: no cuenta como «el último» ni mueve la numeración.
+export function digitosSerie(numeros) {
+  const cuenta = new Map();
+  for (const n of numeros) { const l = String(n).length; cuenta.set(l, (cuenta.get(l) || 0) + 1); }
+  let mejor = null;
+  for (const [l, c] of cuenta) if (!mejor || c > mejor[1] || (c === mejor[1] && l < mejor[0])) mejor = [l, c];
+  return mejor ? mejor[0] : null;
+}
+export function ultimoDeLaSerie(numeros) {
+  const d = digitosSerie(numeros);
+  const l = numeros.filter(n => String(n).length === d);
+  return l.length ? Math.max(...l) : null;
+}
+const patronSerie = (prefijo) => new RegExp(`^${prefijo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)$`);
+// Números de la serie que la plataforma radicó en el RNDC (aceptados o anulados después): el RNDC no devuelve los anulados en
+// su listado, pero cuentan como radicados (no se pueden repetir)
+async function radicadosEnPlataforma(empresa, clave) {
+  const patron = patronSerie(prefijoDe(empresa, clave));
+  const l = await Viaje.find({ empresa: empresa._id, [`${clave}.radicado`]: { $gt: '' } }).select(`${clave}.numero`).sort({ _id: -1 }).limit(500).lean();
+  return l.map(v => txt(v[clave]?.numero).match(patron)?.[1]).filter(Boolean).map(Number);
+}
+
+// Último número de la serie de la empresa radicado en el RNDC: el mayor del listado del RNDC (últimos 30 días) y de los
+// radicados por la plataforma (incluidos los anulados). Si el RNDC no responde el listado, no se adivina: se avisa.
 async function ultimoEnRndc(empresa, claveRndc, usuarioId, clave) {
   const n = NUMERACION[clave];
-  const prefijo = prefijoDe(empresa, clave);
   const hoy = hoyColombia();
   const iso = (d) => d.toISOString().slice(0, 10);
   const r = await consultar(empresa._id, claveRndc, usuarioId, { que: n.que, desde: iso(new Date(hoy.getTime() - 30 * 86400000)), hasta: iso(new Date(hoy.getTime() + 86400000)) });
   if (!r.ok && errorDeClave(r.mensaje)) throw new ErrorHttp(400, `El RNDC no aceptó el usuario o la contraseña: ${r.mensaje}`);
-  const patron = new RegExp(`^${prefijo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)$`);
+  if (!r.ok && !sinDatosRndc(r.mensaje)) throw new ErrorHttp(502, `No se pudo consultar en el RNDC el último número de ${clave} radicado: ${r.mensaje}. Intente de nuevo.`);
+  const patron = patronSerie(prefijoDe(empresa, clave));
   const numeros = (r.documentos || []).map(d => txt(d[n.campo]).match(patron)?.[1]).filter(Boolean).map(Number);
-  return numeros.length ? Math.max(...numeros) : null;
+  return ultimoDeLaSerie([...numeros, ...(await radicadosEnPlataforma(empresa, clave))]);
 }
 
 // Siguiente número disponible en el RNDC (consultado y confirmado libre antes de usarlo)
@@ -461,6 +487,11 @@ async function numeroParaEnviar(empresa, claveRndc, usuarioId, clave, v, numReme
   const doc = v[clave] || {};
   const manual = txt(v.numerosManuales?.[clave]);
   if (manual) {
+    const m = manual.match(patronSerie(prefijoDe(empresa, clave)));
+    const d = m ? digitosSerie(await radicadosEnPlataforma(empresa, clave)) : null;
+    if (m && d && String(Number(m[1])).length !== d) {
+      throw new ErrorHttp(409, `El número ${manual} tiene ${String(Number(m[1])).length} dígitos y los de la empresa en el RNDC tienen ${d}. Revíselo o deje el campo vacío para usar el siguiente del RNDC.`);
+    }
     if (await existeEnRndc(empresa, claveRndc, usuarioId, clave, manual)) throw new ErrorHttp(409, `El número ${manual} ya está radicado en el RNDC: escriba otro o deje el campo vacío para usar el siguiente disponible`);
     return manual;
   }

@@ -874,6 +874,28 @@ test('RNDC: la numeración sale del RNDC y salta los números ya radicados', asy
   await s.adminA.put('/api/rndc/config', { consecutivoRemesa: `R${Math.max(Number(actual.slice(1)), n + 4)}` });
 });
 
+test('RNDC: un número con un dígito de más no cambia la numeración (caso R100632601)', async () => {
+  const nuevo = () => s.reportero.post('/api/viajes', { fecha: '2026-11-06', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const a = (await s.manif.post(`/api/rndc/viajes/${(await nuevo()).body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  assert.equal(a.remesa.estado, 'aceptado', JSON.stringify(a));
+  const n = Number(a.remesa.numero.slice(1));
+  // Alguien radicó por fuera un número con un dígito de más (R5231 en una serie de 3 dígitos)
+  const raro = `R${n}1`;
+  sim.estado.remesas.set(`9001112221|${raro}`, { NUMNITEMPRESATRANSPORTE: '9001112221', CONSECUTIVOREMESA: raro });
+  (await import('../src/services/rndc/operaciones.js')).olvidarNumeracion();
+  const b = (await s.manif.post(`/api/rndc/viajes/${(await nuevo()).body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  assert.equal(b.remesa.numero, `R${n + 1}`, 'el siguiente de la serie, no el del número raro');
+  // A mano tampoco se acepta un número fuera de la serie
+  const c = (await nuevo()).body._id;
+  assert.equal((await s.manif.put(`/api/rndc/viajes/${c}/datos`, { numeroRemesa: `R${n + 2}1` })).status, 200);
+  const r = await s.manif.post(`/api/rndc/viajes/${c}/despachar`, { clave: CLAVE_RNDC });
+  assert.equal(r.status, 409);
+  assert.match(r.body.error, /dígitos/);
+  await s.manif.put(`/api/rndc/viajes/${c}/datos`, { numeroRemesa: '' });
+  sim.estado.remesas.delete(`9001112221|${raro}`);
+  await s.manif.del(`/api/viajes/${c}`);
+});
+
 test('RNDC: verificación previa contra el RNDC y consecutivos', async () => {
   const m = con(await login('manif@a.test'));   // sesión nueva: las anteriores pueden haberse cerrado en otras pruebas
   { const u = await M.Usuario.findOne({ email: 'manif@a.test' }).lean(); console.log('DEPURAR', u.activo, u.tokenVersion, u.empresa); }
