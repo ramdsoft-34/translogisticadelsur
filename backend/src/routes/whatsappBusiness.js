@@ -1,0 +1,156 @@
+// WhatsApp Business: cuenta de cada empresa, manifiestos al conductor y avisos de estado de Meta.
+import crypto from 'node:crypto';
+import express, { Router } from 'express';
+import mongoose from 'mongoose';
+import { z } from 'zod';
+import { Empresa, EnvioWhatsapp } from '../models/index.js';
+import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
+import { P } from '../config/permisos.js';
+import { env } from '../config/env.js';
+import { auditar } from '../services/auditoria.js';
+import { cifrar, descifrar } from '../utils/cifrado.js';
+import { aprobarEnvios, cuentaPlataforma, descartarEnvios, firmaValida, plataformaLista, prepararEnvio, probarCuenta, procesarEnvio, registrarEstados, registrarEstadosPlataforma } from '../services/whatsappBusiness.js';
+
+const r = Router();
+const id = (v) => { if (!mongoose.isValidObjectId(v)) throw new ErrorHttp(400, 'Identificador inválido'); return v; };
+
+// ── Avisos de Meta (públicos): cada cuenta tiene su dirección, su token y su firma ──
+r.get('/webhook', async (req, res) => {
+  const p = await cuentaPlataforma();
+  if (req.query['hub.mode'] !== 'subscribe' || !p?.webhookToken || req.query['hub.verify_token'] !== p.webhookToken) return res.sendStatus(403);
+  res.type('text/plain').send(String(req.query['hub.challenge'] || ''));
+});
+
+r.post('/webhook', express.raw({ type: '*/*', limit: '1mb' }), async (req, res) => {
+  const p = await cuentaPlataforma();
+  const cuerpo = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  if (!firmaValida(cuerpo, req.get('x-hub-signature-256'), p?.appSecretCifrado ? descifrar(p.appSecretCifrado) : '')) return res.sendStatus(403);
+  let datos;
+  try { datos = JSON.parse(cuerpo.toString('utf8')); } catch { return res.sendStatus(400); }
+  await registrarEstadosPlataforma(datos);
+  res.sendStatus(200);
+});
+
+const cuentaWebhook = async (empresaId) => (mongoose.isValidObjectId(empresaId)
+  ? Empresa.findById(empresaId).select('+whatsapp.webhookToken +whatsapp.appSecretCifrado').lean() : null);
+
+r.get('/webhook/:empresa', async (req, res) => {
+  const e = await cuentaWebhook(req.params.empresa);
+  const token = e?.whatsapp?.webhookToken;
+  if (req.query['hub.mode'] !== 'subscribe' || !token || req.query['hub.verify_token'] !== token) return res.sendStatus(403);
+  res.type('text/plain').send(String(req.query['hub.challenge'] || ''));
+});
+
+r.post('/webhook/:empresa', express.raw({ type: '*/*', limit: '1mb' }), async (req, res) => {
+  const e = await cuentaWebhook(req.params.empresa);
+  const cuerpo = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  const secreto = e?.whatsapp?.appSecretCifrado ? descifrar(e.whatsapp.appSecretCifrado) : '';
+  if (!firmaValida(cuerpo, req.get('x-hub-signature-256'), secreto)) return res.sendStatus(403);
+  let datos;
+  try { datos = JSON.parse(cuerpo.toString('utf8')); } catch { return res.sendStatus(400); }
+  req.empresaId = e._id;      // la pantalla de Manifiestos se actualiza en vivo
+  await registrarEstados(e._id, datos);
+  res.sendStatus(200);
+});
+
+r.use(autenticar, soloEmpresa);
+const gestionar = permitir(P.CONFIG_GESTIONAR);
+const operar = permitir(P.RNDC_OPERAR, P.CONFIG_GESTIONAR);
+
+export const datosCuenta = {
+  phoneNumberId: z.string().trim().regex(/^\d*$/, 'el identificador del número solo lleva dígitos').max(30),
+  wabaId: z.string().trim().regex(/^\d*$/, 'el identificador de la cuenta solo lleva dígitos').max(30).optional().default(''),
+  plantilla: z.string().trim().regex(/^[a-z0-9_]+$/, 'la plantilla solo lleva minúsculas, números y guion bajo').max(100),
+  idioma: z.string().trim().regex(/^[a-z]{2}(_[A-Z]{2})?$/, 'idioma inválido').max(5),
+  token: z.string().trim().max(1000).optional(), appSecret: z.string().trim().max(200).optional(),
+};
+
+// Cuenta de una empresa: la usan su administrador y el SuperAdmin, cada una con sus datos aparte
+export async function datosCuentaEmpresa(empresaId) {
+  const e = await Empresa.findById(empresaId).select('+whatsapp.tokenCifrado +whatsapp.appSecretCifrado +whatsapp.webhookToken').lean();
+  if (!e) throw new ErrorHttp(404, 'Empresa no encontrada');
+  const { tokenCifrado, appSecretCifrado, webhookToken, ...w } = e.whatsapp || {};
+  return { modo: 'plataforma', plantilla: 'manifiesto_conductor', idioma: 'es', ...w, plataformaLista: plataformaLista(await cuentaPlataforma()), tieneToken: !!tokenCifrado, tieneSecreto: !!appSecretCifrado,
+    webhookToken: webhookToken || '', webhookUrl: `${env.urlPublica}/api/whatsapp/webhook/${empresaId}` };
+}
+
+export const cuentaEmpresaSchema = z.object({ activo: z.boolean(), modo: z.enum(['plataforma', 'propia']).default('plataforma'), ...datosCuenta });
+
+export async function guardarCuentaEmpresa(empresaId, d) {
+  const antes = await Empresa.findById(empresaId).select('+whatsapp.tokenCifrado +whatsapp.appSecretCifrado +whatsapp.webhookToken').lean();
+  if (!antes) throw new ErrorHttp(404, 'Empresa no encontrada');
+  if (d.activo && d.modo === 'plataforma' && !plataformaLista(await cuentaPlataforma())) {
+    throw new ErrorHttp(400, 'La cuenta de WhatsApp de Translogística todavía no está disponible. Puede registrar un número propio o activarlo más adelante.');
+  }
+  if (d.activo && d.modo === 'propia' && (!d.phoneNumberId || !(d.token || antes.whatsapp?.tokenCifrado) || !(d.appSecret || antes.whatsapp?.appSecretCifrado))) {
+    throw new ErrorHttp(400, 'Para activar WhatsApp indique el identificador del número, el token y el secreto de la app');
+  }
+  const set = { 'whatsapp.activo': d.activo, 'whatsapp.modo': d.modo, 'whatsapp.phoneNumberId': d.phoneNumberId, 'whatsapp.wabaId': d.wabaId, 'whatsapp.plantilla': d.plantilla, 'whatsapp.idioma': d.idioma };
+  if (d.token) set['whatsapp.tokenCifrado'] = cifrar(d.token);           // vacío = conservar el actual
+  if (d.appSecret) set['whatsapp.appSecretCifrado'] = cifrar(d.appSecret);
+  if (!antes.whatsapp?.webhookToken) set['whatsapp.webhookToken'] = crypto.randomBytes(24).toString('hex');
+  await Empresa.updateOne({ _id: empresaId }, { $set: set });
+  return { activo: d.activo, modo: d.modo, phoneNumberId: d.phoneNumberId, plantilla: d.plantilla, tokenCambiado: !!d.token, secretoCambiado: !!d.appSecret };
+}
+
+// ── Cuenta de la empresa ─────────────────────────────────────────────────────
+r.get('/config', gestionar, async (req, res) => res.json(await datosCuentaEmpresa(req.empresaId)));
+
+r.put('/config', gestionar, async (req, res) => {
+  const detalle = await guardarCuentaEmpresa(req.empresaId, cuentaEmpresaSchema.parse(req.body));
+  await auditar(req, 'editar_config_whatsapp', { entidad: 'Empresa', entidadId: req.empresaId, detalle });
+  res.json({ ok: true });
+});
+
+r.post('/config/probar', gestionar, async (req, res) => {
+  try {
+    const x = await probarCuenta(req.empresaId);
+    await auditar(req, 'probar_whatsapp', { detalle: { numero: x.numero } });
+    res.json(x);
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+// ── Envíos ───────────────────────────────────────────────────────────────────
+r.get('/estado', operar, async (req, res) => {
+  const e = await Empresa.findById(req.empresaId).select('whatsapp.activo').lean();
+  res.json({ activo: !!e?.whatsapp?.activo });
+});
+
+r.get('/envios', operar, async (req, res) => {
+  const f = deEmpresa(req);
+  if (req.query.viajes) f.viaje = { $in: String(req.query.viajes).split(',').filter(x => mongoose.isValidObjectId(x)).slice(0, 1000) };
+  if (req.query.estado) f.estado = String(req.query.estado);
+  res.json(await EnvioWhatsapp.find(f).sort({ createdAt: -1 }).limit(Math.min(Number(req.query.limite) || 300, 1000)).lean());
+});
+
+const listaViajes = z.object({ viajes: z.array(z.string().refine(x => mongoose.isValidObjectId(x), 'viaje inválido')).min(1).max(200) });
+r.post('/aprobar', operar, async (req, res) => {
+  const { viajes } = listaViajes.parse(req.body);
+  const x = await aprobarEnvios(req.empresaId, viajes, req.usuario._id);
+  await auditar(req, 'aprobar_whatsapp', { detalle: { viajes: viajes.length, aprobados: x.aprobados } });
+  res.json(x);
+});
+r.post('/descartar', operar, async (req, res) => {
+  const { viajes } = listaViajes.parse(req.body);
+  const x = await descartarEnvios(req.empresaId, viajes, req.usuario._id);
+  await auditar(req, 'descartar_whatsapp', { detalle: { viajes: viajes.length, descartados: x.descartados } });
+  res.json(x);
+});
+
+// Envío o reenvío manual del manifiesto vigente del viaje
+r.post('/viajes/:id/enviar', operar, async (req, res) => {
+  try {
+    const x = await prepararEnvio(req.empresaId, id(req.params.id), { origen: 'manual', usuario: req.usuario._id });
+    await auditar(req, 'enviar_whatsapp_manual', { entidad: 'Viaje', entidadId: req.params.id, detalle: { estado: x?.estado } });
+    res.json(x);
+  } catch (e) { throw e.status ? new ErrorHttp(e.status, e.message) : e; }
+});
+
+r.post('/envios/:id/reintentar', operar, async (req, res) => {
+  const x = await procesarEnvio(req.empresaId, id(req.params.id));
+  if (!x) throw new ErrorHttp(409, 'Este envío no se puede reintentar');
+  await auditar(req, 'reintentar_whatsapp', { entidad: 'EnvioWhatsapp', entidadId: req.params.id, detalle: { estado: x.estado } });
+  res.json(x);
+});
+
+export default r;

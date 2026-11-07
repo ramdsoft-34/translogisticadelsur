@@ -4,13 +4,18 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { Empresa, Usuario, Auditoria, Viaje } from '../models/index.js';
+import { Empresa, Usuario, Auditoria, Viaje, PlataformaWhatsapp } from '../models/index.js';
 import { autenticar, permitir, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { auditar, verificarCadena } from '../services/auditoria.js';
 import { filtroAuditoria, excelAuditoria } from '../services/reportes/auditoriaExport.js';
 import { claveSegura } from './auth.js';
 import { soloDigitos } from '../utils/texto.js';
+import crypto from 'node:crypto';
+import { cifrar } from '../utils/cifrado.js';
+import { env } from '../config/env.js';
+import { cuentaEmpresaSchema, datosCuenta, datosCuentaEmpresa, guardarCuentaEmpresa } from './whatsappBusiness.js';
+import { consumoDelMes, cuentaPlataforma, probarCuenta, probarPlataforma } from '../services/whatsappBusiness.js';
 
 const r = Router();
 r.use(autenticar, permitir(P.EMPRESAS_GESTIONAR));
@@ -149,6 +154,53 @@ r.get('/auditoria.xlsx', async (req, res) => {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="Auditoria.xlsx"');
   res.send(buf);
+});
+
+// ── Cuenta de WhatsApp de Translogística (la usan las empresas sin número propio) ──
+r.get('/whatsapp', async (_req, res) => {
+  const { tokenCifrado, appSecretCifrado, webhookToken, ...p } = (await cuentaPlataforma()) || {};
+  res.json({ activo: false, phoneNumberId: '', wabaId: '', plantilla: 'manifiesto_conductor', idioma: 'es', ...p,
+    tieneToken: !!tokenCifrado, tieneSecreto: !!appSecretCifrado, webhookToken: webhookToken || '', webhookUrl: `${env.urlPublica}/api/whatsapp/webhook` });
+});
+
+r.put('/whatsapp', async (req, res) => {
+  const d = z.object({ activo: z.boolean(), ...datosCuenta }).parse(req.body);
+  const antes = await cuentaPlataforma();
+  if (d.activo && (!d.phoneNumberId || !(d.token || antes?.tokenCifrado) || !(d.appSecret || antes?.appSecretCifrado))) {
+    throw new ErrorHttp(400, 'Para activar la cuenta indique el identificador del número, el token y el secreto de la app');
+  }
+  const set = { activo: d.activo, phoneNumberId: d.phoneNumberId, wabaId: d.wabaId, plantilla: d.plantilla, idioma: d.idioma };
+  if (d.token) set.tokenCifrado = cifrar(d.token);            // vacío = conservar el actual
+  if (d.appSecret) set.appSecretCifrado = cifrar(d.appSecret);
+  if (!antes?.webhookToken) set.webhookToken = crypto.randomBytes(24).toString('hex');
+  await PlataformaWhatsapp.updateOne({ clave: 'whatsapp' }, { $set: set }, { upsert: true });
+  await auditar(req, 'editar_whatsapp_plataforma', { detalle: { activo: d.activo, phoneNumberId: d.phoneNumberId, plantilla: d.plantilla, tokenCambiado: !!d.token, secretoCambiado: !!d.appSecret } });
+  res.json({ ok: true });
+});
+
+r.post('/whatsapp/probar', async (req, res) => {
+  try { res.json(await probarPlataforma()); } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+// ── WhatsApp de cada empresa: el SuperAdmin deja lista la cuenta, cada una independiente ──
+const idEmpresa = (v) => { if (!mongoose.isValidObjectId(v)) throw new ErrorHttp(400, 'Identificador inválido'); return v; };
+r.get('/whatsapp/empresas', async (_req, res) => {
+  const lista = await Empresa.find({}).select('nombre nit dv activa whatsapp.activo whatsapp.modo whatsapp.phoneNumberId').sort({ nombre: 1 }).lean();
+  res.json(lista.map(e => ({ _id: e._id, nombre: e.nombre, nit: e.nit, dv: e.dv, activa: e.activa, activo: !!e.whatsapp?.activo, modo: e.whatsapp?.modo || 'plataforma', phoneNumberId: e.whatsapp?.phoneNumberId || '' })));
+});
+r.get('/whatsapp/empresas/:id', async (req, res) => res.json(await datosCuentaEmpresa(idEmpresa(req.params.id))));
+r.put('/whatsapp/empresas/:id', async (req, res) => {
+  const detalle = await guardarCuentaEmpresa(idEmpresa(req.params.id), cuentaEmpresaSchema.parse(req.body));
+  await auditar(req, 'editar_config_whatsapp', { entidad: 'Empresa', entidadId: req.params.id, empresa: req.params.id, detalle });
+  res.json({ ok: true });
+});
+r.post('/whatsapp/empresas/:id/probar', async (req, res) => {
+  try { res.json(await probarCuenta(idEmpresa(req.params.id))); } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+r.get('/whatsapp/consumo', async (req, res) => {
+  const mes = /^\d{4}-\d{2}$/.test(String(req.query.mes)) ? String(req.query.mes) : new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 7);
+  res.json({ mes, filas: await consumoDelMes(mes) });
 });
 
 export default r;

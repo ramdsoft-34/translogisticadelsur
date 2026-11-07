@@ -847,6 +847,139 @@ test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazab
   delete process.env.CORREO_TRANSPORTE;
 });
 
+test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta y estados', async () => {
+  const llamadas = [];
+  const meta = http.createServer((req, res) => {
+    const partes = [];
+    req.on('data', c => partes.push(c));
+    req.on('end', () => {
+      const cuerpo = Buffer.concat(partes);
+      llamadas.push({ metodo: req.method, ruta: req.url, auth: req.headers.authorization, cuerpo });
+      res.setHeader('Content-Type', 'application/json');
+      if (req.url.endsWith('/media')) return res.end(JSON.stringify({ id: 'media-1' }));
+      if (req.url.endsWith('/messages')) return res.end(JSON.stringify({ messages: [{ id: `wamid.prueba${llamadas.filter(x => x.ruta.endsWith('/messages')).length}` }] }));
+      res.end(JSON.stringify({ display_phone_number: '57 300 000 0000', verified_name: 'Transportes Prueba', quality_rating: 'GREEN' }));
+    });
+  });
+  await new Promise(r => meta.listen(0, '127.0.0.1', r));
+  process.env.WHATSAPP_GRAPH_URL = `http://127.0.0.1:${meta.address().port}/v23.0`;
+  try {
+    const base = { activo: true, modo: 'propia', phoneNumberId: '1234567890', wabaId: '99', plantilla: 'manifiesto_conductor', idioma: 'es' };
+    assert.equal((await s.manif.put('/api/whatsapp/config', base)).status, 403, 'solo el administrador configura WhatsApp');
+    assert.equal((await s.adminA.put('/api/whatsapp/config', base)).status, 400, 'no se activa sin token ni secreto');
+    assert.equal((await s.adminA.put('/api/whatsapp/config', { ...base, token: 'token-secreto', appSecret: 'secreto-app' })).status, 200);
+    const cfg = (await s.adminA.get('/api/whatsapp/config')).body;
+    assert.ok(cfg.tieneToken && cfg.tieneSecreto && cfg.webhookToken);
+    assert.ok(!JSON.stringify(cfg).includes('token-secreto'), 'el token nunca vuelve al navegador');
+    assert.equal((await s.adminA.post('/api/whatsapp/config/probar', {})).body.nombre, 'Transportes Prueba');
+
+    // Al aceptarse el manifiesto queda por aprobar y no sale nada
+    const antes = llamadas.length;
+    const v = await s.reportero.post('/api/viajes', { fecha: '2026-11-05', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+    const ok = await s.manif.post(`/api/rndc/viajes/${v.body._id}/despachar`, { clave: CLAVE_RNDC });
+    assert.equal(ok.body.manifiesto.estado, 'aceptado', JSON.stringify(ok.body));
+    await new Promise(r => setTimeout(r, 300));
+    const lista = async () => (await s.manif.get(`/api/whatsapp/envios?viajes=${v.body._id}`)).body;
+    assert.equal((await lista())[0].estado, 'por_aprobar');
+    assert.equal(llamadas.length, antes, 'sin aprobación no se envía');
+    assert.equal((await s.reportero.post('/api/whatsapp/aprobar', { viajes: [v.body._id] })).status, 403);
+    assert.equal((await s.adminB.get('/api/whatsapp/envios')).body.length, 0, 'otra empresa no ve estos envíos');
+
+    // Sin autorización del conductor no sale, y queda el motivo
+    await s.adminA.put(`/api/maestros/terceros/${s.conductor}`, { celular: '3001234567', whatsappAutorizado: false });
+    const ap = (await s.manif.post('/api/whatsapp/aprobar', { viajes: [v.body._id] })).body;
+    assert.equal(ap.aprobados, 1);
+    assert.equal(ap.resultados[0].estado, 'error');
+    assert.match(ap.resultados[0].error, /no ha autorizado/);
+    assert.equal(llamadas.length, antes);
+
+    // Autorizado: sube el PDF y envía la plantilla con los datos del viaje
+    const aut = await s.adminA.put(`/api/maestros/terceros/${s.conductor}`, { whatsappAutorizado: true });
+    assert.equal(aut.status, 200, JSON.stringify(aut.body));
+    const envio = (await lista())[0];
+    const re = (await s.manif.post(`/api/whatsapp/envios/${envio._id}/reintentar`, {})).body;
+    assert.equal(re.estado, 'enviado', JSON.stringify(re));
+    assert.equal(re.telefono, '573001234567');
+    const media = llamadas.find(x => x.ruta.endsWith('/media'));
+    assert.equal(media.auth, 'Bearer token-secreto');
+    assert.ok(media.cuerpo.includes('%PDF'), 'adjunta el PDF real del manifiesto');
+    const m = JSON.parse(llamadas.find(x => x.ruta.endsWith('/messages')).cuerpo.toString());
+    assert.equal(m.to, '573001234567');
+    assert.equal(m.template.name, 'manifiesto_conductor');
+    assert.equal(m.template.components[0].parameters[0].document.id, 'media-1');
+    const textos = m.template.components[1].parameters.map(x => x.text);
+    assert.equal(textos.length, 8);
+    assert.equal(textos[1], textos[7], 'el nombre de la empresa va en el mensaje');
+    assert.ok(textos[1].length > 2);
+    assert.equal(textos[2], ok.body.manifiesto.numero);
+    assert.equal(textos[3], 'ABC123');
+    assert.ok(textos.every(t => t && !/\n/.test(t)));
+
+    // Avisos de Meta: verificación, firma obligatoria y el estado no retrocede
+    const hook = `/api/whatsapp/webhook/${s.empresaA}`;
+    assert.equal((await api().get(`${hook}?hub.mode=subscribe&hub.verify_token=malo&hub.challenge=7`)).status, 403);
+    assert.equal((await api().get(`${hook}?hub.mode=subscribe&hub.verify_token=${cfg.webhookToken}&hub.challenge=7`)).text, '7');
+    const aviso = (estado) => JSON.stringify({ entry: [{ changes: [{ value: { statuses: [{ id: 'wamid.prueba1', status: estado, timestamp: '1793900000' }] } }] }] });
+    const firmar = (t) => `sha256=${crypto.createHmac('sha256', 'secreto-app').update(t).digest('hex')}`;
+    const avisar = (t, firma) => api().post(hook).set('Content-Type', 'application/json').set('X-Hub-Signature-256', firma).send(t);
+    assert.equal((await avisar(aviso('read'), 'sha256=falsa')).status, 403);
+    assert.equal((await lista())[0].estado, 'enviado', 'un aviso sin firma no cambia nada');
+    assert.equal((await avisar(aviso('read'), firmar(aviso('read')))).status, 200);
+    assert.equal((await lista())[0].estado, 'leido');
+    await avisar(aviso('delivered'), firmar(aviso('delivered')));
+    assert.equal((await lista())[0].estado, 'leido', 'el estado no retrocede');
+
+    // El SuperAdmin deja lista la cuenta de cada empresa por separado; el token nunca vuelve y la otra empresa no cambia
+    assert.equal((await s.adminA.get('/api/admin/whatsapp/empresas')).status, 403);
+    const listaEmp = (await s.sa.get('/api/admin/whatsapp/empresas')).body;
+    assert.ok(listaEmp.some(x => String(x._id) === String(s.empresaA) && x.activo && x.modo === 'propia'));
+    const otra = listaEmp.find(x => String(x._id) !== String(s.empresaA));
+    assert.equal(otra.activo, false);
+    const cuentaOtra = { activo: true, modo: 'propia', phoneNumberId: '7770001', wabaId: '', plantilla: 'manifiesto_conductor', idioma: 'es', token: 'token-otra', appSecret: 'secreto-otra' };
+    assert.equal((await s.sa.put(`/api/admin/whatsapp/empresas/${otra._id}`, cuentaOtra)).status, 200);
+    const verOtra = (await s.sa.get(`/api/admin/whatsapp/empresas/${otra._id}`)).body;
+    assert.equal(verOtra.phoneNumberId, '7770001');
+    assert.ok(verOtra.tieneToken && !JSON.stringify(verOtra).includes('token-otra'));
+    assert.notEqual(verOtra.webhookToken, cfg.webhookToken);
+    assert.equal((await s.adminA.get('/api/whatsapp/config')).body.phoneNumberId, '1234567890', 'la otra empresa no cambia');
+    await s.sa.put(`/api/admin/whatsapp/empresas/${otra._id}`, { ...cuentaOtra, activo: false, token: undefined, appSecret: undefined });
+
+    // Sin número propio: sale de la cuenta de Translogística, que configura solo el SuperAdmin
+    const plano = { activo: true, modo: 'plataforma', phoneNumberId: '', plantilla: 'manifiesto_conductor', idioma: 'es' };
+    assert.equal((await s.adminA.put('/api/whatsapp/config', plano)).status, 400, 'la cuenta de Translogística aún no está lista');
+    const plataforma = { activo: true, phoneNumberId: '5550001', plantilla: 'manifiesto_conductor', idioma: 'es', token: 'token-plataforma', appSecret: 'secreto-plataforma' };
+    assert.equal((await s.adminA.put('/api/admin/whatsapp', plataforma)).status, 403);
+    assert.equal((await s.sa.put('/api/admin/whatsapp', plataforma)).status, 200);
+    const cfgP = (await s.sa.get('/api/admin/whatsapp')).body;
+    assert.ok(cfgP.tieneToken && cfgP.webhookToken);
+    assert.ok(!JSON.stringify(cfgP).includes('token-plataforma'));
+    assert.equal((await s.adminA.put('/api/whatsapp/config', plano)).status, 200);
+    const enviado = (await s.manif.post(`/api/whatsapp/viajes/${v.body._id}/enviar`, {})).body;
+    assert.equal(enviado.estado, 'enviado', JSON.stringify(enviado));
+    assert.equal(enviado.cuenta, 'plataforma');
+    const ultima = llamadas.filter(x => x.ruta.endsWith('/messages')).at(-1);
+    assert.match(ultima.ruta, /\/5550001\/messages$/);
+    assert.equal(ultima.auth, 'Bearer token-plataforma');
+    // Sus avisos llegan a una sola dirección, firmados con el secreto de Translogística
+    const avisoP = JSON.stringify({ entry: [{ changes: [{ value: { statuses: [{ id: enviado.idMensaje, status: 'delivered', timestamp: '1793900000' }] } }] }] });
+    const hookP = '/api/whatsapp/webhook';
+    assert.equal((await api().get(`${hookP}?hub.mode=subscribe&hub.verify_token=${cfgP.webhookToken}&hub.challenge=9`)).text, '9');
+    assert.equal((await api().post(hookP).set('Content-Type', 'application/json').set('X-Hub-Signature-256', firmar(avisoP)).send(avisoP)).status, 403, 'con el secreto de otra cuenta se rechaza');
+    const firmaP = `sha256=${crypto.createHmac('sha256', 'secreto-plataforma').update(avisoP).digest('hex')}`;
+    assert.equal((await api().post(hookP).set('Content-Type', 'application/json').set('X-Hub-Signature-256', firmaP).send(avisoP)).status, 200);
+    assert.equal((await lista())[0].estado, 'entregado');
+    // Conteo por empresa y número para cobrar
+    const consumo = (await s.sa.get(`/api/admin/whatsapp/consumo?mes=${enviado.enviadoEn.slice(0, 7)}`)).body;
+    assert.ok(consumo.filas.some(x => x.cuenta === 'plataforma' && x.mensajes === 1 && x.empresa), JSON.stringify(consumo));
+    assert.equal((await s.adminA.get('/api/admin/whatsapp/consumo')).status, 403);
+    await s.sa.put('/api/admin/whatsapp', { ...plataforma, activo: false, token: undefined, appSecret: undefined });
+  } finally {
+    await s.adminA.put('/api/whatsapp/config', { activo: false, modo: 'plataforma', phoneNumberId: '', plantilla: 'manifiesto_conductor', idioma: 'es' });
+    delete process.env.WHATSAPP_GRAPH_URL;
+    meta.close();
+  }
+});
+
 test('RNDC: la numeración sigue el consecutivo y pide autorización si el siguiente ya está radicado', async () => {
   const usado = (await s.manif.get(`/api/viajes/${s.viaje}`)).body.remesa.numero;     // R500
   const r1 = await s.adminA.put('/api/rndc/config', { consecutivoRemesa: usado, motivoConsecutivo: 'Prueba de número ya usado' });

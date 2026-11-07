@@ -28,7 +28,7 @@ const ROLES: [string, string][] = [['conductor', 'Conductor'], ['titular', 'Titu
   ['tenedor', 'Tenedor'], ['remitente', 'Remitente'], ['destinatario', 'Destinatario'], ['empleado', 'Empleado (SG-SST)']];
 
 const vacio = () => ({
-  tipoId: 'C', numId: '', nombres: '', apellido1: '', apellido2: '', sede: { codigo: '', nombre: '' }, telefono: '', celular: '',
+  tipoId: 'C', numId: '', nombres: '', apellido1: '', apellido2: '', sede: { codigo: '', nombre: '' }, telefono: '', celular: '', whatsappAutorizado: false,
   direccion: '', codMunicipio: '', correo: '', licencia: { categoria: '', numero: '', vence: '' }, fechaNacimiento: '',
   banco: { entidad: '', tipoCuenta: '', cuenta: '' }, roles: ['conductor'] as string[], activo: true, placasTexto: '', placaPrincipal: '',
 });
@@ -168,6 +168,9 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
             <div class="campo" [hidden]="!ver('sede.nombre')" [class.falta]="falta('sede.nombre')"><label for="tsn">Nombre de sede</label><input id="tsn" name="sedeN" maxlength="20" [(ngModel)]="f.sede.nombre" /></div>
           }
           <div class="campo" [hidden]="!ver('celular')" [class.falta]="falta('celular')"><label for="tcel">Celular</label><input id="tcel" name="cel" maxlength="10" [(ngModel)]="f.celular" /></div>
+          @if (f.roles?.includes('conductor')) {
+            <label class="casilla" title="Debe contar con la autorización del conductor"><input type="checkbox" name="waAut" [(ngModel)]="f.whatsappAutorizado" />Autorizó recibir manifiestos por WhatsApp</label>
+          }
           <div class="campo" [hidden]="!ver('telefono')" [class.falta]="falta('telefono')"><label for="ttel">Teléfono fijo</label><input id="ttel" name="tel" maxlength="7" [(ngModel)]="f.telefono" /></div>
           <div class="campo" [hidden]="!ver('direccion')" [class.falta]="falta('direccion')"><label for="tdir">Dirección <span class="obligatorio">*</span></label><input id="tdir" name="dir" maxlength="60" [(ngModel)]="f.direccion" required /></div>
           @if (ver('codMunicipio')) { <app-municipio etiqueta="Municipio *" [(codigo)]="f.codMunicipio" [class.falta]="falta('codMunicipio')" /> }
@@ -425,7 +428,7 @@ export class Terceros {
   private cuerpo() {
     const f = this.form();
     return { tipoId: f.tipoId, numId: f.numId, nombres: f.nombres, apellido1: f.apellido1, apellido2: f.apellido2, sede: f.sede,
-      telefono: f.telefono, celular: f.celular, direccion: f.direccion, codMunicipio: f.codMunicipio, correo: f.correo,
+      telefono: f.telefono, celular: f.celular, whatsappAutorizado: !!f.whatsappAutorizado, direccion: f.direccion, codMunicipio: f.codMunicipio, correo: f.correo,
       licencia: { ...f.licencia, vence: f.licencia.vence || null }, fechaNacimiento: f.fechaNacimiento || null, banco: f.banco,
       roles: f.roles, activo: f.activo, placas: placasDe(f.placasTexto), placaPrincipal: placasDe(f.placasTexto).includes(f.placaPrincipal) ? f.placaPrincipal : '' };
   }

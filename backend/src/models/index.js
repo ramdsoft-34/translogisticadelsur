@@ -94,6 +94,17 @@ const empresaSchema = new Schema({
     pesosPorTamano: { type: [{ tamano: String, kg: Number, _id: false }],
       default: () => [{ tamano: '1.0', kg: 800 }, { tamano: '3.0', kg: 1500 }, { tamano: '5.0', kg: 2500 }, { tamano: '6.0', kg: 5000 }] },
   },
+  // WhatsApp Business (Cloud API de Meta): por defecto sale del número de Translogística;
+  // la empresa puede registrar su propia cuenta y número. Los secretos van cifrados.
+  whatsapp: {
+    activo: { type: Boolean, default: false },
+    modo: { type: String, enum: ['plataforma', 'propia'], default: 'plataforma' },
+    phoneNumberId: str(), wabaId: str(),
+    plantilla: str({ default: 'manifiesto_conductor' }), idioma: str({ default: 'es' }),
+    tokenCifrado: { type: String, default: '', select: false },
+    appSecretCifrado: { type: String, default: '', select: false },
+    webhookToken: { type: String, default: '', select: false },
+  },
   smtp: {
     activo: { type: Boolean, default: false },
     host: str(), puerto: { type: Number, default: 587 },
@@ -223,6 +234,7 @@ const terceroSchema = new Schema({
   apellido1: str(), apellido2: str(),
   sede: { codigo: str(), nombre: str() },
   telefono: str(), celular: str(), direccion: str(), codMunicipio: str(),
+  whatsappAutorizado: { type: Boolean, default: false },   // autorizó recibir sus manifiestos por WhatsApp
   correo: str({ lowercase: true }),
   licencia: { categoria: str(), numero: str(), vence: fecha },
   fechaNacimiento: fecha,
@@ -419,6 +431,37 @@ envioCorreoSchema.plugin(tenantPlugin);
 envioCorreoSchema.index({ empresa: 1, viaje: 1, createdAt: -1 });
 envioCorreoSchema.index({ empresa: 1, estado: 1 });
 
+// ── Cuenta de WhatsApp de Translogística, compartida por las empresas sin número propio (global) ──
+const plataformaWhatsappSchema = new Schema({
+  clave: { type: String, default: 'whatsapp', unique: true, immutable: true },
+  activo: { type: Boolean, default: false },
+  phoneNumberId: str(), wabaId: str(),
+  plantilla: str({ default: 'manifiesto_conductor' }), idioma: str({ default: 'es' }),
+  tokenCifrado: { type: String, default: '', select: false },
+  appSecretCifrado: { type: String, default: '', select: false },
+  webhookToken: { type: String, default: '', select: false },
+}, { timestamps: true });
+
+// ── Manifiestos enviados al conductor por WhatsApp Business ─────────────────
+const envioWhatsappSchema = new Schema({
+  viaje: { type: Schema.Types.ObjectId, ref: 'Viaje', required: true },
+  conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },
+  documento: str(),                         // n.° del manifiesto
+  telefono: str(),
+  cuenta: { type: String, enum: ['plataforma', 'propia'], default: 'plataforma' },   // de qué número salió (para el cobro)
+  // por_aprobar: creado al aceptarse el manifiesto; solo sale cuando alguien lo aprueba
+  estado: { type: String, enum: ['por_aprobar', 'pendiente', 'enviando', 'enviado', 'entregado', 'leido', 'error', 'descartado'], default: 'por_aprobar' },
+  intentos: { type: Number, default: 0 },
+  idMensaje: str(), error: str(),
+  aprobadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null }, aprobadoEn: fecha,
+  enviadoEn: fecha, entregadoEn: fecha, leidoEn: fecha,
+  origen: { type: String, enum: ['automatico', 'manual'], default: 'automatico' },
+  usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+}, { timestamps: true });
+envioWhatsappSchema.plugin(tenantPlugin);
+envioWhatsappSchema.index({ empresa: 1, viaje: 1, createdAt: -1 });
+envioWhatsappSchema.index({ empresa: 1, idMensaje: 1 });
+
 // ── Liquidación de fletes (relación para facturar y pagar) ──────────────────
 const liquidacionSchema = new Schema({
   numero: { type: Number, required: true },
@@ -601,6 +644,8 @@ export const Contador = modelo('Contador', contadorSchema);
 export const Auditoria = modelo('Auditoria', auditoriaSchema);
 export const PlantillaWhatsapp = modelo('PlantillaWhatsapp', plantillaWhatsappSchema);
 export const EnvioCorreo = modelo('EnvioCorreo', envioCorreoSchema);
+export const EnvioWhatsapp = modelo('EnvioWhatsapp', envioWhatsappSchema);
+export const PlataformaWhatsapp = modelo('PlataformaWhatsapp', plataformaWhatsappSchema);
 export const Prestamo = modelo('Prestamo', prestamoSchema);
 export const LiquidacionConductor = modelo('LiquidacionConductor', liquidacionConductorSchema);
 export const CuentaContable = modelo('CuentaContable', cuentaSchema);

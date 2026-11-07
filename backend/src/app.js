@@ -1,3 +1,4 @@
+import whatsappBusiness from './routes/whatsappBusiness.js';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -38,8 +39,9 @@ export function crearApp() {
   }));
   // Los correos con archivos adjuntos (también el de la relación de cobro) traen su propio límite (12 MB) en la ruta
   const json = express.json({ limit: '1mb' });
-  app.use((req, res, next) => (/^\/api\/(correo\/(relaciones|manual)|gestion\/relaciones-cobro\/[a-f0-9]{24}\/correo)$/.test(req.path) ? next() : json(req, res, next)));
-  app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false }));
+  // Los avisos de WhatsApp necesitan el cuerpo exacto para comprobar la firma de Meta
+  app.use((req, res, next) => (/^\/api\/(correo\/(relaciones|manual)$|gestion\/relaciones-cobro\/[a-f0-9]{24}\/correo$|whatsapp\/webhook(\/|$))/.test(req.path) ? next() : json(req, res, next)));
+  app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: process.env.NODE_ENV === 'test' ? 100000 : 600, standardHeaders: 'draft-7', legacyHeaders: false }));
 
   app.get('/api/salud', (_req, res) => res.json({ ok: true }));
   // Cambios en vivo: canal SSE y aviso de cada modificación a los usuarios de la empresa
@@ -54,6 +56,7 @@ export function crearApp() {
   app.use('/api/viajes', viajes);
   app.use('/api/rndc', rndc);
   app.use('/api/correo', correo);
+  app.use('/api/whatsapp', whatsappBusiness);
   app.use('/api/liquidaciones', liquidaciones);
   app.use('/api/gestion', gestion);
   app.use('/api/reportes', reportes);

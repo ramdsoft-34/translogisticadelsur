@@ -52,7 +52,7 @@ export const terceroSchema = z.object({
   nombres: z.string().trim().max(100).optional().default(''),
   apellido1: t(100), apellido2: t(100),
   sede: z.object({ codigo: t(6), nombre: t(20) }).optional(),
-  telefono: digitos(7), celular: digitos(10),
+  telefono: digitos(7), celular: digitos(10), whatsappAutorizado: z.boolean().optional(),
   direccion: t(60), codMunicipio: divipola,
   correo: z.string().trim().toLowerCase().email().or(z.literal('')).optional().default(''),
   licencia: z.object({ categoria: t(3), numero: t(15), vence: fechaOpc }).optional(),

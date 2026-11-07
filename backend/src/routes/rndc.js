@@ -17,6 +17,7 @@ import { asegurarMesAbierto } from '../services/gestion/cierre.js';
 import { asegurarSoporte } from '../services/gestion/soporteInterno.js';
 import * as masiva from '../services/rndc/actualizacionVehiculos.js';
 import { programarEnvios, enviarPendientes } from '../services/correo.js';
+import { prepararEnvio as prepararWhatsapp } from '../services/whatsappBusiness.js';
 import { estadoLimitador } from '../services/rndc/limitador.js';
 import { verificarViaje, verificarConsecutivos, verificacionVigente } from '../services/rndc/verificacion.js';
 import * as claveRndc from '../services/rndc/claveGuardada.js';
@@ -389,7 +390,10 @@ r.post('/despachar-lote', operar, async (req, res) => {
   // Correos del lote: quedan por aprobar en «Manifestados» (un solo correo por cliente al aprobarlos)
   const aceptados = resultados.filter(x => x.manifiesto?.estado === 'aceptado').map(x => x.viaje);
   (async () => {
-    for (const id of aceptados) await programarEnvios(req.empresaId, id, { origen: 'automatico', usuario: req.usuario._id }).catch(() => {});
+    for (const id of aceptados) {
+      await programarEnvios(req.empresaId, id, { origen: 'automatico', usuario: req.usuario._id }).catch(() => {});
+      await prepararWhatsapp(req.empresaId, id, { usuario: req.usuario._id }).catch(() => {});
+    }
   })().catch(e => console.error('Correos del lote:', e.message));
   res.json(resultados);
 });
@@ -488,6 +492,8 @@ function enviarCorreosSiAceptado(req, viajeId, resultado) {
   if (resultado?.manifiesto?.estado !== 'aceptado') return;
   programarEnvios(req.empresaId, viajeId, { origen: 'automatico', usuario: req.usuario._id })
     .catch(e => console.error('No se pudieron programar los correos del viaje', String(viajeId), e.message));
+  prepararWhatsapp(req.empresaId, viajeId, { usuario: req.usuario._id })
+    .catch(e => console.error('No se pudo preparar el WhatsApp del viaje', String(viajeId), e.message));
 }
 
 function resumen(resultado) {

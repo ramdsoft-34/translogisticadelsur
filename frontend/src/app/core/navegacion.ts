@@ -52,6 +52,7 @@ export const MODULOS: Modulo[] = [
   { id: 'empresa', nombre: 'Empresa', icono: 'ajustes', paginas: [
     { ruta: '/configuracion', texto: 'Configuración', icono: 'ajustes', permisos: [P.CONFIG_GESTIONAR, P.USUARIOS_GESTIONAR], descripcion: 'Conexión RNDC, correo, usuarios, importación y auditoría', claves: 'usuarios correo auditoria importar logo soporte' },
     { ruta: '/admin/empresas', texto: 'Empresas', icono: 'edificio', permisos: [P.EMPRESAS_GESTIONAR], descripcion: 'Empresas de la plataforma' },
+    { ruta: '/admin/whatsapp', texto: 'WhatsApp', icono: 'enviar', permisos: [P.EMPRESAS_GESTIONAR], descripcion: 'Número de Translogística y mensajes enviados por empresa', claves: 'whatsapp meta consumo' },
     { ruta: '/admin/app-version', texto: 'Versión de la app', icono: 'enviar', permisos: [P.EMPRESAS_GESTIONAR], descripcion: 'Avisos de actualización de Sur Track para toda la plataforma', claves: 'version actualizar play store app' },
     { ruta: '/admin/auditoria', texto: 'Auditoría global', icono: 'escudo', permisos: [P.EMPRESAS_GESTIONAR], descripcion: 'Registro de actividad de toda la plataforma' },
   ] },

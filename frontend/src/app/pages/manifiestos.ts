@@ -54,6 +54,11 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
             <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([...seleccion()])" [disabled]="trabajando()">
               <app-icono nombre="correo" />Aprobar correos ({{ seleccion().size }})</button>
           }
+          @if (whatsappActivo()) {
+            <button type="button" confirmar="Clic otra vez para descartar" (confirmado)="descartarWhatsapp([...seleccion()])" [disabled]="trabajando()">Descartar WhatsApp</button>
+            <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="aprobarWhatsapp([...seleccion()])" [disabled]="trabajando()">
+              <app-icono nombre="enviar" />Aprobar WhatsApp ({{ seleccion().size }})</button>
+          }
         }
         @if (pestana() === 'soporte' && seleccion().size) {
           <button type="button" (click)="abrirCorreoManual(true)" [disabled]="trabajando()" title="Correo con los soportes internos elegidos y archivos adjuntos">
@@ -170,7 +175,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
           <thead><tr>
             @if (conSeleccion()) { <th><input type="checkbox" aria-label="Seleccionar todos" [checked]="todos()" (change)="alternarTodos()" /></th> }
             <th>N°</th><th>Fecha</th><th>Cliente / destino</th><th>Placa</th><th>Conductor</th><th class="num">Flete</th>
-            <th>Remesa</th><th>Manifiesto</th>@if (conCorreo()) { <th>Correo</th> }<th></th></tr></thead>
+            <th>Remesa</th><th>Manifiesto</th>@if (conCorreo()) { <th>Envíos</th> }<th></th></tr></thead>
           <tbody>
             @for (v of viajes(); track v._id) {
               <tr>
@@ -190,6 +195,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                 }
                 @if (conCorreo()) {
                   <td data-etiqueta="Correo">@if (resumenCorreo(v._id); as rc) { <button type="button" class="chip-boton" (click)="verCorreos(v)" [title]="rc.titulo"><span class="chip" [class]="rc.clase">{{ rc.texto }}</span></button> }
+                    @if (whatsappDe(v._id); as w) { <span class="chip" style="display:block;width:fit-content;margin-top:4px" [class]="claseWhatsapp(w.estado)" [title]="w.error || ('WhatsApp al conductor ' + (w.telefono || ''))">WhatsApp: {{ textoWhatsapp(w.estado) }}</span> }
                     @else { <button type="button" class="pequeno texto" (click)="verCorreos(v)">Sin envío</button> }</td>
                 }
                 <td class="celda-acciones">
@@ -215,6 +221,16 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                           @if (tienePorAprobar(v._id)) {
                             <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([v._id])" [disabled]="trabajando()"
                               title="Envía al cliente el manifiesto y la carta de salida de este viaje"><app-icono nombre="correo" [tam]="15" />Aprobar correo</button>
+                          }
+                          @if (whatsappActivo()) {
+                            @let w = whatsappDe(v._id);
+                            @if (w?.estado === 'por_aprobar') {
+                              <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarWhatsapp([v._id])" [disabled]="trabajando()"
+                                title="Envía el PDF del manifiesto al WhatsApp del conductor"><app-icono nombre="enviar" [tam]="15" />Aprobar WhatsApp</button>
+                            } @else {
+                              <button class="pequeno" confirmar="Clic otra vez para enviar" (confirmado)="enviarWhatsapp(v)" [disabled]="trabajando()"
+                                title="Envía el PDF del manifiesto al WhatsApp del conductor"><app-icono nombre="enviar" [tam]="15" />{{ w ? 'Reenviar WhatsApp' : 'Enviar WhatsApp' }}</button>
+                            }
                           }
                           <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto y la remesa"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
                           <div class="fila-acciones">
@@ -558,7 +574,7 @@ export class Manifiestos {
   readonly momentos: [string, string][] = [['llegada', 'Llegada'], ['entrada', 'Entrada'], ['salida', 'Salida']];
 
   // Cambios de otros usuarios: la pantalla se actualiza sola
-  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'correo', 'maestros'], () => this.cargar());
+  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'correo', 'whatsapp', 'maestros'], () => this.cargar());
 
   // Vista fija desde el menú (Soporte interno, Envíos al RNDC, Correos); vacía = Manifiestos con sus pestañas
   readonly vista = input<'' | 'soporte' | 'historial' | 'correos'>('');
@@ -583,6 +599,7 @@ export class Manifiestos {
     this.api.get<any[]>('/maestros/clientes').then(c => this.clientesFiltro.set(c)).catch(() => {});
     this.api.get('/rndc/catalogos').then(c => this.catalogos.set(c)).catch(() => {});
     this.api.get<any>('/rndc/config').then(c => this.ambiente.set(c.ambiente)).catch(() => {});
+    this.api.get<any>('/whatsapp/estado').then(c => this.whatsappActivo.set(!!c.activo)).catch(() => {});
   }
 
   ir(p: Pestana) {
@@ -676,6 +693,46 @@ export class Manifiestos {
       for (const e of envios) m.set(e.viaje, [...(m.get(e.viaje) || []), e]);
       this.enviosPorViaje.set(m);
     } catch { /* sin permiso para ver correos */ }
+    try {
+      const envios = await this.api.get<any[]>('/whatsapp/envios', { viajes: lista.map(v => v._id).join(','), limite: 1000 });
+      const m = new Map<string, any>();
+      for (const e of envios) if (!m.has(e.viaje)) m.set(e.viaje, e);      // vienen del más reciente al más antiguo
+      this.whatsappPorViaje.set(m);
+    } catch { /* sin permiso */ }
+  }
+
+  // ── Manifiesto al conductor por WhatsApp Business ──
+  readonly whatsappActivo = signal(false);
+  private whatsappPorViaje = signal<Map<string, any>>(new Map());
+  whatsappDe(viajeId: string) { const w = this.whatsappPorViaje().get(viajeId); return w && w.estado !== 'descartado' ? w : null; }
+  textoWhatsapp(e: string) { return ({ por_aprobar: 'por aprobar', pendiente: 'enviando', enviando: 'enviando', enviado: 'enviado', entregado: 'entregado', leido: 'leído', error: 'error' } as Record<string, string>)[e] || e; }
+  claseWhatsapp(e: string) { return ({ por_aprobar: 'alerta', error: 'error', enviado: 'ok', entregado: 'ok', leido: 'ok' } as Record<string, string>)[e] || ''; }
+  private async tareaWhatsapp(fn: () => Promise<void>) {
+    this.trabajando.set(true);
+    try { await fn(); this.seleccion.set(new Set()); await this.cargarCorreos(this.viajes()); }
+    catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+  aprobarWhatsapp(viajes: string[]) {
+    return this.tareaWhatsapp(async () => {
+      const r = await this.api.post<any>('/whatsapp/aprobar', { viajes });
+      const fallos = r.resultados.filter((x: any) => x.estado === 'error');
+      if (!r.aprobados) this.avisos.mostrar('Los viajes elegidos no tienen WhatsApp por aprobar', 'info');
+      else if (fallos.length) this.avisos.mostrar(`${fallos.length} de ${r.aprobados} no se envió: ${fallos[0].error}`, 'error', 9000);
+      else this.avisos.ok(`${r.aprobados} manifiesto(s) enviados por WhatsApp`);
+    });
+  }
+  descartarWhatsapp(viajes: string[]) {
+    return this.tareaWhatsapp(async () => {
+      const r = await this.api.post<any>('/whatsapp/descartar', { viajes });
+      this.avisos.ok(`${r.descartados} WhatsApp descartados; no se enviarán`);
+    });
+  }
+  enviarWhatsapp(v: Viaje) {
+    return this.tareaWhatsapp(async () => {
+      const r = await this.api.post<any>(`/whatsapp/viajes/${v._id}/enviar`, {});
+      if (r?.estado === 'error') this.avisos.mostrar(`No se envió: ${r.error}`, 'error', 9000);
+      else this.avisos.ok('Manifiesto enviado por WhatsApp');
+    });
   }
 
   // Estado más reciente de cada documento enviado del viaje
