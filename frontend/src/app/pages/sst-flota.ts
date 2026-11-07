@@ -30,6 +30,7 @@ interface Hoja {
 interface Inspeccion {
   checklistId: string; fecha: string; dia: string; placa: string; kilometraje: number; resultado: 'apto' | 'no_apto'; criticosMal: string[]; noCumplen: string[];
   conductor: { nombre: string; cedula: string } | null; autorizacion: { por: string; motivo: string } | null; revision: { por: string; accion: string; fecha: string } | null;
+  repeticion?: { por: string; motivo: string; fecha: string; usadaPor?: string } | null;
 }
 const FUENTES: Record<string, string> = { web: 'registrado en la web', preoperacional: 'del preoperacional', mantenimiento: 'del último mantenimiento' };
 
@@ -92,12 +93,14 @@ const FUENTES: Record<string, string> = { web: 'registrado en la web', preoperac
               <td data-etiqueta="Placa"><span class="placa">{{ i.placa }}</span></td>
               <td data-etiqueta="Conductor">{{ i.conductor?.nombre || '—' }}</td>
               <td data-etiqueta="Resultado"><span class="chip" [class.ok]="i.resultado === 'apto'" [class.error]="i.resultado !== 'apto'">{{ i.resultado === 'apto' ? 'Apto' : 'No apto' }}</span>
-                @if (i.autorizacion) { <small class="d-bloque">Salida autorizada</small> }</td>
+                @if (i.autorizacion) { <small class="d-bloque">Salida autorizada</small> }
+                @if (i.repeticion && !i.repeticion.usadaPor) { <small class="d-bloque">Otro preoperacional habilitado</small> }</td>
               <td data-etiqueta="No cumplen">{{ i.noCumplen.length ? i.noCumplen.length + ' ítem(s)' : '—' }}@if (i.criticosMal.length) { <small class="d-bloque texto-error">{{ i.criticosMal.length }} crítico(s)</small> }</td>
               <td data-etiqueta="Revisión">@if (i.revision; as r) { <div class="celda-doble"><span>{{ r.por }}</span><small>{{ r.accion }}</small></div> } @else { <span class="sutil">Sin revisar</span> }</td>
               <td class="celda-acciones"><div class="acciones">
                 <button class="pequeno" (click)="verPdf(i)"><app-icono nombre="ojo" [tam]="15" />PDF</button>
                 @if (puede && !i.revision) { <button class="pequeno" (click)="abrirRevision(i)">Cerrar revisión</button> }
+                @if (puede && puedeRepetir(i)) { <button class="pequeno" (click)="abrirRepetir(i)" title="El conductor solo puede hacer un preoperacional por día">Habilitar otro hoy</button> }
               </div></td>
             </tr>
           } @empty {
@@ -187,6 +190,16 @@ const FUENTES: Record<string, string> = { web: 'registrado en la web', preoperac
         <button type="submit" form="form-rev" class="primario" [disabled]="trabajando() || accion.trim().length < 3">Guardar</button></ng-container>
     </app-modal>
 
+    <!-- Un preoperacional por día: habilitar que el conductor haga otro hoy -->
+    <app-modal [titulo]="'Habilitar otro preoperacional · ' + (repitiendo()?.placa || '')" [abierto]="!!repitiendo()" (cerrar)="repitiendo.set(null)">
+      <form id="form-rep" class="formulario" (ngSubmit)="permitirRepetir()">
+        <p class="ancho">El conductor solo puede hacer un preoperacional por día y no puede cambiarlo. Con esto podrá hacer <b>uno nuevo hoy</b> (una sola vez). Le llega un aviso al celular y queda registrado quién lo habilitó.</p>
+        <div class="campo ancho"><label for="rep-mot">Motivo</label><textarea id="rep-mot" name="mot" rows="3" [(ngModel)]="motivoRepetir" maxlength="500" required placeholder="Ej.: se cambió la llanta y debe revisarse de nuevo"></textarea></div>
+      </form>
+      <ng-container pie><button type="button" (click)="repitiendo.set(null)">Cancelar</button>
+        <button type="submit" form="form-rep" class="primario" [disabled]="trabajando() || motivoRepetir.trim().length < 10">{{ trabajando() ? 'Habilitando…' : 'Habilitar' }}</button></ng-container>
+    </app-modal>
+
     <app-visor-pdf #visor />
   `,
   styles: [ESTILOS_SST, `
@@ -220,6 +233,8 @@ export class SstFlota {
   readonly errorHoja = signal('');
   readonly pideConfirmar = signal(false);
   readonly revisando = signal<Inspeccion | null>(null);
+  readonly repitiendo = signal<Inspeccion | null>(null);
+  motivoRepetir = '';
   km: number | null = null; rc1 = ''; rc1n = ''; rc2 = ''; rc2n = ''; plan: Actividad[] = []; accion = '';
   mant = { tipo: 'preventivo', actividad: '', fecha: hoyIso(), km: null as number | null, taller: '', costo: 0 };
   fDesde = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date(Date.now() - 7 * 86400000)); fHasta = hoyIso(); fPlaca = ''; fResultado = '';
@@ -247,6 +262,23 @@ export class SstFlota {
 
   verPdf(i: Inspeccion) { this.visor().ver(`/sst/inspecciones/${i.checklistId}/pdf`, `Preoperacional ${i.placa}`); }
   abrirRevision(i: Inspeccion) { this.accion = ''; this.revisando.set(i); }
+  // Solo el último preoperacional de hoy de cada conductor, y si no hay ya uno habilitado sin usar
+  puedeRepetir(i: Inspeccion) {
+    const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+    if (i.dia !== hoy || (i.repeticion && !i.repeticion.usadaPor)) return false;
+    const delConductor = this.inspecciones().filter(x => x.dia === hoy && x.conductor?.cedula && x.conductor.cedula === i.conductor?.cedula);
+    return !delConductor.length || delConductor[0].checklistId === i.checklistId;
+  }
+  abrirRepetir(i: Inspeccion) { this.motivoRepetir = ''; this.repitiendo.set(i); }
+  async permitirRepetir() {
+    const i = this.repitiendo(); if (!i || this.motivoRepetir.trim().length < 10) return;
+    this.trabajando.set(true);
+    try {
+      await this.api.post(`/sst/inspecciones/${i.checklistId}/permitir-repetir`, { motivo: this.motivoRepetir.trim() });
+      this.repitiendo.set(null); this.avisos.ok('Listo: el conductor puede hacer otro preoperacional hoy. Se le avisó al celular.');
+      await this.cargarInspecciones();
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
   async revisar() {
     const i = this.revisando(); if (!i) return;
     this.trabajando.set(true);

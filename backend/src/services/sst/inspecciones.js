@@ -78,3 +78,5 @@ export async function detalle(empresaId, checklistId) {
 
 export const revisar = (checklistId, por, accion) => llamarApp(`/checklist/${encodeURIComponent(checklistId)}/revisar`, { metodo: 'POST', cuerpo: { por, accion } });
 export const autorizar = (checklistId, por, motivo) => llamarApp(`/checklist/${encodeURIComponent(checklistId)}/autorizar`, { metodo: 'POST', cuerpo: { por, motivo } });
+// Un preoperacional por día: la oficina habilita que el conductor haga otro hoy (queda quién y por qué)
+export const permitirRepetir = (checklistId, por, motivo) => llamarApp(`/checklist/${encodeURIComponent(checklistId)}/permitir-repetir`, { metodo: 'POST', cuerpo: { por, motivo } });

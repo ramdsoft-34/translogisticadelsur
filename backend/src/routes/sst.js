@@ -341,6 +341,14 @@ r.post('/inspecciones/:id/revisar', gestionar, async (req, res) => {
   await auditar(req, 'sst_revisar_inspeccion', { entidad: 'Preoperacional', entidadId: req.params.id, detalle: { accion: d.accion } });
   res.json(x);
 });
+// Un preoperacional por día: habilitar que el conductor haga otro hoy (con motivo; le llega un aviso)
+r.post('/inspecciones/:id/permitir-repetir', gestionar, async (req, res) => {
+  await insp.detalle(req.empresaId, id(req.params.id));
+  const d = z.object({ motivo: z.string().trim().min(10, 'Escriba el motivo (mínimo 10 caracteres)').max(500) }).parse(req.body);
+  const x = await insp.permitirRepetir(id(req.params.id), por(req), d.motivo);
+  await auditar(req, 'sst_permitir_otro_preoperacional', { entidad: 'Preoperacional', entidadId: req.params.id, detalle: { placa: x?.placa, motivo: d.motivo } });
+  res.json(x);
+});
 
 // ═════════════ Vencimientos ═════════════
 r.get('/vencimientos', ver, async (req, res) => {
