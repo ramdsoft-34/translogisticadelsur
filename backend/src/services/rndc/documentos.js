@@ -109,11 +109,7 @@ export function contextoViaje(empresa, viaje, vehiculo) {
       : viaje.destinatarioAuto?.numId ? viaje.destinatarioAuto : null;
   const pagoSaldo = cfg.pagoSaldo === 'dias' ? sumarDias(viaje.fecha, Number(cfg.diasPagoSaldo) || 0) : finDeMes(viaje.fecha);
   const v = valoresManifiesto(empresa, viaje, vehiculo);
-  // El origen del manifiesto debe ser el municipio de la remesa: el de la sede del remitente (MAN353).
-  // El RNDC exige que el destino del manifiesto sea el municipio de la remesa, es decir, el de la sede del destinatario
-  // (MAN354). Destino: el fijado a mano (tras un MAN354), si no el de la sede del destinatario.
-  const codOrigen = viaje.codOrigenSede || viaje.codOrigen || cfg.codOrigen || '';
-  const codDestino = viaje.codDestinoManifiesto || viaje.codDestinoSede || viaje.codDestino || viaje.tarifaRef?.codMunicipio || '';
+  const { codOrigen, codDestino, operacion } = rutaManifiesto(empresa, viaje);
   return {
     NIT: nitEmpresa(empresa),
     PLACA: viaje.placa,
@@ -139,7 +135,7 @@ export function contextoViaje(empresa, viaje, vehiculo) {
     ANTICIPO: numero(v.anticipo),
     RETEFUENTE: numero(v.retefuente),
     FOPAT: numero(v.fopat),
-    OPERACION: tipoManifiesto(viaje.tarifaRef?.operacion || cfg.operacion || 'G', codOrigen, codDestino),
+    OPERACION: operacion,
     OBSERVACIONES: txt(viaje.observaciones).slice(0, 200),
     // En el manifiesto van el auxiliar del viaje (días y valor) y las observaciones del viaje (sin marcas internas como [NO FACTURAR])
     OBSERVACIONES_MANIFIESTO: observacionesManifiesto(viaje.textoAuxiliar, viaje.observaciones),
@@ -157,6 +153,16 @@ export function tipoManifiesto(base, codOrigen, codDestino) {
   return (base === 'G' || !base) && mismoMunicipio(codOrigen, codDestino) ? 'U' : (base || 'G');
 }
 
+// Origen, destino y tipo del manifiesto de un viaje.
+// El origen debe ser el municipio de la remesa: el de la sede del remitente (MAN353). El destino, el de la sede del
+// destinatario (MAN354): el fijado a mano (tras un MAN354), si no el de la sede del destinatario.
+export function rutaManifiesto(empresa, viaje) {
+  const cfg = empresa.rndc || {};
+  const codOrigen = viaje.codOrigenSede || viaje.codOrigen || cfg.codOrigen || '';
+  const codDestino = viaje.codDestinoManifiesto || viaje.codDestinoSede || viaje.codDestino || viaje.tarifaRef?.codMunicipio || '';
+  return { codOrigen, codDestino, operacion: tipoManifiesto(viaje.tarifaRef?.operacion || cfg.operacion || 'G', codOrigen, codDestino) };
+}
+
 // El destino del manifiesto (el municipio de la sede del destinatario) no es el del destino del viaje (su tarifa).
 // Pasa cuando se elige una sede del destinatario en otro municipio (p. ej. Túquerres para un viaje al Alto Putumayo).
 export function destinoDistintoTarifa(viaje, ctx) {
@@ -167,13 +173,15 @@ export function destinoDistintoTarifa(viaje, ctx) {
 
 // Valores del manifiesto como los calcula el RNDC:
 //   neto = flete − retención en la fuente − retención ICA − FOPAT;  anticipo ≤ neto;  saldo = neto − anticipo.
-// FOPAT (0,1 % del flete) aplica si el peso bruto del vehículo supera 10.500 kg o si el RNDC ya lo exigió.
+// FOPAT (0,1 % del flete) aplica si el peso bruto del vehículo supera 10.500 kg o si el RNDC ya lo exigió,
+// pero nunca en un viaje municipal o urbano (MAN271: «La retención de FOPAT no aplica para viajes municipales»).
 export function valoresManifiesto(empresa, viaje, vehiculo) {
   const cfg = empresa.rndc || {};
+  const municipal = rutaManifiesto(empresa, viaje).operacion === 'U';
   const flete = Math.round(Number(viaje.flete) || 0);
   const retefuente = retencionFuente(flete, cfg.retefuentePct ?? 1);
   const ica = Math.round(flete * (Number(cfg.reteIca) || 0) / 1000);
-  const fopatAplica = !!cfg.aplicarFopat && (vehiculo?.aplicaFopat === true || (Number(vehiculo?.pbv) || 0) > PBV_FOPAT);
+  const fopatAplica = !!cfg.aplicarFopat && !municipal && (vehiculo?.aplicaFopat === true || (Number(vehiculo?.pbv) || 0) > PBV_FOPAT);
   const fopat = fopatAplica ? Math.round(flete * 0.001) : 0;
   const neto = flete - retefuente - ica - fopat;
   const registrado = Math.round(Number(viaje.anticipo) || 0);

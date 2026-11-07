@@ -44,3 +44,16 @@ test('Destino del manifiesto distinto al de la tarifa (caso viaje 986: Alto Putu
   const v4 = viaje({ codDestinoSede: '86749000' });
   assert.equal(destinoDistintoTarifa(v4, contextoViaje(empresa, v4, null)), null);
 });
+
+test('Viaje municipal: sin FOPAT aunque el vehículo lo pague (MAN271)', async () => {
+  const { valoresManifiesto } = await import('../src/services/rndc/documentos.js');
+  const emp = { ...empresa, rndc: { retefuentePct: 1, aplicarFopat: true } };
+  const pesado = { pbv: 12700 };
+  const urbano = viaje({ codOrigen: '52001033', codDestinoSede: '52001000', flete: 410000 });   // Pasto → Pasto (caso viaje 959)
+  assert.equal(valoresManifiesto(emp, urbano, pesado).fopat, 0);
+  const ctx = contextoViaje(emp, urbano, pesado);
+  assert.equal(ctx.OPERACION, 'U'); assert.equal(ctx.FOPAT, '0');
+  assert.equal(Object.fromEntries(variablesManifiesto(emp, urbano, ctx, 'M1')).RETENCIONFOPAT, '0');
+  // Entre municipios sí aplica
+  assert.equal(valoresManifiesto(emp, viaje({ codOrigen: '52001000', codDestinoSede: '52356000', flete: 410000 }), pesado).fopat, 410);
+});
