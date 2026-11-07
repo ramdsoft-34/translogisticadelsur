@@ -109,6 +109,11 @@ export function contextoViaje(empresa, viaje, vehiculo) {
       : viaje.destinatarioAuto?.numId ? viaje.destinatarioAuto : null;
   const pagoSaldo = cfg.pagoSaldo === 'dias' ? sumarDias(viaje.fecha, Number(cfg.diasPagoSaldo) || 0) : finDeMes(viaje.fecha);
   const v = valoresManifiesto(empresa, viaje, vehiculo);
+  // El origen del manifiesto debe ser el municipio de la remesa: el de la sede del remitente (MAN353).
+  // El RNDC exige que el destino del manifiesto sea el municipio de la remesa, es decir, el de la sede del destinatario
+  // (MAN354). Destino: el fijado a mano (tras un MAN354), si no el de la sede del destinatario.
+  const codOrigen = viaje.codOrigenSede || viaje.codOrigen || cfg.codOrigen || '';
+  const codDestino = viaje.codDestinoManifiesto || viaje.codDestinoSede || viaje.codDestino || viaje.tarifaRef?.codMunicipio || '';
   return {
     NIT: nitEmpresa(empresa),
     PLACA: viaje.placa,
@@ -126,25 +131,38 @@ export function contextoViaje(empresa, viaje, vehiculo) {
     DEST_ID: dest?.numId || idCliente(cliente),
     // Sin destinatario propio, el destinatario es el cliente con su sede registrada en el RNDC
     DEST_SEDE: dest ? (dest.sede || '') : (cliente.sedeRemitente || ''),
-    // El origen del manifiesto debe ser el municipio de la remesa: el de la sede del remitente (MAN353)
-    COD_ORIGEN: viaje.codOrigenSede || viaje.codOrigen || cfg.codOrigen || '',
-    // El RNDC exige que el destino del manifiesto sea el municipio de la remesa, es decir,
-    // el de la sede del destinatario (MAN354). Si se conoce, manda sobre el destino escrito.
-    // Destino del manifiesto: el fijado a mano (tras un MAN354), si no el de la sede del destinatario
-    COD_DESTINO: viaje.codDestinoManifiesto || viaje.codDestinoSede || viaje.codDestino || viaje.tarifaRef?.codMunicipio || '',
+    COD_ORIGEN: codOrigen,
+    COD_DESTINO: codDestino,
     PESO: numero(viaje.pesoKg),
     FLETE: numero(v.flete),
     // El anticipo no puede superar el neto a pagar (MAN270)
     ANTICIPO: numero(v.anticipo),
     RETEFUENTE: numero(v.retefuente),
     FOPAT: numero(v.fopat),
-    OPERACION: viaje.tarifaRef?.operacion || cfg.operacion || 'G',
+    OPERACION: tipoManifiesto(viaje.tarifaRef?.operacion || cfg.operacion || 'G', codOrigen, codDestino),
     OBSERVACIONES: txt(viaje.observaciones).slice(0, 200),
     // En el manifiesto van el auxiliar del viaje (días y valor) y las observaciones del viaje (sin marcas internas como [NO FACTURAR])
     OBSERVACIONES_MANIFIESTO: observacionesManifiesto(viaje.textoAuxiliar, viaje.observaciones),
     REMESA: viaje.remesa?.numero || '',
     MANIFIESTO: viaje.manifiesto?.numero || '',
   };
+}
+
+// Municipio (5 primeros dígitos del código DIVIPOLA: 52001001 Catambuco y 52001000 Pasto son el mismo municipio)
+const municipioDe = (codigo) => { const d = soloDigitos(codigo); return d.length >= 5 ? d.slice(0, 5) : ''; };
+export const mismoMunicipio = (a, b) => !!municipioDe(a) && municipioDe(a) === municipioDe(b);
+// Origen y destino en el mismo municipio (Mocoa → Mocoa, Pasto → Catambuco…): viaje municipal o urbano (U).
+// Solo reemplaza el tipo general; un tipo elegido a propósito en la tarifa (ida y regreso, varios en el día…) se respeta.
+export function tipoManifiesto(base, codOrigen, codDestino) {
+  return (base === 'G' || !base) && mismoMunicipio(codOrigen, codDestino) ? 'U' : (base || 'G');
+}
+
+// El destino del manifiesto (el municipio de la sede del destinatario) no es el del destino del viaje (su tarifa).
+// Pasa cuando se elige una sede del destinatario en otro municipio (p. ej. Túquerres para un viaje al Alto Putumayo).
+export function destinoDistintoTarifa(viaje, ctx) {
+  const t = municipioDe(viaje.tarifaRef?.codMunicipio); const d = municipioDe(ctx.COD_DESTINO);
+  if (!t || !d || t === d) return null;
+  return { tarifa: soloDigitos(viaje.tarifaRef.codMunicipio), destino: soloDigitos(ctx.COD_DESTINO), otroDepartamento: t.slice(0, 2) !== d.slice(0, 2) };
 }
 
 // Valores del manifiesto como los calcula el RNDC:

@@ -10,7 +10,7 @@ import { enviar, registrarTransaccion } from './cliente.js';
 import { xmlRegistro, xmlConsulta, bloqueRemesas, interpretarRegistro, interpretarConsulta, validarVariables, ocultarClave } from './xml.js';
 import {
   contextoViaje, variablesRemesa, variablesManifiesto, variablesCumplidoRemesa, variablesCumplidoManifiesto,
-  variablesAnulacion, variablesTercero, variablesVehiculo, huella, idCliente, destinoIgualOrigen, PROBLEMA_DESTINO, valoresManifiesto, textoAuxiliar,
+  variablesAnulacion, variablesTercero, variablesVehiculo, huella, idCliente, destinoIgualOrigen, PROBLEMA_DESTINO, valoresManifiesto, textoAuxiliar, destinoDistintoTarifa,
 } from './documentos.js';
 import { TIPOS_ID_CONDUCTOR, MOTIVOS_REEMPLAZO } from './catalogos.js';
 import { txt, hoyColombia, normalizar, escaparRegex } from '../../utils/texto.js';
@@ -124,6 +124,18 @@ async function registrar(empresa, cred, proceso, variables, meta, anexos = '') {
 }
 
 // Revisiones de la plataforma antes de enviar (además del diccionario oficial).
+// Destino del manifiesto frente al destino del viaje (su tarifa). Otro departamento no se deja expedir (el manifiesto
+// saldría a un lugar que no es el del viaje); otro municipio del mismo departamento solo se avisa (zonas como «Alto Putumayo»).
+async function revisarDestino(v, ctx) {
+  const x = destinoDistintoTarifa(v, ctx);
+  if (!x) return { problema: '', aviso: '' };
+  const nombres = new Map((await Municipio.find({ codigo: { $in: [x.tarifa, x.destino] } }).select('codigo nombre departamento').lean())
+    .map(m => [m.codigo, `${m.nombre} (${m.departamento || ''})`]));
+  const dest = nombres.get(x.destino) || x.destino; const tar = nombres.get(x.tarifa) || x.tarifa;
+  const texto = `Destino: el manifiesto iría a ${dest}, pero el viaje es a «${txt(v.destino)}» (${tar}). El destino del manifiesto es el municipio de la sede del destinatario: elija la sede de ${tar} o corrija el municipio de la tarifa`;
+  return x.otroDepartamento ? { problema: texto, aviso: '' } : { problema: '', aviso: texto };
+}
+
 function avisosViaje(v, vehiculo) {
   const avisos = [];
   const hoy = hoyColombia();
@@ -233,6 +245,7 @@ export async function vistaPrevia(empresaId, viajeId) {
   const empresa = await empresaConRndc(empresaId);
   const { v, vehiculo } = await cargarViaje(empresaId, viajeId);
   const ctx = contextoViaje(empresa, v, vehiculo);
+  const revDestino = await revisarDestino(v, ctx);
   const manual = { remesa: txt(v.numerosManuales?.remesa), manifiesto: txt(v.numerosManuales?.manifiesto) };
   const baseR = baseReemplazo(v, 'remesa'); const baseM = baseReemplazo(v, 'manifiesto');
   const numR = manual.remesa || (baseR ? await numeroDeReemplazo(empresa, 'remesa', baseR, v._id) : v.remesa?.numero || 'el siguiente disponible en el RNDC');
@@ -258,7 +271,7 @@ export async function vistaPrevia(empresaId, viajeId) {
     // Respuesta textual del RNDC en el último rechazo (para corregir y reenviar)
     ultimoError: ultimo && !(v.manifiesto?.estado === 'aceptado')
       ? { proceso: ultimo.proceso, mensaje: ultimo.mensaje, fecha: ultimo.createdAt, referencia: ultimo.referencia } : null,
-    avisos: avisosViaje(v, vehiculo),
+    avisos: [...avisosViaje(v, vehiculo), ...(revDestino.aviso ? [revDestino.aviso] : [])],
     maestros: [
       vehiculo ? estadoMaestro(empresa, 'vehiculo', 'Vehículo', vehiculo) : { tipo: 'vehiculo', rol: 'Vehículo', referencia: v.placa, estado: 'no_existe', faltantes: [] },
       v.remolque ? (remolque ? estadoMaestro(empresa, 'vehiculo', 'Remolque', remolque) : { tipo: 'vehiculo', rol: 'Remolque', referencia: v.remolque, estado: 'no_existe', faltantes: [] }) : null,
@@ -300,8 +313,12 @@ export async function vistaPrevia(empresaId, viajeId) {
       ...validarVariables(3, remesa.map(([n, x]) => [n, n === 'CONSECUTIVOREMESA' ? 'X' : x])),
       ...(destinoIgualOrigen(ctx) ? [PROBLEMA_DESTINO] : []),
       ...(!(Number(v.pesoKg) > 0) ? [PROBLEMA_CANTIDAD] : []),
+      ...(revDestino.problema ? [revDestino.problema] : []),
     ] },
-    manifiesto: { variables: manifiesto, base: baseManifiesto, ajustes: v.ajustesRndc?.manifiesto || {}, problemas: validarVariables(4, manifiesto.map(([n, x]) => [n, n === 'NUMMANIFIESTOCARGA' ? 'X' : x])) },
+    manifiesto: { variables: manifiesto, base: baseManifiesto, ajustes: v.ajustesRndc?.manifiesto || {}, problemas: [
+      ...validarVariables(4, manifiesto.map(([n, x]) => [n, n === 'NUMMANIFIESTOCARGA' ? 'X' : x])),
+      ...(v.manifiesto?.estado !== 'aceptado' && revDestino.problema ? [revDestino.problema] : []),
+    ] },
   };
 }
 
@@ -487,6 +504,8 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
       const problemas = validarVariables(3, varsRemesa(empresa, v, ctx, numR || 'X'));
       if (destinoIgualOrigen(ctx)) problemas.push(PROBLEMA_DESTINO);
       if (!(Number(v.pesoKg) > 0)) problemas.push(PROBLEMA_CANTIDAD);
+      const rd = await revisarDestino(v, ctx);
+      if (rd.problema) problemas.push(rd.problema);
       if (problemas.length) throw new ErrorHttp(422, 'Faltan datos para la remesa', problemas);
       numR = await numeroParaEnviar(empresa, clave, usuarioId, 'remesa', v);
       const vars = varsRemesa(empresa, v, ctx, numR);
@@ -506,6 +525,9 @@ export async function despachar(empresaId, viajeId, clave, usuarioId) {
       v.anticipo = val.anticipo;
       resultado.ajustes = [`Anticipo ajustado de ${val.anticipoRegistrado} a ${val.anticipo} (neto a pagar)`];
     }
+    // El destino se revisa antes de tomar el número del manifiesto (no deja saltos en la numeración)
+    const rdM = await revisarDestino(v, ctx);
+    if (rdM.problema) throw new ErrorHttp(422, 'Revise el destino del manifiesto', [rdM.problema]);
     const numM = await numeroParaEnviar(empresa, clave, usuarioId, 'manifiesto', v, numR);
     const vars = varsManifiesto(empresa, v, ctx, numM);
     const problemas = validarVariables(4, vars);
