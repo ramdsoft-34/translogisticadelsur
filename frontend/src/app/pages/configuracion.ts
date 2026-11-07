@@ -115,8 +115,8 @@ type Pestana = 'rndc' | 'reglas' | 'correo' | 'logo-empresa' | 'logo' | 'rastreo
                   <input id="mm" name="mm" maxlength="3" [(ngModel)]="c.marcaReemplazoManifiesto" placeholder="." style="text-transform:uppercase" autocomplete="off" />
                   <small>Al expedir de nuevo un manifiesto anulado: M100 → M100{{ c.marcaReemplazoManifiesto || '.' }}. Se usa siempre, aunque un intento anterior haya sido rechazado.</small></div>
                 <div class="ancho mensaje info">Cada remesa y manifiesto nuevo toma el <strong>siguiente de este consecutivo</strong>, y el RNDC solo confirma que esté libre.
-                  Los números mayores que existan en el RNDC no adelantan la numeración; si se llega a uno ya usado, se pasa al siguiente y queda en la auditoría.
-                  Cambiar estos campos exige escribir el motivo.</div>
+                  Los números mayores que existan en el RNDC no adelantan la numeración. Si el siguiente ya está usado, el envío se detiene y queda en la auditoría:
+                  para seguir, escriba aquí el número y el motivo. Esa es la autorización del salto.</div>
                 <div class="ancho verificar-consec">
                   <button type="button" (click)="verificarConsecutivos()" [disabled]="verificandoConsec()" title="Consulta en el RNDC las remesas y manifiestos radicados en los últimos 20 días">
                     <app-icono nombre="enviar" [tam]="15" />{{ verificandoConsec() ? 'Consultando el RNDC…' : 'Verificar consecutivos con el RNDC' }}</button>
@@ -128,7 +128,7 @@ type Pestana = 'rndc' | 'reglas' | 'correo' | 'logo-empresa' | 'logo' | 'rastreo
                         <tr><td>{{ d[1] }}</td><td><strong>{{ x.ultimoRndc || 'No encontrado' }}</strong>
                           @if (x.mensaje) { <div class="sutil" style="color:var(--rojo-texto)">El RNDC respondió: {{ x.mensaje }}</div> }</td><td>{{ x.siguientePlataforma }}</td>
                           <td>@if (x.adelante) {
-                                <span class="chip alerta sin-punto" title="La numeración no salta: sigue en orden y pasa uno a uno los números ya usados">Hay números más adelante</span>
+                                <span class="chip alerta sin-punto" title="La numeración no salta: sigue en orden y se detiene si llega a un número ya usado">Hay números más adelante</span>
                               } @else if (x.ultimoRndc) { <span class="chip ok sin-punto">Correcto</span> }</td></tr>
                       }</tbody></table></div>
                     <small class="sutil">Consultado en el RNDC: documentos radicados del {{ k.desde }} al {{ k.hasta }} y verificación número por número del siguiente
@@ -455,7 +455,7 @@ export class Configuracion {
     try {
       const k = await this.api.post<any>('/rndc/consecutivos/verificar', { clave: c });
       this.consec.set(k);
-      if (k.remesa.adelante || k.manifiesto.adelante) this.avisos.mostrar('En el RNDC hay números más adelante del consecutivo. La numeración no salta: sigue en orden y pasa los ya usados.', 'info', 9000);
+      if (k.remesa.adelante || k.manifiesto.adelante) this.avisos.mostrar('En el RNDC hay números más adelante del consecutivo. La numeración no salta: sigue en orden y pedirá autorización si llega a uno de ellos.', 'info', 9000);
       else this.avisos.ok('Los consecutivos siguen al último número radicado en el RNDC');
     } catch (e: any) {
       if (/contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(e?.error?.error || '')) this.clave.olvidar();

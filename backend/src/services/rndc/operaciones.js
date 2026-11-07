@@ -446,26 +446,32 @@ async function ultimoEnRndc(empresa, claveRndc, usuarioId, clave) {
 
 // Siguiente número de la empresa. La numeración oficial es el consecutivo guardado: cada documento nuevo toma el siguiente
 // y el RNDC solo confirma que esté libre. Un número mayor en el RNDC o en la plataforma (anulado, importado o de otro origen)
-// nunca adelanta la numeración: si se llega a él, se pasa al siguiente y queda registrado en la auditoría.
-// Solo la primera vez, sin consecutivo guardado, se parte del último radicado.
+// nunca adelanta la numeración. Si el siguiente ya está usado no se salta solo: se detiene, queda en la auditoría y el
+// administrador autoriza con un motivo el número desde el que se sigue. Solo la primera vez, sin consecutivo guardado,
+// se parte del último radicado.
 export function numeroDesdeRndc(empresa, claveRndc, usuarioId, clave) {
   const k = `${empresa._id}|${clave}`;
   return enFila(k, async () => {
     const prefijo = prefijoDe(empresa, clave);
     const guardado = (await Contador.findOne({ empresa: empresa._id, clave }).lean())?.valor;
     const primero = (guardado || (await ultimoEnRndc(empresa, claveRndc, usuarioId, clave)) || 0) + 1;
-    for (let n = primero; n < primero + 60; n += 1) {
-      const numero = `${prefijo}${n}`;
-      if (await numeroUsado(empresa._id, clave, numero)) continue;            // otro viaje de la plataforma ya lo tiene
-      if (await existeEnRndc(empresa, claveRndc, usuarioId, clave, numero)) continue;
-      await Contador.updateOne({ empresa: empresa._id, clave }, { $set: { valor: n } }, { upsert: true });
-      if (n !== primero) {
-        await auditar(null, 'consecutivo_saltado', { empresa: empresa._id, usuario: usuarioId, entidad: 'Consecutivo', entidadId: clave,
-          detalle: { desde: `${prefijo}${primero}`, hasta: numero, motivo: 'Los números intermedios ya estaban usados en la plataforma o radicados en el RNDC' } });
-      }
+    const dondeEsta = async (numero) => {
+      const v = await numeroUsado(empresa._id, clave, numero);
+      if (v) return `en el viaje N° ${v.numero}`;
+      return (await existeEnRndc(empresa, claveRndc, usuarioId, clave, numero)) ? 'radicado en el RNDC' : '';
+    };
+    const numero = `${prefijo}${primero}`;
+    const donde = await dondeEsta(numero);
+    if (!donde) {
+      await Contador.updateOne({ empresa: empresa._id, clave }, { $set: { valor: primero } }, { upsert: true });
       return numero;
     }
-    throw new ErrorHttp(409, `Los 60 números de ${clave} desde ${prefijo}${primero} ya están usados. Revise el consecutivo en Configuración → RNDC.`);
+    let libre = '';
+    for (let n = primero + 1; n < primero + 60 && !libre; n += 1) if (!(await dondeEsta(`${prefijo}${n}`))) libre = `${prefijo}${n}`;
+    await auditar(null, 'consecutivo_detenido', { empresa: empresa._id, usuario: usuarioId, entidad: 'Consecutivo', entidadId: clave, resultado: 'denegado',
+      detalle: { numero, donde, siguienteLibre: libre } });
+    throw new ErrorHttp(409, `El siguiente número de ${clave}, ${numero}, ya está usado (${donde}). No se saltó ningún número. `
+      + `Para seguir, el administrador debe autorizarlo en Configuración → RNDC con un motivo${libre ? `; el siguiente libre es ${libre}` : ''}.`);
   });
 }
 
