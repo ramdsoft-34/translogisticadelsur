@@ -17,6 +17,9 @@ const relacionClienteSchema = new Schema({
   grupo: str(),                                    // '' = todos los destinos; si no, el grupo de la tarifa (Viajeros, TAT…)
   titulo: str({ maxlength: 250 }),
   version: { type: Number, default: 1 },           // sube cuando cambia una relación ya enviada
+  // Lo último que se le envió a la empresa (versión, título y totales): el enlace lo muestra mientras la nueva versión no se reenvíe
+  enviado: { version: { type: Number, default: 0 }, titulo: { type: String, default: '' }, fecha: { type: Date, default: null },
+    totales: { viajes: Number, vehiculos: Number, tarifa: Number, auxiliar: Number, total: Number } },
   viajes: { type: [{ type: Schema.Types.ObjectId, ref: 'Viaje' }], default: [] },
   totales: { viajes: { type: Number, default: 0 }, vehiculos: { type: Number, default: 0 }, tarifa: { type: Number, default: 0 },
     auxiliar: { type: Number, default: 0 }, total: { type: Number, default: 0 } },

@@ -19,6 +19,8 @@ const DIA = 864e5;
 const RE_TOKEN = /^[A-Za-z0-9_-]{12,32}$/;
 export const DIAS_REPORTE_TARDE = 3;      // un viaje reportado más de 3 días después de su fecha se avisa
 export const enlaceRelacion = (token) => `${env.urlPublica}/r/${token}`;
+// Deja anotado lo que se envió (para el enlace de la empresa)
+const anotarEnviado = (rel) => { rel.enviado = { version: rel.version || 1, titulo: rel.titulo, totales: rel.totales, fecha: new Date() }; };
 const nuevoToken = () => crypto.randomBytes(12).toString('base64url');
 const $ = (n) => Math.round(Number(n) || 0);
 const pesos = (n) => `$ ${$(n).toLocaleString('es-CO')}`;
@@ -337,7 +339,7 @@ export async function enviarCorreo(empresaId, relId, { para = [], cc = [], asunt
     archivos: [{ filename: `${a.nombre}.xlsx`, content: a.xlsx, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
       { filename: `${a.nombre}.pdf`, content: a.pdf, contentType: 'application/pdf' }], adjuntos });
   rel.envios.push({ canal: 'correo', fecha: new Date(), para: destinatarios, estado: r.estado, error: r.error || '', version: rel.version || 1, usuario });
-  if (r.estado === 'enviado' && rel.estado === 'borrador') rel.estado = 'enviada';
+  if (r.estado === 'enviado') { anotarEnviado(rel); if (rel.estado === 'borrador') rel.estado = 'enviada'; }
   await rel.save();
   return { ...r, estado_relacion: rel.estado };
 }
@@ -369,6 +371,7 @@ export async function marcarWhatsapp(empresaId, relId, { para = '' }, usuario) {
   await archivos(empresaId, relId, { congelar: true, usuario });
   const rel = await cargar(empresaId, relId);
   rel.envios.push({ canal: 'whatsapp', fecha: new Date(), para: [txt(para)].filter(Boolean), estado: 'enviado', version: rel.version || 1, usuario });
+  anotarEnviado(rel);
   if (rel.estado === 'borrador') rel.estado = 'enviada';
   await rel.save();
   return { estado: rel.estado, fecha: rel.envios.at(-1).fecha };
@@ -423,9 +426,11 @@ export async function porToken(token, { anotar = true, agente = '' } = {}) {
 export async function resumenPublico(rel) {
   const [cli, empresa] = await Promise.all([Cliente.findOne({ empresa: rel.empresa, _id: rel.cliente }).select('nombre').lean(),
     Empresa.findById(rel.empresa).select('nombre nit dv rndc.razonSocial').lean()]);
-  return { numero: rel.numero, titulo: rel.titulo, cliente: cli?.nombre || '', periodo: periodoTexto(rel.desde, rel.hasta), grupo: grupoTexto(rel.grupo),
-    totales: rel.totales, estado: rel.estado, empresa: txt(empresa?.rndc?.razonSocial) || empresa?.nombre || '',
-    nit: `${txt(empresa?.nit).replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}${empresa?.dv ? `-${empresa.dv}` : ''}`, generada: rel.updatedAt, version: rel.version || 1 };
+  // Con una versión nueva sin reenviar, la empresa sigue viendo lo que se le envió
+  const e = rel.estado === 'borrador' && rel.enviado?.version ? rel.enviado : null;
+  return { numero: rel.numero, titulo: e?.titulo || rel.titulo, cliente: cli?.nombre || '', periodo: periodoTexto(rel.desde, rel.hasta), grupo: grupoTexto(rel.grupo),
+    totales: e?.totales || rel.totales, estado: e ? 'enviada' : rel.estado, empresa: txt(empresa?.rndc?.razonSocial) || empresa?.nombre || '',
+    nit: `${txt(empresa?.nit).replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}${empresa?.dv ? `-${empresa.dv}` : ''}`, generada: e?.fecha || rel.updatedAt, version: e?.version || rel.version || 1 };
 }
 
 // Corrige la fecha de un viaje desde la revisión (solo sin documentos del RNDC aceptados y fuera de relaciones facturadas)

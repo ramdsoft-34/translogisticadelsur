@@ -70,6 +70,9 @@ test('Ciclo: borrador sin guardar archivos → enviada guarda v1 → cambio = ve
   assert.equal(v2.version, 2); assert.equal(v2.estado, 'borrador'); assert.equal(v2.nuevaVersion, true); assert.equal(v2.totales.viajes, 4);
   g = await guardados(rel);
   assert.equal(g.length, 2, 'la versión 1 sigue guardada');
+  // El enlace de la empresa sigue mostrando lo enviado (3 viajes, versión 1)
+  const pub = await R.resumenPublico(await M.RelacionCliente.findOne({ empresa: empresa._id, _id: rel._id }));
+  assert.deepEqual([pub.version, pub.totales.viajes, pub.estado], [1, 3, 'enviada']);
   const leido = await G.ultimoGuardado(empresa._id, 'relacion-cobro', rel._id);
   assert.ok(leido.buffer.equals(v1.pdf), 'lo enviado no cambia');
   // Una relación que ya se envió no se elimina aunque esté en borrador
