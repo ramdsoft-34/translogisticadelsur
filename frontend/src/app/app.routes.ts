@@ -44,6 +44,7 @@ export const routes: Routes = [
       { path: 'sst/personas', ...pagina([P.SST_VER, P.SST_GESTIONAR], () => import('./pages/sst-personas').then(m => m.SstPersonas)) },
       { path: 'sst/capacitaciones', ...pagina([P.SST_VER, P.SST_GESTIONAR], () => import('./pages/sst-capacitaciones').then(m => m.SstCapacitaciones)) },
       { path: 'sst/formatos', ...pagina([P.SST_VER, P.SST_GESTIONAR], () => import('./pages/sst-formatos').then(m => m.SstFormatos)) },
+      { path: 'sst/planes', ...pagina([P.SST_VER, P.SST_GESTIONAR], () => import('./pages/sst-planes').then(m => m.SstPlanes)) },
       { path: 'sst/empresa', ...pagina([P.SST_GESTIONAR], () => import('./pages/sst-empresa').then(m => m.SstEmpresa)) },
       { path: 'admin/sst', ...pagina([P.EMPRESAS_GESTIONAR], () => import('./pages/admin-sst').then(m => m.AdminSst)) },
       { path: 'admin/empresas', ...pagina([P.EMPRESAS_GESTIONAR], () => import('./pages/admin-empresas').then(m => m.AdminEmpresas)) },

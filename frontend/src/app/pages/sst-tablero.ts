@@ -38,12 +38,20 @@ const ROMANOS = ['', 'I', 'II', 'III', 'IV', 'V'];
       </div>
     </section>
 
+    @if (planes(); as pl) {
+      @if (pl.alertas.resumen.vencidas || pl.alertas.resumen.semana) {
+        <div class="mensaje alerta aviso-planes" role="status" style="margin-bottom: 14px"><strong>{{ pl.alertas.resumen.vencidas }} obligación(es) vencida(s) y {{ pl.alertas.resumen.semana }} para esta semana</strong>
+          en el plan anual (Ministerio del Trabajo, ARL y PESV). <a routerLink="/sst/planes" [queryParams]="{ vista: 'alertas' }">Ver alertas</a></div>
+      }
+    }
+
     <section class="kpis" aria-label="Cumplimiento">
       <article class="kpi">
         <header><span>Estándares mínimos (Res. 0312)</span><app-icono nombre="escudo" [tam]="18" /></header>
         <strong>{{ pct(r()?.empresa?.puntaje0312) }}</strong>
         <span class="prog"><span [style.width.%]="r()?.empresa?.puntaje0312 || 0" [class]="clasePuntaje(r()?.empresa?.puntaje0312)"></span></span>
-        <footer>{{ valoracion(r()?.empresa?.puntaje0312) }} @if (r()?.empresa?.fechaEvaluacion0312) { · {{ r()!.empresa.fechaEvaluacion0312 | dia }} }</footer>
+        <footer>{{ valoracion(r()?.empresa?.puntaje0312) }} @if (r()?.empresa?.fechaEvaluacion0312) { · {{ r()!.empresa.fechaEvaluacion0312 | dia }} }
+          @if (planes(); as pl) { · {{ pl.plan.mejoraAbiertas }} acción(es) de mejora abiertas } · <a routerLink="/sst/planes">Autoevaluación y planes</a></footer>
       </article>
       <article class="kpi">
         <header><span>PESV (Res. 40595)</span><app-icono nombre="camion" [tam]="18" /></header>
@@ -218,8 +226,10 @@ export class SstTablero {
   private perfil = viewChild.required(PerfilSst);
   private pesv = viewChild.required(HojaVidaPesv);
   readonly ind = signal<any>(null);
+  // Fase 13: alertas del plan anual y acciones de mejora abiertas
+  readonly planes = signal<any>(null);
   readonly mes = signal(new Date().toISOString().slice(0, 7));
-  constructor() { this.cargar(); this.cargarIndicadores(); }
+  constructor() { this.cargar(); this.cargarIndicadores(); this.api.get('/sst/planes/resumen').then((x) => this.planes.set(x)).catch(() => null); }
   async cargar() {
     try { this.r.set(await this.api.get('/sst/resumen')); } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
   }

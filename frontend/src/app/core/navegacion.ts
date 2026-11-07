@@ -35,6 +35,7 @@ export const MODULOS: Modulo[] = [
   ] },
   { id: 'sst', nombre: 'SG-SST y PESV', icono: 'escudo', paginas: [
     { ruta: '/sst', texto: 'Tablero SST y PESV', icono: 'escudo', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Vencimientos, checklists del día, indicadores del PESV con Sur Track y capacitaciones', claves: 'sg-sst pesv seguridad vial salud trabajo 0312 40595 velocidad fatiga' },
+    { ruta: '/sst/planes', texto: 'Autoevaluación y planes', icono: 'lista', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Estándares mínimos con puntaje, plan de mejora, plan anual y alertas del Ministerio y la ARL', claves: 'autoevaluacion estandares minimos 0312 plan de mejora plan anual alertas arl ministerio pesv' },
     { ruta: '/sst/preoperacionales', texto: 'Preoperacionales', icono: 'check', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Checklists de Sur Track guardados, no aptos y PDF para auditoría', claves: 'checklist sur track inspeccion apto' },
     { ruta: '/sst/planillas', texto: 'Planillas', icono: 'documento', permisos: [P.SST_VER], descripcion: 'Planilla de seguridad social de cada conductor, mes a mes', claves: 'seguridad social eps arl pila planilla' },
     { ruta: '/sst/personas', texto: 'Personas', icono: 'personas', permisos: [P.SST_VER, P.SST_GESTIONAR], descripcion: 'Conductores y empleados: exámenes, EPP, comparendos y checklists', claves: 'examen medico epp comparendo conductor trabajador' },

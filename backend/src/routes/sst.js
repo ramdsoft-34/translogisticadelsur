@@ -16,10 +16,12 @@ import * as Pesv from '../services/sst/pesv.js';
 import * as Ck from '../services/sst/checklistSurTrack.js';
 import * as FR from '../services/sst/firmaRemota.js';
 import rutasPlanillas from './sstPlanillas.js';
+import rutasPlanes from './sstPlanes.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
 r.use(rutasPlanillas);   // planillas de seguridad social de los conductores (main)
+r.use(rutasPlanes);      // Fase 13: autoevaluación, plan de mejora, plan anual y alertas
 const ver = permitir(P.SST_VER, P.SST_GESTIONAR);
 const gestionar = permitir(P.SST_GESTIONAR);
 const puedeGestionar = (req) => tienePermiso(req.usuario.rol, P.SST_GESTIONAR);
