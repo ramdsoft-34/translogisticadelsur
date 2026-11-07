@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { contextoViaje, variablesRemesa, valoresManifiesto } from '../src/services/rndc/documentos.js';
 import { problemasMaestro } from '../src/services/rndc/operaciones.js';
-import { variablesTercero, variablesVehiculo } from '../src/services/rndc/documentos.js';
+import { variablesTercero, variablesVehiculo, observacionesManifiesto } from '../src/services/rndc/documentos.js';
 
 const empresa = { nit: '900109959', dv: '2', rndc: {} };
 const cliente = { tipoId: 'N', nit: '8909009431', dv: '', sedeRemitente: '1' };
@@ -52,4 +52,16 @@ test('Valores: anticipo igual al flete se ajusta al neto y FOPAT según el vehí
 test('Manifiesto: el origen es el municipio de la sede del remitente (MAN353)', () => {
   const v = { fecha: new Date(), cliente, conductor: {}, codOrigenSede: '52001001' };
   assert.equal(contextoViaje({ ...empresa, rndc: { codOrigen: '52001033' } }, v, null).COD_ORIGEN, '52001001');
+});
+
+test('Observaciones del PDF: la del viaje no se repite aunque el RNDC la guarde sin tildes o cortada', () => {
+  const viaje = 'Planillas 16983-16985 Ruta Buesaco La Cruz Peso 3.000 Valor mercancía 41.000.000';
+  const rndc = 'Planillas 16983-16985 Ruta Buesaco La Cruz Peso 3.000 Valor mercancia 41.000.000';
+  assert.equal(observacionesManifiesto(rndc, viaje), rndc);
+  // Con el auxiliar adelante y el texto cortado por el límite del RNDC
+  const cortado = `Auxiliar 1 día $90.000 · ${rndc}`.slice(0, 60);
+  assert.equal(observacionesManifiesto(cortado, viaje), cortado.trim());
+  // Manifiestos de antes: solo llevaban el auxiliar, entonces sí se agregan las del viaje
+  assert.equal(observacionesManifiesto('Auxiliar 1 día $90.000', 'Llamar al llegar'), 'Auxiliar 1 día $90.000 · Llamar al llegar');
+  assert.equal(observacionesManifiesto('', 'Llamar al llegar'), 'Llamar al llegar');
 });

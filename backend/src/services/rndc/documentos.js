@@ -3,7 +3,7 @@
 // sección 12) y de los ejemplos de la guía v4. Las variables adicionales que
 // configure la empresa (`rndc.extras`) reemplazan o completan las de aquí.
 import crypto from 'node:crypto';
-import { txt, soloDigitos, fmtFecha, finDeMes, sumarDias } from '../../utils/texto.js';
+import { txt, soloDigitos, fmtFecha, finDeMes, sumarDias, normalizar } from '../../utils/texto.js';
 import { retencionFuente } from '../calculos.js';
 
 const PBV_FOPAT = 10500;
@@ -245,7 +245,23 @@ export function variablesRemesa(empresa, viaje, ctx, consecutivo) {
 // ── Manifiesto (proceso 4) ──────────────────────────────────────────────────
 // Observaciones del manifiesto: auxiliar + observaciones del viaje, sin repetir y en el límite del RNDC (200)
 export const limpiarObservaciones = (o) => txt(o).replace(/\[\s*NO\s+FACTURAR\s*\]/gi, '').replace(/\s+/g, ' ').trim();
+// Se compara sin tildes ni signos: el RNDC guarda el texto sin tildes («mercancia») y lo corta a 200, así que la
+// misma observación del viaje («mercancía») no debe salir dos veces en el PDF.
+function yaIncluida(lista, parte) {
+  const np = normalizar(parte);
+  if (!np) return true;
+  return lista.some((x) => {
+    const nx = normalizar(x);
+    return nx.includes(np) || (np.length >= 20 && nx.includes(np.slice(0, 30)));
+  });
+}
 export function observacionesManifiesto(...partes) {
+  const l = [];
+  for (const p of partes.map(limpiarObservaciones).filter(Boolean)) if (!yaIncluida(l, p)) l.push(p);
+  return l.join(' · ').slice(0, 200);
+}
+// Forma anterior (comparaba con tildes): solo para reconocer los PDF guardados con las observaciones repetidas
+export function observacionesManifiestoAnterior(...partes) {
   const l = [];
   for (const p of partes.map(limpiarObservaciones).filter(Boolean)) if (!l.some(x => x.includes(p))) l.push(p);
   return l.join(' · ').slice(0, 200);

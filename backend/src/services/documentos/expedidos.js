@@ -6,6 +6,7 @@
 //    estado es una versión nueva y las anteriores se conservan.
 //  - Liquidación del conductor: permanente al crearse; si se anula, la versión «ANULADA» es otra y la original queda.
 import { Viaje } from '../../models/index.js';
+import { DocumentoPdf } from '../../models/documentos.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { pdfGuardado } from './guardados.js';
 import { datosManifiesto, manifiestoPdf, nombreArchivo } from '../reportes/manifiesto.js';
@@ -20,12 +21,24 @@ async function viajeDe(empresaId, viajeId) {
   return v;
 }
 
+// PDF de manifiestos guardados entre el 6 y el 7 de noviembre de 2026 pudieron quedar con las observaciones repetidas
+// (el RNDC las guarda sin tildes). Esos tienen una versión corregida; la guardada antes se conserva.
+const REPETIDAS_DESDE = new Date('2026-11-06T20:00:00Z');
+const REPETIDAS_HASTA = new Date('2026-11-08T05:00:00Z');
+
 export async function manifiestoExpedido(empresa, viajeId, usuario = null) {
   const v = await viajeDe(empresa._id, viajeId);
   if (!v.manifiesto?.numero || (v.manifiesto.estado !== 'aceptado' && v.estado !== 'cumplido')) throw new ErrorHttp(409, 'El viaje no tiene un manifiesto aceptado por el RNDC');
   const nombre = `Manifiesto_${v.manifiesto.numero}.pdf`;
-  return pdfGuardado(empresa._id, { tipo: 'manifiesto', ref: v._id, clave: v.manifiesto.numero, nombre, usuario,
-    generar: async () => manifiestoPdf(await datosManifiesto(empresa, viajeId)) });
+  let clave = v.manifiesto.numero;
+  let datos = null;
+  const previo = await DocumentoPdf.findOne({ empresa: empresa._id, tipo: 'manifiesto', ref: String(v._id), clave }).select('creado').lean();
+  if (previo && previo.creado >= REPETIDAS_DESDE && previo.creado < REPETIDAS_HASTA) {
+    datos = await datosManifiesto(empresa, viajeId);
+    if (datos.observacionesAnterior !== datos.observaciones) clave = `${v.manifiesto.numero}:observaciones`;
+  }
+  return pdfGuardado(empresa._id, { tipo: 'manifiesto', ref: v._id, clave, nombre, usuario,
+    generar: async () => manifiestoPdf(datos ?? await datosManifiesto(empresa, viajeId)) });
 }
 
 export async function remesaExpedida(empresa, viajeId, usuario = null) {
