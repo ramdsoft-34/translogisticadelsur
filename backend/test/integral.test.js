@@ -360,16 +360,16 @@ test('RNDC: consecutivo con letras y números', async () => {
   assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R-500' })).status, 400, 'solo letras y números');
   assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'REM' })).status, 400, 'debe terminar en número');
   // Se puede bajar si el número no está usado (corrección de un número mal escrito)
-  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R499' })).status, 200);
+  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R499', motivoConsecutivo: 'Prueba de cambio de consecutivo' })).status, 200);
   assert.equal((await s.adminA.get('/api/rndc/config')).body.consecutivoRemesa, 'R499');
-  await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R500' });
+  await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R500', motivoConsecutivo: 'Prueba de cambio de consecutivo' });
   // Cambio de serie con ceros a la izquierda: se conservan
-  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoManifiesto: 'mc0700' })).status, 200);
+  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoManifiesto: 'mc0700', motivoConsecutivo: 'Prueba de cambio de serie' })).status, 200);
   const c2 = (await s.adminA.get('/api/rndc/config')).body;
   assert.equal(c2.consecutivoManifiesto, 'MC0700');
   assert.equal(c2.prefijoManifiesto, 'MC0');
   // Se vuelve a la serie de las demás pruebas
-  await s.adminA.put('/api/rndc/config', { consecutivoManifiesto: 'M700' });
+  await s.adminA.put('/api/rndc/config', { consecutivoManifiesto: 'M700', motivoConsecutivo: 'Prueba de cambio de serie' });
   assert.equal((await s.adminA.get('/api/rndc/config')).body.consecutivoManifiesto, 'M700');
 });
 
@@ -847,31 +847,73 @@ test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazab
   delete process.env.CORREO_TRANSPORTE;
 });
 
-test('RNDC: la numeración sale del RNDC y salta los números ya radicados', async () => {
+test('RNDC: la numeración sigue el consecutivo y pasa los números ya radicados', async () => {
   const usado = (await s.manif.get(`/api/viajes/${s.viaje}`)).body.remesa.numero;     // R500
-  const r1 = await s.adminA.put('/api/rndc/config', { consecutivoRemesa: usado });
+  const r1 = await s.adminA.put('/api/rndc/config', { consecutivoRemesa: usado, motivoConsecutivo: 'Prueba de número ya usado' });
   assert.equal(r1.status, 400);
   assert.match(r1.body.error, /ya se usó en el viaje/);
-  const actual = (await s.adminA.get('/api/rndc/config')).body.consecutivoRemesa;
-  // La numeración interna no manda: aunque se baje a R499, el número sale del RNDC
-  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: 'R499' })).status, 200);
   const nuevo = () => s.reportero.post('/api/viajes', { fecha: '2026-11-06', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
-  const a = await nuevo();
-  const ra = (await s.manif.post(`/api/rndc/viajes/${a.body._id}/despachar`, { clave: CLAVE_RNDC })).body;
-  const ultimoRndc = Math.max(...[...sim.estado.remesas.values()].filter(x => x.CONSECUTIVOREMESA !== ra.remesa.numero)
-    .map(x => Number(String(x.CONSECUTIVOREMESA).match(/^R(\d+)$/)?.[1] || 0)));
-  assert.equal(ra.remesa.numero, `R${ultimoRndc + 1}`, 'el siguiente al último radicado en el RNDC');
-  assert.equal(ra.remesa.estado, 'aceptado', JSON.stringify(ra));
-  // Números radicados por fuera de la plataforma (portal del Ministerio): se saltan sin preguntar
-  const n = Number(ra.remesa.numero.slice(1));
-  for (const x of [n + 1, n + 2]) sim.estado.remesas.set(`9001112221|R${x}`, { NUMNITEMPRESATRANSPORTE: '9001112221', CONSECUTIVOREMESA: `R${x}` });
-  const b = await nuevo();
-  const rb = (await s.manif.post(`/api/rndc/viajes/${b.body._id}/despachar`, { clave: CLAVE_RNDC })).body;
-  assert.equal(rb.remesa.numero, `R${n + 3}`, JSON.stringify(rb.remesa));
-  assert.notEqual(rb.remesa.numero, usado);
+  const n = Number((await s.adminA.get('/api/rndc/config')).body.consecutivoRemesa.slice(1));
+  // Números radicados por fuera de la plataforma (portal del Ministerio): se pasan sin preguntar
+  for (const x of [n, n + 1]) sim.estado.remesas.set(`9001112221|R${x}`, { NUMNITEMPRESATRANSPORTE: '9001112221', CONSECUTIVOREMESA: `R${x}` });
+  const rb = (await s.manif.post(`/api/rndc/viajes/${(await nuevo()).body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  assert.equal(rb.remesa.numero, `R${n + 2}`, JSON.stringify(rb.remesa));
   assert.equal(rb.manifiesto.estado, 'aceptado', JSON.stringify(rb));
-  // Se restablece la numeración que traían las demás pruebas
-  await s.adminA.put('/api/rndc/config', { consecutivoRemesa: `R${Math.max(Number(actual.slice(1)), n + 4)}` });
+});
+
+test('RNDC: un número anulado o radicado muy adelante no hace saltar la numeración (caso M10063274 → M10063903)', async () => {
+  const nuevo = () => s.reportero.post('/api/viajes', { fecha: '2026-11-06', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+  const a = (await s.manif.post(`/api/rndc/viajes/${(await nuevo()).body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  assert.equal(a.remesa.estado, 'aceptado', JSON.stringify(a));
+  const n = Number(a.remesa.numero.slice(1));
+  // Un viaje de la plataforma con un número muy adelante, radicado y luego anulado (el RNDC ya no lo lista)
+  const raro = await M.Viaje.collection.insertOne({ empresa: new mongoose.Types.ObjectId(String(s.empresaA)), numero: 990001, estado: 'registrado', fecha: new Date(), placa: 'ABC123',
+    remesa: { numero: `R${n + 50}`, radicado: '999', estado: 'anulado' }, manifiesto: { numero: `M${n + 50}`, radicado: '999', estado: 'anulado' } });
+  const b = (await s.manif.post(`/api/rndc/viajes/${(await nuevo()).body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  await M.Viaje.collection.deleteOne({ _id: raro.insertedId });
+  assert.equal(b.remesa.numero, `R${n + 1}`, 'sigue el consecutivo, no el número de más adelante');
+  assert.equal(b.manifiesto.numero, `M${n + 1}`);
+  // Radicado por fuera muy adelante: tampoco salta; cuando se llega a uno usado, pasa solo ese y queda en la auditoría
+  sim.estado.remesas.set(`9001112221|R${n + 40}`, { NUMNITEMPRESATRANSPORTE: '9001112221', CONSECUTIVOREMESA: `R${n + 40}` });
+  sim.estado.remesas.set(`9001112221|R${n + 3}`, { NUMNITEMPRESATRANSPORTE: '9001112221', CONSECUTIVOREMESA: `R${n + 3}` });
+  const c = (await s.manif.post(`/api/rndc/viajes/${(await nuevo()).body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  assert.equal(c.remesa.numero, `R${n + 2}`);
+  const d = (await s.manif.post(`/api/rndc/viajes/${(await nuevo()).body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  assert.equal(d.remesa.numero, `R${n + 4}`, 'pasa únicamente el número ya radicado');
+  const auditoria = await M.Auditoria.findOne({ accion: 'consecutivo_saltado' }).sort({ _id: -1 }).lean();
+  assert.equal(auditoria.detalle.hasta, `R${n + 4}`);
+  sim.estado.remesas.delete(`9001112221|R${n + 40}`);
+  sim.estado.remesas.delete(`9001112221|R${n + 3}`);
+  // A mano no se puede saltar la numeración
+  const man = (await nuevo()).body._id;
+  assert.equal((await s.manif.put(`/api/rndc/viajes/${man}/datos`, { numeroRemesa: `R${n + 30}` })).status, 200);
+  const salto = await s.manif.post(`/api/rndc/viajes/${man}/despachar`, { clave: CLAVE_RNDC });
+  assert.equal(salto.status, 409);
+  assert.match(salto.body.error, /se salta la numeración/);
+  await s.manif.put(`/api/rndc/viajes/${man}/datos`, { numeroRemesa: '' });
+  await s.manif.del(`/api/viajes/${man}`);
+  // Cambiar el consecutivo exige motivo, solo el administrador, y queda en la auditoría
+  const conf = (await s.adminA.get('/api/rndc/config')).body;
+  assert.equal(conf.consecutivoRemesa, `R${n + 5}`);
+  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: `R${n + 20}` })).status, 400, 'sin motivo');
+  assert.equal((await s.manif.put('/api/rndc/config', { consecutivoRemesa: `R${n + 20}`, motivoConsecutivo: 'Intento sin ser administrador' })).status, 403);
+  assert.equal((await s.adminA.put('/api/rndc/config', { consecutivoRemesa: `R${n + 20}`, motivoConsecutivo: 'Salto aprobado por la gerencia' })).status, 200);
+  const cambio = await M.Auditoria.findOne({ accion: 'editar_config_rndc' }).sort({ _id: -1 }).lean();
+  assert.equal(cambio.detalle.motivoConsecutivo, 'Salto aprobado por la gerencia');
+  const e = (await s.manif.post(`/api/rndc/viajes/${(await nuevo()).body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  assert.equal(e.remesa.numero, `R${n + 20}`);
+  // Con la contraseña guardada, el número elegido se verifica: radicado no se acepta; libre, la numeración sigue desde él
+  assert.equal((await s.adminA.post('/api/rndc/clave-guardada', { clave: CLAVE_RNDC, miClave: CLAVE })).status < 300, true);
+  sim.estado.remesas.set(`9001112221|R${n + 70}`, { NUMNITEMPRESATRANSPORTE: '9001112221', CONSECUTIVOREMESA: `R${n + 70}` });
+  const ocupado = await s.adminA.put('/api/rndc/config', { consecutivoRemesa: `R${n + 70}`, motivoConsecutivo: 'Prueba de número ocupado' });
+  assert.equal(ocupado.status, 400);
+  assert.match(ocupado.body.error, /ya está radicado en el RNDC/);
+  const libre = await s.adminA.put('/api/rndc/config', { consecutivoRemesa: `R${n + 71}`, motivoConsecutivo: 'Prueba de número libre' });
+  assert.equal(libre.body.verificacion.remesa, 'libre', JSON.stringify(libre.body));
+  sim.estado.remesas.delete(`9001112221|R${n + 70}`);
+  await s.adminA.del('/api/rndc/clave-guardada');
+  const f = (await s.manif.post(`/api/rndc/viajes/${(await nuevo()).body._id}/despachar`, { clave: CLAVE_RNDC })).body;
+  assert.equal(f.remesa.numero, `R${n + 71}`);
 });
 
 test('RNDC: un número con un dígito de más no cambia la numeración (caso R100632601)', async () => {
@@ -882,7 +924,6 @@ test('RNDC: un número con un dígito de más no cambia la numeración (caso R10
   // Alguien radicó por fuera un número con un dígito de más (R5231 en una serie de 3 dígitos)
   const raro = `R${n}1`;
   sim.estado.remesas.set(`9001112221|${raro}`, { NUMNITEMPRESATRANSPORTE: '9001112221', CONSECUTIVOREMESA: raro });
-  (await import('../src/services/rndc/operaciones.js')).olvidarNumeracion();
   const b = (await s.manif.post(`/api/rndc/viajes/${(await nuevo()).body._id}/despachar`, { clave: CLAVE_RNDC })).body;
   assert.equal(b.remesa.numero, `R${n + 1}`, 'el siguiente de la serie, no el del número raro');
   // A mano tampoco se acepta un número fuera de la serie
@@ -917,14 +958,14 @@ test('RNDC: verificación previa contra el RNDC y consecutivos', async () => {
   assert.match(c.body.remesa.siguientePlataforma, /^R\d+$/);
   assert.match(c.body.remesa.ultimoRndc, /^R\d+$/, JSON.stringify(c.body));
   assert.ok(Number(c.body.remesa.ultimoRndc.slice(1)) < Number(c.body.remesa.siguientePlataforma.slice(1)), 'la plataforma va adelante');
-  assert.equal(c.body.remesa.sugerido, '');
+  assert.equal(c.body.remesa.adelante, false);
   assert.ok(c.body.remesa.consultasPorNumero >= 1, 'pregunta al RNDC por el número siguiente');
   // Remesas radicadas por fuera de la plataforma (portal del Ministerio): el último real es el del RNDC
   const sig = Number(c.body.remesa.siguientePlataforma.slice(1));
   for (const n of [sig, sig + 1, sig + 2]) sim.estado.remesas.set(`9001112221|R${n}`, { NUMNITEMPRESATRANSPORTE: '9001112221', CONSECUTIVOREMESA: `R${n}` });
   const c2 = (await s.adminA.post('/api/rndc/consecutivos/verificar', { clave: CLAVE_RNDC })).body;
   assert.equal(c2.remesa.ultimoRndc, `R${sig + 2}`, JSON.stringify(c2.remesa));
-  assert.equal(c2.remesa.sugerido, `R${sig + 3}`);
+  assert.equal(c2.remesa.adelante, true, 'se informa, pero la numeración no salta');
   for (const n of [sig, sig + 1, sig + 2]) sim.estado.remesas.delete(`9001112221|R${n}`);
   await s.manif.del(`/api/viajes/${v.body._id}`);
 });
@@ -937,8 +978,8 @@ test('RNDC: tras un DUPLICADO se escriben a mano los números de remesa y manifi
   assert.equal(r1.status, 400);
   assert.match(r1.body.error, /ya lo tiene el viaje/);
   const cfg = (await s.adminA.get('/api/rndc/config')).body;
-  const libreR = `R${cfg.siguienteRemesa + 40}`;
-  const libreM = `M${cfg.siguienteManifiesto + 40}`;
+  const libreR = `R${cfg.siguienteRemesa}`;
+  const libreM = `M${cfg.siguienteManifiesto}`;
   const r2 = await s.manif.put(`/api/rndc/viajes/${id}/datos`, { numeroRemesa: libreR.toLowerCase(), numeroManifiesto: libreM });
   assert.equal(r2.status, 200, JSON.stringify(r2.body));
   assert.equal(r2.body.numeros.remesa, libreR);
@@ -949,8 +990,8 @@ test('RNDC: tras un DUPLICADO se escriben a mano los números de remesa y manifi
   const x = (await s.manif.get(`/api/viajes/${id}`)).body;
   assert.equal(x.numerosManuales.remesa, '');
   const cfg2 = (await s.adminA.get('/api/rndc/config')).body;
-  assert.equal(cfg2.siguienteRemesa, cfg.siguienteRemesa + 41, 'el consecutivo avanza para no repetir el número');
-  assert.equal(cfg2.siguienteManifiesto, cfg.siguienteManifiesto + 41);
+  assert.equal(cfg2.siguienteRemesa, cfg.siguienteRemesa + 1, 'el consecutivo avanza para no repetir el número');
+  assert.equal(cfg2.siguienteManifiesto, cfg.siguienteManifiesto + 1);
 });
 
 test('RNDC: cumplir y anular varios viajes a la vez', async () => {

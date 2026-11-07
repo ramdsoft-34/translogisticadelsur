@@ -2,6 +2,7 @@
 // cumplir, anular, registrar maestros y consultar. Cada envío queda en
 // TransaccionRndc. La clave del usuario web service se recibe en cada
 // operación y nunca se guarda.
+import { auditar } from '../auditoria.js';
 import { Empresa, Viaje, Vehiculo, Tercero, Municipio, Tarifa, TransaccionRndc, Contador, proximo, pob } from '../../models/index.js';
 import { lineaLiquidacion, respaldosAuxiliar } from '../calculos.js';
 import { buscadorMunicipios } from '../importacion/excel.js';
@@ -327,7 +328,7 @@ export async function vistaPrevia(empresaId, viajeId) {
 export async function numeroUsado(empresaId, clave, numero, excepto = null) {
   const campo = clave === 'remesa' ? 'remesa.numero' : 'manifiesto.numero';
   const f = { empresa: empresaId, ...(excepto ? { _id: { $ne: excepto } } : {}),
-    $or: [{ [campo]: numero }, { [`numerosManuales.${clave}`]: numero }, ...(clave === 'manifiesto' ? [{ manifiestoReemplazado: numero }] : [])] };
+    $or: [{ [campo]: numero }, { [`numerosManuales.${clave}`]: numero }, { [`anuladoBase.${clave}`]: numero }, ...(clave === 'manifiesto' ? [{ manifiestoReemplazado: numero }] : [])] };
   return Viaje.findOne(f).select('numero').lean();
 }
 
@@ -358,27 +359,18 @@ export function numeroParejo(empresa, numRemesa) {
   return `${prefijoDe(empresa, 'manifiesto')}${m[2]}`;
 }
 
-// Número escrito a mano: si sigue la numeración de la empresa, el consecutivo avanza hasta él
-// para que los siguientes documentos no lo repitan.
+// Número escrito a mano: el consecutivo solo avanza si es justo el siguiente. Más adelante no se acepta (ver numeroParaEnviar)
+// y uno anterior llena un hueco sin mover la numeración.
 async function avanzarConsecutivo(empresa, clave, numero) {
-  const prefijo = (clave === 'remesa' ? empresa.rndc?.prefijoRemesa : empresa.rndc?.prefijoManifiesto) || '';
-  const m = String(numero).match(/^(.*?)(\d+)$/);
-  if (!m || m[1] !== prefijo) return;
-  const d = digitosSerie(await radicadosEnPlataforma(empresa, clave));
-  if (d && String(Number(m[2])).length !== d) return;          // fuera de la serie: no mueve la numeración
-  await Contador.updateOne({ empresa: empresa._id, clave, valor: { $lt: Number(m[2]) } }, { $set: { valor: Number(m[2]) } });
+  const m = String(numero).match(patronSerie(prefijoDe(empresa, clave)));
+  if (m) await Contador.updateOne({ empresa: empresa._id, clave, valor: Number(m[1]) - 1 }, { $set: { valor: Number(m[1]) } });
 }
 
-// ── Numeración desde el RNDC ────────────────────────────────────────────────
-// El número de cada remesa y manifiesto nuevo sale del RNDC: se consulta el último radicado de la
-// empresa (listado de los últimos días), se toma el siguiente y se confirma en el RNDC que esté libre;
-// si ya existe se pasa al siguiente. La numeración interna solo es el punto de partida si el RNDC
-// no devuelve el listado. Las asignaciones de una misma empresa se hacen en fila (sin choques).
+// ── Numeración ──────────────────────────────────────────────────────────────
+// Las asignaciones de una misma empresa se hacen en fila (sin choques).
 const NUMERACION = { remesa: { que: 'remesa', campo: 'consecutivoremesa', filtro: 'CONSECUTIVOREMESA' },
   manifiesto: { que: 'manifiesto', campo: 'nummanifiestocarga', filtro: 'NUMMANIFIESTOCARGA' } };
-const ultimoConocido = new Map();          // `${empresa}|${clave}` → { numero, vence }
 const filas = new Map();
-const VIGENCIA_ULTIMO_MS = 5 * 60 * 1000;
 const sinDatosRndc = (m) => /no (se )?encontr|no exist|no hay|sin registros|no tiene|no se hallaron|0 registros/i.test(m || '');
 // «Usuario: 7112» viene en todas las respuestas del RNDC: no indica por sí solo un error de clave
 const errorDeClave = (m) => /contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(m || '');
@@ -452,30 +444,30 @@ async function ultimoEnRndc(empresa, claveRndc, usuarioId, clave) {
   return ultimoDeLaSerie([...numeros, ...(await radicadosEnPlataforma(empresa, clave))]);
 }
 
-// Siguiente número disponible en el RNDC (consultado y confirmado libre antes de usarlo)
+// Siguiente número de la empresa. La numeración oficial es el consecutivo guardado: cada documento nuevo toma el siguiente
+// y el RNDC solo confirma que esté libre. Un número mayor en el RNDC o en la plataforma (anulado, importado o de otro origen)
+// nunca adelanta la numeración: si se llega a él, se pasa al siguiente y queda registrado en la auditoría.
+// Solo la primera vez, sin consecutivo guardado, se parte del último radicado.
 export function numeroDesdeRndc(empresa, claveRndc, usuarioId, clave) {
   const k = `${empresa._id}|${clave}`;
   return enFila(k, async () => {
     const prefijo = prefijoDe(empresa, clave);
-    let c = ultimoConocido.get(k);
-    if (!c || c.vence < Date.now()) {
-      c = { numero: await ultimoEnRndc(empresa, claveRndc, usuarioId, clave), vence: Date.now() + VIGENCIA_ULTIMO_MS };
-      ultimoConocido.set(k, c);
-    }
-    let n = c.numero !== null ? c.numero + 1 : await proximo(empresa._id, clave);
-    for (let i = 0; i < 60; i += 1, n += 1) {
+    const guardado = (await Contador.findOne({ empresa: empresa._id, clave }).lean())?.valor;
+    const primero = (guardado || (await ultimoEnRndc(empresa, claveRndc, usuarioId, clave)) || 0) + 1;
+    for (let n = primero; n < primero + 60; n += 1) {
       const numero = `${prefijo}${n}`;
       if (await numeroUsado(empresa._id, clave, numero)) continue;            // otro viaje de la plataforma ya lo tiene
       if (await existeEnRndc(empresa, claveRndc, usuarioId, clave, numero)) continue;
-      c.numero = n;                                                             // reservado para los siguientes envíos
-      await Contador.updateOne({ empresa: empresa._id, clave }, { $max: { valor: n } }, { upsert: true });
+      await Contador.updateOne({ empresa: empresa._id, clave }, { $set: { valor: n } }, { upsert: true });
+      if (n !== primero) {
+        await auditar(null, 'consecutivo_saltado', { empresa: empresa._id, usuario: usuarioId, entidad: 'Consecutivo', entidadId: clave,
+          detalle: { desde: `${prefijo}${primero}`, hasta: numero, motivo: 'Los números intermedios ya estaban usados en la plataforma o radicados en el RNDC' } });
+      }
       return numero;
     }
-    throw new ErrorHttp(409, `No se encontró en el RNDC un número de ${clave} libre después de ${prefijo}${n - 60}`);
+    throw new ErrorHttp(409, `Los 60 números de ${clave} desde ${prefijo}${primero} ya están usados. Revise el consecutivo en Configuración → RNDC.`);
   });
 }
-// Para las pruebas: olvidar el último número consultado
-export function olvidarNumeracion() { ultimoConocido.clear(); }
 
 // Número con el que sale un documento, siempre confirmado libre en el RNDC:
 // - escrito a mano: se usa si está libre (si no, se avisa);
@@ -491,6 +483,10 @@ async function numeroParaEnviar(empresa, claveRndc, usuarioId, clave, v, numReme
     const d = m ? digitosSerie(await radicadosEnPlataforma(empresa, clave)) : null;
     if (m && d && String(Number(m[1])).length !== d) {
       throw new ErrorHttp(409, `El número ${manual} tiene ${String(Number(m[1])).length} dígitos y los de la empresa en el RNDC tienen ${d}. Revíselo o deje el campo vacío para usar el siguiente del RNDC.`);
+    }
+    const siguiente = await proximo(empresa._id, clave);
+    if (m && siguiente > 1 && Number(m[1]) > siguiente) {
+      throw new ErrorHttp(409, `El número ${manual} se salta la numeración: el siguiente es ${prefijoDe(empresa, clave)}${siguiente}. Deje el campo vacío, o pida al administrador que apruebe el salto en Configuración → RNDC indicando el motivo.`);
     }
     if (await existeEnRndc(empresa, claveRndc, usuarioId, clave, manual)) throw new ErrorHttp(409, `El número ${manual} ya está radicado en el RNDC: escriba otro o deje el campo vacío para usar el siguiente disponible`);
     return manual;

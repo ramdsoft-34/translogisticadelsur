@@ -97,21 +97,26 @@ type Pestana = 'rndc' | 'reglas' | 'correo' | 'logo-empresa' | 'logo' | 'rastreo
                 </div>
                 <div class="campo"><label for="sr">Próximo consecutivo de remesa</label>
                   <input id="sr" name="sr" maxlength="15" [ngModel]="c.consecutivoRemesa" (ngModelChange)="c.consecutivoRemesa = limpiarConsecutivo($event)"
-                    placeholder="R10063903" style="text-transform:uppercase" autocomplete="off" />
+                    placeholder="R1" style="text-transform:uppercase" autocomplete="off" />
                   <small>Solo letras y números; debe terminar en número.</small></div>
                 <div class="campo"><label for="sm">Próximo consecutivo de manifiesto</label>
                   <input id="sm" name="sm" maxlength="15" [ngModel]="c.consecutivoManifiesto" (ngModelChange)="c.consecutivoManifiesto = limpiarConsecutivo($event)"
-                    placeholder="M10063903" style="text-transform:uppercase" autocomplete="off" />
+                    placeholder="M1" style="text-transform:uppercase" autocomplete="off" />
                   <small>Solo letras y números; debe terminar en número.</small></div>
+                @if (consecutivoCambiado(c)) {
+                  <div class="campo ancho"><label for="mcon">Motivo del cambio de consecutivo <span class="obligatorio">*</span></label>
+                    <input id="mcon" name="mcon" maxlength="300" [(ngModel)]="motivoConsecutivo" placeholder="Por qué cambia la numeración" autocomplete="off" />
+                    <small>Queda en la auditoría con su usuario. Saltar números debe estar justificado.</small></div>
+                }
                 <div class="campo"><label for="mr">Marca de reemplazo de remesa</label>
                   <input id="mr" name="mr" maxlength="3" [(ngModel)]="c.marcaReemplazoRemesa" placeholder="A" style="text-transform:uppercase" autocomplete="off" />
                   <small>Al expedir de nuevo una remesa anulada: R100 → R100{{ c.marcaReemplazoRemesa || 'A' }}.</small></div>
                 <div class="campo"><label for="mm">Marca de reemplazo de manifiesto</label>
                   <input id="mm" name="mm" maxlength="3" [(ngModel)]="c.marcaReemplazoManifiesto" placeholder="." style="text-transform:uppercase" autocomplete="off" />
                   <small>Al expedir de nuevo un manifiesto anulado: M100 → M100{{ c.marcaReemplazoManifiesto || '.' }}. Se usa siempre, aunque un intento anterior haya sido rechazado.</small></div>
-                <div class="ancho mensaje info">Los números de remesa y manifiesto se toman <strong>del RNDC</strong> automáticamente: antes de cada envío se consulta
-                  el último radicado (incluidos los del portal del Ministerio o la plantilla de Excel), se toma el siguiente y se confirma que esté libre.
-                  Estos campos solo indican el prefijo (por ejemplo «R» o «M») y el punto de partida si el RNDC no devuelve el listado.</div>
+                <div class="ancho mensaje info">Cada remesa y manifiesto nuevo toma el <strong>siguiente de este consecutivo</strong>, y el RNDC solo confirma que esté libre.
+                  Los números mayores que existan en el RNDC no adelantan la numeración; si se llega a uno ya usado, se pasa al siguiente y queda en la auditoría.
+                  Cambiar estos campos exige escribir el motivo.</div>
                 <div class="ancho verificar-consec">
                   <button type="button" (click)="verificarConsecutivos()" [disabled]="verificandoConsec()" title="Consulta en el RNDC las remesas y manifiestos radicados en los últimos 20 días">
                     <app-icono nombre="enviar" [tam]="15" />{{ verificandoConsec() ? 'Consultando el RNDC…' : 'Verificar consecutivos con el RNDC' }}</button>
@@ -122,12 +127,12 @@ type Pestana = 'rndc' | 'reglas' | 'correo' | 'logo-empresa' | 'logo' | 'rastreo
                         @let x = k[d[0]];
                         <tr><td>{{ d[1] }}</td><td><strong>{{ x.ultimoRndc || 'No encontrado' }}</strong>
                           @if (x.mensaje) { <div class="sutil" style="color:var(--rojo-texto)">El RNDC respondió: {{ x.mensaje }}</div> }</td><td>{{ x.siguientePlataforma }}</td>
-                          <td>@if (x.sugerido) {
-                                <button type="button" class="pequeno primario" confirmar="Clic otra vez para ajustar" (confirmado)="ajustarConsecutivo(d[0], x.sugerido)">Ajustar a {{ x.sugerido }}</button>
+                          <td>@if (x.adelante) {
+                                <span class="chip alerta sin-punto" title="La numeración no salta: sigue en orden y pasa uno a uno los números ya usados">Hay números más adelante</span>
                               } @else if (x.ultimoRndc) { <span class="chip ok sin-punto">Correcto</span> }</td></tr>
                       }</tbody></table></div>
                     <small class="sutil">Consultado en el RNDC: documentos radicados del {{ k.desde }} al {{ k.hasta }} y verificación número por número del siguiente
-                      ({{ k.remesa.consultasPorNumero + k.manifiesto.consultasPorNumero }} consultas). Si la plataforma va por detrás, use «Ajustar».</small>
+                      ({{ k.remesa.consultasPorNumero + k.manifiesto.consultasPorNumero }} consultas).</small>
                   }
                 </div>
               </div>
@@ -397,6 +402,8 @@ export class Configuracion {
         const c = await this.api.get<any>('/rndc/config');
         this.ambienteGuardado.set(c.ambiente);
         this.sinGuardar.set(false);
+        this.consecutivosGuardados = { remesa: c.consecutivoRemesa, manifiesto: c.consecutivoManifiesto };
+        this.motivoConsecutivo = '';
         this.cfg.set({ ...c, mercancia: c.mercancia || {}, poliza: { ...(c.poliza || {}), vence: isoDia(c.poliza?.vence) }, extras: c.extras || [] });
       }
       if (p === 'usuarios') {
@@ -423,10 +430,16 @@ export class Configuracion {
     if (c.ambiente === 'PRODUCCION' && this.ambienteGuardado() !== 'PRODUCCION' && !this.confirmoProduccion) {
       this.avisos.mostrar('Marque la confirmación de producción que aparece debajo del ambiente', 'error'); return;
     }
+    if (this.consecutivoCambiado(c)) {
+      if (this.motivoConsecutivo.trim().length < 10) { this.avisos.mostrar('Escriba el motivo del cambio de consecutivo (mínimo 10 caracteres)', 'error'); return; }
+      cuerpo.motivoConsecutivo = this.motivoConsecutivo.trim();
+    }
     this.guardando.set(true);
     try {
-      await this.api.put('/rndc/config', cuerpo);
+      const r = await this.api.put<any>('/rndc/config', cuerpo);
       this.avisos.ok(`Configuración guardada. Ambiente: ${this.nombreAmbiente(c.ambiente)}`);
+      if (Object.values(r.verificacion || {}).includes('libre')) this.avisos.ok('El número está libre en el RNDC: la numeración sigue desde ahí');
+      if (Object.values(r.verificacion || {}).includes('sin_verificar')) this.avisos.mostrar('No se pudo verificar el número en el RNDC ahora. Se confirmará antes de usarlo al expedir.', 'info', 9000);
       await this.auth.refrescar();
       this.ir('rndc');
     } catch (e) { this.avisos.error(e); } finally { this.guardando.set(false); }
@@ -442,21 +455,16 @@ export class Configuracion {
     try {
       const k = await this.api.post<any>('/rndc/consecutivos/verificar', { clave: c });
       this.consec.set(k);
-      if (k.remesa.sugerido || k.manifiesto.sugerido) this.avisos.mostrar('La plataforma va por detrás del RNDC: ajuste el consecutivo para evitar DUPLICADOS', 'error');
+      if (k.remesa.adelante || k.manifiesto.adelante) this.avisos.mostrar('En el RNDC hay números más adelante del consecutivo. La numeración no salta: sigue en orden y pasa los ya usados.', 'info', 9000);
       else this.avisos.ok('Los consecutivos siguen al último número radicado en el RNDC');
     } catch (e: any) {
       if (/contrase|clave|password|autentic|usuario (no |inv|o |y )/i.test(e?.error?.error || '')) this.clave.olvidar();
       this.avisos.error(e);
     } finally { this.verificandoConsec.set(false); }
   }
-  async ajustarConsecutivo(doc: string, numero: string) {
-    try {
-      await this.api.put('/rndc/config', doc === 'remesa' ? { consecutivoRemesa: numero } : { consecutivoManifiesto: numero });
-      this.avisos.ok(`Próximo ${doc}: ${numero}`);
-      this.consec.update(k => ({ ...k, [doc]: { ...k[doc], sugerido: '', siguientePlataforma: numero } }));
-      this.cfg.update(c => ({ ...c, [doc === 'remesa' ? 'consecutivoRemesa' : 'consecutivoManifiesto']: numero }));
-    } catch (e) { this.avisos.error(e); }
-  }
+  private consecutivosGuardados = { remesa: '', manifiesto: '' };
+  motivoConsecutivo = '';
+  consecutivoCambiado(c: any) { return c.consecutivoRemesa !== this.consecutivosGuardados.remesa || c.consecutivoManifiesto !== this.consecutivosGuardados.manifiesto; }
 
   limpiarConsecutivo(v: string) { return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 15); }
 

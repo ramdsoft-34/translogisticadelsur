@@ -144,8 +144,8 @@ export async function verificarConsecutivos(empresaId, clave, usuarioId, { dias 
       consultados: (r.documentos || []).length, consultasPorNumero: consultas, ok: !avisos.length, mensaje: avisos.join(' · '),
       ultimoRndc: ultimo === null ? '' : `${prefijo}${ultimo}`,
       siguientePlataforma: `${prefijo}${siguiente}`,
-      // Si la plataforma va por detrás del RNDC, el siguiente debe ser el último radicado + 1
-      sugerido: ultimo !== null && ultimo >= siguiente ? `${prefijo}${ultimo + 1}` : '',
+      // Hay números radicados más adelante: se informa, pero la numeración no salta (los ya usados se pasan uno a uno)
+      adelante: ultimo !== null && ultimo >= siguiente,
     };
   }
   return { desde: iso(desde), hasta: iso(hoy), ...resultado };

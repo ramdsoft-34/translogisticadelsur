@@ -147,9 +147,11 @@ const configSchema = z.object({
   // Próximos consecutivos (solo para continuar una numeración existente; no se pueden bajar)
   siguienteRemesa: z.coerce.number().int().min(1).optional(),
   siguienteManifiesto: z.coerce.number().int().min(1).optional(),
-  // Consecutivo completo con letras y números (ej. R10063903); debe terminar en número
+  // Consecutivo completo con letras y números; debe terminar en número
   consecutivoRemesa: consecutivo.optional(),
   consecutivoManifiesto: consecutivo.optional(),
+  // Por qué se cambia el consecutivo: queda en la auditoría
+  motivoConsecutivo: z.string().trim().min(10, 'escriba el motivo del cambio de consecutivo (mínimo 10 caracteres)').max(300).optional(),
 });
 
 r.get('/config', permitir(P.CONFIG_GESTIONAR, P.RNDC_OPERAR), async (req, res) => {
@@ -166,12 +168,31 @@ r.get('/config', permitir(P.CONFIG_GESTIONAR, P.RNDC_OPERAR), async (req, res) =
   });
 });
 
+// ¿El número que eligió el administrador está libre en el RNDC? Con la contraseña guardada se consulta de una vez;
+// sin ella queda sin verificar aquí, y se confirma igual antes de usarlo al expedir.
+async function verificarNumeroLibre(req, empresa, clave, numero) {
+  let contrasena;
+  try { contrasena = await claveRndc.usar(req.empresaId, empresa.rndc?.usuario); } catch { return 'sin_verificar'; }
+  if (!contrasena) return 'sin_verificar';
+  let existe;
+  try { existe = await op.existeEnRndc({ _id: req.empresaId }, contrasena, req.usuario._id, clave, numero); } catch { return 'sin_verificar'; }
+  if (existe) throw new ErrorHttp(400, `El número ${numero} ya está radicado en el RNDC: escriba uno que esté libre`);
+  return 'libre';
+}
+
 r.put('/config', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
-  const { siguienteRemesa, siguienteManifiesto, consecutivoRemesa, consecutivoManifiesto, ...d } = configSchema.partial().parse(req.body);
+  const { siguienteRemesa, siguienteManifiesto, consecutivoRemesa, consecutivoManifiesto, motivoConsecutivo, ...d } = configSchema.partial().parse(req.body);
+  // Un consecutivo ya en uso solo cambia con una razón escrita por el administrador
+  const pedirMotivo = async (claveC, cambia) => {
+    if (cambia && !motivoConsecutivo && await proximo(req.empresaId, claveC) > 1) {
+      throw new ErrorHttp(400, `Para cambiar el consecutivo de ${claveC} escriba el motivo: el cambio queda en la auditoría`);
+    }
+  };
   // El consecutivo completo define el prefijo y el próximo número
   const empresaAntes = await Empresa.findById(req.empresaId).select('rndc').lean();
   const nuevos = {};
   const bajados = [];
+  const verificacion = {};
   for (const [claveC, texto, campoPrefijo] of [['remesa', consecutivoRemesa, 'prefijoRemesa'], ['manifiesto', consecutivoManifiesto, 'prefijoManifiesto']]) {
     if (!texto) continue;
     const nuevo = partirConsecutivo(texto);
@@ -180,7 +201,12 @@ r.put('/config', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
     // al expedir, la plataforma salta los que ya tengan documento.
     const usado = await op.numeroUsado(req.empresaId, claveC, `${nuevo.prefijo}${nuevo.numero}`);
     if (usado) throw new ErrorHttp(400, `El consecutivo ${nuevo.prefijo}${nuevo.numero} ya se usó en el viaje N° ${usado.numero}: escriba uno que no se haya expedido`);
+    await pedirMotivo(claveC, nuevo.prefijo !== actual.prefijo || nuevo.numero !== actual.numero);
     if (nuevo.prefijo === actual.prefijo && nuevo.numero < actual.numero) bajados.push(`${claveC}: ${actual.prefijo}${actual.numero} → ${nuevo.prefijo}${nuevo.numero}`);
+    // El número nuevo se verifica en el RNDC: si está radicado no se acepta; si está libre, la numeración sigue desde él
+    if (nuevo.prefijo !== actual.prefijo || nuevo.numero !== actual.numero) {
+      verificacion[claveC] = await verificarNumeroLibre(req, empresaAntes, claveC, `${nuevo.prefijo}${nuevo.numero}`);
+    }
     d[campoPrefijo] = nuevo.prefijo;
     nuevos[claveC] = nuevo.numero;
   }
@@ -195,11 +221,12 @@ r.put('/config', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
     if (!n || nuevos[claveC]) continue;
     const actual = await proximo(req.empresaId, claveC);
     if (n < actual) throw new ErrorHttp(400, `El próximo consecutivo de ${claveC} no puede ser menor que ${actual}`);
+    await pedirMotivo(claveC, n !== actual);
     await Contador.updateOne({ empresa: req.empresaId, clave: claveC }, { $set: { valor: n - 1 } }, { upsert: true });
   }
   await auditar(req, 'editar_config_rndc', { entidad: 'Empresa', entidadId: req.empresaId,
-    detalle: { ...d, siguienteRemesa, siguienteManifiesto, consecutivoRemesa, consecutivoManifiesto, ...(bajados.length ? { consecutivoBajado: bajados } : {}) } });
-  res.json({ ok: true });
+    detalle: { ...d, siguienteRemesa, siguienteManifiesto, consecutivoRemesa, consecutivoManifiesto, motivoConsecutivo, verificacion, ...(bajados.length ? { consecutivoBajado: bajados } : {}) } });
+  res.json({ ok: true, verificacion });
 });
 
 // ── Viajes ──────────────────────────────────────────────────────────────────
