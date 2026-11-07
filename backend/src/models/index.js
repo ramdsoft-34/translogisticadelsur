@@ -178,7 +178,11 @@ const clienteSchema = new Schema({
     salida: { asunto: str(), cuerpo: str({ maxlength: 3000 }) },
   },
   // Correos de relaciones de viajes (aparte de los de manifiestos)
-  enviosRelaciones: { destinatarios: { type: [String], default: [] }, cc: { type: [String], default: [] } },
+  enviosRelaciones: { destinatarios: { type: [String], default: [] }, cc: { type: [String], default: [] },
+    // Fase 11: asunto y mensaje propios de la empresa (vacío = la plantilla general), con datos como {empresa} y {periodo}
+    plantilla: { asunto: str({ maxlength: 200 }), cuerpo: str({ maxlength: 3000 }) } },
+  // Fase 11: contactos de la empresa para mandarles la relación por WhatsApp
+  contactosWhatsapp: { type: [{ _id: false, nombre: str(), cargo: str(), celular: str() }], default: [] },
   // Fase 12: datos fijos de la remesa de este cliente (todos editables) y su logo (data URL; no se carga salvo que se pida)
   remesaFormato: {
     logo: { type: String, default: '', select: false },
@@ -204,6 +208,8 @@ const tarifaSchema = new Schema({
   pesoKg: { type: Number, default: 0, min: 0 },
   operacion: str(),                      // vacío = la de la empresa (ej. U = urbano)
   destinatario: { tipoId: str({ uppercase: true }), numId: str(), sede: str() },
+  // Fase 11: grupo de la relación de cobro (p. ej. Viajeros o TAT). Vacío = sin grupo.
+  grupoRelacion: str({ maxlength: 30 }),
   activo: { type: Boolean, default: true },
 }, { timestamps: true });
 tarifaSchema.plugin(tenantPlugin);
@@ -353,6 +359,7 @@ const viajeSchema = new Schema({
   // Importado de la plantilla de Excel: sus documentos RNDC se gestionaron fuera de la
   // plataforma, por eso no aparece en «Por enviar» hasta que un usuario lo habilite.
   historico: { type: Boolean, default: false },
+  registroMasivo: { type: Boolean, default: false },   // fase 11: creado con el registro masivo
   reporteWhatsapp: { fecha, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null } },                      // manifiesto anulado que reemplaza el nuevo
   enviandoRndc: fecha,                                // bloqueo para no enviar dos veces a la vez
   creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
@@ -638,3 +645,5 @@ export async function proximo(empresa, clave) {
 // populate filtrado por empresa: el tenantPlugin rechaza consultas sin empresa,
 // incluidas las que hace Mongoose para poblar referencias.
 export const pob = (empresa, path, select) => ({ path, ...(select ? { select } : {}), match: { empresa } });
+// Fase 11: relaciones de cobro (en su propio archivo)
+export { RelacionCliente } from './relaciones.js';

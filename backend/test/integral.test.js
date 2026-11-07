@@ -192,7 +192,10 @@ const login = async (email, password = CLAVE) => {
 };
 const con = (token) => ({
   get: (u) => api().get(u).set('Authorization', `Bearer ${token}`),
-  post: (u, b) => api().post(u).set('Authorization', `Bearer ${token}`).send(b),
+  // Varios viajes de la misma placa el mismo día se registran a propósito en estas pruebas: se confirman (la pregunta
+  // del viaje repetido tiene su propia prueba, que manda confirmarRepetido: false)
+  post: (u, b) => api().post(u).set('Authorization', `Bearer ${token}`)
+    .send(u === '/api/viajes' && b && b.confirmarRepetido === undefined ? { ...b, confirmarRepetido: true } : b),
   put: (u, b) => api().put(u).set('Authorization', `Bearer ${token}`).send(b),
   del: (u) => api().delete(u).set('Authorization', `Bearer ${token}`),
 });
@@ -470,6 +473,19 @@ test('Manifiestos RNDC: revisar, corregir tras un rechazo y reenviar', async () 
   assert.equal((await s.manif.get(`/api/rndc/viajes/${s.viaje3}/vista-previa`)).body.ultimoError, null);
   // Con manifiesto aceptado ya no se editan sus datos aquí
   assert.equal((await s.manif.put(`/api/rndc/viajes/${s.viaje3}/datos`, { pesoKg: 1 })).status, 409);
+});
+
+test('Viaje repetido: la misma placa el mismo día pide confirmación (428) y con ella se registra', async () => {
+  const cuerpo = { fecha: '2026-12-01', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor };
+  const a = await s.reportero.post('/api/viajes', { ...cuerpo, confirmarRepetido: false });
+  assert.equal(a.status, 201, JSON.stringify(a.body));
+  const b = await s.reportero.post('/api/viajes', { ...cuerpo, confirmarRepetido: false });
+  assert.equal(b.status, 428);
+  assert.match(b.body.error, /ya tiene un viaje ese día/);
+  assert.ok(b.body.detalles[0].includes(`N° ${a.body.numero}`));
+  const c = await s.reportero.post('/api/viajes', { ...cuerpo, confirmarRepetido: true });
+  assert.equal(c.status, 201);
+  for (const x of [a, c]) assert.equal((await s.reportero.del(`/api/viajes/${x.body._id}`)).status, 200);
 });
 
 test('Viajes que no requieren manifiesto no aparecen en Manifiestos RNDC', async () => {

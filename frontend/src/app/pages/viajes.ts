@@ -23,6 +23,7 @@ import { ESTADOS_RASTREO, Rastreo } from '../core/rastreo.service';
 import { ActivarRastreo } from '../shared/activar-rastreo';
 import { ChecklistConductor } from '../shared/checklist-conductor';
 import { RouterLink } from '@angular/router';
+import { HttpErrorResponse } from '@angular/common/http';
 import { AutorizacionAdmin } from '../core/autorizacion.service';
 
 interface Formulario {
@@ -680,17 +681,27 @@ export class Viajes {
         return;
       }
       else {
-        let v: Viaje;
-        try { v = await this.api.post<Viaje>('/viajes', cuerpo); }
-        catch (e) {
-          // Documentos vencidos: solo con la autorización del administrador (CA-06)
-          const vencidos = AutorizacionAdmin.vencidosDe(e);
-          if (!vencidos) throw e;
-          const aut = await this.autorizacion.pedir(vencidos);
-          if (!aut) return;
-          v = await this.api.post<Viaje>('/viajes', { ...cuerpo, autorizacion: aut });
-          this.avisos.ok('Viaje autorizado por el administrador');
+        let v: Viaje | null = null;
+        let autorizacion: any = null;
+        for (let intento = 0; intento < 3 && !v; intento++) {
+          try { v = await this.api.post<Viaje>('/viajes', autorizacion ? { ...cuerpo, autorizacion } : cuerpo); }
+          catch (e) {
+            // La placa ya tiene viaje ese día: se confirma para no registrar (ni cobrar) dos veces el mismo viaje
+            if (e instanceof HttpErrorResponse && e.status === 428 && !cuerpo.confirmarRepetido) {
+              const det = Array.isArray(e.error?.detalles) ? `\n\n${e.error.detalles.join('\n')}` : '';
+              if (!confirm(`${e.error?.error || 'La placa ya tiene viaje ese día.'}${det}\n\n¿Es otro viaje distinto y lo registra de todas formas?`)) return;
+              cuerpo.confirmarRepetido = true;
+              continue;
+            }
+            // Documentos vencidos: solo con la autorización del administrador (CA-06)
+            const vencidos = AutorizacionAdmin.vencidosDe(e);
+            if (!vencidos || autorizacion) throw e;
+            autorizacion = await this.autorizacion.pedir(vencidos);
+            if (!autorizacion) return;
+          }
         }
+        if (!v) return;
+        if (autorizacion) this.avisos.ok('Viaje autorizado por el administrador');
         this.avisos.ok(`Viaje N° ${v.numero} registrado${requiere ? '' : ' (sin manifiesto)'}`);
         const avisosDoc: string[] = (v as any).avisosDocumentos || [];
         if (avisosDoc.length) this.avisos.mostrar(`Por vencer: ${avisosDoc.join('; ')}`, 'info');

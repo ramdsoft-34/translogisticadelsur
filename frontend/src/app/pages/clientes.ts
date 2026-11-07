@@ -22,7 +22,7 @@ const clienteVacio = () => ({ nombre: '', tipoId: 'N', nit: '', dv: '', razonSoc
 const POLITICAS: [string, string][] = [['registrado', 'Se cobra lo registrado en el viaje'], ['sin', 'Sin auxiliar (no se cobra)'],
   ['incluido', 'Incluido en la tarifa (no se cobra aparte)'], ['sin_anticipo', 'Valor fijo por viaje sin anticipo']];
 const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', tarifaCliente: 0, tarifaAuxiliar: 0, fleteConductor: 0,
-  auxiliarPagado: 0, anticipoHabitual: 0, pesoKg: 0, operacion: '', destinatario: { tipoId: '', numId: '', sede: '' }, activo: true });
+  auxiliarPagado: 0, anticipoHabitual: 0, pesoKg: 0, operacion: '', destinatario: { tipoId: '', numId: '', sede: '' }, activo: true, grupoRelacion: '' });
 const sedeVacia = () => ({ nombre: '', direccion: '', codMunicipio: '' });
 const NUEVA = '__nueva';
 const digitos = (v: any) => String(v ?? '').replace(/\D/g, '');
@@ -195,7 +195,11 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
         <div class="campo"><label for="tac">Auxiliar: cobro al cliente</label><div class="moneda"><input id="tac" moneda name="tac" [(ngModel)]="t.tarifaAuxiliar" /></div></div>
         <div class="campo"><label for="tap">Auxiliar: pago</label><div class="moneda"><input id="tap" moneda name="tap" [(ngModel)]="t.auxiliarPagado" /></div></div>
         <div class="campo"><label for="tp">Peso habitual (kg)</label><input id="tp" type="number" min="0" name="tp" [(ngModel)]="t.pesoKg" /></div>
-        <div class="campo"><label for="to">Tipo de manifiesto</label><select id="to" name="op" [(ngModel)]="t.operacion"><option value="">El de la empresa</option><option value="G">General</option><option value="W">Viaje vacío</option><option value="D">Varios viajes en el día</option><option value="I">Viaje de ida y regreso</option><option value="M">Viaje multiparada</option><option value="U">Viaje municipal o urbano</option></select></div>
+        <div class="campo"><label for="to">Tipo de manifiesto</label><select id="to" name="op" [(ngModel)]="t.operacion"><option value="">El de la empresa</option><option value="G">General</option><option value="W">Viaje vacío</option><option value="D">Varios viajes en el día</option><option value="I">Viaje de ida y regreso</option><option value="M">Viaje multiparada</option><option value="U">Viaje municipal o urbano</option></select>
+          <small>Con origen y destino en el mismo municipio sale como municipal o urbano.</small></div>
+        <div class="campo"><label for="tgr">Grupo de la relación de cobro</label><input id="tgr" name="tgr" maxlength="30" list="grupos-rel" [(ngModel)]="t.grupoRelacion" placeholder="Ej.: Viajeros o TAT" />
+          <datalist id="grupos-rel"><option value="Viajeros"></option><option value="TAT"></option></datalist>
+          <small>Para sacar relaciones separadas por grupo. Vacío = sin grupo.</small></div>
         @if (t._id) { <label class="casilla"><input type="checkbox" name="activo" [(ngModel)]="t.activo" />Activo</label> }
       </form>
       <ng-container pie><button type="button" (click)="abiertoTarifa.set(false)">Cancelar</button>
@@ -454,7 +458,7 @@ export class Clientes {
       if (this.modo() === 'cliente') Object.assign(dest, dest.sede ? { tipoId: c.tipoId, numId: this.numIdCliente() || idCliente(c) } : { tipoId: '', numId: '' });
       else dest.numId = digitos(dest.numId);
       const campos = ['destino', 'codMunicipio', 'tipoCobro', 'tarifaCliente', 'tarifaAuxiliar', 'fleteConductor', 'auxiliarPagado',
-        'anticipoHabitual', 'pesoKg', 'operacion', 'activo'];
+        'anticipoHabitual', 'pesoKg', 'operacion', 'activo', 'grupoRelacion'];
       const cuerpo: any = Object.fromEntries(campos.map(k => [k, t[k]]));
       cuerpo.destinatario = dest; cuerpo.cliente = c._id;
       const g: any = t._id ? await this.api.put(`/maestros/tarifas/${t._id}`, cuerpo) : await this.api.post('/maestros/tarifas', cuerpo);

@@ -20,6 +20,7 @@ export const autorizacionSchema = z.object({ email: z.string().trim().max(120), 
   motivo: z.string().trim().max(300) }).optional();
 import * as rastreo from '../services/rastreo/surtrack.js';
 import { asegurarSoporte } from '../services/gestion/soporteInterno.js';
+import { exigirNoFacturado } from '../services/gestion/relaciones.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -340,6 +341,12 @@ r.post('/', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   if (d.numeroManifiesto) d.numerosManuales = { remesa: '', manifiesto: d.numeroManifiesto };
   delete d.numeroManifiesto;
   await validarReferencias(req, d);
+  // La placa ya tiene viaje ese día: se confirma para no registrar (ni cobrar) dos veces el mismo viaje
+  if (req.body?.confirmarRepetido !== true && d.origen !== 'manifiesto' && d.placa && d.fecha) {
+    const mismos = await Viaje.find(deEmpresa(req, { placa: d.placa, fecha: d.fecha, estado: { $ne: 'anulado' } })).select('numero destino manifiesto.numero soporteInterno.mc').lean();
+    if (mismos.length) throw new ErrorHttp(428, `La placa ${d.placa} ya tiene ${mismos.length === 1 ? 'un viaje' : `${mismos.length} viajes`} ese día. Si es el mismo viaje, no lo registre otra vez.`,
+      mismos.map(x => `N° ${x.numero} · ${x.destino || 'sin destino'} · ${x.manifiesto?.numero || x.soporteInterno?.mc || 'sin documento'}`));
+  }
   // Mes cerrado y documentos del viaje (licencia, SOAT y tecnomecánica vencidos no dejan registrar sin autorización del administrador)
   await asegurarMesAbierto(req.empresaId, d.fecha);
   const { avisos: avisosDocumentos, autorizado } = await exigirDocumentosVigentes(req.empresaId, { conductor: d.conductor, placa: d.placa }, autorizacion);
@@ -392,6 +399,8 @@ async function viajeEditable(req) {
 r.put('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const v = await viajeEditable(req);
   let d = viajeSchema.partial().parse(req.body);
+  // En una relación de cobro facturada solo se corrigen observaciones y licencia
+  if (Object.keys(d).some(k => !['observaciones', 'licencia'].includes(k))) await exigirNoFacturado(req.empresaId, [v._id]);
   if (d.numeroManifiesto !== undefined && v.manifiesto?.estado === 'aceptado') delete d.numeroManifiesto;
   numeroManifiestoA(d);
   if (d.fecha) await asegurarMesAbierto(req.empresaId, d.fecha);
@@ -423,6 +432,7 @@ r.put('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
 // Solo se eliminan viajes sin documentos en el RNDC.
 r.delete('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const v = await viajeEditable(req);
+  await exigirNoFacturado(req.empresaId, [v._id]);
   if (v.estado !== 'registrado' || v.remesa?.radicado || v.manifiesto?.radicado) {
     throw new ErrorHttp(409, 'El viaje tiene documentos en el RNDC; debe anularlos en lugar de eliminar el viaje');
   }

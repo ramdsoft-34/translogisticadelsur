@@ -37,6 +37,7 @@ export const tarifaSchema = z.object({
   tarifaCliente: dinero, tarifaAuxiliar: dinero, fleteConductor: dinero, auxiliarPagado: dinero,
   anticipoHabitual: dinero, pesoKg: dinero,
   operacion: z.string().trim().max(1).toUpperCase().optional().default(''),
+  grupoRelacion: z.string().trim().max(30).optional(),   // fase 11: grupo de la relación de cobro (Viajeros, TAT…)
   destinatario: z.object({ tipoId: z.union([tipoId, z.literal('')]).optional().default(''), numId: t(15), sede: t(6) }).optional(),
   activo: z.boolean().optional(),
 });

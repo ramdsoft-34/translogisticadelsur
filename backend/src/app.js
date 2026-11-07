@@ -36,9 +36,9 @@ export function crearApp() {
     // La sesión va en una cookie: solo los orígenes permitidos pueden enviarla
     credentials: true,
   }));
-  // Los correos con archivos adjuntos traen su propio límite (12 MB) en la ruta
+  // Los correos con archivos adjuntos (también el de la relación de cobro) traen su propio límite (12 MB) en la ruta
   const json = express.json({ limit: '1mb' });
-  app.use((req, res, next) => (/^\/api\/correo\/(relaciones|manual)$/.test(req.path) ? next() : json(req, res, next)));
+  app.use((req, res, next) => (/^\/api\/(correo\/(relaciones|manual)|gestion\/relaciones-cobro\/[a-f0-9]{24}\/correo)$/.test(req.path) ? next() : json(req, res, next)));
   app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false }));
 
   app.get('/api/salud', (_req, res) => res.json({ ok: true }));

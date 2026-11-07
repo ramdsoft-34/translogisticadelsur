@@ -16,6 +16,7 @@ fecha, quién lo generó y su huella SHA-256: si el archivo se altera, no se ent
 | Soporte interno (MC/RC) | Al expedirse | Cambia su estado (vigente → cumplido / anulado): el documento imprime el estado |
 | Liquidación a cliente | Al facturarse | Se anula (versión «ANULADA») |
 | Liquidación de conductor | Al crearse (es la que va a la app) | Se anula (versión «ANULADA») |
+| Relación de cobro (PDF y Excel) | Al enviarse (correo o WhatsApp) o facturarse | Se vuelve a guardar después de enviada y cambió (versión 2, 3…; hay que reenviarla) |
 | Remesa de clientes (fase 12) | Al imprimirse o descargarse marcándola | Se corrige un dato después de impresa (el número no se cambia) |
 | Formato SG-SST | Cada versión final | Cada nueva versión final |
 | Asistencia a capacitación | Al quedar ejecutada | Llega otra firma (p. ej. desde la app) |

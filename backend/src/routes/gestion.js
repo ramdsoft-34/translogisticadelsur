@@ -21,11 +21,13 @@ import { manifiestoPdf, ajusteLogo } from '../services/reportes/manifiesto.js';
 import { soporteExpedido, liquidacionConductorExpedida, liquidacionesConductorLote } from '../services/documentos/expedidos.js';
 import { cabecerasDocumento } from '../services/documentos/guardados.js';
 import rutasRemesas from './remesas.js';
+import rutasRelacionesCobro from './relacionesCobro.js';
 import { avisarLiquidacion } from '../services/rastreo/surtrack.js';
 import { avisarDocumentosApp } from '../services/rastreo/documentosApp.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
+r.use(rutasRelacionesCobro);   // relaciones de cobro (Generar relación y Relaciones generadas)
 r.use(rutasRemesas);           // fase 12: remesas de los clientes con el formato de la cooperativa
 
 const id = z.string().refine(v => mongoose.isValidObjectId(v), 'identificador inválido');
@@ -412,12 +414,15 @@ r.get('/relaciones/viajes', verRep, async (req, res) => {
   const agrupar = Object.hasOwn(AGRUPAR, req.query.agrupar) ? req.query.agrupar : 'general';
   const extra = {};
   if (req.query.placa) extra.placa = txt(req.query.placa).toUpperCase().replace(/[\s-]/g, '');
+  // También por el nombre del conductor (lo que se escribe en «Placa o conductor»)
+  if (req.query.conductor) extra.conductorNombre = { $regex: txt(req.query.conductor).slice(0, 60).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
   const { desde, hasta, viajes, linea } = await viajesPeriodo(req, extra);
   const filas = viajes.map(v => { const l = linea(v);
     return { _id: v._id, estado: v.estado, numero: v.numero, fecha: v.fecha, cliente: v.cliente?.nombre || '', utilidad: l.utilidad, placa: v.placa, conductor: nombreT(v.conductor) || v.conductorNombre, destino: v.destino,
       planilla: v.planilla || '', manifiesto: v.manifiesto?.numero || v.soporteInterno?.mc || '', cantidad: l.cantidad,
       auxiliar: v.conAuxiliar ? (v.diasAuxiliar || l.cantidad) : 0, tarifa: l.totalCobrado, flete: Number(v.flete) || 0, anticipo: Number(v.anticipo) || 0,
-      facturado: !!v.liquidacion }; });
+      facturado: !!v.liquidacion, reportado: v.createdAt || null,
+      origen: v.manifiesto?.estado === 'aceptado' ? 'RNDC' : v.registroMasivo ? 'Registro masivo' : v.soporteInterno?.mc ? 'Soporte interno' : 'Registrado' }; });
   const clave = AGRUPAR[agrupar];
   filas.sort((a, b) => (clave ? String(clave(a)).localeCompare(String(clave(b))) : 0) || (agrupar === 'empresa' ? a.placa.localeCompare(b.placa) : 0)
     || new Date(a.fecha) - new Date(b.fecha) || a.numero - b.numero);
@@ -483,7 +488,9 @@ r.get('/relaciones/informe', verRep, async (req, res) => {
 const masivoSchema = z.object({ cliente: id, tarifaRef: id.optional(), destino: z.string().trim().min(1).max(120), placa: z.string().trim().min(5).max(7),
   conductor: id, desde: z.string(), hasta: z.string(), incluirSabados: z.boolean().optional().default(true), cantidad: z.coerce.number().min(0).default(1),
   conAuxiliar: z.boolean().optional().default(false), diasAuxiliar: z.coerce.number().int().min(0).max(5, 'el auxiliar va de 1 a 5 días').optional().default(0), planilla: z.string().max(30).optional().default(''),
-  requiereManifiesto: z.boolean().optional().default(false), dias: z.array(z.string()).optional() });
+  requiereManifiesto: z.boolean().optional().default(false), dias: z.array(z.string()).optional(),
+  // Otro destino (tarifa) para algunos días del rango, como «Destino para los marcados» de la plantilla
+  destinos: z.record(z.string().regex(/^\d{4}-\d{2}-\d{2}$/), id).optional().default({}) });
 async function diasMasivo(req, d) {
   const desde = parseFecha(d.desde); const hasta = parseFecha(d.hasta);
   if (!desde || !hasta || hasta < desde) throw new ErrorHttp(400, 'Rango de fechas inválido');
@@ -520,14 +527,20 @@ r.post('/relaciones/masivo', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const { valoresDesdeTarifa } = await import('../services/calculos.js');
   const { titularDePlaca } = await import('./viajes.js');
   const sug = t ? valoresDesdeTarifa(t) : {};
+  // Destinos distintos por día (de la misma empresa)
+  const otrosIds = [...new Set(Object.values(d.destinos || {}).map(String))];
+  const otras = new Map((otrosIds.length ? await Tarifa.find(deEmpresa(req, { _id: { $in: otrosIds }, cliente: d.cliente })).lean() : []).map(x => [String(x._id), x]));
+  if (otras.size !== otrosIds.length) throw new ErrorHttp(400, 'Uno de los destinos elegidos no es de esta empresa');
   const titular = await titularDePlaca(req.empresaId, placa);
   const creados = [];
   for (const x of aRegistrar) {
     const numero = await sig(req.empresaId, 'viaje');
-    const v = await Viaje.create({ empresa: req.empresaId, numero, fecha: parseFecha(x.fecha), cliente: d.cliente, tarifaRef: t?._id || null, destino: d.destino,
-      codDestino: sug.codDestino || '', destinatario: sug.destinatario, titular, placa, conductor: d.conductor, conductorNombre: nombreT(cond), cantidad: d.cantidad, conAuxiliar: d.conAuxiliar,
-      diasAuxiliar: d.diasAuxiliar, planilla: d.planilla, tarifa: sug.tarifa || 0, flete: sug.flete || 0, anticipo: sug.anticipo || 0, pesoKg: sug.pesoKg || 0,
-      requiereManifiesto: d.requiereManifiesto, creadoPor: req.usuario._id, actualizadoPor: req.usuario._id });
+    const t2 = d.destinos?.[x.fecha] ? otras.get(String(d.destinos[x.fecha])) : null;
+    const s2 = t2 ? valoresDesdeTarifa(t2) : sug;
+    const v = await Viaje.create({ empresa: req.empresaId, numero, fecha: parseFecha(x.fecha), cliente: d.cliente, tarifaRef: (t2 || t)?._id || null, destino: t2 ? t2.destino : d.destino,
+      codDestino: s2.codDestino || '', destinatario: s2.destinatario, titular, placa, conductor: d.conductor, conductorNombre: nombreT(cond), cantidad: d.cantidad, conAuxiliar: d.conAuxiliar,
+      diasAuxiliar: d.diasAuxiliar, planilla: d.planilla, tarifa: s2.tarifa || 0, flete: s2.flete || 0, anticipo: s2.anticipo || 0, pesoKg: s2.pesoKg || 0,
+      requiereManifiesto: d.requiereManifiesto, registroMasivo: true, creadoPor: req.usuario._id, actualizadoPor: req.usuario._id });
     await asegurarSoporte(req.empresaId, v._id);
     creados.push(v);
   }

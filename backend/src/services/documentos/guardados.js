@@ -32,19 +32,21 @@ const respuesta = (doc, buffer, nuevo) => ({ buffer, nuevo, version: doc.version
  * Devuelve el PDF permanente de (tipo, ref, clave); lo genera y guarda solo la primera vez.
  * @param generar función async que devuelve el Buffer del PDF (solo se llama si no está guardado)
  */
-export async function pdfGuardado(empresaId, { tipo, ref, clave, nombre = '', generar, usuario = null }) {
+export async function pdfGuardado(empresaId, { tipo, ref, clave, nombre = '', generar, usuario = null, formato = 'pdf' }) {
   if (!tipo || !ref || !clave || typeof generar !== 'function') throw new Error('pdfGuardado: faltan datos');
   const filtro = { empresa: empresaId, tipo, ref: String(ref), clave: String(clave) };
   const existente = await DocumentoPdf.findOne(filtro).lean();
   if (existente) return respuesta(existente, await leer(existente), false);
 
   const buffer = await generar();
-  if (!Buffer.isBuffer(buffer) || buffer.subarray(0, 4).toString() !== '%PDF') throw new Error(`pdfGuardado: ${tipo} no generó un PDF`);
+  // También guarda Excel (las relaciones de cobro van en PDF y Excel): se comprueba la cabecera de cada formato
+  const cabecera = formato === 'xlsx' ? 'PK' : '%PDF';
+  if (!Buffer.isBuffer(buffer) || buffer.subarray(0, cabecera.length).toString() !== cabecera) throw new Error(`pdfGuardado: ${tipo} no generó un ${formato.toUpperCase()}`);
   const sha256 = huella(buffer);
   for (let intento = 0; intento < 3; intento++) {
     const ultima = await DocumentoPdf.findOne({ empresa: empresaId, tipo, ref: String(ref) }).sort({ version: -1 }).select('version').lean();
     const version = (ultima?.version || 0) + 1;
-    const relativo = path.join('documentos', limpio(tipo), limpio(ref), `v${version}-${sha256.slice(0, 12)}.pdf`);
+    const relativo = path.join('documentos', limpio(tipo), limpio(ref), `v${version}-${sha256.slice(0, 12)}.${formato === 'xlsx' ? 'xlsx' : 'pdf'}`);
     const destino = ruta(empresaId, relativo);
     await fs.promises.mkdir(path.dirname(destino), { recursive: true });
     try { await fs.promises.writeFile(destino, buffer, { flag: 'wx' }); } catch (e) {

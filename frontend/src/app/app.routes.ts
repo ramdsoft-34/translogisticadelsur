@@ -7,6 +7,8 @@ const pagina = (permisos: string[], cargar: () => Promise<any>) => ({ canActivat
 export const routes: Routes = [
   // Pública: el QR del soporte interno lleva aquí
   { path: 'verificar/:codigo', loadComponent: () => import('./pages/verificar').then(m => m.Verificar) },
+  // Fase 11: enlace de la relación de cobro que recibe la empresa (sin sesión)
+  { path: 'r/:token', loadComponent: () => import('./pages/relacion-publica').then(m => m.RelacionPublica) },
   // Página pública de la empresa; con sesión iniciada lleva directo a la plataforma
   { path: '', pathMatch: 'full', canActivate: [sinSesion], loadComponent: () => import('./pages/landing').then(m => m.Landing) },
   { path: 'ingresar', canActivate: [sinSesion], loadComponent: () => import('./pages/ingresar').then(m => m.Ingresar) },

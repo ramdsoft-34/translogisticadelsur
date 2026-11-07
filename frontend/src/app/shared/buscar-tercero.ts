@@ -70,7 +70,7 @@ export class BuscarTercero {
     const id = this.valor();
     this.cargado = id;
     if (!id) { this.texto.set(''); return; }
-    try { const t = await this.api.get<any>(`/maestros/terceros/${id}`); this.texto.set(`${nombreTercero(t)} · ${t.numId}`); } catch { this.texto.set(''); }
+    try { const t = await this.api.get<any>(`/maestros/terceros/${id}`); this.texto.set([nombreTercero(t), t.numId].filter(Boolean).join(" · ")); } catch { this.texto.set(''); }
   }
 
   enfocar() { this.buscar(this.valor() ? '' : this.texto()); this.abierto.set(true); }
@@ -93,7 +93,7 @@ export class BuscarTercero {
   elegir(t: any) {
     this.cargado = t._id;
     this.valor.set(t._id);
-    this.texto.set(`${nombreTercero(t)} · ${t.numId}`);
+    this.texto.set([nombreTercero(t), t.numId].filter(Boolean).join(" · "));
     this.abierto.set(false);
     this.elegido.emit(t);
   }

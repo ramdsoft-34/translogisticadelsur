@@ -31,7 +31,9 @@ const CLAVE = `Prueba${crypto.randomInt(100000, 999999)}`;
 const s = {};
 const con = (token) => ({
   get: (u) => api().get(u).set('Authorization', `Bearer ${token}`),
-  post: (u, b) => api().post(u).set('Authorization', `Bearer ${token}`).send(b),
+  // Viajes de la misma placa el mismo día a propósito: se confirman (la pregunta tiene su prueba en integral.test.js)
+  post: (u, b) => api().post(u).set('Authorization', `Bearer ${token}`)
+    .send(u === '/api/viajes' && b && b.confirmarRepetido === undefined ? { ...b, confirmarRepetido: true } : b),
   put: (u, b) => api().put(u).set('Authorization', `Bearer ${token}`).send(b),
 });
 const login = async (email, extra = {}) => {
