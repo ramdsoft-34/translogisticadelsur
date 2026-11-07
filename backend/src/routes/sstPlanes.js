@@ -9,6 +9,7 @@ import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
 import { libroExcel } from '../services/reportes/comun.js';
 import * as planes from '../services/sst/planes.js';
+import { sugerencias } from '../services/sst/evidencias.js';
 import { ESTANDARES, CICLOS } from '../services/sst/estandares.js';
 import { OBLIGACIONES, ENTIDADES } from '../services/sst/obligaciones.js';
 
@@ -43,6 +44,11 @@ r.get('/autoevaluaciones/:id', ver, async (req, res) => res.json(await planes.ob
 r.put('/autoevaluaciones/:id', gestionar, async (req, res) => {
   const d = z.object({ items: itemsEval.optional(), fecha: fechaOpc, reporteArl: datosArl.optional(), recomendacionesArl: z.object({ fecha: fechaOpc, resumen: txt(2000).optional() }).optional() }).parse(req.body);
   res.json(await planes.guardar(req.empresaId, id(req.params.id), d, req.usuario._id));
+});
+// Sugerencia de cumple / no cumple con lo que ya tiene la plataforma (el responsable la confirma)
+r.get('/autoevaluaciones/:id/sugerencias', ver, async (req, res) => {
+  const a = await planes.obtener(req.empresaId, id(req.params.id));
+  res.json({ vigencia: a.vigencia, items: await sugerencias(req.empresaId, a.vigencia) });
 });
 r.post('/autoevaluaciones/:id/cerrar', gestionar, async (req, res) => {
   const a = await planes.cerrar(req.empresaId, id(req.params.id), req.usuario._id);

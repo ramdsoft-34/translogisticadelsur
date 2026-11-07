@@ -82,3 +82,31 @@ test('El resultado crítico agenda el informe de avances a la ARL a 3 meses', ()
   assert.equal(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(r[0].fecha), '2026-07-27');
   assert.equal(O.obligacionesPorResultado({ vigencia: 2025, fecha: new Date(), nivel: E.nivelDe(90) }).length, 0);
 });
+
+// Fase 13b: sugerencias de cumple / no cumple con los datos de la plataforma
+const V = await import('../src/services/sst/evidencias.js');
+const base = {
+  responsable: 'Cristian Salcedo', licencia: 'SST-27322-2025', planillas: { cumplimiento: 100 }, actas: 11,
+  capacitaciones: { programadas: 9, vencidas: 8, ejecutadas: 7, induccion: 2 }, personas: { total: 22, conExamen: 22 },
+  eppFirmados: 30, inspecciones: 290, mantenimiento: { vehiculos: 19, conPreventivo: 17 }, simulacros: 1,
+  actividades: { 'matriz-legal': { total: 1, hechas: 1 }, auditoria: { total: 1, hechas: 0 }, indicadores: { total: 12, hechas: 11 } },
+  mejora: { total: 51, abiertasVencidas: 0 },
+};
+
+test('Sugerencias: con todo al día sugiere cumple y explica de dónde sale', () => {
+  const s = V.reglas(base);
+  for (const n of ['1.1.1', '1.1.4', '1.1.6', '1.2.1', '1.2.2', '3.1.4', '4.2.4', '4.2.5', '4.2.6', '5.1.2', '2.7.1', '3.3.1', '7.1.1']) assert.equal(s[n].estado, 'C', n);
+  assert.equal(s['6.1.2'].estado, 'NC');                    // auditoría pendiente en el plan anual
+  assert.match(s['1.2.1'].motivo, /7 de 8/);
+  assert.ok(Object.values(s).every((x) => x.motivo && x.fuente));
+});
+
+test('Sugerencias: lo que falta sale como no cumple y lo que no se puede saber no se sugiere', () => {
+  const s = V.reglas({ ...base, licencia: '', planillas: null, actas: 3, capacitaciones: { programadas: 0, vencidas: 0, ejecutadas: 0, induccion: 0 },
+    personas: { total: 22, conExamen: 15 }, mantenimiento: { vehiculos: 19, conPreventivo: 5 }, simulacros: 0, actividades: {}, mejora: { total: 51, abiertasVencidas: 40 } });
+  assert.equal(s['1.1.1'].estado, 'NC');
+  assert.equal(s['1.1.4'], undefined);                      // sin la app de conductores no se sugiere
+  for (const n of ['1.1.6', '1.2.1', '1.2.2', '3.1.4', '4.2.5', '5.1.2', '7.1.1']) assert.equal(s[n].estado, 'NC', n);
+  assert.equal(s['2.1.1'], undefined);                      // la política firmada la marca el responsable
+  assert.equal(s['2.7.1'], undefined);
+});

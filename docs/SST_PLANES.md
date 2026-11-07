@@ -22,11 +22,19 @@ Al **cerrar** una autoevaluación:
 - Ministerio de Transporte y Supertransporte (PESV, Res. 40595 de 2022): Comité de Seguridad Vial e indicadores trimestrales, reporte a la Supertransporte, diagnóstico y matriz de riesgos viales, auditoría del PESV y evaluación de propietarios vinculados.
 Las fechas son sugeridas y se ajustan en cada actividad. Si el plan se carga con el año empezado, las fechas que ya pasaron no se agregan. También se pueden crear actividades propias.
 
+## Sugerencia de cumple / no cumple (Fase 13b)
+En una autoevaluación en borrador, «Sugerir desde la plataforma» propone la calificación de los ítems que se pueden comprobar con los datos de la vigencia (`backend/src/services/sst/evidencias.js`), cada uno con su motivo y su fuente:
+1.1.1 responsable y licencia · 1.1.4 planillas del último mes (si la empresa usa la app) · 1.1.6 actas de reunión · 1.2.1 capacitaciones ejecutadas · 1.2.2 inducciones · 3.1.4 exámenes vigentes · 4.2.4 inspecciones y preoperacionales · 4.2.5 mantenimiento preventivo · 4.2.6 EPP firmados · 5.1.2 simulacro · 2.6.1, 2.7.1, 4.1.2, 6.1.2, 6.1.3, 3.3.1, 3.3.2, 3.3.6 según lo hecho en el plan anual · 7.1.1 acciones de mejora vencidas.
+«Aplicar» solo marca en pantalla: el responsable revisa, guarda y cierra. Lo que la plataforma no puede saber (política firmada, curso de 50 horas…) no se sugiere.
+
+## Proyección automática del año
+Si el año no tiene calendario se carga solo (sin las fechas que ya pasaron), y desde el 1 de diciembre se carga también el del año siguiente; sale un aviso en Alertas. Lo que quedó pendiente de años anteriores aparece al comienzo del plan del año nuevo («Pendientes de años anteriores») y sigue en las alertas hasta que se marque hecho o cancelado.
+
 ## Alertas
 Actividades pendientes vencidas, de esta semana o de los próximos 30 días, más avisos (falta el plan del año, falta o está sin cerrar la autoevaluación). Salen en la pestaña Alertas, en el contador del menú y en el tablero, con un botón para enviar el resumen por WhatsApp.
 
 ## API (`/api/sst`)
-`GET /estandares` · `GET|POST /autoevaluaciones` · `GET|PUT|DELETE /autoevaluaciones/:id` · `POST /autoevaluaciones/:id/cerrar|reabrir` · `GET /autoevaluaciones/:id/excel` · `GET|POST /actividades` · `PUT|DELETE /actividades/:id` · `POST /plan-anual/:anio/generar` · `GET /plan-anual/:anio/excel` · `GET /alertas`.
+`GET /estandares` · `GET|POST /autoevaluaciones` · `GET /autoevaluaciones/:id/sugerencias` · `GET|PUT|DELETE /autoevaluaciones/:id` · `POST /autoevaluaciones/:id/cerrar|reabrir` · `GET /autoevaluaciones/:id/excel` · `GET|POST /actividades` · `PUT|DELETE /actividades/:id` · `POST /plan-anual/:anio/generar` · `GET /plan-anual/:anio/excel` · `GET /alertas`.
 
 Código: `backend/src/models/sstPlanes.js`, `backend/src/services/sst/{estandares,obligaciones,planes}.js`, `backend/src/routes/sstPlanes.js` (montado en `routes/sst.js`) y `frontend/src/app/pages/sst-planes.ts`. El tablero lee `GET /api/sst/planes/resumen`.
 

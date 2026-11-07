@@ -35,11 +35,12 @@ interface Resumen { id: string; vigencia: number; fecha: string; origen: string;
   conteos: { C: number; NC: number; NA: number; sinCalificar: number } | null; reporteArl?: { fecha: string | null; consecutivo: string } }
 interface Actividad { _id: string; anio: number; origen: 'norma' | 'mejora' | 'propia'; numeral: string; titulo: string; detalle: string; entidad: string; norma: string;
   ciclo: string; responsable: string; recursos: string; evidencia: string; fecha: string; estado: 'pendiente' | 'en_curso' | 'hecha' | 'cancelada'; nota: string;
-  vence: { estado: EstadoVence; texto: string } | null }
+  vence: { estado: EstadoVence; texto: string } | null; arrastrada?: boolean }
 interface Autoevaluacion { _id: string; vigencia: number; fecha: string; origen: string; estado: string; soloTotal: boolean; totalRegistrado: number | null;
   items: { numeral: string; estado: Calif; justificacion: string }[];
   reporteArl?: { fecha: string | null; consecutivo: string }; recomendacionesArl?: { fecha: string | null; resumen: string };
   calculo: { total: number; nivel: Nivel }; meta: { total: number; necesarias: number; llega: number } | null; acciones: Actividad[] }
+interface Sugerencia { numeral: string; estado: 'C' | 'NC'; motivo: string; fuente: string }
 interface Alerta { id: string; titulo: string; origen: string; entidad: string; norma: string; evidencia: string; responsable: string; fecha: string; estado: EstadoVence; texto: string }
 interface Alertas { resumen: { vencidas: number; semana: number; mes: number }; items: Alerta[]; avisos: { clave: string; texto: string }[] }
 
@@ -127,6 +128,7 @@ const anioHoy = () => Number(hoyIso().slice(0, 4));
                 @if (meta(); as m) { @if (m.necesarias) { <p class="meta">Cumpliendo las <b>{{ m.necesarias }}</b> acciones de más peso se pasa de <b>{{ n(m.total) }} %</b> a <b>{{ n(m.llega) }} %</b> y se sale del nivel crítico.</p> } }
                 <div class="acciones">
                   @if (puede && a.estado === 'borrador' && !a.soloTotal) {
+                    <button type="button" (click)="sugerir()" [disabled]="trabajando()"><app-icono nombre="buscar" [tam]="16" />Sugerir desde la plataforma</button>
                     <button type="button" (click)="guardarItems()" [disabled]="!cambios() || trabajando()"><app-icono nombre="check" [tam]="16" />Guardar calificación</button>
                     <button type="button" class="primario" confirmar="Clic otra vez: se cierra y se arma el plan de mejora" (confirmado)="cerrar()" [disabled]="trabajando()">Cerrar y generar plan de mejora</button>
                   }
@@ -148,6 +150,27 @@ const anioHoy = () => Number(hoyIso().slice(0, 4));
               @if (puede) { <button type="button" (click)="guardarArl()" [disabled]="trabajando()">Guardar datos de la ARL</button> }
             </section>
           </div>
+
+          @if (sugeridas().length && editable()) {
+            <section class="tarjeta sugerencias">
+              <div class="seccion-cab"><h2>Sugerencias de la plataforma ({{ sugeridas().length }} ítems)</h2>
+                <div class="acciones"><button type="button" class="primario" (click)="aplicarSugerencias()">Aplicar las {{ distintas() }} que cambian</button>
+                  <button type="button" (click)="sugeridas.set([])">Cerrar</button></div></div>
+              <p class="nota">Salen de Datos y membrete, Capacitaciones, Personas, Flota, Formatos, Planillas y el plan anual de {{ sel()?.vigencia }}. Revíselas antes de guardar: la calificación final es del responsable.</p>
+              <div class="tabla-caja"><table>
+                <thead><tr><th>Num.</th><th>Sugerencia</th><th>Motivo</th><th>Fuente</th><th>Actual</th></tr></thead>
+                <tbody>
+                  @for (x of sugeridas(); track x.numeral) {
+                    <tr [class.cambia]="estado(x.numeral) !== x.estado">
+                      <td class="num">{{ x.numeral }}</td>
+                      <td><span [class]="'chip sin-punto ' + (x.estado === 'C' ? 'ok' : 'error')">{{ x.estado === 'C' ? 'Cumple' : 'No cumple' }}</span></td>
+                      <td>{{ x.motivo }}</td><td class="nota">{{ x.fuente }}</td><td class="num">{{ estado(x.numeral) || '—' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table></div>
+            </section>
+          }
 
           @if (!a.soloTotal) {
             <section class="tarjeta">
@@ -178,7 +201,7 @@ const anioHoy = () => Number(hoyIso().slice(0, 4));
                     @if (e.primero) { <tr class="grupo"><td colspan="6">Estándar {{ e.grupo }} · {{ nombreGrupo(e.grupo) }}</td></tr> }
                     <tr>
                       <td class="num">{{ e.numeral }}</td>
-                      <td>{{ e.item }}@if (estado(e.numeral) === 'NC') { <small class="accion">Plan: {{ e.accion }}</small> }</td>
+                      <td>{{ e.item }}@if (motivo(e.numeral); as m) { <small class="sugerido">Plataforma: {{ m }}</small> }@if (estado(e.numeral) === 'NC') { <small class="accion">Plan: {{ e.accion }}</small> }</td>
                       <td class="num">{{ n(e.peso) }}</td>
                       <td><div class="seg" role="group" [attr.aria-label]="'Calificación ' + e.numeral">
                         @for (k of ['C', 'NC', 'NA']; track k) {
@@ -287,7 +310,7 @@ const anioHoy = () => Number(hoyIso().slice(0, 4));
               <tr [class.hecha]="x.estado === 'hecha'" [class.cancelada]="x.estado === 'cancelada'">
                 <td class="num">@if (editando() === x._id) { <input type="date" [(ngModel)]="edicion.fecha" /> } @else { {{ x.fecha | dia }} }
                   @if (x.vence; as v) { <span [class]="'chip sin-punto ' + chipDe(v.estado)">{{ v.texto }}</span> }</td>
-                <td><strong>@if (x.numeral) { <span class="codigo">{{ x.numeral }}</span> }{{ x.titulo }}</strong>
+                <td><strong>@if (x.numeral) { <span class="codigo">{{ x.numeral }}</span> }{{ x.titulo }}</strong>@if (x.arrastrada) { <span class="chip alerta sin-punto arr">Pendiente de {{ x.anio }}</span> }
                   <small>{{ entidades[x.entidad] || x.entidad }}@if (x.norma) { · {{ x.norma }} }@if (x.evidencia) { · Evidencia: {{ x.evidencia }} }</small>
                   @if (x.nota) { <small class="nota-act">{{ x.nota }}</small> }
                   @if (editando() === x._id) { <input class="nota-ed" [(ngModel)]="edicion.nota" maxlength="1000" placeholder="Nota (obligatoria para cancelar)" [attr.aria-label]="'Nota de ' + x.titulo" /> }</td>
@@ -342,7 +365,8 @@ const anioHoy = () => Number(hoyIso().slice(0, 4));
     tr.grupo td { background: var(--gris-1); font-weight: 700; font-size: 12px; color: var(--gris-6); }
     .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
     td small { display: block; color: var(--gris-5); font-size: 12px; margin-top: 2px; }
-    .accion { color: var(--ambar) !important; }
+    .accion { color: var(--ambar) !important; } .sugerido { color: var(--azul) !important; }
+    tr.cambia td { background: var(--azul-claro); } .sugerencias { margin-bottom: 14px; } .arr { margin-left: 6px; font-size: 11px; }
     .seg { display: inline-flex; border: 1px solid var(--gris-3); border-radius: 8px; overflow: hidden; }
     .seg button { border: 0; border-radius: 0; min-height: 0; padding: 4px 9px; font-size: 12px; font-weight: 700; background: var(--gris-0); color: var(--gris-5); }
     .seg button + button { border-left: 1px solid var(--gris-3); }
@@ -355,7 +379,7 @@ const anioHoy = () => Number(hoyIso().slice(0, 4));
     .rojo, .rojo b { color: var(--rojo) !important; }
     h3.mes { margin: 16px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--gris-6); }
     tr.hecha td { opacity: .6; } tr.cancelada td { opacity: .45; text-decoration: line-through; }
-    .tabla-act { table-layout: fixed; width: 100%; } .tabla-act select { max-width: 100%; } .tabla-act .acciones { flex-wrap: nowrap; }
+    .tabla-act { table-layout: fixed; width: 100%; } .tabla-act td.num { white-space: normal; } .tabla-act td.num .chip { display: inline-block; margin-top: 4px; white-space: normal; } .tabla-act select { max-width: 100%; } .tabla-act .acciones { flex-wrap: nowrap; }
     .nota-act { font-style: italic; } .nota-ed { width: 100%; margin-top: 4px; font-size: 12.5px; }
     .barra-alertas { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
     .barra-alertas select { width: auto; } .cuenta { font-variant-numeric: tabular-nums; opacity: .75; margin-left: 4px; }
@@ -396,6 +420,8 @@ export class SstPlanes {
   readonly anio = signal(anioHoy());
   readonly alertas = signal<Alertas | null>(null);
   readonly nuevaAct = signal(false);
+  readonly sugeridas = signal<Sugerencia[]>([]);
+  readonly distintas = computed(() => this.sugeridas().filter((x) => this.estado(x.numeral) !== x.estado).length);
   readonly filtrosAlertas: [string, string][] = [['', 'Todas'], ['vencido', 'Vencidas'], ['semana', 'Esta semana'], ['mes', 'Próximos 30 días']];
   readonly filtroAlerta = signal('');
   readonly origenAlerta = signal('');
@@ -447,8 +473,9 @@ export class SstPlanes {
   readonly porMes = computed(() => {
     const nombres = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
     const grupos = new Map<number, Actividad[]>();
-    for (const x of this.anual()) { const m = Number(aIso(x.fecha).slice(5, 7)); grupos.set(m, [...(grupos.get(m) || []), x]); }
-    return [...grupos.entries()].sort((a, b) => a[0] - b[0]).map(([m, items]) => ({ mes: m, nombre: nombres[m - 1], items }));
+    // Lo que quedó abierto de años anteriores va primero, aparte de los meses del año
+    for (const x of this.anual()) { const m = x.arrastrada ? 0 : Number(aIso(x.fecha).slice(5, 7)); grupos.set(m, [...(grupos.get(m) || []), x]); }
+    return [...grupos.entries()].sort((a, b) => a[0] - b[0]).map(([m, items]) => ({ mes: m, nombre: m ? nombres[m - 1] : 'Pendientes de años anteriores', items }));
   });
 
   constructor() {
@@ -478,6 +505,24 @@ export class SstPlanes {
   }
 
   estado(n: string): Calif { return this.calif()[n] || ''; }
+  motivo(n: string) { const x = this.sugeridas().find((y) => y.numeral === n); return x ? `${x.estado === 'C' ? 'cumple' : 'no cumple'} · ${x.motivo}` : ''; }
+
+  async sugerir() {
+    const a = this.sel(); if (!a) return;
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.get<{ items: Sugerencia[] }>(`/sst/autoevaluaciones/${a._id}/sugerencias`);
+      this.sugeridas.set(r.items);
+      this.avisos.ok(`${r.items.length} ítems con sugerencia; ${this.distintas()} cambian la calificación actual`);
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+
+  aplicarSugerencias() {
+    const cambia = this.sugeridas().filter((x) => this.estado(x.numeral) !== x.estado);
+    this.calif.update((c) => ({ ...c, ...Object.fromEntries(cambia.map((x) => [x.numeral, x.estado])) }));
+    this.cambios.set(true);
+    this.avisos.ok(`${cambia.length} ítems marcados según la plataforma. Revise y guarde la calificación.`);
+  }
   justif(n: string) { return this.justificaciones()[n] || ''; }
   calificar(n: string, k: Calif) { this.calif.update((c) => ({ ...c, [n]: c[n] === k ? '' : k })); this.cambios.set(true); }
   justificar(n: string, v: string) { this.justificaciones.update((j) => ({ ...j, [n]: v })); this.cambios.set(true); }
@@ -493,6 +538,7 @@ export class SstPlanes {
   }
 
   private poner(a: Autoevaluacion) {
+    if (this.sel()?._id !== a._id) this.sugeridas.set([]);
     this.sel.set(a);
     this.calif.set(Object.fromEntries(a.items.map((i) => [i.numeral, i.estado])));
     this.justificaciones.set(Object.fromEntries(a.items.map((i) => [i.numeral, i.justificacion])));

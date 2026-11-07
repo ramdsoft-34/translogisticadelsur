@@ -192,14 +192,35 @@ export async function generarPlanAnual(empresaId, anio, usuarioId, ahora = new D
   return { nuevas, anteriores };
 }
 
+/**
+ * Actividades del plan. Con año: las de ese año más las que quedaron abiertas de años anteriores (arrastradas),
+ * para que nada pendiente se pierda al cambiar de año.
+ */
 export async function actividades(empresaId, { anio, origen, estado } = {}) {
   const f = { empresa: empresaId };
-  if (anio) f.anio = anio;
+  if (anio) f.$or = [{ anio }, { anio: { $lt: anio }, estado: { $in: ['pendiente', 'en_curso'] } }];
   if (origen) f.origen = origen;
   if (estado) f.estado = estado;
   const l = await SstActividad.find(f).sort({ fecha: 1, titulo: 1 }).lean();
   const ahora = new Date();
-  return l.map((x) => ({ ...x, vence: ['hecha', 'cancelada'].includes(x.estado) ? null : { estado: estadoVence(x.fecha, ahora), texto: textoVence(x.fecha, ahora) } }));
+  return l.map((x) => ({ ...x, arrastrada: !!anio && x.anio < anio,
+    vence: ['hecha', 'cancelada'].includes(x.estado) ? null : { estado: estadoVence(x.fecha, ahora), texto: textoVence(x.fecha, ahora) } }));
+}
+
+/**
+ * Proyección automática: si el año no tiene calendario se carga solo (sin las fechas que ya pasaron) y desde el
+ * 1 de diciembre se carga también el del año siguiente. Devuelve los años que cargó.
+ */
+export async function proyectar(empresaId, ahora = new Date()) {
+  const anio = anioCol(ahora);
+  const mes = Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', month: '2-digit' }).format(ahora));
+  const cargados = [];
+  for (const y of mes === 12 ? [anio, anio + 1] : [anio]) {
+    if (await SstActividad.exists({ empresa: empresaId, anio: y, origen: 'norma', clave: { $not: /^avance-resultado@/ } })) continue;
+    const r = await generarPlanAnual(empresaId, y, null, ahora);
+    if (r.nuevas) cargados.push({ anio: y, nuevas: r.nuevas });
+  }
+  return cargados;
 }
 
 export function resumenPlan(lista) {
@@ -238,6 +259,7 @@ export async function borrarActividad(empresaId, id) {
 /** Pendientes vencidas o que vencen en 30 días, y avisos de lo que falta (autoevaluación del año, plan anual). */
 export async function alertas(empresaId, ahora = new Date()) {
   const anio = anioCol(ahora);
+  const cargados = await proyectar(empresaId, ahora).catch(() => []);
   const hasta = new Date(hoyColombia(ahora).getTime() + 31 * 86400000);
   const [pend, hayPlan, ultima] = await Promise.all([
     SstActividad.find({ empresa: empresaId, estado: { $in: ['pendiente', 'en_curso'] }, fecha: { $lte: hasta } }).sort({ fecha: 1 }).lean(),
@@ -247,7 +269,7 @@ export async function alertas(empresaId, ahora = new Date()) {
   const items = pend.map((x) => ({ id: x._id, titulo: x.titulo, origen: x.origen, entidad: x.entidad, norma: x.norma, evidencia: x.evidencia,
     responsable: x.responsable, fecha: x.fecha, estado: estadoVence(x.fecha, ahora), texto: textoVence(x.fecha, ahora) }))
     .filter((x) => x.estado !== 'ok');
-  const avisos = [];
+  const avisos = cargados.map((c) => ({ clave: `proyeccion-${c.anio}`, texto: `Se cargó solo el calendario ${c.anio}: ${c.nuevas} actividades con las fechas de la norma. Revise las fechas y los responsables.` }));
   if (!hayPlan) avisos.push({ clave: 'plan', texto: `Aún no hay plan anual de trabajo ${anio}. Genérelo para recibir las alertas del calendario.` });
   if (!ultima) avisos.push({ clave: 'autoevaluacion', texto: 'No hay autoevaluación de estándares mínimos registrada.' });
   else if (ultima.vigencia < anio - 1) avisos.push({ clave: 'autoevaluacion', texto: `La última autoevaluación es de la vigencia ${ultima.vigencia}. Falta la de ${anio - 1}.` });
