@@ -871,7 +871,9 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     const cfg = (await s.adminA.get('/api/whatsapp/config')).body;
     assert.ok(cfg.tieneToken && cfg.tieneSecreto && cfg.webhookToken);
     assert.ok(!JSON.stringify(cfg).includes('token-secreto'), 'el token nunca vuelve al navegador');
-    assert.equal((await s.adminA.post('/api/whatsapp/config/probar', {})).body.nombre, 'Transportes Prueba');
+    const prueba = (await s.adminA.post('/api/whatsapp/config/probar', {})).body;
+    assert.equal(prueba.nombre, 'Transportes Prueba');
+    assert.ok(llamadas.some(x => x.metodo === 'POST' && x.ruta.endsWith('/99/subscribed_apps')), 'al probar suscribe la cuenta a los avisos de entrega');
 
     // Al aceptarse el manifiesto queda por aprobar y no sale nada
     const antes = llamadas.length;

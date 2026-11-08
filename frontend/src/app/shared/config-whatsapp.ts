@@ -55,7 +55,11 @@ Este número solo envía documentos. Para cualquier novedad, comuníquese con {{
           <button type="button" (click)="probar()" [disabled]="trabajando() || !c.activo">Probar conexión</button>
         </div>
         @if (prueba(); as p) { <div class="mensaje" [class.ok]="p.ok" [class.error]="!p.ok" style="margin-top:12px" role="status">
-          {{ p.ok ? 'Conectado: ' + p.nombre + ' · ' + p.numero : p.error }}</div> }
+          {{ p.ok ? 'Conectado: ' + p.nombre + ' · ' + p.numero : p.error }}
+          @if (p.ok) {
+            @if (p.estadoNombre && p.estadoNombre !== 'aprobado') { <div>Nombre visible {{ p.estadoNombre }}: Meta no entrega los mensajes hasta aprobarlo.</div> }
+            <div>{{ p.suscrito ? 'Avisos de entrega activos.' : p.avisoSuscripcion }}</div>
+          }</div> }
       </form>
 
       @if (c.modo === 'propia') {

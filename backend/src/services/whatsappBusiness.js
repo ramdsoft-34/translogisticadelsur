@@ -56,9 +56,18 @@ export async function probarPlataforma() {
   if (!plataformaLista(p)) throw new Error('Active la cuenta e indique el identificador del número y el token');
   return probarDatos({ cuenta: p, token: descifrar(p.tokenCifrado) });
 }
+// Nombre visible del número: mientras Meta no lo aprueba, los mensajes se aceptan pero no se entregan
+const NOMBRE_ESTADO = { APPROVED: 'aprobado', AVAILABLE_WITHOUT_REVIEW: 'aprobado', PENDING_REVIEW: 'en revisión', DECLINED: 'rechazado', EXPIRED: 'vencido', NONE: 'sin nombre' };
 async function probarDatos({ cuenta, token }) {
-  const r = await llamarMeta(`${cuenta.phoneNumberId}?fields=display_phone_number,verified_name,quality_rating`, token);
-  return { ok: true, numero: r.display_phone_number, nombre: r.verified_name, calidad: r.quality_rating };
+  const r = await llamarMeta(`${cuenta.phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,name_status,status`, token);
+  // Sin esta suscripción Meta no avisa a la plataforma si el mensaje se entregó, se leyó o falló
+  let suscrito = false, avisoSuscripcion = '';
+  if (cuenta.wabaId) {
+    try { suscrito = !!(await llamarMeta(`${cuenta.wabaId}/subscribed_apps`, token, { method: 'POST' })).success; }
+    catch (e) { avisoSuscripcion = `No se pudo suscribir la cuenta a los avisos de entrega: ${e.message}`; }
+  } else avisoSuscripcion = 'Falta el identificador de la cuenta (WABA ID): sin él no llegan los avisos de entrega';
+  return { ok: true, numero: r.display_phone_number, nombre: r.verified_name, calidad: r.quality_rating,
+    estadoNombre: NOMBRE_ESTADO[r.name_status] || (r.name_status ? String(r.name_status).toLowerCase() : ''), estadoNumero: r.status || '', suscrito, avisoSuscripcion };
 }
 
 async function subirPdf(cuenta, token, pdf, nombre) {
