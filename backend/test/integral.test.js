@@ -931,6 +931,24 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     await avisar(aviso('delivered'), firmar(aviso('delivered')));
     assert.equal((await lista())[0].estado, 'leido', 'el estado no retrocede');
 
+    // Viaje sin RNDC: el soporte interno (MC/RC) también queda por aprobar y sale con la misma plantilla
+    const vs = await s.manif.post('/api/viajes', { fecha: '2026-11-06', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Pasto urbano', placa: 'ABC123', conductor: s.conductor, requiereManifiesto: false });
+    assert.equal(vs.status, 201, JSON.stringify(vs.body));
+    const listaS = async () => (await s.manif.get(`/api/whatsapp/envios?viajes=${vs.body._id}`)).body;
+    const porAprobarS = (await listaS())[0];
+    assert.equal(porAprobarS.tipo, 'soporte');
+    assert.equal(porAprobarS.estado, 'por_aprobar');
+    assert.match(porAprobarS.documento, /^MC/);
+    await s.manif.post(`/api/gestion/soportes/viajes/${vs.body._id}`, {});
+    assert.equal((await listaS()).length, 1, 'abrir el soporte no crea otro envío');
+    const apS = (await s.manif.post('/api/whatsapp/aprobar', { viajes: [vs.body._id] })).body;
+    assert.equal(apS.resultados[0].estado, 'enviado', JSON.stringify(apS));
+    const mS = JSON.parse(llamadas.filter(x => x.ruta.endsWith('/messages')).at(-1).cuerpo.toString());
+    const textosS = mS.template.components[1].parameters.map(x => x.text);
+    assert.equal(textosS[2], porAprobarS.documento, 'el MC va como número del documento');
+    assert.match(textosS[6], /^RC/, 'el RC va como remesa');
+    assert.match(mS.template.components[0].parameters[0].document.filename, /^Soporte_MC/);
+
     // El SuperAdmin deja lista la cuenta de cada empresa por separado; el token nunca vuelve y la otra empresa no cambia
     assert.equal((await s.adminA.get('/api/admin/whatsapp/empresas')).status, 403);
     const listaEmp = (await s.sa.get('/api/admin/whatsapp/empresas')).body;

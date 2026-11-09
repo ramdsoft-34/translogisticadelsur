@@ -446,7 +446,8 @@ const plataformaWhatsappSchema = new Schema({
 const envioWhatsappSchema = new Schema({
   viaje: { type: Schema.Types.ObjectId, ref: 'Viaje', required: true },
   conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },
-  documento: str(),                         // n.° del manifiesto
+  tipo: { type: String, enum: ['manifiesto', 'soporte'], default: 'manifiesto' },   // soporte interno MC/RC en viajes sin RNDC
+  documento: str(),                         // n.° del manifiesto (o MC del soporte interno)
   telefono: str(),
   cuenta: { type: String, enum: ['plataforma', 'propia'], default: 'plataforma' },   // de qué número salió (para el cobro)
   // por_aprobar: creado al aceptarse el manifiesto; solo sale cuando alguien lo aprueba

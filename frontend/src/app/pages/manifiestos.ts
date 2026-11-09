@@ -63,6 +63,11 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         @if (pestana() === 'soporte' && seleccion().size) {
           <button type="button" (click)="abrirCorreoManual(true)" [disabled]="trabajando()" title="Correo con los soportes internos elegidos y archivos adjuntos">
             <app-icono nombre="correo" />Correo con {{ seleccion().size }} soporte(s)</button>
+          @if (whatsappActivo()) {
+            <button type="button" confirmar="Clic otra vez para descartar" (confirmado)="descartarWhatsapp([...seleccion()])" [disabled]="trabajando()">Descartar WhatsApp</button>
+            <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="aprobarWhatsapp([...seleccion()])" [disabled]="trabajando()">
+              <app-icono nombre="enviar" />Aprobar WhatsApp ({{ seleccion().size }})</button>
+          }
         }
         @if (puedeCrear && !vista()) { <button class="primario" (click)="nuevoManifiesto()"><app-icono nombre="mas" />Nuevo manifiesto</button> }
       </div>
@@ -187,7 +192,8 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                 <td data-etiqueta="Remesa">@if ($any(v).soporteInterno?.rc) { {{ $any(v).soporteInterno.rc }}<br /><span class="chip ok sin-punto">interna</span> } @else { <span class="chip alerta sin-punto">sin soporte</span> }</td>
                 <td data-etiqueta="Manifiesto">@if ($any(v).soporteInterno?.mc) { {{ $any(v).soporteInterno.mc }}<br /><span class="chip" [class]="chipSoporte($any(v))">{{ textoSoporte($any(v)) }}</span>
                   @if ($any(v).soporteInterno.estado === 'anulado' && $any(v).soporteInterno.anulado?.motivo) { <br /><span class="sutil" [title]="$any(v).soporteInterno.anulado.motivo">{{ $any(v).soporteInterno.anulado.motivo }}</span> }
-                  @else { <br /><span class="sutil">Cód. {{ $any(v).soporteInterno.codigo }}</span> } }</td>
+                  @else { <br /><span class="sutil">Cód. {{ $any(v).soporteInterno.codigo }}</span> } }
+                  @if (whatsappDe(v._id); as w) { <span class="chip" style="display:block;width:fit-content;margin-top:4px" [class]="claseWhatsapp(w.estado)" [title]="w.error || ('WhatsApp al conductor ' + (w.telefono || ''))">WhatsApp: {{ textoWhatsapp(w.estado) }}</span> }</td>
                 } @else {
                 <td data-etiqueta="Remesa">@if (v.remesa.numero) { {{ v.remesa.numero }}<br /><span class="chip" [class]="chip(v.remesa.estado)">{{ v.remesa.estado || 'sin enviar' }}</span> }</td>
                 <td data-etiqueta="Manifiesto">@if (v.manifiesto.numero) { {{ v.manifiesto.numero }}<br /><span class="chip" [class]="chip(v.manifiesto.estado)">{{ v.manifiesto.estado || 'sin enviar' }}</span> }
@@ -252,6 +258,16 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                               <button class="pequeno" (click)="verSoporte(v)" title="Ver el soporte en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver</button>
                               <button class="pequeno" (click)="correoSoporte(v)" title="Enviar el soporte por correo"><app-icono nombre="correo" [tam]="15" />Correo</button>
                             </div>
+                            @if (whatsappActivo()) {
+                              @let w = whatsappDe(v._id);
+                              @if (w?.estado === 'por_aprobar') {
+                                <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarWhatsapp([v._id])" [disabled]="trabajando()"
+                                  title="Envía el PDF del soporte interno al WhatsApp del conductor"><app-icono nombre="enviar" [tam]="15" />Aprobar WhatsApp</button>
+                              } @else {
+                                <button class="pequeno" confirmar="Clic otra vez para enviar" (confirmado)="enviarWhatsapp(v)" [disabled]="trabajando()"
+                                  title="Envía el PDF del soporte interno al WhatsApp del conductor"><app-icono nombre="enviar" [tam]="15" />{{ w ? 'Reenviar WhatsApp' : 'Enviar WhatsApp' }}</button>
+                              }
+                            }
                             <div class="fila-acciones">
                               @if (si.estado === 'cumplido') {
                                 <button class="pequeno peligro" (click)="abrirAnularSoporte(v, true)">Anular cumplido</button>
@@ -686,13 +702,17 @@ export class Manifiestos {
   claseCorreo(e: string) { return ESTADO_CORREO[e]?.[1] || ''; }
 
   private async cargarCorreos(lista: Viaje[]) {
-    if (!this.conCorreo() || !lista.length) return;
+    if (!lista.length) return;
+    // En Soporte interno solo hay WhatsApp (los correos de soportes son manuales)
+    if (this.pestana() !== 'soporte') {
+    if (!this.conCorreo()) return;
     try {
       const envios = await this.api.get<any[]>('/correo/envios', { viajes: lista.map(v => v._id).join(','), limite: 1000 });
       const m = new Map<string, any[]>();
       for (const e of envios) m.set(e.viaje, [...(m.get(e.viaje) || []), e]);
       this.enviosPorViaje.set(m);
     } catch { /* sin permiso para ver correos */ }
+    }
     try {
       const envios = await this.api.get<any[]>('/whatsapp/envios', { viajes: lista.map(v => v._id).join(','), limite: 1000 });
       const m = new Map<string, any>();
@@ -718,7 +738,7 @@ export class Manifiestos {
       const fallos = r.resultados.filter((x: any) => x.estado === 'error');
       if (!r.aprobados) this.avisos.mostrar('Los viajes elegidos no tienen WhatsApp por aprobar', 'info');
       else if (fallos.length) this.avisos.mostrar(`${fallos.length} de ${r.aprobados} no se envió: ${fallos[0].error}`, 'error', 9000);
-      else this.avisos.ok(`${r.aprobados} manifiesto(s) enviados por WhatsApp`);
+      else this.avisos.ok(`${r.aprobados} documento(s) enviados por WhatsApp`);
     });
   }
   descartarWhatsapp(viajes: string[]) {
@@ -731,7 +751,7 @@ export class Manifiestos {
     return this.tareaWhatsapp(async () => {
       const r = await this.api.post<any>(`/whatsapp/viajes/${v._id}/enviar`, {});
       if (r?.estado === 'error') this.avisos.mostrar(`No se envió: ${r.error}`, 'error', 9000);
-      else this.avisos.ok('Manifiesto enviado por WhatsApp');
+      else this.avisos.ok(this.pestana() === 'soporte' ? 'Soporte interno enviado por WhatsApp' : 'Manifiesto enviado por WhatsApp');
     });
   }
 

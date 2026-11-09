@@ -24,6 +24,7 @@ import rutasRemesas from './remesas.js';
 import rutasRelacionesCobro from './relacionesCobro.js';
 import { avisarLiquidacion } from '../services/rastreo/surtrack.js';
 import { avisarDocumentosApp } from '../services/rastreo/documentosApp.js';
+import { prepararEnvio as prepararWhatsapp, descartarEnvios as descartarWhatsapp } from '../services/whatsappBusiness.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -625,6 +626,7 @@ r.post('/soportes/viajes/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) =>
   const d = await soporteInterno(empresa, req.params.id, { reemplazar });
   await auditar(req, reemplazar ? 'soporte_interno_reemplazo' : 'soporte_interno', { entidad: 'Viaje', entidadId: req.params.id, detalle: { mc: d.soporte.mc, rc: d.soporte.rc, codigo: d.soporte.codigo } });
   avisarDocumentosApp(req.empresaId, req.params.id);
+  await prepararWhatsapp(req.empresaId, req.params.id, { usuario: req.usuario._id }).catch(() => {});
   res.json(d.soporte);
 });
 // Cumplido y anulación del soporte interno (no van al RNDC)
@@ -642,6 +644,8 @@ r.post('/soportes/viajes/:id/anular', permitir(P.VIAJES_REGISTRAR), async (req, 
   const s = await soporteAnular(req.empresaId, req.params.id, d, req.usuario._id);
   await auditar(req, d.soloCumplido ? 'anular_cumplido_soporte' : 'anular_soporte_interno', { entidad: 'Viaje', entidadId: req.params.id, detalle: { mc: s.mc, motivo: d.motivo } });
   avisarDocumentosApp(req.empresaId, req.params.id);
+  // El soporte anulado ya no se envía al conductor
+  if (!d.soloCumplido) await descartarWhatsapp(req.empresaId, [req.params.id], req.usuario._id);
   res.json(s);
 });
 r.get('/soportes/viajes/:id/pdf', permitir(P.VIAJES_VER), async (req, res) => {

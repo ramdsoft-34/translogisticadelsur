@@ -91,6 +91,8 @@ export async function asegurarSoporte(empresaId, viajeId) {
   const s = (await soporteInterno(empresa, viajeId)).soporte;
   // Si el viaje ya va a la app nueva, el conductor recibe el soporte (import dinámico: evita un ciclo)
   import('../rastreo/documentosApp.js').then((m) => m.avisarDocumentosApp(empresaId, viajeId)).catch(() => {});
+  // Igual que el manifiesto: queda por aprobar para enviarlo por WhatsApp al conductor
+  await import('../whatsappBusiness.js').then((m) => m.prepararEnvio(empresaId, viajeId)).catch(() => {});
   return s;
 }
 

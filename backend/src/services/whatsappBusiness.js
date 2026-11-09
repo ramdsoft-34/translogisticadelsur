@@ -6,9 +6,10 @@ import { Empresa, EnvioWhatsapp, PlataformaWhatsapp, Tercero, Viaje } from '../m
 import { descifrar } from '../utils/cifrado.js';
 import { txt } from '../utils/texto.js';
 import { datosManifiesto, manifiestoPdf, nombreArchivo } from './reportes/manifiesto.js';
+import { soporteInterno } from './gestion/soporteInterno.js';
+import { soporteExpedido } from './documentos/expedidos.js';
 
 const urlGraph = () => (process.env.WHATSAPP_GRAPH_URL || 'https://graph.facebook.com/v23.0').replace(/\/$/, '');
-const VIGENTES = ['por_aprobar', 'pendiente', 'enviando', 'enviado', 'entregado', 'leido'];
 // Meta puede avisar en desorden: el estado nunca retrocede
 const ORDEN = { enviado: 1, entregado: 2, leido: 3 };
 const ESTADO_META = { sent: 'enviado', delivered: 'entregado', read: 'leido' };
@@ -91,16 +92,26 @@ function mensajePlantilla(cuenta, para, mediaId, nombre, d, conductor, empresa) 
     ] } };
 }
 
-// Envía un manifiesto ya aprobado. Se revisa de nuevo: pudo anularse o cambiar el conductor mientras esperaba.
+// Documento que se le envía al conductor: el manifiesto aceptado por el RNDC o, en los viajes sin RNDC,
+// el soporte interno (MC/RC) mientras no esté anulado
+function documentoVigente(v) {
+  if (v?.manifiesto?.estado === 'aceptado' && v.manifiesto.numero) return { tipo: 'manifiesto', documento: v.manifiesto.numero };
+  const s = v?.soporteInterno;
+  if (s?.mc && s.estado !== 'anulado') return { tipo: 'soporte', documento: s.mc };
+  return null;
+}
+
+// Envía un manifiesto (o soporte interno) ya aprobado. Se revisa de nuevo: pudo anularse o cambiar el conductor mientras esperaba.
 export async function procesarEnvio(empresaId, envioId) {
   const r = await EnvioWhatsapp.findOneAndUpdate({ empresa: empresaId, _id: envioId, estado: { $in: ['pendiente', 'error'] } },
     { $set: { estado: 'enviando', error: '' }, $inc: { intentos: 1 } }, { new: true }).lean();
   if (!r) return null;
   const terminar = async (set) => (await EnvioWhatsapp.findOneAndUpdate({ empresa: empresaId, _id: envioId }, { $set: set }, { new: true }).lean());
   try {
-    const v = await Viaje.findOne({ empresa: empresaId, _id: r.viaje }).select('conductor manifiesto').lean();
-    if (v?.manifiesto?.estado !== 'aceptado' || v.manifiesto.numero !== r.documento) {
-      return await terminar({ estado: 'descartado', error: 'El manifiesto ya no está vigente: no se envió' });
+    const v = await Viaje.findOne({ empresa: empresaId, _id: r.viaje }).select('conductor manifiesto soporteInterno').lean();
+    const doc = documentoVigente(v);
+    if (!doc || doc.documento !== r.documento) {
+      return await terminar({ estado: 'descartado', error: `${r.tipo === 'soporte' ? 'El soporte interno' : 'El manifiesto'} ya no está vigente: no se envió` });
     }
     const conductor = await Tercero.findOne({ empresa: empresaId, _id: v.conductor }).select('nombres celular whatsappAutorizado').lean();
     if (!conductor) throw new Error('El viaje no tiene conductor');
@@ -108,30 +119,40 @@ export async function procesarEnvio(empresaId, envioId) {
     const para = celularWhatsapp(conductor.celular);
     if (!para) throw new Error('El conductor no tiene un celular válido de 10 dígitos (Conductores y terceros)');
     const { empresa, cuenta, token, tipo } = await cuentaWhatsapp(empresaId);
-    const d = await datosManifiesto(empresa, r.viaje);
-    const nombre = nombreArchivo(d);
-    const mediaId = await subirPdf(cuenta, token, await manifiestoPdf(d), nombre);
+    let d, pdf, nombre;
+    if (doc.tipo === 'soporte') {
+      // Mismos datos de la plantilla (MC como manifiesto y RC como remesa) y el PDF tal como quedó expedido
+      d = await soporteInterno(empresa, r.viaje, { asignar: false });
+      const s = await soporteExpedido(empresa, r.viaje);
+      pdf = s.buffer; nombre = s.nombre;
+    } else {
+      d = await datosManifiesto(empresa, r.viaje);
+      nombre = nombreArchivo(d); pdf = await manifiestoPdf(d);
+    }
+    const mediaId = await subirPdf(cuenta, token, pdf, nombre);
     const res = await llamarMeta(`${cuenta.phoneNumberId}/messages`, token, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(mensajePlantilla(cuenta, para, mediaId, nombre, d, conductor, empresa)) });
-    return await terminar({ estado: 'enviado', cuenta: tipo, conductor: conductor._id, telefono: para, idMensaje: res.messages?.[0]?.id || '', enviadoEn: new Date(), error: '' });
+    return await terminar({ estado: 'enviado', tipo: doc.tipo, cuenta: tipo, conductor: conductor._id, telefono: para, idMensaje: res.messages?.[0]?.id || '', enviadoEn: new Date(), error: '' });
   } catch (e) {
     return await terminar({ estado: 'error', error: String(e.message).slice(0, 500) });
   }
 }
 
-// Al aceptarse el manifiesto queda por aprobar; un envío manual sale de una vez.
+// Al aceptarse el manifiesto (o numerarse el soporte interno) queda por aprobar; un envío manual sale de una vez.
 export async function prepararEnvio(empresaId, viajeId, { origen = 'automatico', usuario = null } = {}) {
   const e = await Empresa.findById(empresaId).select('whatsapp.activo whatsapp.modo').lean();
   if (!e?.whatsapp?.activo) {
     if (origen === 'automatico') return null;
     const err = new Error('WhatsApp está desactivado para esta empresa (Configuración → WhatsApp)'); err.status = 400; throw err;
   }
-  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('conductor manifiesto').lean();
-  if (v?.manifiesto?.estado !== 'aceptado') { const err = new Error('Solo se envía cuando el RNDC aceptó el manifiesto'); err.status = 409; throw err; }
-  const documento = v.manifiesto.numero;
-  if (origen === 'automatico' && await EnvioWhatsapp.exists({ empresa: empresaId, viaje: viajeId, documento, estado: { $in: VIGENTES } })) return null;
+  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('conductor manifiesto soporteInterno').lean();
+  const doc = documentoVigente(v);
+  if (!doc) { const err = new Error('Solo se envía el manifiesto aceptado por el RNDC o el soporte interno vigente'); err.status = 409; throw err; }
+  const { tipo, documento } = doc;
+  // Automático una sola vez por documento: si ya se envió, se descartó o falló, no se vuelve a crear (abrir el soporte no lo repite)
+  if (origen === 'automatico' && await EnvioWhatsapp.exists({ empresa: empresaId, viaje: viajeId, documento })) return null;
   if (origen === 'manual') await EnvioWhatsapp.updateMany({ empresa: empresaId, viaje: viajeId, estado: 'por_aprobar' }, { $set: { estado: 'descartado', error: 'Reemplazado por un envío manual' } });
-  const envio = await EnvioWhatsapp.create({ empresa: empresaId, viaje: viajeId, conductor: v.conductor, documento, origen, usuario, cuenta: e.whatsapp.modo || 'plataforma',
+  const envio = await EnvioWhatsapp.create({ empresa: empresaId, viaje: viajeId, conductor: v.conductor, tipo, documento, origen, usuario, cuenta: e.whatsapp.modo || 'plataforma',
     estado: origen === 'automatico' ? 'por_aprobar' : 'pendiente' });
   return origen === 'automatico' ? envio.toObject() : procesarEnvio(empresaId, envio._id);
 }
