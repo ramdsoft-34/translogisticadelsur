@@ -22,6 +22,7 @@ export const routes: Routes = [
       { path: 'manifiestos', ...pagina([P.RNDC_OPERAR], () => import('./pages/manifiestos').then(m => m.Manifiestos)) },
       { path: 'soporte-interno', ...pagina([P.VIAJES_VER], () => import('./pages/manifiestos').then(m => m.Manifiestos)), data: { permisos: [P.VIAJES_VER], vista: 'soporte' } },
       { path: 'rndc/envios', ...pagina([P.RNDC_OPERAR], () => import('./pages/manifiestos').then(m => m.Manifiestos)), data: { permisos: [P.RNDC_OPERAR], vista: 'historial' } },
+      { path: 'whatsapp/mensajes', ...pagina([P.RNDC_OPERAR, P.CONFIG_GESTIONAR], () => import('./pages/mensajes-whatsapp').then(m => m.MensajesWhatsapp)) },
       { path: 'rndc/correos', ...pagina([P.RNDC_OPERAR], () => import('./pages/manifiestos').then(m => m.Manifiestos)), data: { permisos: [P.RNDC_OPERAR], vista: 'correos' } },
       { path: 'conductores', ...pagina([P.MAESTROS_VER], () => import('./pages/terceros').then(m => m.Terceros)) },
       { path: 'pago-conductores', ...pagina([P.LIQUIDACION_VER], () => import('./pages/pago-conductores').then(m => m.PagoConductores)) },

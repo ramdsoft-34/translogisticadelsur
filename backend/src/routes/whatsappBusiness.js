@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import express, { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { Empresa, EnvioWhatsapp } from '../models/index.js';
+import { Empresa, EnvioWhatsapp, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { env } from '../config/env.js';
@@ -121,6 +121,34 @@ r.get('/envios', operar, async (req, res) => {
   if (req.query.viajes) f.viaje = { $in: String(req.query.viajes).split(',').filter(x => mongoose.isValidObjectId(x)).slice(0, 1000) };
   if (req.query.estado) f.estado = String(req.query.estado);
   res.json(await EnvioWhatsapp.find(f).sort({ createdAt: -1 }).limit(Math.min(Number(req.query.limite) || 300, 1000)).lean());
+});
+
+// Mensajes de WhatsApp de la empresa en un periodo: cada envío con su conductor, documento y horas
+// (enviado, entregado, leído). Los estados los avisa Meta por el webhook, sin costo.
+const fechaIso = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'fecha inválida');
+const ENVIADOS = ['enviado', 'entregado', 'leido'];
+r.get('/mensajes', operar, async (req, res) => {
+  const q = z.object({ desde: fechaIso, hasta: fechaIso, estado: z.string().max(20).optional().default(''), texto: z.string().trim().max(60).optional().default('') }).parse(req.query);
+  const desde = new Date(`${q.desde}T05:00:00.000Z`);             // medianoche en Colombia
+  const hasta = new Date(`${q.hasta}T05:00:00.000Z`); hasta.setUTCDate(hasta.getUTCDate() + 1);
+  if (!(hasta > desde)) throw new ErrorHttp(400, 'El rango de fechas no es válido');
+  const lista = await EnvioWhatsapp.find(deEmpresa(req, { createdAt: { $gte: desde, $lt: hasta } })).sort({ createdAt: -1 }).limit(3000)
+    .populate([pob(req.empresaId, 'viaje', 'numero placa destino fecha'), pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId')]).lean();
+  const vigentes = lista.filter(x => x.estado !== 'descartado');
+  const cuenta = (f) => vigentes.filter(f).length;
+  const totales = { total: vigentes.length, porAprobar: cuenta(x => x.estado === 'por_aprobar'), enviados: cuenta(x => ENVIADOS.includes(x.estado)),
+    entregados: cuenta(x => ['entregado', 'leido'].includes(x.estado)), leidos: cuenta(x => x.estado === 'leido'), errores: cuenta(x => x.estado === 'error') };
+  const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
+  const texto = q.texto.toLowerCase();
+  const mensajes = lista
+    .filter(x => !q.estado ? x.estado !== 'descartado' : q.estado === 'enviados' ? ENVIADOS.includes(x.estado) : x.estado === q.estado)
+    .map(x => ({ _id: x._id, fecha: x.createdAt, tipo: x.tipo || 'manifiesto', documento: x.documento, estado: x.estado, error: x.error, telefono: x.telefono,
+      origen: x.origen, cuenta: x.cuenta, intentos: x.intentos, enviadoEn: x.enviadoEn, entregadoEn: x.entregadoEn, leidoEn: x.leidoEn,
+      viaje: x.viaje ? { _id: x.viaje._id, numero: x.viaje.numero, placa: x.viaje.placa, destino: x.viaje.destino } : null,
+      conductor: x.conductor ? { nombre: nombreDe(x.conductor), numId: x.conductor.numId } : null }))
+    .filter(x => !texto || [x.documento, x.telefono, x.viaje?.placa, x.viaje?.numero, x.conductor?.nombre, x.conductor?.numId]
+      .some(v => String(v ?? '').toLowerCase().includes(texto)));
+  res.json({ totales, mensajes });
 });
 
 const listaViajes = z.object({ viajes: z.array(z.string().refine(x => mongoose.isValidObjectId(x), 'viaje inválido')).min(1).max(200) });

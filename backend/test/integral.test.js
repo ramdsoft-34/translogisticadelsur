@@ -949,6 +949,18 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     assert.match(textosS[6], /^RC/, 'el RC va como remesa');
     assert.match(mS.template.components[0].parameters[0].document.filename, /^Soporte_MC/);
 
+    // Mensajes de WhatsApp: lista del periodo con totales; otra empresa no los ve
+    const msj = (await s.manif.get('/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31')).body;
+    assert.ok(msj.totales.enviados >= 2 && msj.totales.leidos >= 1, JSON.stringify(msj.totales));
+    const mSoporte = msj.mensajes.find(x => x.documento === porAprobarS.documento);
+    assert.equal(mSoporte.tipo, 'soporte');
+    assert.equal(mSoporte.viaje.placa, 'ABC123');
+    assert.ok(mSoporte.conductor.nombre);
+    assert.equal((await s.manif.get(`/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31&estado=leido`)).body.mensajes.every(x => x.estado === 'leido'), true);
+    assert.equal((await s.manif.get(`/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31&texto=${porAprobarS.documento}`)).body.mensajes.length, 1);
+    assert.equal((await s.adminB.get('/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31')).body.mensajes.length, 0);
+    assert.equal((await s.reportero.get('/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31')).status, 403);
+
     // El SuperAdmin deja lista la cuenta de cada empresa por separado; el token nunca vuelve y la otra empresa no cambia
     assert.equal((await s.adminA.get('/api/admin/whatsapp/empresas')).status, 403);
     const listaEmp = (await s.sa.get('/api/admin/whatsapp/empresas')).body;

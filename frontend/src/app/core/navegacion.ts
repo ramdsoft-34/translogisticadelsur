@@ -48,6 +48,7 @@ export const MODULOS: Modulo[] = [
     { ruta: '/consultas-rndc', texto: 'Consultas', icono: 'buscar', permisos: [P.RNDC_CONSULTAR], descripcion: 'Lo que el RNDC tiene registrado para la empresa' },
     { ruta: '/rndc/envios', texto: 'Envíos', icono: 'enviar', permisos: [P.RNDC_OPERAR], descripcion: 'Historial de envíos al RNDC y sus respuestas', claves: 'historial transacciones radicado' },
     { ruta: '/rndc/correos', texto: 'Correos', icono: 'correo', permisos: [P.RNDC_OPERAR], descripcion: 'Manifiestos y cartas de salida enviados a clientes' },
+    { ruta: '/whatsapp/mensajes', texto: 'Mensajes de WhatsApp', icono: 'enviar', permisos: [P.RNDC_OPERAR, P.CONFIG_GESTIONAR], descripcion: 'Manifiestos y soportes enviados al WhatsApp de los conductores: entregados y leídos', claves: 'whatsapp conductor entregado leido visto mensajes' },
   ] },
   { id: 'empresa', nombre: 'Empresa', icono: 'ajustes', paginas: [
     { ruta: '/configuracion', texto: 'Configuración', icono: 'ajustes', permisos: [P.CONFIG_GESTIONAR, P.USUARIOS_GESTIONAR], descripcion: 'Conexión RNDC, correo, usuarios, importación y auditoría', claves: 'usuarios correo auditoria importar logo soporte' },
