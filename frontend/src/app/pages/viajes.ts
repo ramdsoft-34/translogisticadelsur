@@ -147,7 +147,10 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         </select>
         @if (clienteConSeguros()) {
           <span class="etq">Seguro:</span>
-          <label class="casilla" title="El manifiesto se expide normal y hay que anularlo al día siguiente antes de las 9:00 a. m."><input type="checkbox" name="seguro" [(ngModel)]="f.seguro" />Es un seguro (anular el manifiesto al día siguiente antes de las 9:00 a. m.)</label>
+          <div class="seguro-campo">
+            <label class="casilla"><input type="checkbox" name="seguro" [(ngModel)]="f.seguro" />Es un seguro</label>
+            @if (f.seguro) { <small class="sutil">Se anula al día siguiente antes de las 9:00 a. m.</small> }
+          </div>
         }
 
         <span class="etq">Conductor:</span>
@@ -338,6 +341,10 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     <app-exportar-viajes [clientes]="clientes()" />
     <app-plantillas-whatsapp [abierto]="plantillasAbierto()" [fecha]="waFecha" (cerrar)="plantillasAbierto.set(false)" (cambiadas)="cargarPlantillas()" />`,
   styles: [`
+    .seguro-campo { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+    .seguro-campo .casilla { margin: 0; white-space: nowrap; }
+    .seguro-campo small { min-width: 0; }
+
     .resumen { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--gris-2); border: 1px solid var(--gris-2);
       border-radius: var(--radio-l); overflow: hidden; margin-bottom: 14px; }
     .resumen > div { background: var(--gris-0); padding: 12px 16px; display: flex; flex-direction: column; gap: 2px; }
