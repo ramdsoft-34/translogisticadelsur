@@ -21,6 +21,12 @@ const ESTADOS: Record<string, [string, string]> = {
     <div class="pagina-cab"><div><h1>Mensajes de WhatsApp</h1>
       <p class="sutil">Manifiestos y soportes internos que se mandaron a enviar al WhatsApp de los conductores: cuándo salieron, si llegaron al celular y si los leyeron. Los que aún no se han enviado no aparecen aquí.</p></div></div>
 
+    <div class="pestanas" role="tablist" style="margin-bottom:14px">
+      <button type="button" role="tab" [class.activa]="vista() === 'enviados'" [attr.aria-selected]="vista() === 'enviados'" (click)="ver('enviados')">Enviados</button>
+      <button type="button" role="tab" [class.activa]="vista() === 'recibidos'" [attr.aria-selected]="vista() === 'recibidos'" (click)="ver('recibidos')">Recibidos
+        @if (totalRecibidos()) { <span class="chip info sin-punto">{{ totalRecibidos() }}</span> }</button>
+    </div>
+
     <div class="filtros">
       <div class="campo"><label for="w-d">Desde</label><input id="w-d" type="date" [(ngModel)]="desde" (change)="cargar()" /></div>
       <div class="campo"><label for="w-h">Hasta</label><input id="w-h" type="date" [(ngModel)]="hasta" (change)="cargar()" /></div>
@@ -28,6 +34,30 @@ const ESTADOS: Record<string, [string, string]> = {
       <button type="button" (click)="cargar()" [disabled]="cargando()">Buscar</button>
     </div>
 
+    @if (vista() === 'recibidos') {
+      <p class="sutil">Lo que la gente le escribe al número. Solo se leen aquí: a quien escribe se le responde una vez cada 12 horas que el número solo envía documentos (el texto se cambia en Configuración → WhatsApp).</p>
+      <div class="tabla-caja"><table class="tabla-movil">
+        <thead><tr><th>Fecha</th><th>De</th><th>Mensaje</th><th>Respuesta automática</th></tr></thead>
+        <tbody>
+          @for (m of recibidos(); track m._id) {
+            <tr>
+              <td data-etiqueta="Fecha">{{ m.fecha | fechaHora }}</td>
+              <td data-etiqueta="De"><strong>{{ m.conductor?.nombre || m.nombre || 'Sin nombre' }}</strong><br /><span class="sutil">{{ celular(m.de) }}{{ m.conductor && m.nombre ? ' · ' + m.nombre + ' en WhatsApp' : '' }}</span></td>
+              <td data-etiqueta="Mensaje" class="texto-msj">{{ m.texto || '—' }}</td>
+              <td data-etiqueta="Respuesta">
+                @switch (m.respuesta?.estado) {
+                  @case ('enviada') { <span class="chip ok sin-punto">Enviada</span> <span class="sutil">{{ m.respuesta.en | fechaHora }}</span> }
+                  @case ('error') { <span class="chip error sin-punto">No salió</span><br /><span class="sutil error-texto">{{ m.respuesta.detalle }}</span> }
+                  @case ('omitida') { <span class="sutil">{{ m.respuesta.detalle }}</span> }
+                  @default { <span class="sutil">—</span> }
+                }</td>
+            </tr>
+          } @empty {
+            <tr><td colspan="4" class="vacio">{{ cargando() ? 'Cargando…' : 'Nadie ha escrito al número en este periodo' }}</td></tr>
+          }
+        </tbody>
+      </table></div>
+    } @else {
     @if (totales(); as t) {
       <div class="cifras" role="group" aria-label="Filtrar por estado">
         @for (c of cifras; track c.v) {
@@ -61,12 +91,14 @@ const ESTADOS: Record<string, [string, string]> = {
         }
       </tbody>
     </table></div>
-    <p class="sutil" style="margin-top:10px">Si el conductor desactivó la confirmación de lectura en WhatsApp, el mensaje queda en «Entregado» aunque lo haya visto.</p>`,
+    <p class="sutil" style="margin-top:10px">Si el conductor desactivó la confirmación de lectura en WhatsApp, el mensaje queda en «Entregado» aunque lo haya visto.</p>
+    }`,
   styles: [`
     .cifras { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
     .cifra { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--gris-2); border-radius: 12px; background: var(--gris-0); height: auto; font-weight: 500; }
     .cifra strong { font-size: 18px; font-variant-numeric: tabular-nums; }
     .cifra.activo { border-color: var(--primario-borde); background: var(--primario-claro); }
+    .texto-msj { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 460px; }
     .error-texto { color: var(--rojo); display: inline-block; max-width: 280px; overflow-wrap: anywhere; }
   `],
 })
@@ -85,16 +117,26 @@ export class MensajesWhatsapp {
   readonly mensajes = signal<any[]>([]);
   readonly cargando = signal(false);
   readonly trabajando = signal(false);
+  readonly vista = signal<'enviados' | 'recibidos'>('enviados');
+  readonly recibidos = signal<any[]>([]);
+  readonly totalRecibidos = signal(0);
   private enVivo = inject(EnVivo).al(['whatsapp'], () => this.cargar());
 
   constructor() { this.cargar(); }
 
+  ver(v: 'enviados' | 'recibidos') { this.vista.set(v); this.cargar(); }
+
   async cargar() {
     if (!this.desde || !this.hasta) return;
     this.cargando.set(true);
+    const periodo = { desde: this.desde, hasta: this.hasta, texto: this.texto.trim() };
     try {
-      const r = await this.api.get<any>('/whatsapp/mensajes', { desde: this.desde, hasta: this.hasta, estado: this.estado(), texto: this.texto.trim() });
-      this.totales.set(r.totales); this.mensajes.set(r.mensajes);
+      const [r, rec] = await Promise.all([
+        this.vista() === 'enviados' ? this.api.get<any>('/whatsapp/mensajes', { ...periodo, estado: this.estado() }) : Promise.resolve(null),
+        this.api.get<any>('/whatsapp/recibidos', periodo),
+      ]);
+      if (r) { this.totales.set(r.totales); this.mensajes.set(r.mensajes); }
+      this.recibidos.set(rec.mensajes); this.totalRecibidos.set(rec.total);
     } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
   }
 

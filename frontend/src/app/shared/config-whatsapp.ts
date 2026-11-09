@@ -50,6 +50,16 @@ Este número solo envía documentos. Para cualquier novedad, comuníquese con {{
             <div class="campo"><label for="wa-idi">Idioma de la plantilla</label><input id="wa-idi" name="idi" maxlength="5" [(ngModel)]="c.idioma" /><small>El mismo con el que se aprobó, por ejemplo es o es_CO.</small></div>
           </div>
         }
+        <fieldset class="respuesta">
+          <legend>Respuesta automática</legend>
+          <label class="casilla"><input type="checkbox" name="respActiva" [(ngModel)]="c.respuesta.activa" />Responder a quien le escriba al número</label>
+          @if (c.respuesta.activa) {
+            <div class="campo"><label for="wa-resp">Texto de la respuesta</label>
+              <textarea id="wa-resp" name="resp" rows="3" maxlength="1000" [(ngModel)]="c.respuesta.texto" [placeholder]="c.respuestaBase"></textarea>
+              <small>Vacío = el texto de ejemplo. {{ '{' }}empresa{{ '}' }} se cambia por el nombre de la empresa. Se responde una vez cada 12 horas por número y no cuesta: va dentro de las 24 horas de la conversación.</small></div>
+          }
+          <p class="sutil">Los mensajes que escriban se leen en Mensajes de WhatsApp → Recibidos.</p>
+        </fieldset>
         <div class="acciones" style="margin-top:14px">
           <button class="primario" type="submit" [disabled]="trabajando()">Guardar</button>
           <button type="button" (click)="probar()" [disabled]="trabajando() || !c.activo">Probar conexión</button>
@@ -79,6 +89,8 @@ Este número solo envía documentos. Para cualquier novedad, comuníquese con {{
       <p class="sutil" style="margin-top:12px">Antes de enviar: cada conductor debe tener su celular y la casilla de autorización marcada en Conductores y terceros.</p>
     }`,
   styles: [`h3 { margin: 16px 0 4px; font-size: 14.5px; }
+    .respuesta { margin: 14px 0 0; border: 1px solid var(--gris-2); border-radius: 12px; padding: 10px 14px; display: grid; gap: 8px; }
+    .respuesta legend { font-weight: 650; padding: 0 6px; } .respuesta textarea { width: 100%; }
     .plantilla { background: var(--gris-1); border: 1px solid var(--gris-2); border-radius: 10px; padding: 12px 14px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; margin: 8px 0 0; }`],
 })
 export class ConfigWhatsapp {
@@ -102,6 +114,7 @@ export class ConfigWhatsapp {
     this.trabajando.set(true); this.prueba.set(null);
     try {
       await this.api.put('/whatsapp/config', { activo: !!c.activo, modo: c.modo || 'plataforma', phoneNumberId: c.phoneNumberId || '', wabaId: c.wabaId || '', plantilla: c.plantilla, idioma: c.idioma,
+        respuesta: { activa: c.respuesta?.activa !== false, texto: (c.respuesta?.texto || '').trim() },
         ...(this.token ? { token: this.token } : {}), ...(this.secreto ? { appSecret: this.secreto } : {}) });
       this.token = ''; this.secreto = '';
       this.avisos.ok('Configuración de WhatsApp guardada');

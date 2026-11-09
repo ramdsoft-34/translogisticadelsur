@@ -104,6 +104,8 @@ const empresaSchema = new Schema({
     tokenCifrado: { type: String, default: '', select: false },
     appSecretCifrado: { type: String, default: '', select: false },
     webhookToken: { type: String, default: '', select: false },
+    // Respuesta automática a quien le escribe al número (gratis: va dentro de las 24 horas)
+    respuesta: { activa: { type: Boolean, default: true }, texto: str() },
   },
   smtp: {
     activo: { type: Boolean, default: false },
@@ -467,6 +469,20 @@ envioWhatsappSchema.plugin(tenantPlugin);
 envioWhatsappSchema.index({ empresa: 1, viaje: 1, createdAt: -1 });
 envioWhatsappSchema.index({ empresa: 1, idMensaje: 1 });
 
+// ── Mensajes que la gente le escribe al número de WhatsApp (solo lectura en la plataforma) ──
+const mensajeWhatsappSchema = new Schema({
+  cuenta: { type: String, enum: ['plataforma', 'propia'], default: 'propia' },
+  idMensaje: str(),                         // id de Meta (evita guardar dos veces el mismo aviso)
+  de: str(), nombre: str(),                 // número (57…) y nombre del perfil de WhatsApp
+  conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },
+  tipo: str(), texto: str(),                // text, image, audio, document… (sin descargar archivos)
+  fecha: { type: Date, default: Date.now },
+  respuesta: { estado: { type: String, enum: ['', 'enviada', 'omitida', 'error'], default: '' }, en: fecha, detalle: str() },
+}, { timestamps: true });
+mensajeWhatsappSchema.plugin(tenantPlugin);
+mensajeWhatsappSchema.index({ empresa: 1, fecha: -1 });
+mensajeWhatsappSchema.index({ empresa: 1, idMensaje: 1 }, { unique: true, partialFilterExpression: { idMensaje: { $gt: '' } } });
+
 // ── Liquidación de fletes (relación para facturar y pagar) ──────────────────
 const liquidacionSchema = new Schema({
   numero: { type: Number, required: true },
@@ -650,6 +666,7 @@ export const Auditoria = modelo('Auditoria', auditoriaSchema);
 export const PlantillaWhatsapp = modelo('PlantillaWhatsapp', plantillaWhatsappSchema);
 export const EnvioCorreo = modelo('EnvioCorreo', envioCorreoSchema);
 export const EnvioWhatsapp = modelo('EnvioWhatsapp', envioWhatsappSchema);
+export const MensajeWhatsapp = modelo('MensajeWhatsapp', mensajeWhatsappSchema);
 export const PlataformaWhatsapp = modelo('PlataformaWhatsapp', plataformaWhatsappSchema);
 export const Prestamo = modelo('Prestamo', prestamoSchema);
 export const LiquidacionConductor = modelo('LiquidacionConductor', liquidacionConductorSchema);

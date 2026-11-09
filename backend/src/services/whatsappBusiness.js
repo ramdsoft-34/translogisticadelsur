@@ -2,7 +2,8 @@
 // con el nombre de la empresa en el mensaje; la empresa que quiera registra su propia cuenta y número.
 // Igual que los correos: al aceptarse el manifiesto queda «por aprobar» y solo sale con la confirmación de una persona.
 import crypto from 'node:crypto';
-import { Empresa, EnvioWhatsapp, PlataformaWhatsapp, Tercero, Viaje } from '../models/index.js';
+import { Empresa, EnvioWhatsapp, MensajeWhatsapp, PlataformaWhatsapp, Tercero, Viaje } from '../models/index.js';
+import { publicar } from './eventos.js';
 import { descifrar } from '../utils/cifrado.js';
 import { txt } from '../utils/texto.js';
 import { datosManifiesto, manifiestoPdf, nombreArchivo } from './reportes/manifiesto.js';
@@ -202,6 +203,69 @@ async function aplicarEstado(empresaId, s) {
 
 export async function registrarEstados(empresaId, datos) {
   for (const s of estadosDe(datos)) await aplicarEstado(empresaId, s);
+  await registrarRecibidos(datos, { empresaId, cuenta: 'propia' });
+}
+
+// ── Mensajes que la gente le escribe al número ──
+// Se guardan para leerlos en «Mensajes de WhatsApp» y se responde una vez (cada 12 horas por número) que el número
+// solo envía documentos. La respuesta es gratis porque va dentro de las 24 horas de la conversación que abrió la persona.
+export const RESPUESTA_BASE = 'Hola. Este número de {empresa} solo envía documentos y no lee los mensajes. Para cualquier novedad comuníquese con {empresa}. Gracias.';
+const recibidosDe = (datos) => (datos?.entry || []).flatMap((x) => x.changes || []).map((c) => c.value || {})
+  .flatMap((v) => (v.messages || []).map((m) => ({ m, nombre: (v.contacts || []).find((k) => k.wa_id === m.from)?.profile?.name || '', phoneNumberId: v.metadata?.phone_number_id || '' })));
+const TIPOS = { image: 'Imagen', audio: 'Audio', video: 'Video', document: 'Documento', sticker: 'Sticker', location: 'Ubicación', contacts: 'Contacto', reaction: 'Reacción' };
+function textoDe(m) {
+  if (m.type === 'text') return m.text?.body || '';
+  if (m.type === 'button') return m.button?.text || '';
+  if (m.type === 'interactive') return m.interactive?.button_reply?.title || m.interactive?.list_reply?.title || '';
+  if (m.type === 'reaction') return m.reaction?.emoji || '';
+  const caption = m[m.type]?.caption || m.document?.filename || '';
+  return `[${TIPOS[m.type] || m.type}]${caption ? ` ${caption}` : ''}`;
+}
+const textoRespuesta = (empresa) => (txt(empresa?.whatsapp?.respuesta?.texto) || RESPUESTA_BASE).replaceAll('{empresa}', empresa?.nombre || 'la empresa').slice(0, 1000);
+
+async function conductorDe(empresaId, numero) {
+  const diez = String(numero || '').replace(/\D/g, '').slice(-10);
+  if (diez.length !== 10) return null;
+  const t = await Tercero.findOne({ empresa: empresaId, celular: { $in: [diez, `57${diez}`, `+57${diez}`] } }).select('_id').lean();
+  return t?._id || null;
+}
+
+async function responder(empresaId, mensaje, cuentaTipo) {
+  const e = await Empresa.findById(empresaId).select('nombre whatsapp.activo whatsapp.respuesta').lean();
+  if (!e?.whatsapp?.activo || e.whatsapp.respuesta?.activa === false) return { estado: 'omitida', detalle: 'Respuesta automática apagada' };
+  if (mensaje.tipo === 'reaction') return { estado: 'omitida', detalle: 'Es una reacción' };
+  const hace12 = new Date(Date.now() - 12 * 3600000);
+  if (await MensajeWhatsapp.exists({ empresa: empresaId, de: mensaje.de, 'respuesta.estado': 'enviada', 'respuesta.en': { $gte: hace12 } })) {
+    return { estado: 'omitida', detalle: 'Ya se le respondió en las últimas 12 horas' };
+  }
+  try {
+    const { cuenta, token, tipo } = await cuentaWhatsapp(empresaId);
+    if (tipo !== cuentaTipo) return { estado: 'omitida', detalle: 'El mensaje llegó a otro número' };
+    await llamarMeta(`${cuenta.phoneNumberId}/messages`, token, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: mensaje.de, type: 'text', text: { preview_url: false, body: textoRespuesta(e) } }) });
+    return { estado: 'enviada', en: new Date(), detalle: '' };
+  } catch (err) { return { estado: 'error', en: new Date(), detalle: String(err.message || err).slice(0, 300) }; }
+}
+
+/** Guarda los mensajes recibidos y responde. Con empresaId (cuenta propia) o, en el número de Translogística, la del último envío a ese número. */
+export async function registrarRecibidos(datos, { empresaId = null, cuenta = 'propia' } = {}) {
+  for (const { m, nombre } of recibidosDe(datos)) {
+    const de = String(m.from || '').replace(/\D/g, '');
+    if (!de) continue;
+    let empresa = empresaId;
+    if (!empresa) {
+      const ultimo = await EnvioWhatsapp.collection.findOne({ telefono: de, cuenta: 'plataforma' }, { sort: { createdAt: -1 }, projection: { empresa: 1 } });
+      empresa = ultimo?.empresa;
+      if (!empresa) continue;              // nadie de la plataforma le ha escrito a ese número
+    }
+    if (m.id && await MensajeWhatsapp.exists({ empresa, idMensaje: String(m.id) })) continue;
+    const doc = await MensajeWhatsapp.create({ empresa, cuenta, idMensaje: String(m.id || ''), de, nombre: String(nombre).slice(0, 120), tipo: String(m.type || ''),
+      texto: textoDe(m).slice(0, 4000), fecha: new Date(Number(m.timestamp) * 1000 || Date.now()), conductor: await conductorDe(empresa, de) }).catch((e) => (e?.code === 11000 ? null : Promise.reject(e)));
+    if (!doc) continue;
+    const r = await responder(empresa, doc, cuenta);
+    await MensajeWhatsapp.updateOne({ empresa, _id: doc._id }, { $set: { respuesta: r } });
+    if (!empresaId) publicar(empresa, { recurso: 'whatsapp', ruta: '/recibidos', metodo: 'POST' });
+  }
 }
 
 // Avisos del número de Translogística: la empresa sale del propio envío. Es una búsqueda global,
@@ -211,6 +275,7 @@ export async function registrarEstadosPlataforma(datos) {
     const x = await EnvioWhatsapp.collection.findOne({ idMensaje: String(s.id || ''), cuenta: 'plataforma' }, { projection: { empresa: 1 } });
     if (x) await aplicarEstado(x.empresa, s);
   }
+  await registrarRecibidos(datos, { cuenta: 'plataforma' });
 }
 
 // Mensajes que salieron en el mes, por empresa y número (para cobrarlos). Mira todas las empresas: solo SuperAdmin.
