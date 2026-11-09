@@ -18,6 +18,7 @@ export const routes: Routes = [
     children: [
       { path: 'inicio', ...pagina([P.VIAJES_VER], () => import('./pages/inicio').then(m => m.Inicio)) },
       { path: 'viajes', ...pagina([P.VIAJES_VER], () => import('./pages/viajes').then(m => m.Viajes)) },
+      { path: 'correo', ...pagina([P.VIAJES_VER], () => import('./pages/correo').then(m => m.Correo)) },
       { path: 'manifiestos', ...pagina([P.RNDC_OPERAR], () => import('./pages/manifiestos').then(m => m.Manifiestos)) },
       { path: 'soporte-interno', ...pagina([P.VIAJES_VER], () => import('./pages/manifiestos').then(m => m.Manifiestos)), data: { permisos: [P.VIAJES_VER], vista: 'soporte' } },
       { path: 'rndc/envios', ...pagina([P.RNDC_OPERAR], () => import('./pages/manifiestos').then(m => m.Manifiestos)), data: { permisos: [P.RNDC_OPERAR], vista: 'historial' } },

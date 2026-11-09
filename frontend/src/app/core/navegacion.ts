@@ -13,6 +13,7 @@ export const MODULOS: Modulo[] = [
   { id: 'operacion', nombre: 'Operación', icono: 'camion', paginas: [
     { ruta: '/viajes', texto: 'Viajes', icono: 'camion', permisos: [P.VIAJES_VER], descripcion: 'Registrar, consultar y exportar viajes', claves: 'registrar viaje whatsapp exportar' },
     { ruta: '/relaciones', texto: 'Programación por placa', icono: 'lista', permisos: [P.VIAJES_VER], descripcion: 'Registro masivo por días, copias y utilidad por placa', claves: 'relaciones masivo' },
+    { ruta: '/correo', texto: 'Correo', icono: 'correo', permisos: [P.VIAJES_VER], descripcion: 'Su Gmail: leer, responder y enviar con los manifiestos y remesas de los viajes', claves: 'gmail correo email bandeja enviar responder' },
     { ruta: '/monitoreo', texto: 'Monitoreo', icono: 'ubicacion', permisos: [P.VIAJES_VER], descripcion: 'Rastreo GPS en vivo e historial de recorridos', claves: 'rastreo gps sur track mapa' },
   ] },
   { id: 'documentos', nombre: 'Documentos', icono: 'documento', paginas: [

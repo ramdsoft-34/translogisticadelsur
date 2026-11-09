@@ -8,6 +8,7 @@ import publico from './routes/publico.js';
 import auth from './routes/auth.js';
 import superadmin from './routes/superadmin.js';
 import correo from './routes/correo.js';
+import gmail from './routes/gmail.js';
 import usuarios from './routes/usuarios.js';
 import maestros from './routes/maestros.js';
 import viajes from './routes/viajes.js';
@@ -37,7 +38,7 @@ export function crearApp() {
   // Los correos con archivos adjuntos traen su propio límite (12 MB) en la ruta
   const json = express.json({ limit: '1mb' });
   // (también el correo de una relación de cobro, que trae sus archivos adjuntos: fase 11)
-  const conLimitePropio = (p) => /^\/api\/correo\/(relaciones|manual)$/.test(p) || /^\/api\/gestion\/relaciones-cobro\/[a-f0-9]{24}\/correo$/.test(p);
+  const conLimitePropio = (p) => /^\/api\/correo\/(relaciones|manual)$/.test(p) || p === '/api/gmail/enviar' || /^\/api\/gestion\/relaciones-cobro\/[a-f0-9]{24}\/correo$/.test(p);
   app.use((req, res, next) => (conLimitePropio(req.path) ? next() : json(req, res, next)));
   app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false }));
 
@@ -54,6 +55,7 @@ export function crearApp() {
   app.use('/api/viajes', viajes);
   app.use('/api/rndc', rndc);
   app.use('/api/correo', correo);
+  app.use('/api/gmail', gmail);          // Fase 14: Gmail de cada usuario
   app.use('/api/liquidaciones', liquidaciones);
   app.use('/api/gestion', gestion);
   app.use('/api/reportes', reportes);
