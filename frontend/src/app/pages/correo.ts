@@ -11,12 +11,13 @@ import { Modal } from '../shared/modal';
 interface Firma { texto: string; logo: string; enRespuestas: boolean }
 interface Estado { configurado: boolean; conectado: boolean; email: string; error: string; nombre: string; firma: Firma }
 interface Carpeta { id: string; nombre: string; noLeidos: number; total?: number; color?: string }
-interface Vinculo { tipo: 'cliente' | 'manifiesto' | 'placa'; texto: string; viaje?: string | null; numeroViaje?: number | null }
+interface Vinculo { tipo: 'cliente' | 'manifiesto' | 'placa'; texto: string; cliente?: string; viaje?: string | null; numeroViaje?: number | null }
 interface Persona { nombre: string; correo: string }
 interface Hilo { id: string; asunto: string; de: Persona; participantes: string[]; mensajes: number; fecha: string; extracto: string; noLeido: boolean; conAdjuntos: boolean; destacado: boolean; vinculos: Vinculo[] }
 interface Adjunto { id: string; nombre: string; tipo: string; tamano: number }
 interface Mensaje { id: string; de: Persona; para: string; cc: string; asunto: string; fecha: string; texto: string; html: string; adjuntos: Adjunto[]; idMensaje: string; referencias: string }
-interface Detalle { id: string; asunto: string; mensajes: Mensaje[]; vinculos: Vinculo[] }
+interface Detalle { id: string; asunto: string; mensajes: Mensaje[]; vinculos: Vinculo[]; cliente: string | null }
+interface Pestana { id: string; nombre: string; noLeidos?: number }
 interface DocViaje { viaje: string; numero: number; placa: string; fecha: string; destino: string; documentos: { tipo: 'manifiesto' | 'remesa'; texto: string }[] }
 interface Archivo { nombre: string; tipo: string; datos: string; tamano: number }
 
@@ -37,6 +38,7 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const textoDe = (html = '') => new DOMParser().parseFromString(html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|tr|li|h\d)>/gi, '$&\n'), 'text/html').body.textContent?.replace(/\n{3,}/g, '\n\n').trim() || '';
 const CHIP: Record<string, string> = { cliente: 'ch-c', manifiesto: 'ch-m', placa: 'ch-p' };
 const COLORES = ['#1a73e8', '#d93025', '#188038', '#e37400', '#9334e6', '#007b83', '#c5221f', '#5f6368'];
+const PUBLICOS = ['gmail.com', 'hotmail.com', 'hotmail.es', 'outlook.com', 'outlook.es', 'live.com', 'yahoo.com', 'yahoo.es', 'icloud.com', 'msn.com'];
 const VER: Record<string, string> = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
 
 // Íconos tipo Material (los de Gmail), 24×24
@@ -66,7 +68,7 @@ const IC: Record<string, string> = {
   izq: 'M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z', der: 'M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z',
   menu: 'M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z',
   doc: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z',
-  bajar: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z', ojo: 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+  bajar: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z', edificio: 'M12 7V3H2v18h20V7H12zM6 19H4v-2h2v2zm0-4H4v-2h2v2zm0-4H4V9h2v2zm0-4H4V5h2v2zm4 12H8v-2h2v2zm0-4H8v-2h2v2zm0-4H8V9h2v2zm0-4H8V5h2v2zm10 12h-8v-2h2v-2h-2v-2h2v-2h-2V9h8v10zm-2-8h-2v2h2v-2zm0 4h-2v2h2v-2z', ojo: 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
 };
 
 // Fase 14: el Gmail de cada usuario dentro de la plataforma, con el aspecto y los pasos de Gmail: carpetas, búsqueda,
@@ -109,14 +111,22 @@ const IC: Record<string, string> = {
           <nav class="carpetas" aria-label="Carpetas">
             <button type="button" class="redactar" (click)="redactar()"><svg viewBox="0 0 24 24"><path [attr.d]="IC['lapiz']" /></svg>Redactar</button>
             @for (c of carpetasVisibles(); track c.id) {
-              <button type="button" class="carpeta" [class.activa]="etiqueta() === c.id" [class.nl]="c.id === 'INBOX' && c.noLeidos" (click)="abrirCarpeta(c.id)">
+              <button type="button" class="carpeta" [class.activa]="etiqueta() === c.id && !cliente()" [class.nl]="c.id === 'INBOX' && c.noLeidos" (click)="abrirCarpeta(c.id)">
                 <svg viewBox="0 0 24 24"><path [attr.d]="IC[c.id] || IC['etiqueta']" /></svg><span class="n">{{ c.nombre }}</span>
                 @if (c.id === 'DRAFT' ? c.total : c.noLeidos) { <b>{{ c.id === 'DRAFT' ? c.total : c.noLeidos }}</b> }</button>
             }
             <button type="button" class="carpeta" (click)="verMas.set(!verMas())"><svg viewBox="0 0 24 24" [style.transform]="verMas() ? 'rotate(180deg)' : ''"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z" /></svg><span class="n">{{ verMas() ? 'Menos' : 'Más' }}</span></button>
+            @if (principales().length) {
+              <p class="titulo">Clientes</p>
+              @for (t of clientesVisibles(); track t.id) {
+                <button type="button" class="carpeta" [class.activa]="cliente() === t.id" [class.nl]="!!t.noLeidos" (click)="abrirCliente(t.id)" [title]="'Todo lo de ' + t.nombre">
+                  <svg viewBox="0 0 24 24" [style.fill]="color(t.nombre)"><path [attr.d]="IC['etiqueta']" /></svg><span class="n">{{ t.nombre }}</span>@if (t.noLeidos) { <b>{{ t.noLeidos }}{{ t.noLeidos >= 50 ? '+' : '' }}</b> }</button>
+              }
+              @if (otros().length) { <button type="button" class="carpeta" (click)="verMasClientes.set(!verMasClientes())"><svg viewBox="0 0 24 24" [style.transform]="verMasClientes() ? 'rotate(180deg)' : ''"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z" /></svg><span class="n">{{ verMasClientes() ? 'Menos' : 'Más clientes (' + otros().length + ')' }}</span></button> }
+            }
             @if (propias().length) { <p class="titulo">Etiquetas</p>
               @for (c of propias(); track c.id) {
-                <button type="button" class="carpeta" [class.activa]="etiqueta() === c.id" (click)="abrirCarpeta(c.id)"><svg viewBox="0 0 24 24" [style.fill]="c.color || '#5f6368'"><path [attr.d]="IC['etiqueta']" /></svg><span class="n">{{ c.nombre }}</span>@if (c.noLeidos) { <b>{{ c.noLeidos }}</b> }</button>
+                <button type="button" class="carpeta" [class.activa]="etiqueta() === c.id && !cliente()" (click)="abrirCarpeta(c.id)"><svg viewBox="0 0 24 24" [style.fill]="c.color || '#5f6368'"><path [attr.d]="IC['etiqueta']" /></svg><span class="n">{{ c.nombre }}</span>@if (c.noLeidos) { <b>{{ c.noLeidos }}</b> }</button>
               } }
             <button type="button" class="desconectar" confirmar="Clic otra vez: se quita el permiso de Gmail" (confirmado)="desconectar()">Desconectar Gmail</button>
           </nav>
@@ -138,6 +148,7 @@ const IC: Record<string, string> = {
                 <button type="button" class="chip-f" [class.on]="chips().has('no_leidos')" (click)="chip('no_leidos')">No leídos</button>
                 @if (q.trim()) { <button type="button" class="chip-f on" (click)="q = ''; cargarHilos()">«{{ q.trim() }}» ✕</button> }
               </div>
+              @if (cliente()) { <p class="nota-p"><svg viewBox="0 0 24 24" [style.color]="color(nombreCliente(cliente()))"><path [attr.d]="IC['etiqueta']" /></svg><span>Etiqueta <b>{{ nombreCliente(cliente()) }}</b>: todo lo del cliente, recibido y enviado (sus correos, lo que lo nombra y sus placas del último mes).</span></p> }
               @if (cargandoLista()) { <div class="cargando"></div> }
               <div class="filas">
                 @for (h of hilos(); track h.id) {
@@ -147,7 +158,7 @@ const IC: Record<string, string> = {
                     <span class="av-m" [style.background]="color(h.de.nombre)">{{ inicial(h.de.nombre) }}</span>
                     <span class="de">{{ remitentes(h) }}@if (h.mensajes > 1) { <small>{{ h.mensajes }}</small> }</span>
                     <span class="txt"><span class="as">{{ h.asunto || '(sin asunto)' }}</span><span class="pr"><span class="guion"> - </span>{{ h.extracto }}</span></span>
-                    <span class="chips">@for (v of h.vinculos.slice(0, 2); track $index) { <span [class]="'chip-v ' + CHIP[v.tipo]">{{ v.texto }}</span> }</span>
+                    <span class="chips">@for (v of h.vinculos.slice(0, 2); track $index) { @if (v.tipo === 'cliente') { <span class="et-c" [style.background]="color(v.texto.replace('Cliente: ', ''))" (click)="chipCliente($event, v)" [title]="'Etiqueta del cliente: ' + v.texto.replace('Cliente: ', '')">{{ v.texto.replace('Cliente: ', '') }}</span> } @else { <span [class]="'chip-v ' + CHIP[v.tipo]">{{ v.texto }}</span> } }</span>
                     <span class="h">@if (h.conAdjuntos) { <svg class="clip" viewBox="0 0 24 24" aria-label="Con adjuntos"><path [attr.d]="IC['clip']" /></svg> }{{ fecha(h.fecha) }}</span>
                   </div>
                 } @empty { @if (!cargandoLista()) { <p class="vacia">No hay conversaciones{{ q.trim() || chips().size || fechaF() ? ' con este filtro' : ' en ' + nombreCarpeta() }}.</p> } }
@@ -163,12 +174,17 @@ const IC: Record<string, string> = {
               </div>
               @if (detalle(); as d) {
                 <div class="hilo-v">
-                  <h2>{{ d.asunto || '(sin asunto)' }} <span class="et">{{ nombreCarpeta() }}</span></h2>
+                  <h2>{{ d.asunto || '(sin asunto)' }} <span class="et">{{ nombreCarpeta() }}</span>@if (d.cliente) { <span class="et-c grande" [style.background]="color(nombreCliente(d.cliente))">{{ nombreCliente(d.cliente) }}<button type="button" (click)="mover(d, '')" title="Quitar la etiqueta" aria-label="Quitar la etiqueta del cliente">×</button></span> }</h2>
                   @if (d.vinculos.length) {
                     <div class="vinc"><b>Vinculado a</b>@for (v of d.vinculos; track $index) {
                       <button type="button" [class]="'chip-v ' + CHIP[v.tipo]" (click)="buscarTexto(v.tipo === 'cliente' ? v.texto.replace('Cliente: ', '') : v.texto.replace('Manifiesto ', ''))" title="Ver los correos de esto">{{ v.texto }}@if (v.numeroViaje) { · viaje {{ v.numeroViaje }} }</button> }
                       <span class="nota">Reconocido por la placa, el número de manifiesto y el cliente.</span></div>
                   }
+                  <div class="mover"><svg viewBox="0 0 24 24"><path [attr.d]="IC['etiqueta']" /></svg><span>Etiqueta del cliente</span>
+                    <select [ngModel]="d.cliente || ''" (ngModelChange)="mover(d, $event)" aria-label="Etiqueta del cliente">
+                      <option value="">Sin cliente</option>@for (o of todosClientes(); track o.id) { <option [value]="o.id">{{ o.nombre }}</option> }</select>
+                    @if (dominioDe(d); as dom) { <label class="chk-m"><input type="checkbox" [(ngModel)]="todoDominio" /> todos los de &#64;{{ dom }}</label> }
+                    <small>Los próximos correos de {{ todoDominio && dominioDe(d) ? 'todo @' + dominioDe(d) : remitenteDe(d) }} quedarán con esa etiqueta.</small></div>
                   @for (m of d.mensajes; track m.id; let ultimo = $last) {
                     <article class="msg" [class.abierto]="ultimo || abiertos().has(m.id)">
                       <header (click)="!ultimo && alternar(m.id)">
@@ -349,6 +365,14 @@ const IC: Record<string, string> = {
     .hilo:not(.nl) .h { color: var(--g-tenue); font-weight: 400; } .h .clip { width: 16px; height: 16px; color: var(--g-tenue); }
     .chip-v { display: inline-block; font-size: 11.5px; font-weight: 600; border-radius: 4px; padding: 1px 6px; border: 0; min-height: 0; white-space: nowrap; }
     .ch-c { background: var(--ambar-claro); color: var(--ambar); } .ch-m { background: var(--rojo-claro); color: var(--rojo); } .ch-p { background: var(--azul-claro); color: var(--azul); }
+    .et-c { display: inline-flex; align-items: center; gap: 4px; color: #fff; font-size: 11.5px; font-weight: 600; border-radius: 4px; padding: 1px 7px; white-space: nowrap; cursor: pointer; }
+    .et-c.grande { font-size: 12px; padding: 2px 4px 2px 8px; vertical-align: middle; margin-left: 6px; cursor: default; }
+    .et-c button { border: 0; background: none; color: #fff; min-height: 0; padding: 0 4px; font-size: 15px; line-height: 1; box-shadow: none; border-radius: 3px; } .et-c button:hover { background: rgba(0,0,0,.2); }
+    .nota-p { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 16px; font-size: 12.5px; color: var(--g-tenue); border-bottom: 1px solid var(--gris-15); }
+    .mover { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; margin: -4px 0 14px; color: var(--gris-6); }
+    .mover svg { width: 18px; height: 18px; } .mover select { min-height: 0; padding: 4px 8px; font-size: 13px; max-width: 220px; }
+    .mover small { color: var(--g-tenue); } .chk-m { display: inline-flex; align-items: center; gap: 4px; }
+    .chip-v.ch-c { cursor: pointer; }
     .vacia { padding: 28px 16px; text-align: center; color: var(--g-tenue); }
     .hilo-v { padding: 4px 16px 24px 72px; overflow-y: auto; }
     .hilo-v h2 { font-size: 22px; font-weight: 400; margin: 6px 0 14px; } .et { font-size: 12px; background: var(--gris-15); border-radius: 4px; padding: 2px 6px; vertical-align: middle; color: var(--gris-6); }
@@ -500,6 +524,13 @@ export class Correo {
   readonly adjuntos = signal<Archivo[]>([]);
   readonly documentos = signal<{ viaje: string; tipo: 'manifiesto' | 'remesa'; texto: string }[]>([]);
   readonly editandoFirma = signal(false);
+  readonly principales = signal<Pestana[]>([]);
+  readonly verMasClientes = signal(false);
+  readonly clientesVisibles = computed(() => (this.verMasClientes() ? [...this.principales(), ...this.otros()] : [...this.principales(), ...this.otros().filter((o) => o.id === this.cliente())]));
+  readonly otros = signal<Pestana[]>([]);
+  readonly cliente = signal('');
+  readonly todosClientes = computed(() => [...this.principales(), ...this.otros()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')));
+  todoDominio = false;
   readonly nombreCarpeta = computed(() => [...this.carpetas(), ...this.propias()].find((c) => c.id === this.etiqueta())?.nombre || 'Recibidos');
   readonly rango = computed(() => { const n = this.hilos().length; if (!n) return ''; const ini = this.paginas().length * 25 + 1; const est = this.estimado();
     const fin = ini + n - 1; return `${ini}–${fin} de ${(this.siguiente() ? Math.max(est, fin + 1) : fin).toLocaleString('es-CO')}`; });
@@ -520,7 +551,7 @@ export class Correo {
   private async iniciar() {
     try {
       const e = await this.api.get<Estado>('/gmail/estado'); this.estado.set(e);
-      if (e.conectado) await Promise.all([this.cargarCarpetas(), this.cargarHilos()]);
+      if (e.conectado) { this.cargarClientes(); await Promise.all([this.cargarCarpetas(), this.cargarHilos()]); }
     } catch (err) { this.avisos.error(err); }
   }
   async conectar() {
@@ -543,14 +574,37 @@ export class Correo {
     this.cargandoLista.set(true);
     try {
       const r = await this.api.get<{ items: Hilo[]; siguiente: string; estimado: number }>('/gmail/hilos',
-        { etiqueta: this.etiqueta(), q: this.q.trim(), filtro: [...this.chips()].join(','), fecha: this.fechaF(), pagina });
+        { etiqueta: this.etiqueta(), ...(this.cliente() ? { cliente: this.cliente() } : {}), q: this.q.trim(), filtro: [...this.chips()].join(','), fecha: this.fechaF(), pagina });
       this.hilos.set(r.items); this.siguiente.set(r.siguiente); this.estimado.set(r.estimado || 0);
     } catch (e) { this.avisos.error(e); } finally { this.cargandoLista.set(false); }
   }
   private actual = '';
   paginaSiguiente() { const s = this.siguiente(); if (!s) return; this.paginas.update((p) => [...p, this.actual]); this.actual = s; this.cargarHilos(s, true); }
   paginaAnterior() { const p = [...this.paginas()]; const t = p.pop() ?? ''; this.paginas.set(p); this.actual = t; this.cargarHilos(t, true); }
-  abrirCarpeta(id: string) { this.etiqueta.set(id); this.volver(false); this.verCajon.set(false); this.actual = ''; this.cargarHilos(); }
+  // ── Etiquetas por cliente ──
+  async cargarClientes() {
+    try { const r = await this.api.get<{ principales: Pestana[]; otros: Pestana[] }>('/gmail/clientes'); this.principales.set(r.principales); this.otros.set(r.otros); }
+    catch { /* sin etiquetas de clientes: la bandeja funciona igual */ }
+  }
+  abrirCliente(id: string) { this.cliente.set(id || ''); this.etiqueta.set('INBOX'); this.volver(false); this.verCajon.set(false); this.actual = ''; this.cargarHilos(); }
+  chipCliente(ev: Event, v: Vinculo & { cliente?: string }) { if (v.tipo !== 'cliente' || !v.cliente || v.cliente === this.cliente()) return; ev.stopPropagation(); this.abrirCliente(v.cliente); }
+  nombreCliente(id: string) { return this.todosClientes().find((x) => x.id === id)?.nombre || ''; }
+  remitenteDe(d: Detalle) {   // quien escribe en la conversación (si soy yo, a quien le escribo)
+    const yo = this.estado()!.email.toLowerCase(); const m = d.mensajes.find((x) => x.de.correo.toLowerCase() !== yo);
+    return (m?.de.correo || (d.mensajes[0].para.match(/[^\s<>,"]+@[^\s<>,"]+/)?.[0] ?? '')).toLowerCase();
+  }
+  dominioDe(d: Detalle) { const dom = this.remitenteDe(d).split('@')[1] || ''; return dom && !PUBLICOS.includes(dom) ? dom : ''; }
+  async mover(d: Detalle, cliente: string) {
+    const r = this.remitenteDe(d); if (!r) return;
+    const remitente = this.todoDominio && this.dominioDe(d) ? `@${this.dominioDe(d)}` : r;
+    try {
+      await this.api.post('/gmail/reglas', { remitente, cliente, hilo: d.id });
+      this.detalle.update((x) => (x ? { ...x, cliente: cliente || null } : x));
+      this.avisos.ok(cliente ? `Etiqueta ${this.nombreCliente(cliente)} puesta. Lo de ${remitente} quedará con esa etiqueta (en Gmail: Clientes/${this.nombreCliente(cliente)})` : 'Etiqueta del cliente quitada');
+      this.cargarClientes();
+    } catch (e) { this.avisos.error(e); }
+  }
+  abrirCarpeta(id: string) { this.cliente.set(''); this.etiqueta.set(id); this.volver(false); this.verCajon.set(false); this.actual = ''; this.cargarHilos(); }
   chip(c: string) { this.chips.update((s) => { const n = new Set(s); n.has(c) ? n.delete(c) : n.add(c); return n; }); this.actual = ''; this.cargarHilos(); }
   buscar() { this.volver(false); this.actual = ''; this.cargarHilos(); }
   buscarTexto(t: string) { this.q = t; this.etiqueta.set('INBOX'); this.buscar(); }

@@ -8,7 +8,7 @@
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
-import { CuentaGmail } from '../models/gmail.js';
+import { CuentaGmail, ReglaCorreo } from '../models/gmail.js';
 import { Viaje, Cliente } from '../models/index.js';
 import { cifrar, descifrar } from '../utils/cifrado.js';
 import { ErrorHttp } from '../middleware/auth.js';
@@ -139,26 +139,93 @@ export function detectar(texto = '') {
   return { placas, manifiestos };
 }
 
+// ── Pestañas por cliente ──
+const sinTildes = (t = '') => String(t).normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+// Dominios de correo gratuito: no identifican a una empresa (ana@gmail.com no hace a Gmail cliente)
+const PUBLICOS = new Set(['gmail.com', 'hotmail.com', 'hotmail.es', 'outlook.com', 'outlook.es', 'live.com', 'yahoo.com', 'yahoo.es', 'icloud.com', 'msn.com', 'aol.com', 'protonmail.com']);
+const dominio = (correo = '') => String(correo).toLowerCase().split('@')[1] || '';
+const correoDe = (x = '') => (String(x).match(/<([^>]+)>/)?.[1] || String(x)).trim().toLowerCase();
+// Palabras que nombran al cliente: nombre, razón social sin «S.A.S.» y siglas largas
+const LEGALES = /\b(S\.?\s?A\.?\s?S\.?|S\.?\s?A\.?|LTDA\.?|E\.?\s?U\.?|S\.?\s?C\.?\s?A\.?|Y\s+CIA\.?|SOCIEDAD|COMERCIALIZADORA)\b/g;
+export function palabrasCliente(c) {
+  return [...new Set([c.nombre, c.razonSocial, c.siglas].filter(Boolean).map((s) => sinTildes(s).replace(LEGALES, '').replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()).filter((s) => s.length >= 4))];
+}
+
+/** Datos para reconocer a cada cliente: palabras, correos y dominios propios, y reglas aprendidas. */
+export async function clavesClientes(empresaId) {
+  const [clientes, reglas] = await Promise.all([
+    Cliente.find({ empresa: empresaId, activo: { $ne: false } }).select('nombre razonSocial siglas correos').lean(),
+    ReglaCorreo.find({ empresa: empresaId }).select('remitente cliente').lean(),
+  ]);
+  return clientes.map((c) => {
+    const id = String(c._id);
+    const correos = (c.correos || []).map(correoDe).filter((x) => x.includes('@'));
+    const propias = reglas.filter((r) => String(r.cliente) === id).map((r) => r.remitente);
+    return { id, nombre: c.nombre, palabras: palabrasCliente(c), correos: [...new Set([...correos, ...propias.filter((r) => !r.startsWith('@'))])],
+      dominios: [...new Set([...correos.map(dominio), ...propias.filter((r) => r.startsWith('@')).map((r) => r.slice(1))].filter((d) => d && !PUBLICOS.has(d)))] };
+  });
+}
+
+/** Cliente de un correo por quién lo envía o recibe (lo más seguro), luego por el nombre en el texto. */
+export function clienteDe(claves, { correos = [], texto = '' }) {
+  const cs = correos.map(correoDe);
+  const porCorreo = claves.find((c) => cs.some((x) => c.correos.includes(x))) || claves.find((c) => cs.some((x) => c.dominios.includes(dominio(x))));
+  if (porCorreo) return porCorreo.id;
+  const t = ` ${sinTildes(texto).replace(/[^A-Z0-9]/g, ' ')} `;
+  return claves.find((c) => c.palabras.some((w) => t.includes(` ${w} `)))?.id || null;
+}
+
+/** Búsqueda de Gmail que trae todo lo de un cliente: lo que envía o se le envía, lo que lo nombra y lo de sus placas recientes. */
+export function consultaCliente(clave, placas = []) {
+  const partes = [
+    ...clave.correos.flatMap((x) => [`from:${x}`, `to:${x}`]), ...clave.dominios.flatMap((d) => [`from:${d}`, `to:${d}`]),
+    ...clave.palabras.map((w) => `"${w.toLowerCase()}"`), ...placas.slice(0, 15),
+  ];
+  return partes.length ? `{${partes.join(' ')}}` : `"${clave.nombre.replace(/"/g, '')}"`;
+}
+
+/** Id de la etiqueta «Clientes/Nombre» en el Gmail del usuario; la crea si no existe (con caché por cuenta). */
+const cacheEtiquetas = new Map();   // usuarioId → Map(nombre en minúsculas → id)
+export const nombreEtiqueta = (cliente) => `Clientes/${String(cliente).replace(/\//g, '-').trim()}`.slice(0, 200);
+export async function etiquetaCliente(cuenta, cliente) {
+  const k = String(cuenta.usuario); const nombre = nombreEtiqueta(cliente);
+  let m = cacheEtiquetas.get(k);
+  if (!m) { const { labels = [] } = await gmail(cuenta, '/labels'); m = new Map(labels.map((l) => [l.name.toLowerCase(), l.id])); cacheEtiquetas.set(k, m); }
+  if (!m.has(nombre.toLowerCase())) {
+    const nueva = await gmail(cuenta, '/labels', { metodo: 'POST', cuerpo: { name: nombre, labelListVisibility: 'labelShow', messageListVisibility: 'show' } })
+      .catch(async () => { cacheEtiquetas.delete(k); const { labels = [] } = await gmail(cuenta, '/labels'); return labels.find((l) => l.name.toLowerCase() === nombre.toLowerCase()); });
+    if (!nueva?.id) throw new ErrorHttp(502, 'Gmail no dejó crear la etiqueta del cliente');
+    m.set(nombre.toLowerCase(), nueva.id);
+  }
+  return m.get(nombre.toLowerCase());
+}
+
+/** Pone en Gmail la etiqueta del cliente a las conversaciones reconocidas que aún no la tienen (en segundo plano). */
+export async function etiquetarHilos(cuenta, hilos, nombres) {
+  for (const h of hilos.filter((x) => x.cliente && nombres.get(x.cliente))) {
+    const id = await etiquetaCliente(cuenta, nombres.get(h.cliente));
+    if (!(h.etiquetas || []).includes(id)) await gmail(cuenta, `/threads/${h.id}/modify`, { metodo: 'POST', cuerpo: { addLabelIds: [id] } });
+  }
+}
+
 /** Busca en la base los viajes y clientes que mencionan los correos (una sola consulta por lista). */
 export async function vincular(empresaId, lista) {
   const det = lista.map((x) => detectar(`${x.asunto} ${x.extracto}`));
   const placas = [...new Set(det.flatMap((d) => d.placas))]; const manis = [...new Set(det.flatMap((d) => d.manifiestos))];
-  const [viajes, clientes] = await Promise.all([
+  const [viajes, claves] = await Promise.all([
     placas.length || manis.length ? Viaje.find({ empresa: empresaId, $or: [{ 'manifiesto.numero': { $in: manis } }, { placa: { $in: placas } }] })
       .sort({ fecha: -1 }).limit(300).select('numero placa fecha manifiesto.numero cliente').lean() : [],
-    Cliente.find({ empresa: empresaId, activo: { $ne: false } }).select('nombre razonSocial').lean(),
+    clavesClientes(empresaId),
   ]);
-  const nombreCliente = new Map(clientes.map((c) => [String(c._id), c.nombre]));
-  const claves = clientes.map((c) => ({ id: String(c._id), nombre: c.nombre, palabras: [c.nombre, c.razonSocial].filter(Boolean).map((s) => s.toUpperCase()).filter((s) => s.length >= 5) }));
+  const nombreCliente = new Map(claves.map((c) => [c.id, c.nombre]));
   return lista.map((x, i) => {
     const v = [];
     for (const n of det[i].manifiestos) { const vj = viajes.find((y) => y.manifiesto?.numero === n); v.push({ tipo: 'manifiesto', texto: `Manifiesto ${n}`, viaje: vj?._id || null }); }
     for (const p of det[i].placas) { const vj = viajes.find((y) => y.placa === p); v.push({ tipo: 'placa', texto: p, viaje: vj?._id || null, numeroViaje: vj?.numero || null }); }
-    const txt = `${x.asunto} ${x.extracto} ${x.de?.nombre || ''}`.toUpperCase();
-    let cliente = claves.find((c) => c.palabras.some((w) => txt.includes(w)))?.id;
+    let cliente = clienteDe(claves, { correos: [x.de?.correo, ...(x.correos || [])].filter(Boolean), texto: `${x.asunto} ${x.extracto} ${x.de?.nombre || ''}` });
     if (!cliente) { const vj = viajes.find((y) => det[i].manifiestos.includes(y.manifiesto?.numero) || det[i].placas.includes(y.placa)); if (vj?.cliente) cliente = String(vj.cliente); }
     if (cliente) v.unshift({ tipo: 'cliente', texto: `Cliente: ${nombreCliente.get(cliente) || ''}`, cliente });
-    return { ...x, vinculos: v };
+    return { ...x, cliente: cliente || null, vinculos: v };
   });
 }
 

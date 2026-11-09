@@ -72,3 +72,18 @@ test('Estilo Gmail: De con nombre, Cco, HTML con texto alterno y logo de la firm
   assert.ok(!sinLogo.includes('multipart/related') && sinLogo.includes('multipart/alternative'));
   assert.match(Buffer.from(G.mime({ para: 'a@b.co', asunto: 'x', texto: 'y' }), 'base64url').toString('utf8'), /^To: a@b.co\r\nSubject: x\r\nMIME-Version: 1.0\r\nContent-Type: text\/plain/);
 });
+
+test('Pestañas por cliente: correo, dominio, nombre y búsqueda de Gmail', () => {
+  assert.deepEqual(G.palabrasCliente({ nombre: 'Corbeta', razonSocial: 'Colombiana de Comercio S.A. - Corbeta S.A.S.', siglas: 'COR' }), ['CORBETA', 'COLOMBIANA DE COMERCIO CORBETA']);
+  const claves = [
+    { id: 'c1', nombre: 'Corbeta', palabras: ['CORBETA'], correos: ['logistica@corbeta.com.co'], dominios: ['corbeta.com.co'] },
+    { id: 'c2', nombre: 'DSierra', palabras: ['DSIERRA'], correos: ['dsierra.despachos@gmail.com'], dominios: [] },
+    { id: 'c3', nombre: 'Alpina', palabras: ['ALPINA'], correos: [], dominios: [] },
+  ];
+  assert.equal(G.clienteDe(claves, { correos: ['"Ana" <ana@corbeta.com.co>'], texto: 'Hola' }), 'c1');              // por dominio
+  assert.equal(G.clienteDe(claves, { correos: ['DSierra.Despachos@gmail.com'], texto: 'Remesas' }), 'c2');         // correo exacto (gmail no es dominio)
+  assert.equal(G.clienteDe(claves, { correos: ['otro@gmail.com'], texto: 'MANIFIESTOS ALPINA - 09/11' }), 'c3');    // por nombre
+  assert.equal(G.clienteDe(claves, { correos: ['otro@gmail.com'], texto: 'Alpinismo y montaña' }), null);           // palabra completa, no un pedazo
+  assert.equal(G.clienteDe(claves, { correos: [], texto: 'Corbetá' }), 'c1');                                       // sin importar tildes
+  assert.equal(G.consultaCliente(claves[0], ['TTK210']), '{from:logistica@corbeta.com.co to:logistica@corbeta.com.co from:corbeta.com.co to:corbeta.com.co "corbeta" TTK210}');
+});

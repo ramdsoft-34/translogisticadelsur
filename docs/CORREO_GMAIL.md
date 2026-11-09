@@ -36,3 +36,16 @@ Sin `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` la pantalla avisa que falta la c
 `GET /estado` · `POST /conectar` · `GET /oauth/callback` (Google) · `DELETE /cuenta` · `GET /etiquetas` · `GET /hilos?etiqueta&q&filtro&pagina` · `GET /hilos/:id` · `POST /hilos/:id/leido` · `GET /mensajes/:id/adjuntos/:adj` · `GET /documentos?q` · `POST /enviar`.
 
 Código: `models/gmail.js`, `services/gmail.js`, `routes/gmail.js` (montado en `app.js`), `frontend/src/app/pages/correo.ts`. Pruebas: `backend/test/gmail.test.js`.
+
+## Etiquetas por cliente
+
+En la columna izquierda, bajo «Clientes», hay una etiqueta por cliente (los de más viajes en los últimos 4 meses; los demás en
+«Más clientes»). Cada una trae todo lo del cliente, recibido y enviado:
+
+1. Correos de o para los correos registrados del cliente (Clientes y tarifas) y su dominio (no cuenta gmail.com, hotmail.com…).
+2. Correos que nombran al cliente (nombre o razón social, sin tildes ni «S.A.S.»).
+3. Correos con las placas de sus viajes del último mes.
+
+Los correos reconocidos quedan además con la etiqueta «Clientes/Nombre» en Gmail (se ve en el celular y en gmail.com).
+«Etiqueta del cliente» dentro de un correo lo cambia de cliente: la plataforma aprende el remitente (o todo su dominio) para
+toda la empresa (colección `reglacorreos`) y cambia la etiqueta en Gmail.

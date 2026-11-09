@@ -2,9 +2,10 @@
 // /oauth/callback es la única ruta sin sesión (la llama Google); la valida el estado firmado.
 // Todo lo demás exige sesión y ver viajes (para adjuntar sus documentos). Cada usuario solo ve su propio buzón.
 import express, { Router } from 'express';
+import mongoose from 'mongoose';
 import { z } from 'zod';
-import { Empresa, Viaje } from '../models/index.js';
-import { CuentaGmail } from '../models/gmail.js';
+import { Empresa, Viaje, Cliente } from '../models/index.js';
+import { CuentaGmail, ReglaCorreo } from '../models/gmail.js';
 import { autenticar, permitir, soloEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { env } from '../config/env.js';
@@ -59,7 +60,7 @@ const SISTEMA = [['INBOX', 'Recibidos'], ['STARRED', 'Destacados'], ['SNOOZED', 
 r.get('/etiquetas', async (req, res) => {
   const c = await G.cuentaDe(req);
   const { labels = [] } = await G.gmail(c, '/labels');
-  const propias = labels.filter((l) => l.type === 'user').slice(0, 30);
+  const propias = labels.filter((l) => l.type === 'user' && !/^clientes\//i.test(l.name)).slice(0, 30);
   const det = await Promise.all([...SISTEMA.filter(([id]) => id !== 'SNOOZED').map(([id]) => ({ id })), ...propias].map((l) => G.gmail(c, `/labels/${encodeURIComponent(l.id)}`).catch(() => null)));
   const de = new Map(det.filter(Boolean).map((l) => [l.id, l]));
   res.json({
@@ -70,37 +71,91 @@ r.get('/etiquetas', async (req, res) => {
 
 // Lista de conversaciones (25 por página) con sus vínculos a viajes, manifiestos y clientes
 r.get('/hilos', async (req, res) => {
-  const q = z.object({ etiqueta: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).default('INBOX'), q: z.string().trim().max(200).default(''),
-    pagina: z.string().max(200).default(''), filtro: z.string().max(40).default(''), fecha: z.enum(['', '1d', '7d', '30d', '6m', '1y']).default('') }).parse(req.query);
+  const q = z.object({ etiqueta: z.string().regex(/^[A-Za-z0-9_-]{0,64}$/).default('INBOX'), q: z.string().trim().max(200).default(''),
+    pagina: z.string().max(200).default(''), filtro: z.string().max(40).default(''), fecha: z.enum(['', '1d', '7d', '30d', '6m', '1y']).default(''),
+    cliente: idMongo.optional() }).parse(req.query);
   const c = await G.cuentaDe(req);
+  // Pestaña de un cliente: todo lo suyo (recibido y enviado), no solo Recibidos
+  let deCliente = '';
+  if (q.cliente) { const k = (await G.clavesClientes(req.empresaId)).find((x) => x.id === q.cliente); if (!k) throw new ErrorHttp(404, 'Cliente no encontrado'); deCliente = G.consultaCliente(k, await placasRecientes(req.empresaId, q.cliente)); q.etiqueta = q.etiqueta === 'INBOX' ? '' : q.etiqueta; }
   const f = new Set(q.filtro.split(',').filter(Boolean));   // chips combinables: no_leidos, adjuntos
-  const busqueda = [q.q, q.etiqueta === 'SNOOZED' ? 'in:snoozed' : '', f.has('no_leidos') ? 'is:unread' : '', f.has('adjuntos') ? 'has:attachment' : '',
+  const busqueda = [deCliente, q.q, q.etiqueta === 'SNOOZED' ? 'in:snoozed' : '', f.has('no_leidos') ? 'is:unread' : '', f.has('adjuntos') ? 'has:attachment' : '',
     q.fecha ? `newer_than:${q.fecha}` : ''].filter(Boolean).join(' ');
-  const p = new URLSearchParams({ maxResults: '25', ...(q.etiqueta !== 'SNOOZED' ? { labelIds: q.etiqueta } : {}), ...(busqueda ? { q: busqueda } : {}), ...(q.pagina ? { pageToken: q.pagina } : {}) });
+  const p = new URLSearchParams({ maxResults: '25', ...(q.etiqueta && q.etiqueta !== 'SNOOZED' ? { labelIds: q.etiqueta } : {}), ...(busqueda ? { q: busqueda } : {}), ...(q.pagina ? { pageToken: q.pagina } : {}) });
   const l = await G.gmail(c, `/threads?${p}`);
   const hilos = await Promise.all((l.threads || []).map((t) => G.gmail(c, `/threads/${t.id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject`).catch(() => null)));
   const items = hilos.filter(Boolean).map((h) => {
     const ult = G.resumenMensaje(h.messages.at(-1)); const pri = G.resumenMensaje(h.messages[0]);
     const participantes = [...new Set(h.messages.map((m) => G.persona(G.cabecera(m.payload?.headers, 'From')).nombre.split(' ')[0]))];
-    return { id: h.id, asunto: pri.asunto, de: ult.de, participantes, mensajes: h.messages.length, fecha: ult.fecha, extracto: ult.extracto,
+    const correos = h.messages.flatMap((m) => ['From', 'To'].flatMap((n) => G.cabecera(m.payload?.headers, n).split(','))).filter(Boolean);
+    return { id: h.id, asunto: pri.asunto, de: ult.de, participantes, correos, etiquetas: [...new Set(h.messages.flatMap((m) => m.labelIds || []))], mensajes: h.messages.length, fecha: ult.fecha, extracto: ult.extracto,
       noLeido: h.messages.some((m) => (m.labelIds || []).includes('UNREAD')), conAdjuntos: h.messages.some((m) => G.resumenMensaje(m).conAdjuntos),
       destacado: h.messages.some((m) => (m.labelIds || []).includes('STARRED')) };
   });
-  res.json({ items: await G.vincular(req.empresaId, items), siguiente: l.nextPageToken || '', estimado: l.resultSizeEstimate || 0 });
+  const vinculados = await G.vincular(req.empresaId, items);
+  // Cada correo reconocido queda también con la etiqueta de su cliente en Gmail (sin hacer esperar la lista)
+  const nombres = new Map(vinculados.flatMap((x) => x.vinculos.filter((v) => v.tipo === 'cliente').map((v) => [x.cliente, v.texto.replace('Cliente: ', '')])));
+  G.etiquetarHilos(c, vinculados, nombres).catch(() => null);
+  res.json({ items: vinculados.map(({ correos, etiquetas, ...x }) => x), siguiente: l.nextPageToken || '', estimado: l.resultSizeEstimate || 0 });
 });
 
 r.get('/hilos/:id', async (req, res) => {
   const c = await G.cuentaDe(req);
   const h = await G.gmail(c, `/threads/${idGmail(req.params.id)}?format=full`);
   const mensajes = h.messages.map((m) => ({ ...G.resumenMensaje(m), ...G.partes(m.payload) }));
-  const [v] = await G.vincular(req.empresaId, [{ asunto: mensajes[0].asunto, extracto: mensajes.map((m) => m.extracto).join(' '), de: mensajes[0].de }]);
-  res.json({ id: h.id, asunto: mensajes[0].asunto, mensajes, vinculos: v.vinculos });
+  const [v] = await G.vincular(req.empresaId, [{ asunto: mensajes[0].asunto, extracto: mensajes.map((m) => m.extracto).join(' '), de: mensajes[0].de,
+    correos: mensajes.flatMap((m) => [m.de.correo, ...String(m.para || '').split(',')]) }]);
+  res.json({ id: h.id, asunto: mensajes[0].asunto, mensajes, vinculos: v.vinculos, cliente: v.cliente });
 });
 
 r.post('/hilos/:id/leido', async (req, res) => {
   const c = await G.cuentaDe(req);
   await G.gmail(c, `/threads/${idGmail(req.params.id)}/modify`, { metodo: 'POST', cuerpo: { removeLabelIds: ['UNREAD'] } });
   res.status(204).end();
+});
+
+// ── Pestañas por cliente ──
+const placasRecientes = async (empresaId, cliente) => (await Viaje.distinct('placa', { empresa: empresaId, cliente, fecha: { $gte: new Date(Date.now() - 30 * 864e5) }, estado: { $ne: 'anulado' } })).filter(Boolean);
+
+// Etiquetas por cliente: los de más viajes en los últimos 4 meses (o con correos registrados o aprendidos) se ven; los demás en «Más»
+r.get('/clientes', async (req, res) => {
+  const c = await G.cuentaDe(req);
+  const [claves, uso] = await Promise.all([G.clavesClientes(req.empresaId),
+    Viaje.aggregate([{ $match: { empresa: new mongoose.Types.ObjectId(String(req.empresaId)), fecha: { $gte: new Date(Date.now() - 120 * 864e5) }, estado: { $ne: 'anulado' } } }, { $group: { _id: '$cliente', n: { $sum: 1 } } }])]);
+  const n = new Map(uso.map((u) => [String(u._id), u.n]));
+  const orden = claves.map((k) => ({ ...k, peso: (n.get(k.id) || 0) + (k.correos.length || k.dominios.length ? 1 : 0) })).sort((a, b) => b.peso - a.peso || a.nombre.localeCompare(b.nombre, 'es'));
+  const top = orden.filter((k) => k.peso > 0).slice(0, 10);
+  // No leídos de cada pestaña (en Recibidos), como los contadores de Gmail
+  const noLeidos = await Promise.all(top.map(async (k) => {
+    const p = new URLSearchParams({ maxResults: '50', labelIds: 'INBOX', q: `is:unread ${G.consultaCliente(k, await placasRecientes(req.empresaId, k.id))}` });
+    return G.gmail(c, `/threads?${p}`).then((x) => (x.threads || []).length).catch(() => 0);
+  }));
+  res.json({ principales: top.map((k, i) => ({ id: k.id, nombre: k.nombre, noLeidos: noLeidos[i] })), otros: orden.filter((k) => !top.includes(k)).map((k) => ({ id: k.id, nombre: k.nombre })) });
+});
+
+// Cambiar la etiqueta de cliente de un correo: la plataforma aprende el remitente (o todo su dominio) y en Gmail cambia la etiqueta «Clientes/Nombre»
+r.post('/reglas', express.json(), async (req, res) => {
+  const d = z.object({ remitente: z.string().trim().toLowerCase().max(200).regex(/^([^\s@<>]+@|@)[^\s@<>]+\.[^\s@<>]+$/, 'Correo o dominio inválido'),
+    cliente: idMongo.or(z.literal('')), hilo: z.string().regex(/^[a-zA-Z0-9_-]{6,64}$/).optional(), etiquetar: z.boolean().default(true) }).parse(req.body);
+  if (!d.cliente) {   // «Sin cliente»: olvida el remitente y quita la etiqueta de cliente del correo
+    await ReglaCorreo.deleteOne({ empresa: req.empresaId, remitente: d.remitente });
+    if (d.hilo) { const c = await G.cuentaDe(req); const { labels = [] } = await G.gmail(c, '/labels'); const ids = labels.filter((l) => /^clientes\//i.test(l.name)).map((l) => l.id);
+      if (ids.length) await G.gmail(c, `/threads/${idGmail(d.hilo)}/modify`, { metodo: 'POST', cuerpo: { removeLabelIds: ids } }); }
+    return res.status(204).end();
+  }
+  const cli = await Cliente.findOne({ _id: d.cliente, empresa: req.empresaId }).select('nombre').lean();
+  if (!cli) throw new ErrorHttp(404, 'Cliente no encontrado');
+  await ReglaCorreo.updateOne({ empresa: req.empresaId, remitente: d.remitente }, { $set: { cliente: cli._id, usuario: req.usuario._id } }, { upsert: true });
+  if (d.hilo && d.etiquetar) {
+    const c = await G.cuentaDe(req);
+    const id = await G.etiquetaCliente(c, cli.nombre);
+    // Quita la etiqueta de otro cliente que tuviera (un correo es de un solo cliente)
+    const { labels = [] } = await G.gmail(c, '/labels');
+    const otras = labels.filter((l) => /^clientes\//i.test(l.name) && l.id !== id).map((l) => l.id);
+    await G.gmail(c, `/threads/${idGmail(d.hilo)}/modify`, { metodo: 'POST', cuerpo: { addLabelIds: [id], ...(otras.length ? { removeLabelIds: otras } : {}) } });
+  }
+  await auditar(req, 'gmail_regla', { detalle: { remitente: d.remitente, cliente: cli.nombre } });
+  res.status(201).json({ remitente: d.remitente, cliente: { id: String(cli._id), nombre: cli.nombre } });
 });
 
 // Destacar (estrella) y mover a la papelera (se puede recuperar desde Papelera, como en Gmail)

@@ -22,3 +22,14 @@ cuentaGmailSchema.plugin(tenantPlugin);
 cuentaGmailSchema.index({ empresa: 1, usuario: 1 }, { unique: true });
 
 export const CuentaGmail = mongoose.models.CuentaGmail || mongoose.model('CuentaGmail', cuentaGmailSchema);
+
+// Pestañas por cliente: «los correos de este remitente son de este cliente». Es de la empresa (lo aprende de cualquier usuario).
+// remitente: un correo (ana@corbeta.com) o un dominio (@corbeta.com)
+const reglaCorreoSchema = new Schema({
+  remitente: { type: String, trim: true, lowercase: true, required: true, maxlength: 200 },
+  cliente: { type: Schema.Types.ObjectId, ref: 'Cliente', required: true },
+  usuario: { type: Schema.Types.ObjectId, ref: 'Usuario' },
+}, { timestamps: true });
+reglaCorreoSchema.plugin(tenantPlugin);
+reglaCorreoSchema.index({ empresa: 1, remitente: 1 }, { unique: true });
+export const ReglaCorreo = mongoose.models.ReglaCorreo || mongoose.model('ReglaCorreo', reglaCorreoSchema);
