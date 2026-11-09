@@ -18,7 +18,7 @@ import { ListaBuscable, OpcionBuscable } from '../shared/lista-buscable';
 import { RndcClave } from '../core/rndc-clave.service';
 
 const clienteVacio = () => ({ nombre: '', tipoId: 'N', nit: '', dv: '', razonSocial: '', sedeRemitente: '', correos: '', whatsapp: '', activo: true,
-  siglas: '', politicaAuxiliar: 'registrado', valorAuxiliarSinAnticipo: 30000 });
+  siglas: '', politicaAuxiliar: 'registrado', valorAuxiliarSinAnticipo: 30000, seguros: false });
 // Cómo se le cobra el auxiliar al cliente (RN-15)
 const POLITICAS: [string, string][] = [['registrado', 'Se cobra lo registrado en el viaje'], ['sin', 'Sin auxiliar (no se cobra)'],
   ['incluido', 'Incluido en la tarifa (no se cobra aparte)'], ['sin_anticipo', 'Valor fijo por viaje sin anticipo']];
@@ -153,6 +153,7 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
         @if (f.politicaAuxiliar === 'sin_anticipo') {
           <div class="campo"><label for="cvaux">Valor por viaje sin anticipo</label><div class="moneda"><input id="cvaux" moneda name="vaux" [(ngModel)]="f.valorAuxiliarSinAnticipo" /></div></div>
         }
+        <label class="casilla ancho"><input type="checkbox" name="seguros" [(ngModel)]="f.seguros" />Maneja seguros: sus viajes se pueden marcar como «seguro» y el manifiesto se anula al día siguiente antes de las 9:00 a. m.</label>
         @if (f._id) { <label class="casilla"><input type="checkbox" name="activo" [(ngModel)]="f.activo" />Activo</label> }
       </form>
       <ng-container pie><button type="button" (click)="abiertoCliente.set(false)">Cancelar</button>
@@ -348,7 +349,7 @@ export class Clientes {
     const f = this.clienteForm();
     const cuerpo: any = { nombre: f.nombre, tipoId: f.tipoId, nit: f.nit, dv: f.dv, razonSocial: f.razonSocial, sedeRemitente: f.sedeRemitente,
       correos: String(f.correos || '').split(',').map((s: string) => s.trim()).filter(Boolean), whatsapp: f.whatsapp || '', activo: f.activo,
-      siglas: String(f.siglas || '').toUpperCase(), politicaAuxiliar: f.politicaAuxiliar || 'registrado', valorAuxiliarSinAnticipo: Number(f.valorAuxiliarSinAnticipo) || 0 };
+      siglas: String(f.siglas || '').toUpperCase(), politicaAuxiliar: f.politicaAuxiliar || 'registrado', valorAuxiliarSinAnticipo: Number(f.valorAuxiliarSinAnticipo) || 0, seguros: !!f.seguros };
     const s = this.sedeCliente();
     if (!f._id && (s.direccion || s.codMunicipio)) cuerpo.sede = s;
     try {

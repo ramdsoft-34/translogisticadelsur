@@ -1,3 +1,4 @@
+import { textoLimite } from '../core/seguro';
 import { Turno } from '../core/turno';
 import { Component, computed, inject, input, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
@@ -78,6 +79,20 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         Ambiente RNDC: <strong>{{ ambiente() === 'SIMULADO' ? 'simulador local' : 'pruebas del Ministerio' }}</strong>.
         Los documentos expedidos aquí no tienen validez legal. El administrador lo cambia en Configuración.
       </div>
+    }
+
+    @if (!vista() && seguros().length) {
+      <section class="seguros" [class.vencidos]="segurosVencidos()" role="alert" aria-label="Seguros por anular">
+        <strong>{{ seguros().length }} seguro(s) por anular</strong>{{ segurosVencidos() ? ' · ' + segurosVencidos() + ' con el plazo vencido' : '' }}
+        <span class="sutil"> — el manifiesto se anula al día siguiente antes de las 9:00 a. m.</span>
+        <ul>
+          @for (x of seguros(); track x._id) {
+            <li [class.vencido]="x.vencido"><strong>{{ x.manifiesto || 'Sin manifiesto' }}</strong> · {{ x.placa }} · {{ x.cliente }} · {{ x.destino }}
+              — {{ x.vencido ? 'debía anularse antes de' : 'anular antes de' }} <strong>{{ textoLimite(x.limite) }}</strong>
+              @if (puedeQuitarSeguro) { <button type="button" class="texto pequeno" confirmar="Clic otra vez para quitar la marca de seguro" (confirmado)="quitarSeguro(x)">Quitar marca</button> }</li>
+          }
+        </ul>
+      </section>
     }
 
     @if (!vista()) {
@@ -187,7 +202,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                 @if (conSeleccion()) { <td data-etiqueta="Elegir"><input type="checkbox" [attr.aria-label]="'Seleccionar viaje ' + v.numero" [checked]="seleccion().has(v._id)" (change)="alternar(v._id)" /></td> }
                 <td data-etiqueta="N°">{{ v.numero }}</td><td data-etiqueta="Fecha">{{ v.fecha | dia }}</td>
                 <td data-etiqueta="Cliente">{{ v.cliente?.nombre }}<br /><span class="sutil">{{ v.destino }}</span></td>
-                <td data-etiqueta="Placa"><strong>{{ v.placa }}</strong></td><td data-etiqueta="Conductor">{{ v.conductorNombre }}</td><td data-etiqueta="Flete" class="num">{{ v.flete | pesos }}</td>
+                <td data-etiqueta="Placa"><strong>{{ v.placa }}</strong>@if ($any(v).seguro?.marcado) { <br /><span class="chip sin-punto" [class.error]="v.manifiesto.estado !== 'anulado'" title="Seguro: anular el manifiesto al día siguiente antes de las 9:00 a. m.">Seguro</span> }</td><td data-etiqueta="Conductor">{{ v.conductorNombre }}</td><td data-etiqueta="Flete" class="num">{{ v.flete | pesos }}</td>
                 @if (pestana() === 'soporte') {
                 <td data-etiqueta="Remesa">@if ($any(v).soporteInterno?.rc) { {{ $any(v).soporteInterno.rc }}<br /><span class="chip ok sin-punto">interna</span> } @else { <span class="chip alerta sin-punto">sin soporte</span> }</td>
                 <td data-etiqueta="Manifiesto">@if ($any(v).soporteInterno?.mc) { {{ $any(v).soporteInterno.mc }}<br /><span class="chip" [class]="chipSoporte($any(v))">{{ textoSoporte($any(v)) }}</span>
@@ -515,6 +530,11 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       </ng-container>
     </app-modal>`,
   styles: [`
+    .seguros { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--ambar-borde, #f5c46b); border-left-width: 4px; border-radius: 12px; background: var(--ambar-claro, #fff6e0); }
+    .seguros.vencidos { border-color: var(--rojo, #d92d20); background: var(--rojo-claro, #fdecea); }
+    .seguros ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+    .seguros li.vencido { color: var(--rojo-texto, #b42318); }
+
     .soporte-filtros { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 18px; margin: -6px 0 12px; }
     .soporte-filtros p { margin: 0; flex: 1 1 380px; }
     .pila-acciones { display: inline-flex; flex-direction: column; align-items: stretch; gap: 6px; }
@@ -625,7 +645,19 @@ export class Manifiestos {
   }
 
   private turno = new Turno();
+  // Seguros por anular (alerta arriba de las pestañas)
+  readonly seguros = signal<any[]>([]);
+  readonly segurosVencidos = computed(() => this.seguros().filter(x => x.vencido).length);
+  readonly puedeQuitarSeguro = this.auth.tiene(P.VIAJES_REGISTRAR);
+  textoLimite = textoLimite;
+  cargarSeguros() { this.api.get<any[]>('/viajes/seguros').then(x => this.seguros.set(x)).catch(() => {}); }
+  async quitarSeguro(x: any) {
+    try { await this.api.post(`/viajes/${x._id}/seguro`, { marcado: false }); this.avisos.ok(`El viaje ${x.numero} ya no está marcado como seguro`); this.cargarSeguros(); }
+    catch (e) { this.avisos.error(e); }
+  }
+
   async cargar() {
+    this.cargarSeguros();
     const vigente = this.turno.tomar();
     this.cargando.set(true);
     try {

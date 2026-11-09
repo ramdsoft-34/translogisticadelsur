@@ -176,6 +176,8 @@ const clienteSchema = new Schema({
   //   sin_anticipo: se cobra un valor fijo por viaje sin anticipo
   politicaAuxiliar: { type: String, enum: ['registrado', 'sin', 'incluido', 'sin_anticipo'], default: 'registrado' },
   valorAuxiliarSinAnticipo: { type: Number, default: 30000, min: 0 },
+  // Sus viajes se pueden marcar como «seguro»: el manifiesto se anula al día siguiente antes de las 9:00 a. m.
+  seguros: { type: Boolean, default: false },
   activo: { type: Boolean, default: true },
   // Envío de documentos por correo cuando el RNDC acepta remesa y manifiesto
   envios: {
@@ -372,6 +374,8 @@ const viajeSchema = new Schema({
   // plataforma, por eso no aparece en «Por enviar» hasta que un usuario lo habilite.
   historico: { type: Boolean, default: false },
   registroMasivo: { type: Boolean, default: false },   // fase 11: creado con el registro masivo
+  // Seguro (cliente con «seguros»): manifiesto normal que se anula al día siguiente antes de las 9:00 a. m.
+  seguro: { marcado: { type: Boolean, default: false }, fecha, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null } },
   reporteWhatsapp: { fecha, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null } },                      // manifiesto anulado que reemplaza el nuevo
   enviandoRndc: fecha,                                // bloqueo para no enviar dos veces a la vez
   creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },

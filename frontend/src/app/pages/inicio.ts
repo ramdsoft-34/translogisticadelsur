@@ -82,6 +82,10 @@ const ESTADOS: Record<string, [string, string]> = {
         <ul class="tareas">
           <li [class.vacia]="!r()?.rechazos"><a [routerLink]="rutaRndc()"><span class="ico rojo"><app-icono nombre="alerta" [tam]="16" /></span>
             <span class="tx"><strong>Rechazos del RNDC</strong><small>Corregir y reenviar</small></span><span class="num">{{ r()?.rechazos || 0 }}</span></a></li>
+          @if (r()?.seguros?.pendientes) {
+            <li><a [routerLink]="rutaRndc()"><span class="ico" [class.rojo]="r()?.seguros?.vencidos" [class.ambar]="!r()?.seguros?.vencidos"><app-icono nombre="alerta" [tam]="16" /></span>
+              <span class="tx"><strong>Seguros por anular</strong><small>{{ r()?.seguros?.vencidos ? r()?.seguros?.vencidos + ' con el plazo vencido' : 'Antes de las 9:00 a. m. del día siguiente' }}</small></span><span class="num">{{ r()?.seguros?.pendientes }}</span></a></li>
+          }
           <li [class.vacia]="!pendientes()"><a [routerLink]="rutaRndc()"><span class="ico ambar"><app-icono nombre="enviar" [tam]="16" /></span>
             <span class="tx"><strong>Por manifestar</strong><small>Remesa y manifiesto sin enviar</small></span><span class="num">{{ pendientes() }}</span></a></li>
           <li [class.vacia]="!(r()?.estados?.manifestado)"><a [routerLink]="rutaRndc()"><span class="ico gris"><app-icono nombre="reloj" [tam]="16" /></span>

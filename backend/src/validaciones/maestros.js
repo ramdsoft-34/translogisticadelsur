@@ -24,6 +24,7 @@ export const clienteSchema = z.object({
   siglas: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{0,6}$/, 'siglas de hasta 6 letras o números').optional().default(''),
   politicaAuxiliar: z.enum(['registrado', 'sin', 'incluido', 'sin_anticipo']).optional().default('registrado'),
   valorAuxiliarSinAnticipo: z.coerce.number().min(0).max(10000000).optional().default(30000),
+  seguros: z.boolean().optional(),
   enviosRelaciones: z.object({ destinatarios: z.array(z.string().trim().toLowerCase().email()).max(20).optional().default([]),
     cc: z.array(z.string().trim().toLowerCase().email()).max(20).optional().default([]) }).optional(),
   activo: z.boolean().optional(),

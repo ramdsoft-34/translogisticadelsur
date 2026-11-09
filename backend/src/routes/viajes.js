@@ -21,6 +21,7 @@ export const autorizacionSchema = z.object({ email: z.string().trim().max(120), 
 import * as rastreo from '../services/rastreo/surtrack.js';
 import { asegurarSoporte } from '../services/gestion/soporteInterno.js';
 import { exigirNoFacturado } from '../services/gestion/relaciones.js';
+import { datosSeguro, limiteSeguro } from '../services/gestion/seguros.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -82,7 +83,7 @@ function numeroManifiestoA(d) {
 }
 
 const POBLAR = (req) => [
-  pob(req.empresaId, 'cliente', 'nombre nit dv tipoId'),
+  pob(req.empresaId, 'cliente', 'nombre nit dv tipoId seguros'),
   pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId tipoId celular'),
   pob(req.empresaId, 'titular', 'nombres apellido1 apellido2 numId tipoId'),
 ];
@@ -225,7 +226,12 @@ r.get('/resumen', permitir(P.VIAJES_VER), async (req, res) => {
     const d = new Date(desde14.getTime() + i * 86400000).toISOString().slice(0, 10);
     return { dia: d, viajes: porDia.get(d)?.viajes || 0, tarifa: porDia.get(d)?.tarifa || 0 };
   });
-  res.json({ hoy: hoyN, estados, mes: mes[0] || { viajes: 0, tarifa: 0, flete: 0, anticipo: 0 },
+  // Seguros por anular (el día siguiente antes de las 9:00 a. m.)
+  const segs = await Viaje.find(deEmpresa(req, { 'seguro.marcado': true, estado: { $ne: 'anulado' }, 'manifiesto.estado': { $ne: 'anulado' } }))
+    .select('estado manifiesto seguro createdAt').lean();
+  const ahoraS = new Date();
+  const seguros = { pendientes: segs.length, vencidos: segs.filter(v => limiteSeguro(v) < ahoraS).length };
+  res.json({ hoy: hoyN, estados, seguros, mes: mes[0] || { viajes: 0, tarifa: 0, flete: 0, anticipo: 0 },
     mesAnterior: mesAnt[0] || { viajes: 0, tarifa: 0 }, dias, rechazos, enRuta,
     clientes: clientes.map(c => ({ nombre: c.c?.[0]?.nombre || 'Sin cliente', viajes: c.viajes, tarifa: c.tarifa })),
     ultimos: ultimos.map(v => ({ _id: v._id, numero: v.numero, fecha: v.fecha, placa: v.placa, destino: v.destino, estado: v.estado,
@@ -246,7 +252,7 @@ async function viajesDelReporte(req, fecha, incluirReportados) {
   const filtro = deEmpresa(req, { fecha, estado: { $ne: 'anulado' } });
   if (!incluirReportados) filtro['reporteWhatsapp.fecha'] = null;
   const viajes = (await Viaje.find(filtro).sort({ numero: 1 }).populate(POBLAR(req))
-    .populate(pob(req.empresaId, 'cliente', 'nombre whatsapp')).lean()).map(presentar);
+    .populate(pob(req.empresaId, 'cliente', 'nombre whatsapp seguros')).lean()).map(presentar);
   // Auxiliar pagado al conductor de cada viaje (para el reporte y la opción «Unificar auxiliar»)
   const tarifas = viajes.length ? await Tarifa.find(deEmpresa(req, { cliente: { $in: [...new Set(viajes.map(v => String(v.cliente?._id)))] } })).lean() : [];
   const porId = new Map(tarifas.map(t => [String(t._id), t])); const respaldo = respaldosAuxiliar(tarifas);
@@ -279,6 +285,7 @@ r.get('/reporte-whatsapp', permitir(P.VIAJES_VER), async (req, res) => {
     // Valores originales del viaje (la unificación del auxiliar solo cambia el texto del mensaje)
     viajes: viajes.map(v => ({ _id: v._id, numero: v.numero, placa: v.placa, conductor: v.conductorNombre, destino: v.destino,
       cliente: v.cliente?.nombre || '', reportado: !!v.reporteWhatsapp?.fecha, reportadoEn: v.reporteWhatsapp?.fecha || null,
+      permiteSeguro: !!v.cliente?.seguros, seguro: !!v.seguro?.marcado,
       flete: Number(v.flete) || 0, anticipo: Number(v.anticipo) || 0, auxiliar: Number(v.auxiliar) || 0, diasAuxiliar: v.auxiliar ? (Number(v.diasAuxiliar) || 1) : 0 })),
     mensajes: mensajesPorCliente(elegidos, fecha, new Date(), plantilla, opciones),
   });
@@ -326,6 +333,28 @@ r.post('/reporte-whatsapp/marcar', permitir(P.VIAJES_REGISTRAR), async (req, res
     { $set: { 'reporteWhatsapp.fecha': new Date(), 'reporteWhatsapp.usuario': req.usuario._id } });
   await auditar(req, 'reporte_whatsapp', { entidad: 'Viaje', detalle: { viajes: viajes.length, marcados: r2.modifiedCount } });
   res.json({ marcados: r2.modifiedCount });
+});
+
+// Seguros pendientes de anular (manifiesto sin anular), con la hora límite: el día siguiente antes de las 9:00 a. m.
+r.get('/seguros', permitir(P.VIAJES_VER), async (req, res) => {
+  const lista = await Viaje.find(deEmpresa(req, { 'seguro.marcado': true, estado: { $ne: 'anulado' }, 'manifiesto.estado': { $ne: 'anulado' } }))
+    .select('numero fecha placa conductorNombre destino cliente manifiesto remesa estado seguro createdAt').populate(pob(req.empresaId, 'cliente', 'nombre')).sort({ fecha: 1, numero: 1 }).lean();
+  const ahora = new Date();
+  res.json(lista.map(v => ({ _id: v._id, numero: v.numero, fecha: v.fecha, placa: v.placa, conductor: v.conductorNombre, destino: v.destino, cliente: v.cliente?.nombre || '',
+    estado: v.estado, manifiesto: v.manifiesto?.numero || '', manifiestoEstado: v.manifiesto?.estado || '', ...datosSeguro(v, ahora) })).sort((a, b) => a.limite - b.limite));
+});
+
+// Marcar o quitar «seguro» (solo clientes con la opción de seguros)
+r.post('/:id/seguro', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
+  const { marcado } = z.object({ marcado: z.boolean() }).parse(req.body);
+  const v = await Viaje.findOne(deEmpresa(req, { _id: req.params.id })).populate(pob(req.empresaId, 'cliente', 'nombre seguros'));
+  if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
+  if (marcado && !v.cliente?.seguros) throw new ErrorHttp(400, `El cliente ${v.cliente?.nombre || ''} no maneja seguros: actívelo en Clientes y tarifas`);
+  if (v.estado === 'anulado' || v.manifiesto?.estado === 'anulado') throw new ErrorHttp(409, 'El manifiesto ya está anulado');
+  v.seguro = marcado ? { marcado: true, fecha: v.seguro?.marcado ? v.seguro.fecha : new Date(), usuario: req.usuario._id } : { marcado: false, fecha: null, usuario: null };
+  await v.save();
+  await auditar(req, marcado ? 'marcar_seguro' : 'quitar_seguro', { entidad: 'Viaje', entidadId: v._id, detalle: { numero: v.numero, placa: v.placa } });
+  res.json({ seguro: datosSeguro(v.toObject()) });
 });
 
 r.get('/:id', permitir(P.VIAJES_VER), async (req, res) => {

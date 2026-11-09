@@ -1,3 +1,4 @@
+import { textoLimite } from '../core/seguro';
 import { Turno } from '../core/turno';
 import { Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
@@ -112,6 +113,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
                 @if (v.rastreo?.activo) { <a class="chip sin-punto gps" [class]="claseRastreo(v.rastreo!.estado)" [routerLink]="['/monitoreo']" [queryParams]="{ viaje: v._id }"
                   (click)="$event.stopPropagation()" title="Ver en el mapa de Monitoreo">GPS · {{ textoRastreo(v.rastreo!.estado) }}</a> }
                 @if (v.reporteWhatsapp?.fecha) { <span class="chip ok sin-punto" title="Reportado por WhatsApp">WA</span> }
+                @if ($any(v).seguro?.marcado) { <span class="chip sin-punto" [class.error]="v.manifiesto.estado !== 'anulado'" title="Seguro: el manifiesto se anula al día siguiente antes de las 9:00 a. m.">Seguro{{ v.manifiesto.estado === 'anulado' ? ' · anulado' : '' }}</span> }
               </span></td>
             </tr>
           } @empty {
@@ -283,10 +285,14 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
                 @if (x.auxiliar) {
                   <label class="casilla" title="Sumar el auxiliar al flete y al anticipo en el mensaje"><input type="checkbox" [checked]="waUnificados().has(x._id)" (change)="waAlternarUnificado(x._id)" [attr.aria-label]="'Unificar auxiliar del viaje ' + x.numero" />Unificar aux.</label>
                 }
+                @if (x.permiteSeguro && puedeRegistrar) {
+                  <label class="casilla" title="El manifiesto se expide normal y hay que anularlo al día siguiente antes de las 9:00 a. m."><input type="checkbox" [checked]="x.seguro" (change)="marcarSeguro(x, $any($event.target).checked)" [attr.aria-label]="'Marcar como seguro el viaje ' + x.numero" />Seguro</label>
+                }
               </div>
               <div class="wa-cuerpo">
                 <div class="wa-fila1"><strong>N° {{ x.numero }}</strong> <span class="sutil">{{ x.cliente }}</span>
-                  <span class="chip sin-punto" [class.ok]="x.reportado" [class.alerta]="!x.reportado">{{ x.reportado ? 'Reportado' : 'Pendiente' }}</span></div>
+                  <span class="chip sin-punto" [class.ok]="x.reportado" [class.alerta]="!x.reportado">{{ x.reportado ? 'Reportado' : 'Pendiente' }}</span>
+                  @if (x.seguro) { <span class="chip sin-punto error" title="Anular el manifiesto al día siguiente antes de las 9:00 a. m.">Seguro</span> }</div>
                 <div>{{ x.conductor }} · <strong>{{ x.placa }}</strong></div>
                 <div class="sutil wa-destino">{{ x.destino }}</div>
                 <div class="wa-valores">
@@ -443,6 +449,15 @@ export class Viajes {
     const s = new Set(this.waSeleccion());
     if (s.has(id)) s.delete(id); else s.add(id);
     this.waSeleccion.set(s); this.cargarWhatsapp();
+  }
+  // Seguro: el manifiesto se expide normal; queda la alerta para anularlo al día siguiente antes de las 9:00 a. m.
+  async marcarSeguro(x: any, marcado: boolean) {
+    try {
+      const r = await this.api.post<any>(`/viajes/${x._id}/seguro`, { marcado });
+      x.seguro = r.seguro.marcado;
+      this.waViajes.update(l => [...l]);
+      this.avisos.ok(marcado ? `Viaje ${x.numero} marcado como seguro: anule el manifiesto antes de ${textoLimite(r.seguro.limite)}` : `Viaje ${x.numero} ya no es seguro`);
+    } catch (e) { this.avisos.error(e); this.waViajes.update(l => [...l]); }
   }
   waAlternarTodos() { this.waSeleccion.set(this.waTodos() ? new Set() : new Set(this.waViajes().map(x => x._id))); this.cargarWhatsapp(); }
   waLimpiar() { this.waSeleccion.set(new Set()); this.cargarWhatsapp(); }
