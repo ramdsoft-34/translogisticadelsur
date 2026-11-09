@@ -28,7 +28,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { AutorizacionAdmin } from '../core/autorizacion.service';
 
 interface Formulario {
-  licencia?: string; conLicencia?: boolean; numeroManifiesto?: string;
+  licencia?: string; conLicencia?: boolean; numeroManifiesto?: string; seguro?: boolean;
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
   placa: string; remolque: string; conductor: string; titular: string;
   pesoKg: number | null; cantidad: number | null; conAuxiliar: boolean; diasAuxiliar: number | null; planilla: string;
@@ -145,6 +145,10 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
           <option value="">Seleccione…</option>
           @for (c of clientesActivos(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }
         </select>
+        @if (clienteConSeguros()) {
+          <span class="etq">Seguro:</span>
+          <label class="casilla" title="El manifiesto se expide normal y hay que anularlo al día siguiente antes de las 9:00 a. m."><input type="checkbox" name="seguro" [(ngModel)]="f.seguro" />Es un seguro (anular el manifiesto al día siguiente antes de las 9:00 a. m.)</label>
+        }
 
         <span class="etq">Conductor:</span>
         <div>
@@ -576,6 +580,7 @@ export class Viajes {
       flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones, estado: v.estado, historico: !!v.historico,
       requiereManifiesto: v.requiereManifiesto !== false,
       licencia: (v as any).licencia || '', conLicencia: !!(v as any).licencia, numeroManifiesto: (v as any).numerosManuales?.manifiesto || '',
+      seguro: !!(v as any).seguro?.marcado,
     });
     this.preguntarManifiesto.set(false);
     this.habilitarRndc = false;
@@ -586,7 +591,17 @@ export class Viajes {
     this.abierto.set(true);
   }
 
-  cambiarCliente(_: string) { this.form.update(f => ({ ...f, tarifaRef: '', destino: '', codDestino: '' })); }
+  cambiarCliente(_: string) { this.form.update(f => ({ ...f, tarifaRef: '', destino: '', codDestino: '', seguro: false })); }
+  // La casilla «Seguro» solo aparece con clientes que manejan seguros (Clientes y tarifas → Maneja seguros)
+  clienteConSeguros() { const id = this.form().cliente; return !!id && !!this.clientes().find(c => c._id === id && (c as any).seguros); }
+  // Guarda la marca de seguro si cambió (el viaje ya debe existir)
+  private async guardarSeguro(id: string, numero: number | undefined, antes: boolean, ahora: boolean) {
+    if (antes === ahora) return;
+    try {
+      const r = await this.api.post<any>(`/viajes/${id}/seguro`, { marcado: ahora });
+      if (ahora) this.avisos.mostrar(`Viaje N° ${numero} marcado como seguro: anule el manifiesto antes de ${textoLimite(r.seguro.limite)}`, 'info', 9000);
+    } catch (e) { this.avisos.error(e); }
+  }
 
   // Destino con sugerencias: si coincide con un destino del cliente se toman su tarifa y valores;
   // si no, es un destino nuevo (se pide el municipio).
@@ -674,7 +689,7 @@ export class Viajes {
     if (!f.conductor && !this.bloqueado()) { this.avisos.mostrar('Seleccione el conductor', 'error'); return; }
     const cuerpo: any = { ...f, placa: f.placa.toUpperCase(), remolque: (f.remolque || '').toUpperCase(), tarifaRef: f.tarifaRef || null,
       licencia: f.conLicencia ? (f.licencia || '').trim() : '', numeroManifiesto: (f.numeroManifiesto || '').trim().toUpperCase() };
-    delete cuerpo.conLicencia;
+    delete cuerpo.conLicencia; delete cuerpo.seguro;
     delete cuerpo._id; delete cuerpo.estado; delete cuerpo.titular;
     if (!cuerpo.numeroManifiesto && !f._id) delete cuerpo.numeroManifiesto;
     for (const k of ['pesoKg', 'cantidad', 'diasAuxiliar', 'tarifa', 'flete', 'anticipo']) if (cuerpo[k] === null || cuerpo[k] === '') delete cuerpo[k];
@@ -691,6 +706,9 @@ export class Viajes {
         this.avisos.ok(`Viaje N° ${this.numeroEditado()} actualizado`);
         if ((this.viajeRastreo as any)?.reporteWhatsapp?.fecha && !r.reporteWhatsapp?.fecha) this.avisos.mostrar('El viaje vuelve a quedar por reportar: sale en el mensaje de WhatsApp del cliente corregido.', 'info', 9000);
         if (this.viajeRastreo) (this.viajeRastreo as any).reporteWhatsapp = r.reporteWhatsapp;
+        const antesSeguro = !!(this.viajeRastreo as any)?.seguro?.marcado;
+        await this.guardarSeguro(f._id, this.numeroEditado(), antesSeguro, !!f.seguro && this.clienteConSeguros());
+        if (this.viajeRastreo) (this.viajeRastreo as any).seguro = { marcado: !!f.seguro && this.clienteConSeguros() };
         this.cargarWhatsapp();
         this.registradosTanda.update(l => l.length ? l : [{ numero: this.numeroEditado(), placa: f.placa, sinManifiesto: f.requiereManifiesto === false }]);
         return;
@@ -718,6 +736,7 @@ export class Viajes {
         if (!v) return;
         if (autorizacion) this.avisos.ok('Viaje autorizado por el administrador');
         this.avisos.ok(`Viaje N° ${v.numero} registrado${requiere ? '' : ' (sin manifiesto)'}`);
+        if (f.seguro && this.clienteConSeguros()) await this.guardarSeguro(v._id, v.numero, false, true);
         const avisosDoc: string[] = (v as any).avisosDocumentos || [];
         if (avisosDoc.length) this.avisos.mostrar(`Por vencer: ${avisosDoc.join('; ')}`, 'info');
         // «Rastrear este viaje»: se abre el asistente para elegir destino o clientes
@@ -739,7 +758,7 @@ export class Viajes {
           this.registradosTanda.update(l => [...l, { numero: v.numero, placa: v.placa, sinManifiesto: !requiere }]);
           // El destino (y sus valores) cambian en cada viaje: se dejan vacíos
           this.form.set({ ...f, tarifaRef: '', destino: '', codDestino: '', tarifa: null, flete: null, anticipo: null, pesoKg: null, cantidad: 1,
-            conAuxiliar: false, diasAuxiliar: null, planilla: '', placa: '', remolque: '', conductor: '', titular: '', observaciones: '', requiereManifiesto: true });
+            conAuxiliar: false, diasAuxiliar: null, planilla: '', placa: '', remolque: '', conductor: '', titular: '', observaciones: '', requiereManifiesto: true, seguro: false });
           this.placasConductor.set([]); this.preguntarManifiesto.set(false); this.cargarSiguienteNumero();
           this.enfocarConductor();
           return;
