@@ -16,6 +16,9 @@ import { Confirmar } from './confirmar';
 
 // Expedición de remesa y manifiesto de un viaje: revisar y corregir los datos,
 // enviar al RNDC y, si hay rechazo, ver la respuesta real del RNDC, corregir y reenviar.
+// Solo códigos DIVIPOLA válidos (8 dígitos): uno dañado queda vacío para elegir el municipio, en vez de bloquear el guardado
+const div8 = (c: any) => { const x = String(c ?? '').trim(); return /^\d{8}$/.test(x) ? x : ''; };
+
 @Component({
   selector: 'app-expedir-rndc',
   imports: [FormsModule, Modal, Icono, Moneda, SelectorMunicipio, BuscarTercero, Confirmar, ...FORMATOS],
@@ -638,7 +641,7 @@ export class ExpedirRndc {
       if (this.viajeId() !== id) return;   // se abrió otro viaje mientras cargaba
       this.viaje.set(v);
       this.form.set({
-        fecha: isoDia(v.fecha), codOrigen: v.codOrigen || '', codDestino: v.codDestino || v.tarifaRef?.codMunicipio || '',
+        fecha: isoDia(v.fecha), codOrigen: div8(v.codOrigen), codDestino: div8(v.codDestino) || div8(v.tarifaRef?.codMunicipio),
         placa: v.placa, remolque: v.remolque || '', conductor: v.conductor?._id || '', titular: v.titular?._id || '', titularInicial: v.titular?._id || '',
         pesoKg: v.pesoKg, destinatario: { tipoId: v.destinatario?.tipoId || '', numId: v.destinatario?.numId || '', sede: v.destinatario?.sede || '' },
         flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones || '',
@@ -809,7 +812,7 @@ export class ExpedirRndc {
       if (this.viaje()?.reporteWhatsapp?.fecha && !v.reporteWhatsapp?.fecha) this.avisos.mostrar('El viaje vuelve a quedar por reportar: en Viajes → Reporte por WhatsApp sale en el mensaje del cliente corregido.', 'info', 9000);
       this.viaje.set(v);
       this.form.update(f => ({ ...f, placa: v.placa, remolque: v.remolque || '', conductor: v.conductor?._id || '', titular: v.titular?._id || '', titularInicial: v.titular?._id || '',
-        codOrigen: v.codOrigen || '', codDestino: v.codDestino || f.codDestino, codDestinoManifiesto: this.previa()?.destinoManifiestoFijo || '',
+        codOrigen: div8(v.codOrigen), codDestino: div8(v.codDestino) || div8(f.codDestino), codDestinoManifiesto: this.previa()?.destinoManifiestoFijo || '',
         destinatario: { tipoId: v.destinatario?.tipoId || '', numId: v.destinatario?.numId || '', sede: v.destinatario?.sede || '' }, ...this.datosCliente(v) }));
       this.alinearLugares(this.previa());
       if (!silencioso) { this.avisos.ok('Datos del viaje guardados'); this.actualizado.emit(); }

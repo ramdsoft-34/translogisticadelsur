@@ -14,6 +14,7 @@ import { ImportarExcel } from '../shared/importar-excel';
 import { Moneda } from '../shared/moneda';
 import { filtrar } from '../shared/filtro';
 import { Confirmar } from '../shared/confirmar';
+import { ListaBuscable, OpcionBuscable } from '../shared/lista-buscable';
 import { RndcClave } from '../core/rndc-clave.service';
 
 const clienteVacio = () => ({ nombre: '', tipoId: 'N', nit: '', dv: '', razonSocial: '', sedeRemitente: '', correos: '', whatsapp: '', activo: true,
@@ -25,13 +26,16 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
   auxiliarPagado: 0, anticipoHabitual: 0, pesoKg: 0, operacion: '', destinatario: { tipoId: '', numId: '', sede: '' }, activo: true, grupoRelacion: '' });
 const sedeVacia = () => ({ nombre: '', direccion: '', codMunicipio: '' });
 const NUEVA = '__nueva';
+// Sedes en orden de número de código (1, 2, … 14, 15, … 140), no alfabético
+const ordenarSedes = (l: any[]) => [...l].sort((a, b) => String(a.sede.codigo).localeCompare(String(b.sede.codigo), 'es', { numeric: true }));
+const textoSede = (x: any): OpcionBuscable => ({ valor: String(x.sede.codigo), texto: `${x.sede.codigo} · ${x.sede.nombre || '(sin nombre)'}${x.direccion ? ' — ' + x.direccion : ''}` });
 const digitos = (v: any) => String(v ?? '').replace(/\D/g, '');
 // Documento con el que el cliente está registrado como tercero en el RNDC (NIT + DV)
 const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv) : digitos(c?.nit);
 
 @Component({
   selector: 'app-clientes',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, Moneda, Confirmar, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, Moneda, Confirmar, ListaBuscable, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Clientes y tarifas</h1><p class="sutil">Cada cliente es una empresa remitente con sus sedes; cada destino es la sede donde se descarga, con su tarifa, flete y anticipo.</p></div>
@@ -132,11 +136,7 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
         } @else {
           <div class="campo ancho"><label for="cs">Sede de cargue</label>
             @if (sedesCliente().length && f._id === sel()?._id) {
-              <select id="cs" name="sede" [(ngModel)]="f.sedeRemitente">
-                <option value="">Sin sede</option>
-                @if (f.sedeRemitente && !existeSede(f.sedeRemitente)) { <option [value]="f.sedeRemitente">{{ f.sedeRemitente }} · (no registrada en la plataforma)</option> }
-                @for (x of sedesCliente(); track x.sede.codigo) { <option [value]="x.sede.codigo">{{ x.sede.codigo }} · {{ x.sede.nombre || '(sin nombre)' }}{{ x.direccion ? ' — ' + x.direccion : '' }}</option> }
-              </select>
+              <app-lista-buscable idCampo="cs" [opciones]="opcionesCargue(f.sedeRemitente)" [(valor)]="f.sedeRemitente" placeholder="Sin sede" />
             } @else {
               <input id="cs" name="sede" maxlength="6" [(ngModel)]="f.sedeRemitente" />
               <small>Código de la sede en el RNDC. Cree las sedes en la pestaña Sedes del cliente.</small>
@@ -174,11 +174,8 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
           }
           @if (modo() === 'cliente' || digitos(t.destinatario.numId).length >= 5) {
             <div class="campo ancho va-rndc"><label for="ds">Sede de descargue</label>
-              <select id="ds" name="ds" [ngModel]="t.destinatario.sede" (ngModelChange)="elegirSede($event)">
-                @if (modo() === 'cliente') { <option value="">La misma sede de cargue</option> } @else { <option value="" disabled>Elija la sede</option> }
-                @for (s of sedesDestinatario(); track s.sede.codigo) { <option [value]="s.sede.codigo">{{ s.sede.codigo }} · {{ s.sede.nombre || '(sin nombre)' }}{{ s.direccion ? ' — ' + s.direccion : '' }}</option> }
-                @if (puedeTarifas) { <option [value]="NUEVA">+ Crear una sede nueva…</option> }
-              </select></div>
+              <app-lista-buscable idCampo="ds" [opciones]="opcionesDescargue()" [valor]="t.destinatario.sede" (cambio)="elegirSede($event)"
+                [placeholder]="modo() === 'cliente' ? 'La misma sede de cargue' : 'Elija la sede'" /></div>
             @if (t.destinatario.sede === NUEVA) {
               <div class="campo va-rndc"><label for="nsn">Nombre de la sede</label><input id="nsn" name="nsn" maxlength="20" [(ngModel)]="sedeForm().nombre" placeholder="BODEGA NORTE" /></div>
               <div class="campo va-rndc"><label for="nsd">Dirección</label><input id="nsd" name="nsd" maxlength="60" [(ngModel)]="sedeForm().direccion" /></div>
@@ -313,12 +310,23 @@ export class Clientes {
       try {
         const l = (await this.api.get<any>('/maestros/terceros/sedes', { numId })).sedes.filter((x: any) => x.sede?.codigo);
         if (!vigente()) return;
-        if (l.length) { this.sedesCliente.set(l); this.numIdCliente.set(numId); return; }
+        if (l.length) { this.sedesCliente.set(ordenarSedes(l)); this.numIdCliente.set(numId); return; }
       } catch { /* sin sedes */ }
     }
     if (!vigente()) return;
     this.sedesCliente.set([]); this.numIdCliente.set('');
   }
+  // Opciones de las listas con búsqueda (ya ordenadas por código de sede)
+  opcionesCargue(actual: string): OpcionBuscable[] {
+    const l: OpcionBuscable[] = [{ valor: '', texto: 'Sin sede' }];
+    if (actual && !this.existeSede(actual)) l.push({ valor: String(actual), texto: `${actual} · (no registrada en la plataforma)` });
+    return [...l, ...this.sedesCliente().map(textoSede)];
+  }
+  readonly opcionesDescargue = computed<OpcionBuscable[]>(() => [
+    ...(this.modo() === 'cliente' ? [{ valor: '', texto: 'La misma sede de cargue' }] : []),
+    ...this.sedesDestinatario().map(textoSede),
+    ...(this.puedeTarifas ? [{ valor: NUEVA, texto: '+ Crear una sede nueva…', extra: true }] : []),
+  ]);
   existeSede(cod: string) { return this.sedesCliente().some(x => x.sede.codigo === String(cod)); }
   readonly sedeCargue = computed(() => this.sedesCliente().find(x => String(x.sede.codigo) === String(this.sel()?.sedeRemitente || '')) || null);
   // El destino es una sede del mismo cliente (sin destinatario o con su mismo documento)
@@ -425,7 +433,7 @@ export class Clientes {
     if (!doc) { this.sedesDestinatario.set([]); return; }
     try {
       const l = (await this.api.get<any>('/maestros/terceros/sedes', { numId: doc })).sedes;
-      this.sedesDestinatario.set(l.filter((x: any) => x.sede?.codigo));
+      this.sedesDestinatario.set(ordenarSedes(l.filter((x: any) => x.sede?.codigo)));
       if (this.modo() === 'otra' && l[0]) this.empresaDestino.set([l[0].nombres, l[0].apellido1].filter(Boolean).join(' '));
     } catch { this.sedesDestinatario.set([]); }
   }
