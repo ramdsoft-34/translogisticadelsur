@@ -959,6 +959,8 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     assert.equal((await s.manif.get(`/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31&estado=leido`)).body.mensajes.every(x => x.estado === 'leido'), true);
     assert.equal((await s.manif.get(`/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31&texto=${porAprobarS.documento}`)).body.mensajes.length, 1);
     assert.equal((await s.adminB.get('/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31')).body.mensajes.length, 0);
+    assert.ok(msj.mensajes.every(x => !['por_aprobar', 'descartado'].includes(x.estado)), 'solo lo que se mandó a enviar');
+    assert.equal(msj.totales.porAprobar, undefined);
     assert.equal((await s.reportero.get('/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31')).status, 403);
 
     // El SuperAdmin deja lista la cuenta de cada empresa por separado; el token nunca vuelve y la otra empresa no cambia

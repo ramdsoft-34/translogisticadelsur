@@ -26,6 +26,7 @@ const tarifaVacia = () => ({ destino: '', codMunicipio: '', tipoCobro: 'viaje', 
   auxiliarPagado: 0, anticipoHabitual: 0, pesoKg: 0, operacion: '', destinatario: { tipoId: '', numId: '', sede: '' }, activo: true, grupoRelacion: '' });
 const sedeVacia = () => ({ nombre: '', direccion: '', codMunicipio: '' });
 const NUEVA = '__nueva';
+const CARGUE = '__cargue';
 // Sedes en orden de número de código (1, 2, … 14, 15, … 140), no alfabético
 const ordenarSedes = (l: any[]) => [...l].sort((a, b) => String(a.sede.codigo).localeCompare(String(b.sede.codigo), 'es', { numeric: true }));
 const textoSede = (x: any): OpcionBuscable => ({ valor: String(x.sede.codigo), texto: `${x.sede.codigo} · ${x.sede.nombre || '(sin nombre)'}${x.direccion ? ' — ' + x.direccion : ''}` });
@@ -88,7 +89,10 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
                     <td data-etiqueta="Se descarga en">@if (t.destinatario?.sede) {
                         <span class="chip sin-punto">{{ t.sedeNombre || 'Sede ' + t.destinatario.sede }}</span>
                         <small class="d-bloque sutil">{{ esDelCliente(t) ? 'Sede del cliente' : (t.destinatarioNombre || t.destinatario.tipoId + ' ' + t.destinatario.numId) }}{{ t.sedeDireccion ? ' · ' + t.sedeDireccion : '' }}</small>
-                      } @else { <span class="sutil">Sin sede (el mismo cliente)</span> }</td>
+                      } @else if (t.sedeAuto) {
+                        <span class="chip sin-punto">{{ t.sedeAuto.codigo }} · {{ t.sedeAuto.nombre || 'Sede ' + t.sedeAuto.codigo }}</span>
+                        <small class="d-bloque sutil">Sede del municipio de destino{{ t.sedeAuto.direccion ? ' · ' + t.sedeAuto.direccion : '' }}</small>
+                      } @else { <span class="sutil">Sede de cargue</span><small class="d-bloque sutil">{{ t.codMunicipio ? 'El cliente no tiene sede en el municipio de destino' : 'Sin municipio de destino' }}</small> }</td>
                     <td class="num" data-etiqueta="Tarifa / flete">{{ t.tarifaCliente | pesos }}<small class="d-bloque sutil">{{ t.fleteConductor | pesos }}</small></td>
                     <td class="num" data-etiqueta="Anticipo">{{ t.anticipoHabitual | pesos }}</td>
                     <td class="num" data-etiqueta="Auxiliar">{{ t.tarifaAuxiliar | pesos }}<small class="d-bloque sutil">paga {{ t.auxiliarPagado | pesos }}</small></td>
@@ -175,7 +179,11 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
           @if (modo() === 'cliente' || digitos(t.destinatario.numId).length >= 5) {
             <div class="campo ancho va-rndc"><label for="ds">Sede de descargue</label>
               <app-lista-buscable idCampo="ds" [opciones]="opcionesDescargue()" [valor]="t.destinatario.sede" (cambio)="elegirSede($event)"
-                [placeholder]="modo() === 'cliente' ? 'La misma sede de cargue' : 'Elija la sede'" /></div>
+                [placeholder]="modo() === 'cliente' ? 'Sede del municipio de destino' : 'Elija la sede'" />
+              @if (modo() === 'cliente' && !t.destinatario.sede) {
+                @if (sedeAutoDe(t.codMunicipio); as a) { <small>Se usará la sede {{ a.sede.codigo }} · {{ a.sede.nombre || '(sin nombre)' }}{{ a.direccion ? ' — ' + a.direccion : '' }}. Si cambia el municipio de destino, cambia la sede.</small> }
+                @else { <small>{{ t.codMunicipio ? 'El cliente no tiene sede en ese municipio: irá la sede de cargue. Cree la sede si la necesita.' : 'Elija el municipio de destino para tomar su sede.' }}</small> }
+              }</div>
             @if (t.destinatario.sede === NUEVA) {
               <div class="campo va-rndc"><label for="nsn">Nombre de la sede</label><input id="nsn" name="nsn" maxlength="20" [(ngModel)]="sedeForm().nombre" placeholder="BODEGA NORTE" /></div>
               <div class="campo va-rndc"><label for="nsd">Dirección</label><input id="nsd" name="nsd" maxlength="60" [(ngModel)]="sedeForm().direccion" /></div>
@@ -323,7 +331,8 @@ export class Clientes {
     return [...l, ...this.sedesCliente().map(textoSede)];
   }
   readonly opcionesDescargue = computed<OpcionBuscable[]>(() => [
-    ...(this.modo() === 'cliente' ? [{ valor: '', texto: 'La misma sede de cargue' }] : []),
+    ...(this.modo() === 'cliente' ? [{ valor: '', texto: 'Sede del municipio de destino (automática)' },
+      ...(this.sel()?.sedeRemitente ? [{ valor: CARGUE, texto: `La misma sede de cargue (sede ${this.sel().sedeRemitente})` }] : [])] : []),
     ...this.sedesDestinatario().map(textoSede),
     ...(this.puedeTarifas ? [{ valor: NUEVA, texto: '+ Crear una sede nueva…', extra: true }] : []),
   ]);
@@ -438,7 +447,16 @@ export class Clientes {
     } catch { this.sedesDestinatario.set([]); }
   }
   // Al elegir la sede, el municipio del destino se toma de la sede si aún no tiene uno
+  // Sede del cliente en el municipio de destino (la misma regla del servidor al enviar al RNDC)
+  sedeAutoDe(codMunicipio: string) {
+    const cod = String(codMunicipio || '');
+    if (!/^\d{8}$/.test(cod)) return null;
+    const rem = String(this.sel()?.sedeRemitente || '');
+    return ordenarSedes(this.sedesDestinatario().filter(s => String(s.sede.codigo) !== rem && String(s.codMunicipio || '').startsWith(cod.slice(0, 5))))
+      .sort((a, b) => (a.codMunicipio === cod ? 0 : 1) - (b.codMunicipio === cod ? 0 : 1))[0] || null;
+  }
   elegirSede(cod: string) {
+    if (cod === CARGUE) cod = String(this.sel()?.sedeRemitente || '');
     const s = this.sedesDestinatario().find(x => x.sede.codigo === cod);
     this.tarifaForm.update(t => ({ ...t, destinatario: { ...t.destinatario, sede: cod },
       codMunicipio: t.codMunicipio || s?.codMunicipio || '', destino: t.destino || (s ? s.sede.nombre : '') }));

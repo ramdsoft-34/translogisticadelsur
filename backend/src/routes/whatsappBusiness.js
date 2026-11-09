@@ -132,17 +132,20 @@ r.get('/mensajes', operar, async (req, res) => {
   const desde = new Date(`${q.desde}T05:00:00.000Z`);             // medianoche en Colombia
   const hasta = new Date(`${q.hasta}T05:00:00.000Z`); hasta.setUTCDate(hasta.getUTCDate() + 1);
   if (!(hasta > desde)) throw new ErrorHttp(400, 'El rango de fechas no es válido');
-  const lista = await EnvioWhatsapp.find(deEmpresa(req, { createdAt: { $gte: desde, $lt: hasta } })).sort({ createdAt: -1 }).limit(3000)
+  // Solo lo que alguien mandó a enviar: lo «por aprobar» (nadie pulsó Enviar) y lo descartado no aparece.
+  // La fecha es la del envío (o la del último intento si falló antes de salir).
+  const rango = { $gte: desde, $lt: hasta };
+  const lista = await EnvioWhatsapp.find(deEmpresa(req, { estado: { $nin: ['por_aprobar', 'descartado'] },
+    $or: [{ enviadoEn: rango }, { enviadoEn: null, updatedAt: rango }] })).sort({ updatedAt: -1 }).limit(3000)
     .populate([pob(req.empresaId, 'viaje', 'numero placa destino fecha'), pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId')]).lean();
-  const vigentes = lista.filter(x => x.estado !== 'descartado');
-  const cuenta = (f) => vigentes.filter(f).length;
-  const totales = { total: vigentes.length, porAprobar: cuenta(x => x.estado === 'por_aprobar'), enviados: cuenta(x => ENVIADOS.includes(x.estado)),
+  const cuenta = (f) => lista.filter(f).length;
+  const totales = { total: lista.length, enviados: cuenta(x => ENVIADOS.includes(x.estado)),
     entregados: cuenta(x => ['entregado', 'leido'].includes(x.estado)), leidos: cuenta(x => x.estado === 'leido'), errores: cuenta(x => x.estado === 'error') };
   const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
   const texto = q.texto.toLowerCase();
   const mensajes = lista
-    .filter(x => !q.estado ? x.estado !== 'descartado' : q.estado === 'enviados' ? ENVIADOS.includes(x.estado) : x.estado === q.estado)
-    .map(x => ({ _id: x._id, fecha: x.createdAt, tipo: x.tipo || 'manifiesto', documento: x.documento, estado: x.estado, error: x.error, telefono: x.telefono,
+    .filter(x => !q.estado || (q.estado === 'enviados' ? ENVIADOS.includes(x.estado) : x.estado === q.estado))
+    .map(x => ({ _id: x._id, fecha: x.enviadoEn || x.updatedAt, tipo: x.tipo || 'manifiesto', documento: x.documento, estado: x.estado, error: x.error, telefono: x.telefono,
       origen: x.origen, cuenta: x.cuenta, intentos: x.intentos, enviadoEn: x.enviadoEn, entregadoEn: x.entregadoEn, leidoEn: x.leidoEn,
       viaje: x.viaje ? { _id: x.viaje._id, numero: x.viaje.numero, placa: x.viaje.placa, destino: x.viaje.destino } : null,
       conductor: x.conductor ? { nombre: nombreDe(x.conductor), numId: x.conductor.numId } : null }))

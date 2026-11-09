@@ -3,6 +3,7 @@
 // TransaccionRndc. La clave del usuario web service se recibe en cada
 // operación y nunca se guarda.
 import { auditar } from '../auditoria.js';
+import { elegirSedeMunicipio } from '../gestion/sedeMunicipio.js';
 import { Empresa, Viaje, Vehiculo, Tercero, Municipio, Tarifa, TransaccionRndc, Contador, proximo, pob } from '../../models/index.js';
 import { lineaLiquidacion, respaldosAuxiliar } from '../calculos.js';
 import { buscadorMunicipios } from '../importacion/excel.js';
@@ -61,8 +62,7 @@ export async function cargarViaje(empresaId, viajeId) {
       // La sede en ese municipio exacto; si no, en un centro poblado del mismo municipio (ej. El Plateado en Argelia)
       const sedes = await Tercero.find({ empresa: empresaId, tipoId: v.cliente.tipoId || 'N', numId: idCliente(v.cliente), codMunicipio: new RegExp(`^${codDestino.slice(0, 5)}`) })
         .select('tipoId numId sede codMunicipio').lean();
-      sedes.sort((a, b) => (a.codMunicipio === codDestino ? 0 : 1) - (b.codMunicipio === codDestino ? 0 : 1) || (Number(a.sede?.codigo) || 0) - (Number(b.sede?.codigo) || 0));
-      const s = sedes.find(x => txt(x.sede?.codigo) && txt(x.sede.codigo) !== txt(v.cliente.sedeRemitente));
+      const s = elegirSedeMunicipio(sedes, codDestino, v.cliente.sedeRemitente);
       if (s) v.destinatarioAuto = { tipoId: s.tipoId, numId: s.numId, sede: s.sede.codigo, nombreSede: s.sede.nombre || '' };
     }
   }

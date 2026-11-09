@@ -1,6 +1,7 @@
 // Maestros de la empresa: clientes y sus destinos/tarifas, terceros
 // (conductores, propietarios, tenedores…), vehículos y el catálogo DIVIPOLA.
 import { Router } from 'express';
+import { elegirSedeMunicipio } from '../services/gestion/sedeMunicipio.js';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Cliente, Tarifa, Tercero, Vehiculo, Municipio, Viaje, Empresa, Liquidacion, FacturaCont, pob } from '../models/index.js';
@@ -122,15 +123,24 @@ r.get('/tarifas', ver, async (req, res) => {
   const filtro = deEmpresa(req);
   if (req.query.cliente) filtro.cliente = req.query.cliente;
   if (req.query.activos === '1') filtro.activo = true;
-  const tarifas = await Tarifa.find(filtro).sort({ destino: 1 }).populate(pob(req.empresaId, 'cliente', 'nombre nit dv tipoId')).lean();
+  const tarifas = await Tarifa.find(filtro).sort({ destino: 1 }).populate(pob(req.empresaId, 'cliente', 'nombre nit dv tipoId sedeRemitente')).lean();
   // Nombre de la sede del destinatario (código y nombre, como en el RNDC); sin destinatario = el mismo cliente
   const docsDe = (t) => (t.destinatario?.numId ? [String(t.destinatario.numId).replace(/\D/g, '')]
     : t.cliente ? [idCliente(t.cliente), String(t.cliente.nit || '').replace(/\D/g, '')] : []).filter(Boolean);
   const docs = [...new Set(tarifas.filter(t => t.destinatario?.sede).flatMap(docsDe))];
   const sedes = new Map((docs.length ? await Tercero.find(deEmpresa(req, { numId: { $in: docs }, 'sede.codigo': { $ne: '' } })).select('numId nombres sede codMunicipio direccion').lean() : [])
     .map(s => [`${s.numId}|${s.sede.codigo}`, s]));
+  // Sin sede fija: la sede del cliente en el municipio de destino (la misma regla con la que se envía al RNDC)
+  const sinSede = tarifas.filter(t => !t.destinatario?.sede && !t.destinatario?.numId && t.cliente && t.codMunicipio);
+  const docsAuto = [...new Set(sinSede.map(t => idCliente(t.cliente)))];
+  const sedesCli = docsAuto.length ? await Tercero.find(deEmpresa(req, { numId: { $in: docsAuto }, 'sede.codigo': { $ne: '' } })).select('numId nombres sede codMunicipio direccion').lean() : [];
   res.json(tarifas.map(t => { const s = t.destinatario?.sede ? docsDe(t).map(d => sedes.get(`${d}|${t.destinatario.sede}`)).find(Boolean) : null;
-    return s ? { ...t, sedeNombre: s.sede.nombre, sedeMunicipio: s.codMunicipio, sedeDireccion: s.direccion, destinatarioNombre: s.nombres } : t; }));
+    if (s) return { ...t, sedeNombre: s.sede.nombre, sedeMunicipio: s.codMunicipio, sedeDireccion: s.direccion, destinatarioNombre: s.nombres };
+    if (!t.destinatario?.sede && !t.destinatario?.numId && t.cliente) {
+      const a = elegirSedeMunicipio(sedesCli.filter(x => x.numId === idCliente(t.cliente)), t.codMunicipio, t.cliente.sedeRemitente);
+      if (a) return { ...t, sedeAuto: { codigo: a.sede.codigo, nombre: a.sede.nombre, direccion: a.direccion, codMunicipio: a.codMunicipio } };
+    }
+    return t; }));
 });
 r.post('/tarifas', editarTarifas, async (req, res) => {
   const d = tarifaSchema.parse(req.body);

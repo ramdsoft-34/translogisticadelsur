@@ -19,7 +19,7 @@ const ESTADOS: Record<string, [string, string]> = {
   imports: [FormsModule, Icono, Confirmar, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Mensajes de WhatsApp</h1>
-      <p class="sutil">Manifiestos y soportes internos enviados al WhatsApp de los conductores: cuándo salieron, si llegaron al celular y si los leyeron.</p></div></div>
+      <p class="sutil">Manifiestos y soportes internos que se mandaron a enviar al WhatsApp de los conductores: cuándo salieron, si llegaron al celular y si los leyeron. Los que aún no se han enviado no aparecen aquí.</p></div></div>
 
     <div class="filtros">
       <div class="campo"><label for="w-d">Desde</label><input id="w-d" type="date" [(ngModel)]="desde" (change)="cargar()" /></div>
@@ -42,7 +42,7 @@ const ESTADOS: Record<string, [string, string]> = {
       <tbody>
         @for (m of mensajes(); track m._id) {
           <tr>
-            <td data-etiqueta="Fecha">{{ m.fecha | fechaHora }}<br /><span class="sutil">{{ m.origen === 'manual' ? 'Manual' : 'Automático' }}</span></td>
+            <td data-etiqueta="Fecha">{{ m.fecha | fechaHora }}</td>
             <td data-etiqueta="Conductor">{{ m.conductor?.nombre || 'Sin conductor' }}<br /><span class="sutil">{{ celular(m.telefono) }}</span></td>
             <td data-etiqueta="Documento">{{ m.documento }}<br /><span class="sutil">{{ m.tipo === 'soporte' ? 'Soporte interno' : 'Manifiesto' }}</span></td>
             <td data-etiqueta="Viaje">@if (m.viaje) { N° {{ m.viaje.numero }} · <strong>{{ m.viaje.placa }}</strong><br /><span class="sutil">{{ m.viaje.destino }}</span> }</td>
@@ -75,7 +75,7 @@ export class MensajesWhatsapp {
   private avisos = inject(Avisos);
   readonly cifras = [
     { v: '', k: 'total', t: 'Todos' }, { v: 'enviados', k: 'enviados', t: 'Enviados' }, { v: 'entregado', k: 'entregados', t: 'Entregados' },
-    { v: 'leido', k: 'leidos', t: 'Leídos' }, { v: 'por_aprobar', k: 'porAprobar', t: 'Por aprobar' }, { v: 'error', k: 'errores', t: 'Con error' },
+    { v: 'leido', k: 'leidos', t: 'Leídos' }, { v: 'error', k: 'errores', t: 'Con error' },
   ];
   desde = inicioMesIso();
   hasta = hoyIso();
