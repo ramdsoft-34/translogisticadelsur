@@ -331,3 +331,66 @@ test('Tablero: todo sale de los datos reales', async () => {
   assert.equal(vacio.autoevaluacion.estandares.valor, null); assert.equal(vacio.indicadores.preoperacionalesHoy, null, 'sin la app: vacío, no cero inventado');
   assert.equal((await s.consulta.get('/api/sst/tablero')).status, 200);
 });
+
+test('Autoevaluación y planes: 60 ítems, cierre con plan de mejora, puntaje en Datos y membrete, plan anual, alertas y Excel', async () => {
+  const cat = (await s.a.get('/api/sst/estandares')).body;
+  assert.equal(cat.estandares.length, 60);
+  assert.equal((await s.consulta.post('/api/sst/autoevaluaciones', { vigencia: 2026, fecha: '2026-11-01' })).status, 403, 'la consulta solo ve');
+  const nueva = await s.a.post('/api/sst/autoevaluaciones', { vigencia: 2026, fecha: '2026-11-01' });
+  assert.equal(nueva.status, 201, JSON.stringify(nueva.body));
+  assert.equal(nueva.body.items.length, 60); assert.equal(nueva.body.estado, 'borrador');
+  assert.equal((await s.a.post('/api/sst/autoevaluaciones', { vigencia: 2026, fecha: '2026-11-01' })).status, 409, 'una por vigencia');
+  const idA = nueva.body._id;
+  // Incompleta: no cierra
+  assert.equal((await s.a.post(`/api/sst/autoevaluaciones/${idA}/cerrar`)).status, 400);
+  // Todo cumple menos dos ítems; uno no aplica sin justificación no deja cerrar
+  const items = cat.estandares.map((e) => ({ numeral: e.numeral, estado: e.numeral === '5.1.1' || e.numeral === '1.1.2' ? 'NC' : e.numeral === '4.1.3' ? 'NA' : 'C', justificacion: '' }));
+  assert.equal((await s.a.put(`/api/sst/autoevaluaciones/${idA}`, { items })).status, 200);
+  const sinJust = await s.a.post(`/api/sst/autoevaluaciones/${idA}/cerrar`);
+  assert.equal(sinJust.status, 400); assert.match(sinJust.body.error, /4\.1\.3/);
+  await s.a.put(`/api/sst/autoevaluaciones/${idA}`, { items: [{ numeral: '4.1.3', estado: 'NA', justificacion: 'No se manejan sustancias carcinógenas' }] });
+  const sug = await s.a.get(`/api/sst/autoevaluaciones/${idA}/sugerencias`);
+  assert.equal(sug.status, 200, JSON.stringify(sug.body));
+  assert.ok(sug.body.items.find((x) => x.numeral === '1.2.1'), 'sugiere con las capacitaciones');
+  assert.ok(sug.body.items.every((x) => ['C', 'NC'].includes(x.estado) && x.motivo && x.fuente));
+  const cerrada = await s.a.post(`/api/sst/autoevaluaciones/${idA}/cerrar`);
+  assert.equal(cerrada.status, 200, JSON.stringify(cerrada.body));
+  assert.equal(cerrada.body.calculo.total, 94.5); assert.equal(cerrada.body.calculo.nivel.clave, 'aceptable');
+  assert.deepEqual(cerrada.body.plan, { creadas: 2, cerradas: 0 });
+  assert.equal(cerrada.body.acciones.length, 2); assert.equal(cerrada.body.acciones[0].numeral, '5.1.1', 'lo de más peso primero');
+  assert.equal((await s.a.put(`/api/sst/autoevaluaciones/${idA}`, { items })).status, 409, 'cerrada no se califica');
+  // El puntaje queda en Datos y membrete y en el tablero
+  assert.equal((await s.a.get('/api/sst/tablero')).body.autoevaluacion.estandares.valor, 94.5);
+  // Plan de mejora y plan anual
+  const mejora = (await s.a.get('/api/sst/actividades?origen=mejora')).body;
+  assert.equal(mejora.items.length, 2);
+  const gen = await s.a.post('/api/sst/plan-anual/2099/generar');
+  assert.equal(gen.status, 200); assert.ok(gen.body.nuevas > 30);
+  assert.equal((await s.a.post('/api/sst/plan-anual/2099/generar')).body.nuevas, 0, 'no repite');
+  const anual = (await s.a.get('/api/sst/actividades?anio=2099')).body;
+  assert.ok(anual.items.some((x) => x.origen === 'norma' && x.entidad === 'Supertransporte'));
+  assert.ok(anual.items.every((x) => !/^(SST|PESV)-\d+$/.test(x.evidencia)), 'evidencia con nombre');
+  // Actividad propia, hecha y cancelar sin nota no deja
+  const propia = await s.a.post('/api/sst/actividades', { titulo: 'Revisar botiquines', fecha: '2099-03-10', responsable: 'Ana' });
+  assert.equal(propia.status, 201);
+  assert.equal((await s.a.put(`/api/sst/actividades/${propia.body._id}`, { estado: 'cancelada' })).status, 400);
+  assert.equal((await s.a.put(`/api/sst/actividades/${propia.body._id}`, { estado: 'hecha' })).body.estado, 'hecha');
+  assert.equal((await s.a.del(`/api/sst/actividades/${mejora.items[0]._id}`)).status, 400, 'las del plan de mejora no se borran');
+  // Alertas, resumen del tablero y Excel
+  const al = (await s.a.get('/api/sst/alertas')).body;
+  assert.ok(al.resumen && Array.isArray(al.items) && Array.isArray(al.avisos));
+  const res = (await s.a.get('/api/sst/planes/resumen')).body;
+  assert.equal(res.autoevaluacion.total, 94.5); assert.equal(res.plan.mejoraAbiertas, 2);
+  const xl = await s.a.get(`/api/sst/autoevaluaciones/${idA}/excel`).buffer(true).parse((r, cb) => { const b = []; r.on('data', (c) => b.push(c)); r.on('end', () => cb(null, Buffer.concat(b))); });
+  assert.equal(xl.status, 200);
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(xl.body);
+  assert.ok(wb.worksheets[0].rowCount >= 60);
+  // Otra empresa no ve nada
+  assert.equal((await s.b.get('/api/sst/autoevaluaciones')).body.length, 0);
+  assert.equal((await s.b.get(`/api/sst/autoevaluaciones/${idA}`)).status, 404);
+  // Reabrir y luego cumplir todo: la acción abierta se cierra sola al volver a cerrar
+  assert.equal((await s.a.post(`/api/sst/autoevaluaciones/${idA}/reabrir`)).body.estado, 'borrador');
+  await s.a.put(`/api/sst/autoevaluaciones/${idA}`, { items: [{ numeral: '5.1.1', estado: 'C' }] });
+  const otraR = await s.a.post(`/api/sst/autoevaluaciones/${idA}/cerrar`); const otra = otraR.body; assert.equal(otraR.status, 200, JSON.stringify(otra));
+  assert.deepEqual(otra.plan, { creadas: 0, cerradas: 1 });
+});

@@ -24,9 +24,11 @@ import * as archivos from '../services/sst/archivos.js';
 import * as sstApp from '../services/sst/app.js';
 import { tablero } from '../services/sst/tablero.js';
 import * as pdfSst from '../services/reportes/sst.js';
+import rutasPlanes from './sstPlanes.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
+r.use(rutasPlanes);   // autoevaluación de estándares mínimos, plan de mejora, plan anual y alertas
 const ver = permitir(P.SST_VER);
 const gestionar = permitir(P.SST_GESTIONAR);
 const id = (v) => { if (!/^[a-f0-9]{24}$/i.test(String(v))) throw new ErrorHttp(400, 'Identificador inválido'); return String(v); };

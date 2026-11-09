@@ -45,6 +45,7 @@ export const routes: Routes = [
       { path: 'sst/capacitaciones', ...pagina([P.SST_VER], () => import('./pages/sst-capacitaciones').then(m => m.SstCapacitaciones)) },
       { path: 'sst/formatos', ...pagina([P.SST_VER], () => import('./pages/sst-formatos').then(m => m.SstFormatos)) },
       { path: 'sst/datos', ...pagina([P.SST_VER], () => import('./pages/sst-datos').then(m => m.SstDatos)) },
+      { path: 'sst/planes', ...pagina([P.SST_VER], () => import('./pages/sst-planes').then(m => m.SstPlanes)) },
       { path: 'vehiculos', ...pagina([P.MAESTROS_VER], () => import('./pages/vehiculos').then(m => m.Vehiculos)) },
       { path: 'clientes', ...pagina([P.MAESTROS_VER], () => import('./pages/clientes').then(m => m.Clientes)) },
       { path: 'liquidaciones', ...pagina([P.LIQUIDACION_VER], () => import('./pages/liquidaciones').then(m => m.Liquidaciones)) },

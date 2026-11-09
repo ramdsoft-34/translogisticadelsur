@@ -29,6 +29,7 @@ export const MODULOS: Modulo[] = [
   ] },
   { id: 'sst', nombre: 'SG-SST y PESV', icono: 'escudo', paginas: [
     { ruta: '/sst/tablero', texto: 'Tablero SST y PESV', icono: 'escudo', permisos: [P.SST_VER], descripcion: 'Vencimientos, preoperacional de hoy, capacitaciones e indicadores', claves: 'sst pesv tablero indicadores seguridad salud vial' },
+    { ruta: '/sst/planes', texto: 'Autoevaluación y planes', icono: 'lista', permisos: [P.SST_VER], descripcion: 'Los 60 estándares mínimos con puntaje, plan de mejora, plan anual y alertas del Ministerio, la ARL y el PESV', claves: 'autoevaluacion estandares minimos 0312 plan de mejora plan anual alertas arl mintrabajo' },
     { ruta: '/sst/colaboradores', texto: 'Colaboradores', icono: 'personas', permisos: [P.SST_VER], descripcion: 'Perfil de SST de cada persona: exámenes, EPP, comparendos y capacitaciones', claves: 'colaborador empleado epp examen comparendo' },
     { ruta: '/sst/flota', texto: 'Flota e inspecciones', icono: 'camion', permisos: [P.SST_VER], descripcion: 'Hoja de vida, pólizas, mantenimiento y preoperacionales', claves: 'mantenimiento hoja de vida poliza kilometraje inspeccion' },
     { ruta: '/sst/capacitaciones', texto: 'Capacitaciones', icono: 'lista', permisos: [P.SST_VER], descripcion: 'Programa anual con asistencia firmada', claves: 'capacitacion induccion asistencia programa' },

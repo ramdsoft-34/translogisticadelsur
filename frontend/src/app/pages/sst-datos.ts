@@ -1,4 +1,5 @@
 import { Component, inject, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
@@ -23,7 +24,7 @@ interface Datos {
 // Datos y membrete de SG-SST: lo que llena los formatos y el membrete que llevan los PDF y los Word propios.
 @Component({
   selector: 'app-sst-datos',
-  imports: [FormsModule, Icono, VisorPdf, Confirmar],
+  imports: [FormsModule, RouterLink, Icono, VisorPdf, Confirmar],
   template: `
     <div class="pagina-cab">
       <div><h1>Datos y membrete</h1>
@@ -62,7 +63,8 @@ interface Datos {
             <section class="bloque"><h3>Última autoevaluación</h3>
               <p class="nota">Los porcentajes salen de la autoevaluación que hace el responsable; la plataforma no los calcula.</p>
               <div class="formulario">
-                <div class="campo"><label for="d-est">Estándares mínimos (%)</label><input id="d-est" name="est" type="number" min="0" max="100" step="0.1" [(ngModel)]="d.autoevaluacion.estandares.valor" /></div>
+                <div class="campo"><label for="d-est">Estándares mínimos (%)</label><input id="d-est" name="est" type="number" min="0" max="100" step="0.1" [(ngModel)]="d.autoevaluacion.estandares.valor" />
+                  <small>Se actualiza solo al cerrar la autoevaluación en <a routerLink="/sst/planes">Autoevaluación y planes</a>.</small></div>
                 <div class="campo"><label for="d-estf">Fecha</label><input id="d-estf" name="estf" type="date" [max]="hoy" [(ngModel)]="fechas.estandares" /></div>
                 <div class="campo"><label for="d-pv">PESV (%)</label><input id="d-pv" name="pv" type="number" min="0" max="100" step="0.1" [(ngModel)]="d.autoevaluacion.pesv.valor" /></div>
                 <div class="campo"><label for="d-pvf">Fecha</label><input id="d-pvf" name="pvf" type="date" [max]="hoy" [(ngModel)]="fechas.pesv" /></div>

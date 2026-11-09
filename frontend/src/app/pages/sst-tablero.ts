@@ -48,10 +48,17 @@ const DIA = (f: string) => new Intl.DateTimeFormat('es-CO', { timeZone: 'America
       <nav class="accesos" aria-label="Accesos">
         <a class="boton primario" routerLink="/sst/formatos"><app-icono nombre="documento" [tam]="16" />Diligenciar un formato</a>
         <a class="boton" routerLink="/sst/flota" [queryParams]="{ vista: 'inspecciones' }"><app-icono nombre="check" [tam]="16" />Preoperacional</a>
+        <a class="boton" routerLink="/sst/planes"><app-icono nombre="lista" [tam]="16" />Autoevaluación y planes</a>
         <a class="boton" routerLink="/sst/colaboradores"><app-icono nombre="personas" [tam]="16" />Colaboradores</a>
         <a class="boton" routerLink="/sst/datos"><app-icono nombre="edificio" [tam]="16" />Datos y membrete</a>
       </nav>
 
+      @if (planes(); as pl) {
+        @if (pl.alertas.resumen.vencidas || pl.alertas.resumen.semana) {
+          <div class="mensaje alerta" role="status"><strong>@if (pl.alertas.resumen.vencidas) { {{ pl.alertas.resumen.vencidas }} obligación(es) vencida(s) }@if (pl.alertas.resumen.vencidas && pl.alertas.resumen.semana) { y }@if (pl.alertas.resumen.semana) { {{ pl.alertas.resumen.semana }} para esta semana }</strong>
+            en el plan anual (Ministerio del Trabajo, ARL y PESV). <a routerLink="/sst/planes" [queryParams]="{ vista: 'alertas' }">Ver alertas</a></div>
+        }
+      }
       @if (!d.datosCompletos) { <div class="mensaje alerta" role="status"><strong>Complete los datos de SG-SST.</strong> Falta el responsable del SG-SST o la ARL: los formatos salen sin esos datos. <a routerLink="/sst/datos">Ir a Datos y membrete</a></div> }
       @if (d.incidentesSinRevisar) { <div class="mensaje alerta" role="status"><strong>{{ d.incidentesSinRevisar }} reporte(s) de incidente sin revisar</strong> desde la app de conductores. <a routerLink="/sst/formatos" [queryParams]="{ vista: 'reportes' }">Revisar</a></div> }
 
@@ -59,8 +66,8 @@ const DIA = (f: string) => new Intl.DateTimeFormat('es-CO', { timeZone: 'America
         <article class="kpi"><header><span>Estándares mínimos</span><app-icono nombre="escudo" [tam]="18" /></header>
           @if (d.autoevaluacion.estandares.valor !== null) { <strong>{{ d.autoevaluacion.estandares.valor }} %</strong>
             <div class="barra-avance"><span [style.width.%]="d.autoevaluacion.estandares.valor"></span></div>
-            <footer>Autoevaluación del {{ d.autoevaluacion.estandares.fecha | dia }}</footer> }
-          @else { <span class="vacio-kpi">Sin autoevaluación registrada. <a routerLink="/sst/datos">Registrarla</a></span> }</article>
+            <footer>Autoevaluación del {{ d.autoevaluacion.estandares.fecha | dia }}@if (planes()?.plan?.mejoraAbiertas) { · {{ planes().plan.mejoraAbiertas }} acción(es) de mejora abiertas } · <a routerLink="/sst/planes">Ver detalle</a></footer> }
+          @else { <span class="vacio-kpi">Sin autoevaluación registrada. <a routerLink="/sst/planes">Hacerla</a></span> }</article>
         <article class="kpi"><header><span>PESV</span><app-icono nombre="camion" [tam]="18" /></header>
           @if (d.autoevaluacion.pesv.valor !== null) { <strong>{{ d.autoevaluacion.pesv.valor }} %</strong>
             <div class="barra-avance"><span [style.width.%]="d.autoevaluacion.pesv.valor"></span></div>
@@ -185,7 +192,9 @@ export class SstTablero {
   readonly error = signal('');
   readonly todos = signal(false);
 
-  constructor() { this.cargar(); }
+  // Alertas del plan anual y acciones de mejora abiertas (Autoevaluación y planes)
+  readonly planes = signal<any>(null);
+  constructor() { this.cargar(); this.api.get('/sst/planes/resumen').then((x) => this.planes.set(x)).catch(() => null); }
 
   async cargar() {
     this.error.set('');
