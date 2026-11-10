@@ -233,7 +233,7 @@ export async function analizarViajes(empresaId, buffer, { cliente: clienteDefect
 
   const tarifasPorCliente = {};
   for (const c of new Set(resultado.map((x) => String(x.cliente || '')).filter(Boolean))) {
-    tarifasPorCliente[c] = tarifas.filter((t) => String(t.cliente) === c).map((t) => ({ _id: t._id, destino: t.destino })).sort((a, b) => a.destino.localeCompare(b.destino, 'es'));
+    tarifasPorCliente[c] = tarifas.filter((t) => String(t.cliente) === c).map((t) => ({ _id: t._id, destino: t.destino, tarifa: Number(t.tarifaCliente) || 0, flete: Number(t.fleteConductor) || 0, anticipo: Number(t.anticipoHabitual) || 0 })).sort((a, b) => a.destino.localeCompare(b.destino, 'es'));
   }
   const cuenta = (e) => resultado.filter((x) => x.estado === e).length;
   return { total: resultado.length, listas: cuenta('lista'), revisar: cuenta('revisar'), repetidas: cuenta('repetida'), errores: cuenta('error'), filas: resultado, tarifasPorCliente };

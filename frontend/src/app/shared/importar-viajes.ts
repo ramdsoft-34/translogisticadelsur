@@ -55,7 +55,7 @@ interface Fila {
           En las que tienen error elija el conductor o el destino; los demás errores se corrigen en el archivo.</p>
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th><input type="checkbox" aria-label="Marcar todas las que se pueden subir" [checked]="todasMarcadas()" (change)="marcarTodas($any($event.target).checked)" /></th>
-            <th>Fila</th><th>Fecha</th><th>Placa</th><th>Conductor</th><th>Destino</th><th>Planilla</th><th class="num">Tarifa</th><th class="num">Aux.</th><th>Revisión</th></tr></thead>
+            <th>Fila</th><th>Fecha</th><th>Placa</th><th>Conductor</th><th>Destino</th><th>Planilla</th><th class="num">Tarifa</th><th class="num">Flete conductor</th><th class="num">Anticipo</th><th class="num">Aux.</th><th>Revisión</th></tr></thead>
           <tbody>@for (f of visibles(); track f.fila) {
             <tr [class.apagada]="!f.incluir">
               <td data-etiqueta="Subir"><input type="checkbox" [checked]="f.incluir" [disabled]="!sePuede(f)" (change)="alternar(f, $any($event.target).checked)" [attr.aria-label]="'Subir la fila ' + f.fila" /></td>
@@ -78,6 +78,8 @@ interface Fila {
               </td>
               <td data-etiqueta="Planilla">{{ f.planilla || '—' }}</td>
               <td data-etiqueta="Tarifa" class="num">{{ f.tarifa | pesos }}</td>
+              <td data-etiqueta="Flete conductor" class="num"><strong>{{ f.flete | pesos }}</strong></td>
+              <td data-etiqueta="Anticipo" class="num">{{ f.anticipo | pesos }}</td>
               <td data-etiqueta="Aux." class="num">{{ f.diasAuxiliar ? f.diasAuxiliar + ' d' : '—' }}@if (f.diasAuxiliar && f.auxiliarPagado) { <br /><small class="pagado">Pagado</small> }</td>
               <td data-etiqueta="Revisión" class="revision">
                 @switch (f.estado) {
@@ -139,7 +141,7 @@ export class ImportarViajes {
   readonly clientes = signal<any[]>([]);
   readonly archivo = signal<File | null>(null);
   readonly filas = signal<Fila[]>([]);
-  readonly tarifas = signal<Record<string, { _id: string; destino: string }[]>>({});
+  readonly tarifas = signal<Record<string, { _id: string; destino: string; tarifa: number; flete: number; anticipo: number }[]>>({});
   readonly filtro = signal<'' | Fila['estado']>('');
   readonly trabajando = signal(false);
   readonly resultado = signal<{ creados: any[]; fallidos: any[] } | null>(null);
@@ -193,7 +195,9 @@ export class ImportarViajes {
   }
   ponerDestino(f: Fila, id: string) {
     const t = this.tarifasDe(f.cliente || '').find(x => x._id === id); if (!t) return;
-    this.actualizar(f, { tarifaRef: id, destino: t.destino, completarDeTarifa: true, avisos: [...f.avisos, `Destino elegido a mano: ${t.destino} (flete y anticipo de esa tarifa; la tarifa, la del archivo si la trae)`] });
+    // Flete y anticipo de esa tarifa (la base de tarifas y fletes); la tarifa, la del archivo si la trae
+    this.actualizar(f, { tarifaRef: id, destino: t.destino, flete: t.flete, anticipo: t.anticipo, tarifa: f.tarifa || t.tarifa, completarDeTarifa: true,
+      avisos: [...f.avisos, `Destino elegido a mano: ${t.destino}`] });
   }
 
   async registrar() {
