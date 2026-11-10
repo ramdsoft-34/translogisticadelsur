@@ -207,9 +207,7 @@ export async function registrarEstados(empresaId, datos) {
 }
 
 // ── Mensajes que la gente le escribe al número ──
-// Se guardan para leerlos en «Mensajes de WhatsApp» y se responde una vez (cada 12 horas por número) que el número
-// solo envía documentos. La respuesta es gratis porque va dentro de las 24 horas de la conversación que abrió la persona.
-export const RESPUESTA_BASE = 'Hola. Este número de {empresa} solo envía documentos y no lee los mensajes. Para cualquier novedad comuníquese con {empresa}. Gracias.';
+// Se guardan solo para leerlos en «Mensajes de WhatsApp». No se responde nada desde la plataforma.
 const recibidosDe = (datos) => (datos?.entry || []).flatMap((x) => x.changes || []).map((c) => c.value || {})
   .flatMap((v) => (v.messages || []).map((m) => ({ m, nombre: (v.contacts || []).find((k) => k.wa_id === m.from)?.profile?.name || '', phoneNumberId: v.metadata?.phone_number_id || '' })));
 const TIPOS = { image: 'Imagen', audio: 'Audio', video: 'Video', document: 'Documento', sticker: 'Sticker', location: 'Ubicación', contacts: 'Contacto', reaction: 'Reacción' };
@@ -221,7 +219,6 @@ function textoDe(m) {
   const caption = m[m.type]?.caption || m.document?.filename || '';
   return `[${TIPOS[m.type] || m.type}]${caption ? ` ${caption}` : ''}`;
 }
-const textoRespuesta = (empresa) => (txt(empresa?.whatsapp?.respuesta?.texto) || RESPUESTA_BASE).replaceAll('{empresa}', empresa?.nombre || 'la empresa').slice(0, 1000);
 
 async function conductorDe(empresaId, numero) {
   const diez = String(numero || '').replace(/\D/g, '').slice(-10);
@@ -230,24 +227,7 @@ async function conductorDe(empresaId, numero) {
   return t?._id || null;
 }
 
-async function responder(empresaId, mensaje, cuentaTipo) {
-  const e = await Empresa.findById(empresaId).select('nombre whatsapp.activo whatsapp.respuesta').lean();
-  if (!e?.whatsapp?.activo || e.whatsapp.respuesta?.activa === false) return { estado: 'omitida', detalle: 'Respuesta automática apagada' };
-  if (mensaje.tipo === 'reaction') return { estado: 'omitida', detalle: 'Es una reacción' };
-  const hace12 = new Date(Date.now() - 12 * 3600000);
-  if (await MensajeWhatsapp.exists({ empresa: empresaId, de: mensaje.de, 'respuesta.estado': 'enviada', 'respuesta.en': { $gte: hace12 } })) {
-    return { estado: 'omitida', detalle: 'Ya se le respondió en las últimas 12 horas' };
-  }
-  try {
-    const { cuenta, token, tipo } = await cuentaWhatsapp(empresaId);
-    if (tipo !== cuentaTipo) return { estado: 'omitida', detalle: 'El mensaje llegó a otro número' };
-    await llamarMeta(`${cuenta.phoneNumberId}/messages`, token, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: mensaje.de, type: 'text', text: { preview_url: false, body: textoRespuesta(e) } }) });
-    return { estado: 'enviada', en: new Date(), detalle: '' };
-  } catch (err) { return { estado: 'error', en: new Date(), detalle: String(err.message || err).slice(0, 300) }; }
-}
-
-/** Guarda los mensajes recibidos y responde. Con empresaId (cuenta propia) o, en el número de Translogística, la del último envío a ese número. */
+/** Guarda los mensajes recibidos. Con empresaId (cuenta propia) o, en el número de Translogística, la del último envío a ese número. */
 export async function registrarRecibidos(datos, { empresaId = null, cuenta = 'propia' } = {}) {
   for (const { m, nombre } of recibidosDe(datos)) {
     const de = String(m.from || '').replace(/\D/g, '');
@@ -262,8 +242,6 @@ export async function registrarRecibidos(datos, { empresaId = null, cuenta = 'pr
     const doc = await MensajeWhatsapp.create({ empresa, cuenta, idMensaje: String(m.id || ''), de, nombre: String(nombre).slice(0, 120), tipo: String(m.type || ''),
       texto: textoDe(m).slice(0, 4000), fecha: new Date(Number(m.timestamp) * 1000 || Date.now()), conductor: await conductorDe(empresa, de) }).catch((e) => (e?.code === 11000 ? null : Promise.reject(e)));
     if (!doc) continue;
-    const r = await responder(empresa, doc, cuenta);
-    await MensajeWhatsapp.updateOne({ empresa, _id: doc._id }, { $set: { respuesta: r } });
     if (!empresaId) publicar(empresa, { recurso: 'whatsapp', ruta: '/recibidos', metodo: 'POST' });
   }
 }

@@ -35,25 +35,18 @@ const ESTADOS: Record<string, [string, string]> = {
     </div>
 
     @if (vista() === 'recibidos') {
-      <p class="sutil">Lo que la gente le escribe al número. Solo se leen aquí: a quien escribe se le responde una vez cada 12 horas que el número solo envía documentos (el texto se cambia en Configuración → WhatsApp).</p>
+      <p class="sutil">Lo que la gente le escribe al número. Solo se leen aquí: la plataforma no responde.</p>
       <div class="tabla-caja"><table class="tabla-movil">
-        <thead><tr><th>Fecha</th><th>De</th><th>Mensaje</th><th>Respuesta automática</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>De</th><th>Mensaje</th></tr></thead>
         <tbody>
           @for (m of recibidos(); track m._id) {
             <tr>
               <td data-etiqueta="Fecha">{{ m.fecha | fechaHora }}</td>
               <td data-etiqueta="De"><strong>{{ m.conductor?.nombre || m.nombre || 'Sin nombre' }}</strong><br /><span class="sutil">{{ celular(m.de) }}{{ m.conductor && m.nombre ? ' · ' + m.nombre + ' en WhatsApp' : '' }}</span></td>
               <td data-etiqueta="Mensaje" class="texto-msj">{{ m.texto || '—' }}</td>
-              <td data-etiqueta="Respuesta">
-                @switch (m.respuesta?.estado) {
-                  @case ('enviada') { <span class="chip ok sin-punto">Enviada</span> <span class="sutil">{{ m.respuesta.en | fechaHora }}</span> }
-                  @case ('error') { <span class="chip error sin-punto">No salió</span><br /><span class="sutil error-texto">{{ m.respuesta.detalle }}</span> }
-                  @case ('omitida') { <span class="sutil">{{ m.respuesta.detalle }}</span> }
-                  @default { <span class="sutil">—</span> }
-                }</td>
             </tr>
           } @empty {
-            <tr><td colspan="4" class="vacio">{{ cargando() ? 'Cargando…' : 'Nadie ha escrito al número en este periodo' }}</td></tr>
+            <tr><td colspan="3" class="vacio">{{ cargando() ? 'Cargando…' : 'Nadie ha escrito al número en este periodo' }}</td></tr>
           }
         </tbody>
       </table></div>

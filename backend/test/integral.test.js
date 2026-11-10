@@ -931,7 +931,7 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     await avisar(aviso('delivered'), firmar(aviso('delivered')));
     assert.equal((await lista())[0].estado, 'leido', 'el estado no retrocede');
 
-    // Alguien le escribe al número: se guarda para leerlo y se le responde una sola vez (cada 12 horas)
+    // Alguien le escribe al número: se guarda para leerlo y no se le responde nada
     const recibido = (id, texto) => JSON.stringify({ entry: [{ changes: [{ value: { metadata: { phone_number_id: '99' },
       contacts: [{ wa_id: '573001112233', profile: { name: 'Pedro' } }], messages: [{ id, from: '573001112233', timestamp: '1793900100', type: 'text', text: { body: texto } }] } }] }] });
     const antesResp = llamadas.filter(x => x.ruta.endsWith('/messages')).length;
@@ -939,17 +939,11 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     await avisar(recibido('wamid.in1', 'Buenas, ya cargué'), firmar(recibido('wamid.in1', 'Buenas, ya cargué')));   // Meta repite el aviso
     await avisar(recibido('wamid.in2', '¿Me oye?'), firmar(recibido('wamid.in2', '¿Me oye?')));
     const resp = llamadas.filter(x => x.ruta.endsWith('/messages')).slice(antesResp).map(x => JSON.parse(x.cuerpo.toString()));
-    assert.equal(resp.length, 1, 'una sola respuesta automática');
-    assert.equal(resp[0].type, 'text'); assert.equal(resp[0].to, '573001112233'); assert.match(resp[0].text.body, /solo envía documentos/);
+    assert.equal(resp.length, 0, 'la plataforma no responde');
     const rec = (await s.manif.get('/api/whatsapp/recibidos?desde=2020-01-01&hasta=2099-12-31')).body;
     assert.equal(rec.total, 2, 'el aviso repetido no se guarda dos veces');
-    assert.equal(rec.mensajes.find(x => x.texto === 'Buenas, ya cargué').respuesta.estado, 'enviada');
-    assert.equal(rec.mensajes.find(x => x.texto === '¿Me oye?').respuesta.estado, 'omitida');
     assert.equal(rec.mensajes[0].nombre, 'Pedro');
     assert.equal((await s.adminB.get('/api/whatsapp/recibidos?desde=2020-01-01&hasta=2099-12-31')).body.total, 0);
-    // El texto de la respuesta se configura (y se puede apagar)
-    const cfgR = (await s.adminA.get('/api/whatsapp/config')).body;
-    assert.equal(cfgR.respuesta.activa, true); assert.match(cfgR.respuestaBase, /\{empresa\}/);
 
     // Viaje sin RNDC: el soporte interno (MC/RC) también queda por aprobar y sale con la misma plantilla
     const vs = await s.manif.post('/api/viajes', { fecha: '2026-11-06', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Pasto urbano', placa: 'ABC123', conductor: s.conductor, requiereManifiesto: false });

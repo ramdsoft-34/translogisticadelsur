@@ -104,8 +104,6 @@ const empresaSchema = new Schema({
     tokenCifrado: { type: String, default: '', select: false },
     appSecretCifrado: { type: String, default: '', select: false },
     webhookToken: { type: String, default: '', select: false },
-    // Respuesta automática a quien le escribe al número (gratis: va dentro de las 24 horas)
-    respuesta: { activa: { type: Boolean, default: true }, texto: str() },
   },
   smtp: {
     activo: { type: Boolean, default: false },
@@ -477,7 +475,6 @@ const mensajeWhatsappSchema = new Schema({
   conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },
   tipo: str(), texto: str(),                // text, image, audio, document… (sin descargar archivos)
   fecha: { type: Date, default: Date.now },
-  respuesta: { estado: { type: String, enum: ['', 'enviada', 'omitida', 'error'], default: '' }, en: fecha, detalle: str() },
 }, { timestamps: true });
 mensajeWhatsappSchema.plugin(tenantPlugin);
 mensajeWhatsappSchema.index({ empresa: 1, fecha: -1 });

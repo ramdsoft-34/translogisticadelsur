@@ -9,7 +9,7 @@ import { P } from '../config/permisos.js';
 import { env } from '../config/env.js';
 import { auditar } from '../services/auditoria.js';
 import { cifrar, descifrar } from '../utils/cifrado.js';
-import { RESPUESTA_BASE, aprobarEnvios, cuentaPlataforma, descartarEnvios, firmaValida, plataformaLista, prepararEnvio, probarCuenta, procesarEnvio, registrarEstados, registrarEstadosPlataforma } from '../services/whatsappBusiness.js';
+import { aprobarEnvios, cuentaPlataforma, descartarEnvios, firmaValida, plataformaLista, prepararEnvio, probarCuenta, procesarEnvio, registrarEstados, registrarEstadosPlataforma } from '../services/whatsappBusiness.js';
 
 const r = Router();
 const id = (v) => { if (!mongoose.isValidObjectId(v)) throw new ErrorHttp(400, 'Identificador inválido'); return v; };
@@ -63,8 +63,6 @@ export const datosCuenta = {
   plantilla: z.string().trim().regex(/^[a-z0-9_]+$/, 'la plantilla solo lleva minúsculas, números y guion bajo').max(100),
   idioma: z.string().trim().regex(/^[a-z]{2}(_[A-Z]{2})?$/, 'idioma inválido').max(5),
   token: z.string().trim().max(1000).optional(), appSecret: z.string().trim().max(200).optional(),
-  // Respuesta automática a quien le escribe al número
-  respuesta: z.object({ activa: z.boolean().default(true), texto: z.string().trim().max(1000).optional().default('') }).optional(),
 };
 
 // Cuenta de una empresa: la usan su administrador y el SuperAdmin, cada una con sus datos aparte
@@ -72,7 +70,7 @@ export async function datosCuentaEmpresa(empresaId) {
   const e = await Empresa.findById(empresaId).select('+whatsapp.tokenCifrado +whatsapp.appSecretCifrado +whatsapp.webhookToken').lean();
   if (!e) throw new ErrorHttp(404, 'Empresa no encontrada');
   const { tokenCifrado, appSecretCifrado, webhookToken, ...w } = e.whatsapp || {};
-  return { modo: 'plataforma', plantilla: 'manifiesto_conductor', idioma: 'es', ...w, respuesta: { activa: w.respuesta?.activa !== false, texto: w.respuesta?.texto || '' }, respuestaBase: RESPUESTA_BASE, plataformaLista: plataformaLista(await cuentaPlataforma()), tieneToken: !!tokenCifrado, tieneSecreto: !!appSecretCifrado,
+  return { modo: 'plataforma', plantilla: 'manifiesto_conductor', idioma: 'es', ...w, plataformaLista: plataformaLista(await cuentaPlataforma()), tieneToken: !!tokenCifrado, tieneSecreto: !!appSecretCifrado,
     webhookToken: webhookToken || '', webhookUrl: `${env.urlPublica}/api/whatsapp/webhook/${empresaId}` };
 }
 
@@ -88,7 +86,6 @@ export async function guardarCuentaEmpresa(empresaId, d) {
     throw new ErrorHttp(400, 'Para activar WhatsApp indique el identificador del número, el token y el secreto de la app');
   }
   const set = { 'whatsapp.activo': d.activo, 'whatsapp.modo': d.modo, 'whatsapp.phoneNumberId': d.phoneNumberId, 'whatsapp.wabaId': d.wabaId, 'whatsapp.plantilla': d.plantilla, 'whatsapp.idioma': d.idioma };
-  if (d.respuesta) { set['whatsapp.respuesta.activa'] = d.respuesta.activa; set['whatsapp.respuesta.texto'] = d.respuesta.texto || ''; }
   if (d.token) set['whatsapp.tokenCifrado'] = cifrar(d.token);           // vacío = conservar el actual
   if (d.appSecret) set['whatsapp.appSecretCifrado'] = cifrar(d.appSecret);
   if (!antes.whatsapp?.webhookToken) set['whatsapp.webhookToken'] = crypto.randomBytes(24).toString('hex');
@@ -157,7 +154,7 @@ r.get('/mensajes', operar, async (req, res) => {
   res.json({ totales, mensajes });
 });
 
-// Mensajes que la gente le escribió al número (solo para leerlos) con la respuesta automática que se le dio
+// Mensajes que la gente le escribió al número (solo para leerlos)
 r.get('/recibidos', operar, async (req, res) => {
   const q = z.object({ desde: fechaIso, hasta: fechaIso, texto: z.string().trim().max(60).optional().default('') }).parse(req.query);
   const desde = new Date(`${q.desde}T05:00:00.000Z`);
@@ -166,7 +163,7 @@ r.get('/recibidos', operar, async (req, res) => {
   const lista = await MensajeWhatsapp.find(deEmpresa(req, { fecha: { $gte: desde, $lt: hasta } })).sort({ fecha: -1 }).limit(2000)
     .populate(pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId')).lean();
   const t = q.texto.toLowerCase();
-  const mensajes = lista.map((x) => ({ _id: x._id, fecha: x.fecha, de: x.de, nombre: x.nombre, tipo: x.tipo, texto: x.texto, respuesta: x.respuesta,
+  const mensajes = lista.map((x) => ({ _id: x._id, fecha: x.fecha, de: x.de, nombre: x.nombre, tipo: x.tipo, texto: x.texto,
     conductor: x.conductor ? { nombre: [x.conductor.nombres, x.conductor.apellido1, x.conductor.apellido2].filter(Boolean).join(' '), numId: x.conductor.numId } : null }))
     .filter((x) => !t || [x.de, x.nombre, x.texto, x.conductor?.nombre, x.conductor?.numId].some((v) => String(v ?? '').toLowerCase().includes(t)));
   res.json({ total: mensajes.length, mensajes });
