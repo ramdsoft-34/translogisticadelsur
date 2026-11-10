@@ -94,14 +94,14 @@ const quincena = () => {
                 <div class="tabla-caja" style="box-shadow:none"><table class="tabla-movil">
                   <thead><tr><th></th><th>Fecha</th><th>Placa</th><th>Empresa</th><th>Destino</th><th>Manifiesto</th>
                     <th class="num">Flete</th><th class="num">Auxiliar</th><th class="num" title="Anticipo que se descuenta: 0 si es igual o mayor al flete en Pasto, Mayorista o Popayán">Anticipo</th>
-                    <th class="num" title="Flete + auxiliar − anticipo reconocido">Saldo</th></tr></thead>
+                    <th class="num" title="Flete + auxiliar sin pagar − anticipo reconocido (el auxiliar «Pagado» ya se entregó)">Saldo</th></tr></thead>
                   <tbody>@for (l of g.lineas; track l.viaje) {
                     <tr><td data-etiqueta="Elegir"><input type="checkbox" [checked]="sel().has(l.viaje)" (change)="alternar(l.viaje)" [attr.aria-label]="'Viaje ' + l.numero" /></td>
                       <td data-etiqueta="Fecha">{{ l.fecha | dia }}</td><td data-etiqueta="Placa">{{ l.placa }}</td><td data-etiqueta="Empresa">{{ l.empresa }}</td>
                       <td data-etiqueta="Destino">{{ l.destino }}</td><td data-etiqueta="Manifiesto">{{ l.manifiesto }}</td>
-                      <td data-etiqueta="Flete" class="num">{{ l.flete | pesos }}</td><td data-etiqueta="Auxiliar" class="num">{{ l.auxiliar | pesos }}</td>
+                      <td data-etiqueta="Flete" class="num">{{ l.flete | pesos }}</td><td data-etiqueta="Auxiliar" class="num">{{ l.auxiliar | pesos }}@if (l.auxiliar && l.auxiliarPagado) { <br /><small class="aux-pagado">Pagado</small> }</td>
                       <td data-etiqueta="Anticipo" class="num">@if (l.anticipoReconocido !== l.anticipo) { <s class="sutil" title="No se descuenta: pago completo en Pasto, Mayorista o Popayán">{{ l.anticipo | pesos }}</s><br /> }{{ l.anticipoReconocido | pesos }}</td>
-                      <td data-etiqueta="Saldo" class="num"><strong>{{ (l.flete + l.auxiliar - l.anticipoReconocido) | pesos }}</strong></td></tr>
+                      <td data-etiqueta="Saldo" class="num"><strong>{{ (l.flete + (l.auxiliarPagado ? 0 : l.auxiliar) - l.anticipoReconocido) | pesos }}</strong></td></tr>
                   }</tbody>
                   @if (totalesGrupo(g); as t) {
                     <tfoot><tr><td></td><td colspan="5">Elegidos ({{ t.viajes }})</td><td class="num">{{ t.flete | pesos }}</td><td class="num">{{ t.auxiliar | pesos }}</td>
@@ -234,6 +234,7 @@ const quincena = () => {
       <ng-container pie><button type="button" (click)="abono.set(null)">Cancelar</button><button class="primario" type="submit" form="form-ab" [disabled]="trabajando()">Abonar</button></ng-container>
     </app-modal>`,
   styles: [`
+    .aux-pagado { color: var(--verde, #2E7D32); font-weight: 650; font-size: .78rem; }
     .cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 0 0 14px; }
     .cifras > div { background: var(--gris-0); border: 1px solid var(--gris-2); border-radius: var(--radio-l); padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
     .cifras span { font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gris-5); }
@@ -347,7 +348,8 @@ export class PagoConductores {
   totalesGrupo(g: any) {
     const ls = this.seleccionGrupo(g); const s = (k: string) => ls.reduce((a: number, l: any) => a + (Number(l[k]) || 0), 0);
     const t = { viajes: ls.length, flete: s('flete'), auxiliar: s('auxiliar'), anticipo: s('anticipoReconocido'), retefuente: s('retefuente'), fopat: s('fopat'), saldos: 0 };
-    t.saldos = t.flete + t.auxiliar - t.anticipo;
+    const yaPagado = ls.reduce((a: number, l: any) => a + (l.auxiliarPagado ? Number(l.auxiliar) || 0 : 0), 0);
+    t.saldos = t.flete + t.auxiliar - yaPagado - t.anticipo;
     return ls.length ? t : null;
   }
   // Préstamo que se descontará: el escrito a mano o, si no, las cuotas vencidas (sin pasar del saldo)

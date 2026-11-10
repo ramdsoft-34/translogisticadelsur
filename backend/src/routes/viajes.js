@@ -14,7 +14,7 @@ import { reglasDe, pesoPorTamano } from '../services/gestion/reglas.js';
 import { lineaLiquidacion, respaldosAuxiliar } from '../services/calculos.js';
 import * as liq from '../services/gestion/liquidacionConductor.js';
 import { parseFecha, hoyColombia, escaparRegex } from '../utils/texto.js';
-import { saldoViaje, utilidadViaje, valoresDesdeTarifa } from '../services/calculos.js';
+import { auxiliarYaPagado, saldoViaje, utilidadViaje, valoresDesdeTarifa } from '../services/calculos.js';
 // Autorización del administrador para registrar con documentos vencidos (CA-06)
 export const autorizacionSchema = z.object({ email: z.string().trim().max(120), clave: z.string().max(100), codigo: z.string().max(10).optional().default(''),
   motivo: z.string().trim().max(300) }).optional();
@@ -43,6 +43,7 @@ const viajeSchema = z.object({
     sede: z.string().trim().max(6).optional().default('') }).optional(),
   pesoKg: dinero.optional(), cantidad: dinero.optional(), conAuxiliar: z.boolean().optional(),
   diasAuxiliar: z.coerce.number().int().min(0).max(5, 'el auxiliar va de 1 a 5 días').optional(), planilla: z.string().trim().max(30).optional(),
+  auxiliarPagado: z.boolean().nullable().optional(),
   tarifa: dinero.optional(), flete: dinero.optional(), anticipo: dinero.optional(),
   observaciones: z.string().trim().max(500).optional(),
   licencia: z.string().trim().max(40).optional(),
@@ -75,7 +76,7 @@ export function corregirCliente(v, d) {
   d['reporteWhatsapp.usuario'] = null;
 }
 // Después de expedir documentos en el RNDC solo se pueden cambiar datos internos.
-const CAMPOS_INTERNOS = ['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa', 'historico', 'licencia'];
+const CAMPOS_INTERNOS = ['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'auxiliarPagado', 'planilla', 'tarifa', 'historico', 'licencia'];
 // «Manifiesto» del formulario → número manual del manifiesto para el RNDC
 function numeroManifiestoA(d) {
   if (d.numeroManifiesto === undefined) return;
@@ -91,7 +92,7 @@ const POBLAR = (req) => [
 const nombreTercero = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : '');
 function presentar(v) {
   return { ...v, conductorNombre: nombreTercero(v.conductor) || v.conductorNombre || '', titularNombre: nombreTercero(v.titular),
-    saldo: saldoViaje(v), utilidad: utilidadViaje(v) };
+    saldo: saldoViaje(v), utilidad: utilidadViaje(v), auxiliarPagado: auxiliarYaPagado(v) };
 }
 
 // Verifica que todas las referencias pertenezcan a la empresa del usuario.

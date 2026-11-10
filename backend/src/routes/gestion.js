@@ -101,10 +101,10 @@ const COL_LC = [{ titulo: 'Fecha', peso: 1 }, { titulo: 'Placa', peso: 0.8 }, { 
   { titulo: 'Manifiesto', peso: 1 }, { titulo: 'Flete', peso: 1, alin: 'right' }, { titulo: 'Auxiliar', peso: 0.9, alin: 'right' }, { titulo: 'Anticipo', peso: 1, alin: 'right' },
   { titulo: 'Anticipo rec.', peso: 1, alin: 'right' }, { titulo: 'Retefuente', peso: 1, alin: 'right' }, { titulo: 'FOPAT', peso: 0.8, alin: 'right' }, { titulo: 'Saldo', peso: 1, alin: 'right' }];
 // Líneas antiguas (antes del auxiliar y del anticipo reconocido) se muestran con sus valores originales
-const filaLc = (x) => [fmtFecha(x.fecha), x.placa, x.empresa, x.destino, x.manifiesto, $(x.flete), $(x.auxiliar), $(x.anticipo),
+const filaLc = (x) => [fmtFecha(x.fecha), x.placa, x.empresa, x.destino, x.manifiesto, $(x.flete), x.auxiliarPagado ? `${$(x.auxiliar).toLocaleString('es-CO')}\nPagado` : $(x.auxiliar), $(x.anticipo),
   $(x.anticipoReconocido ?? x.anticipo), $(x.retefuente), $(x.fopat), $(x.saldo)];
 const totalLc = (l) => ['TOTAL', '', '', '', '', $(l.flete), $(l.auxiliar), $(l.anticipo), $(l.anticipoReconocido ?? l.anticipo), $(l.retefuente), $(l.fopat),
-  $(l.flete + (l.auxiliar || 0) - (l.anticipoReconocido ?? l.anticipo) - l.retefuente - l.fopat)];
+  $(l.flete + (l.auxiliar || 0) - (l.auxiliarYaPagado || 0) - (l.anticipoReconocido ?? l.anticipo) - l.retefuente - l.fopat)];
 r.get('/liq-conductores/:numero/:formato', verLiq, async (req, res) => {
   if (!['pdf', 'xlsx'].includes(req.params.formato)) throw new ErrorHttp(404, 'Formato no disponible');
   const l = await LiquidacionConductor.findOne(deEmpresa(req, { numero: req.params.numero })).lean();

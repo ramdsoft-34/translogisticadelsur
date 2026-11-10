@@ -15,10 +15,10 @@ const imagenDeDataUrl = (u) => {
 // Totales del documento. Las líneas antiguas (antes del auxiliar y del anticipo reconocido) usan el anticipo original.
 export function resumenLiquidacion(l) {
   const antRec = l.anticipoReconocido ?? l.anticipo ?? 0;
-  const saldos = $(l.flete) + $(l.auxiliar) - $(antRec);
+  const saldos = $(l.flete) + $(l.auxiliar) - $(l.auxiliarYaPagado) - $(antRec);
   return { saldos, retefuente: $(l.retefuente), fopat: $(l.fopat), prestamos: $(l.descuentoPrestamos), neto: $(l.neto), anticipoReconocido: $(antRec) };
 }
-const saldoLinea = (x) => $(x.flete) + $(x.auxiliar) - $(x.anticipoReconocido ?? x.anticipo);
+const saldoLinea = (x) => $(x.flete) + (x.auxiliarPagado ? 0 : $(x.auxiliar)) - $(x.anticipoReconocido ?? x.anticipo);
 
 // Dibuja una liquidación dentro del recuadro (x, y, ancho, alto). `compacto` = media hoja.
 function dibujar(doc, empresa, l, { x, y, ancho, alto, compacto }) {
@@ -66,21 +66,24 @@ function dibujar(doc, empresa, l, { x, y, ancho, alto, compacto }) {
   const resumenAlto = (R.prestamos ? 5 : 4) * (compacto ? 11 : 13) + 16;
   const firmasAlto = compacto ? 34 : 46;
   const caben = Math.max(1, Math.floor((fin - yy - FILA * 2 - resumenAlto - firmasAlto - 10) / FILA));
-  const fila = (valores, { negrita = false, fondo = null, color = COLOR.primario } = {}) => {
-    if (fondo) doc.rect(x, yy, ancho, FILA).fill(fondo);
+  // `debajo`: texto pequeño bajo el valor de una columna ({ 6: 'Pagado' }); la fila crece para que quepa
+  const fila = (valores, { negrita = false, fondo = null, color = COLOR.primario, debajo = null } = {}) => {
+    const alto = debajo ? FILA + (compacto ? 5.5 : 6.5) : FILA;
+    if (fondo) doc.rect(x, yy, ancho, alto).fill(fondo);
     let cx = x;
-    doc.fillColor(color).font(negrita ? 'Helvetica-Bold' : 'Helvetica').fontSize((compacto ? 6.6 : 7.6));
     valores.forEach((v, i) => {
+      doc.fillColor(color).font(negrita ? 'Helvetica-Bold' : 'Helvetica').fontSize((compacto ? 6.6 : 7.6));
       doc.text(String(v ?? ''), cx + 3, yy + (FILA - 7) / 2, { width: anchos[i] - 6, align: cols[i][2], lineBreak: false, ellipsis: true });
+      if (debajo?.[i]) doc.fillColor('#2E7D32').font('Helvetica-Bold').fontSize(compacto ? 5.2 : 6).text(debajo[i], cx + 3, yy + FILA - 2, { width: anchos[i] - 6, align: cols[i][2], lineBreak: false });
       cx += anchos[i];
     });
-    yy += FILA;
+    yy += alto;
   };
   fila(cols.map(c => c[0]), { negrita: true, fondo: COLOR.primario, color: 'white' });
   const lineas = l.lineas || [];
   const visibles = lineas.length > caben ? lineas.slice(0, caben - 1) : lineas;
   visibles.forEach((v, i) => fila([i + 1, fmtFecha(v.fecha), v.manifiesto, v.empresa, v.destino, pesos(v.flete), pesos(v.auxiliar), pesos(v.anticipoReconocido ?? v.anticipo), pesos(saldoLinea(v))],
-    { fondo: i % 2 ? COLOR.cebra : null }));
+    { fondo: i % 2 ? COLOR.cebra : null, debajo: v.auxiliarPagado ? { 6: 'Pagado' } : null }));
   if (visibles.length < lineas.length) {
     const resto = lineas.slice(visibles.length);
     fila(['', '', `+ ${resto.length} viaje(s) más`, '', '', pesos(resto.reduce((a, v) => a + $(v.flete), 0)), pesos(resto.reduce((a, v) => a + $(v.auxiliar), 0)),
@@ -92,7 +95,7 @@ function dibujar(doc, empresa, l, { x, y, ancho, alto, compacto }) {
 
   // ── Resumen (derecha) y notas (izquierda) ──
   const wr = Math.min(250, ancho * 0.48); const xr = x + ancho - wr; const fr = compacto ? 11 : 13;
-  const filasResumen = [['(+) Total saldos (flete + auxiliar - anticipo)', R.saldos], ['(-) Retención en la fuente', -R.retefuente], ['(-) FOPAT', -R.fopat],
+  const filasResumen = [['(+) Total saldos (flete + auxiliar sin pagar - anticipo)', R.saldos], ['(-) Retención en la fuente', -R.retefuente], ['(-) FOPAT', -R.fopat],
     ...(R.prestamos ? [['(-) Cuota de préstamo o descuento', -R.prestamos]] : [])];
   let yr = yy;
   filasResumen.forEach(([t, v]) => {
@@ -103,7 +106,7 @@ function dibujar(doc, empresa, l, { x, y, ancho, alto, compacto }) {
   doc.roundedRect(xr, yr + 1, wr, fr + 6, 3).fill(COLOR.acento);
   doc.fillColor(COLOR.primario).font('Helvetica-Bold').fontSize(compacto ? 8.5 : 10).text('NETO A PAGAR', xr + 6, yr + 5, { width: wr - 90, lineBreak: false });
   doc.text(pesos(R.neto), xr + wr - 90, yr + 5, { width: 84, align: 'right', lineBreak: false });
-  const notas = ['Saldo de cada viaje = flete + auxiliar - anticipo reconocido.', 'Retefuente: porcentaje del flete según las reglas de la empresa.',
+  const notas = ['Saldo de cada viaje = flete + auxiliar - anticipo reconocido. El auxiliar «Pagado» ya se entregó y no se suma.', 'Retefuente: porcentaje del flete según las reglas de la empresa.',
     'FOPAT: 0,1 % del flete si el PBV supera el límite y el destino no es Pasto.'];
   if (!compacto) doc.fillColor('#777').font('Helvetica').fontSize(6.8).text(notas.join('\n'), x, yy, { width: ancho - wr - 18 });
   if (l.estado === 'ANULADA') {

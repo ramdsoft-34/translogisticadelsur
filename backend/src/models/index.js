@@ -313,6 +313,9 @@ const viajeSchema = new Schema({
   cantidad: { type: Number, default: 1, min: 0 },     // viajes o unidades (tarifa por unidad)
   conAuxiliar: { type: Boolean, default: false },
   diasAuxiliar: { type: Number, default: 0, min: 0 },   // cantidad de auxiliares o días de auxiliar (0 = uno por unidad)
+  // Auxiliar ya pagado al conductor (se entrega el día del reporte): en su liquidación se muestra pero no se suma al saldo.
+  // null = según la regla: reportado el mismo día → pagado; registrado después (relación de fletes) → pendiente
+  auxiliarPagado: { type: Boolean, default: null },
   planilla: str(),                                      // N° de planilla del cliente (si aplica)
   tarifa: { type: Number, default: 0, min: 0 },
   flete: { type: Number, default: 0, min: 0 },
@@ -575,6 +578,7 @@ const liquidacionConductorSchema = new Schema({
   viajes: [{ type: Schema.Types.ObjectId, ref: 'Viaje' }],
   lineas: { type: Array, default: [] },
   flete: Number, auxiliar: { type: Number, default: 0 }, anticipo: Number, anticipoReconocido: Number,
+  auxiliarYaPagado: { type: Number, default: 0 },        // parte del auxiliar que ya se le había pagado (no suma al neto)
   retefuente: Number, fopat: Number, descuentoPrestamos: Number, interesPrestamos: Number, neto: Number,
   empresas: str(), agrupacion: { type: String, enum: ['conductor', 'placa_empresa'], default: 'conductor' },
   pagado: { type: Number, default: 0 },

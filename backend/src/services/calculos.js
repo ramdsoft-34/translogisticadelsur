@@ -3,6 +3,19 @@
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || 0);
 
+const diaColombia = (d) => new Date(new Date(d).getTime() - 5 * 3600000).toISOString().slice(0, 10);
+
+// Auxiliar ya pagado al conductor. Regla de la empresa: el viaje que se reporta el mismo día ya se canceló (el auxiliar
+// se le entrega ese día); el que se registra después, en la relación de fletes, queda pendiente de pago.
+// Lo marcado a mano en el viaje manda. Los importados del Excel el 30/10/2026 se toman como pagados.
+export function auxiliarYaPagado(v) {
+  if (typeof v?.auxiliarPagado === 'boolean') return v.auxiliarPagado;
+  if (!v?.createdAt || !v?.fecha) return false;
+  const creado = diaColombia(v.createdAt); const dia = new Date(v.fecha).toISOString().slice(0, 10);
+  if (creado === '2026-10-30' && dia < creado) return true;
+  return creado <= dia;
+}
+
 // SALDO = flete - anticipo (solo si hay flete)
 export function saldoViaje(v) {
   const flete = num(v.flete);

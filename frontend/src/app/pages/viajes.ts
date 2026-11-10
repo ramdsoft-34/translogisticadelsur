@@ -29,6 +29,7 @@ import { AutorizacionAdmin } from '../core/autorizacion.service';
 
 interface Formulario {
   licencia?: string; conLicencia?: boolean; numeroManifiesto?: string; seguro?: boolean;
+  auxiliarPagado?: boolean | null;   // null = según la regla (reportado hoy → pagado)
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
   placa: string; remolque: string; conductor: string; titular: string;
   pesoKg: number | null; cantidad: number | null; conAuxiliar: boolean; diasAuxiliar: number | null; planilla: string;
@@ -209,7 +210,13 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
         </select>
 
         <span class="etq">Aux. Valor:</span>
-        <div class="lectura-fila">{{ f.conAuxiliar ? (valorAuxiliar() | pesos) : '' }}</div>
+        <div class="con-casilla">
+          <div class="lectura-fila" style="flex:1">{{ f.conAuxiliar ? (valorAuxiliar() | pesos) : '' }}</div>
+          @if (f.conAuxiliar) {
+            <label class="casilla aux-pagado" title="Ya se le pagó al conductor (el viaje se reportó el día): en su liquidación no se suma al saldo">
+              <input type="checkbox" name="auxPagado" [ngModel]="auxPagado()" (ngModelChange)="ponerAuxPagado($event)" />Pagado</label>
+          }
+        </div>
 
         <label for="v-obs">Observaciones:</label>
         <input id="v-obs" name="obs" maxlength="200" [(ngModel)]="f.observaciones" placeholder="Escribe [NO FACTURAR] para excluirlo de la factura" />
@@ -364,6 +371,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .registro .corto { max-width: 170px; }
     .registro .con-casilla { display: flex; gap: 8px; align-items: center; } .registro .con-casilla input[type=text], .registro .con-casilla input:not([type]) { flex: 1; }
     .registro .con-casilla input[type=checkbox] { width: 20px; height: 20px; min-height: 0; flex: none; }
+    .registro .aux-pagado { margin: 0; white-space: nowrap; flex: none; }
     .registro .lectura-fila { min-height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 10px; border: 1px dashed var(--gris-3); background: var(--gris-1); font-weight: 700; font-variant-numeric: tabular-nums; }
     .registro .chip { margin-top: 4px; }
     .resumen-registro { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 0 2px; font-size: 13px; font-variant-numeric: tabular-nums; }
@@ -574,6 +582,9 @@ export class Viajes {
     const unidad = Number(t?.auxiliarPagado) || Number(ts.find(x => Number(x.auxiliarPagado) > 0)?.auxiliarPagado) || 0;
     return unidad * (Number(f.diasAuxiliar) || 1);
   }
+  // Auxiliar pagado: si no se ha marcado a mano, el viaje reportado hoy ya está pagado y el registrado después queda pendiente
+  auxPagado() { const f = this.form(); return f.auxiliarPagado ?? (f.fecha === hoyIso()); }
+  ponerAuxPagado(v: boolean) { this.form.update(f => ({ ...f, auxiliarPagado: !!v })); }
   ponerAuxiliar(dias: number) { this.form.update(f => ({ ...f, conAuxiliar: dias > 0, diasAuxiliar: dias > 0 ? dias : null })); }
   fechaFormulario(fecha: string) { if (fecha && fecha !== this.waFecha) { this.waFecha = fecha; this.cargarWhatsapp(true); } }
   private reporteDelFormulario(fecha: string) { this.waFecha = fecha || hoyIso(); this.cargarPlantillas().then(() => this.cargarWhatsapp(true)); }
@@ -587,7 +598,7 @@ export class Viajes {
       flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones, estado: v.estado, historico: !!v.historico,
       requiereManifiesto: v.requiereManifiesto !== false,
       licencia: (v as any).licencia || '', conLicencia: !!(v as any).licencia, numeroManifiesto: (v as any).numerosManuales?.manifiesto || '',
-      seguro: !!(v as any).seguro?.marcado,
+      seguro: !!(v as any).seguro?.marcado, auxiliarPagado: v.conAuxiliar ? !!(v as any).auxiliarPagado : null,
     });
     this.preguntarManifiesto.set(false);
     this.habilitarRndc = false;
@@ -697,12 +708,13 @@ export class Viajes {
     const cuerpo: any = { ...f, placa: f.placa.toUpperCase(), remolque: (f.remolque || '').toUpperCase(), tarifaRef: f.tarifaRef || null,
       licencia: f.conLicencia ? (f.licencia || '').trim() : '', numeroManifiesto: (f.numeroManifiesto || '').trim().toUpperCase() };
     delete cuerpo.conLicencia; delete cuerpo.seguro;
+    cuerpo.auxiliarPagado = f.conAuxiliar ? this.auxPagado() : null;
     delete cuerpo._id; delete cuerpo.estado; delete cuerpo.titular;
     if (!cuerpo.numeroManifiesto && !f._id) delete cuerpo.numeroManifiesto;
     for (const k of ['pesoKg', 'cantidad', 'diasAuxiliar', 'tarifa', 'flete', 'anticipo']) if (cuerpo[k] === null || cuerpo[k] === '') delete cuerpo[k];
     delete cuerpo.historico;
     if (this.bloqueado()) {
-      for (const k of Object.keys(cuerpo)) if (!['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa', 'licencia'].includes(k)) delete cuerpo[k];
+      for (const k of Object.keys(cuerpo)) if (!['observaciones', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'auxiliarPagado', 'planilla', 'tarifa', 'licencia'].includes(k)) delete cuerpo[k];
     }
     if (f.historico && this.habilitarRndc) cuerpo.historico = false;
     this.guardando.set(true);

@@ -79,7 +79,7 @@ test('RN-05: anticipo ≥ flete en Pasto, Mayorista o Popayán cuenta como 0', (
 
 test('RN-06: neto = flete + auxiliar − anticipo reconocido − retefuente − FOPAT', () => {
   const l = lineaConductor({ flete: 1000000, auxiliar: 60000, anticipo: 200000, pbv: 12000, destino: 'Ipiales' });
-  assert.deepEqual(l, { retefuente: 10000, fopat: 1000, anticipoReconocido: 200000, saldo: 1000000 + 60000 - 200000 - 10000 - 1000 });
+  assert.deepEqual(l, { retefuente: 10000, fopat: 1000, anticipoReconocido: 200000, auxiliarPagado: false, saldo: 1000000 + 60000 - 200000 - 10000 - 1000 });
   // En Pasto no hay FOPAT aunque el PBV supere 10.500 kg
   assert.equal(lineaConductor({ flete: 1000000, pbv: 12000, destino: 'Pasto' }).fopat, 0);
 });
@@ -239,9 +239,9 @@ test('CA-03: liquidación de SLF645 con auxiliar y anticipo reconocido (neto $ 2
   const base = { cliente: s.corbeta, placa: 'SLF645', conductor: s.conductor };
   const viajes = [
     // Pasto: anticipo igual al flete → anticipo reconocido 0 (RN-05); 1 día de auxiliar de 30.000
-    { ...base, fecha: dia(0), tarifaRef: s.tPasto, destino: 'PASTO 3.0', flete: 460000, anticipo: 460000, conAuxiliar: true, diasAuxiliar: 1 },
+    { ...base, fecha: dia(0), tarifaRef: s.tPasto, destino: 'PASTO 3.0', flete: 460000, anticipo: 460000, conAuxiliar: true, diasAuxiliar: 1, auxiliarPagado: false },
     // Ipiales: sin tarifa de auxiliar → la primera del cliente (Pasto, 30.000) (RF-REG-07)
-    { ...base, fecha: dia(2), tarifaRef: s.tIpiales, destino: 'IPIALES 3.0', flete: 1150000, anticipo: 100000, conAuxiliar: true },
+    { ...base, fecha: dia(2), tarifaRef: s.tIpiales, destino: 'IPIALES 3.0', flete: 1150000, anticipo: 100000, conAuxiliar: true, auxiliarPagado: false },
     { ...base, fecha: dia(4), tarifaRef: s.tTuquerres, destino: 'TUQUERRES', flete: 1150000, anticipo: 68000 },
   ];
   for (const v of viajes) { const r = await s.admin.post('/api/viajes', v); assert.equal(r.status, 201, JSON.stringify(r.body)); }
@@ -251,7 +251,7 @@ test('CA-03: liquidación de SLF645 con auxiliar y anticipo reconocido (neto $ 2
   const c = await s.admin.post('/api/gestion/liq-conductores/calcular', { desde: dia(0), hasta: dia(6), placa: 'SLF645' });
   assert.equal(c.status, 200, JSON.stringify(c.body));
   assert.deepEqual(c.body.lineas.map(l => [l.auxiliar, l.anticipoReconocido]), [[30000, 0], [30000, 100000], [0, 68000]]);
-  assert.deepEqual(c.body.totales, { viajes: 3, flete: 2760000, auxiliar: 60000, anticipo: 628000, anticipoReconocido: 168000, retefuente: 27600, fopat: 0, saldo: 2624400 });
+  assert.deepEqual(c.body.totales, { viajes: 3, flete: 2760000, auxiliar: 60000, auxiliarYaPagado: 0, anticipo: 628000, anticipoReconocido: 168000, retefuente: 27600, fopat: 0, saldo: 2624400 });
 
   // RF-REG-16 / RF-BIT-02: totales de la bitácora con auxiliar, retefuente y FOPAT
   const bit = await s.admin.get(`/api/viajes?desde=${dia(0)}&hasta=${dia(6)}&placa=SLF645`);

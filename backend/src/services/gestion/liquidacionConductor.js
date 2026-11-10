@@ -4,12 +4,13 @@
 //   FOPAT: 0,1 % del flete solo si el PBV del vehículo supera 10.500 kg y el destino no es Pasto.
 //   Anticipo reconocido (RN-05): si el anticipo es mayor o igual al flete y el destino es Pasto,
 //     Mayorista o Popayán, cuenta como 0.
-//   Neto (RN-06) = flete + auxiliar − anticipo reconocido − retefuente − FOPAT − préstamos.
+//   Neto (RN-06) = flete + auxiliar pendiente − anticipo reconocido − retefuente − FOPAT − préstamos.
+//   El auxiliar ya pagado (el del viaje reportado el mismo día) se muestra como «Pagado» y no se suma.
 // Al liquidar se descuentan las cuotas vencidas de préstamos, o el valor que se escoja (máximo lo pendiente).
 import { Viaje, Vehiculo, Tarifa, Cliente, LiquidacionConductor, siguiente, pob } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { normalizar } from '../../utils/texto.js';
-import { lineaLiquidacion, respaldosAuxiliar } from '../calculos.js';
+import { auxiliarYaPagado, lineaLiquidacion, respaldosAuxiliar } from '../calculos.js';
 import { postear } from './contabilidad.js';
 import { asegurarMesAbierto } from './cierre.js';
 import { cuotaPendiente, pendienteTotal, descontar, revertirDescuentos } from './prestamos.js';
@@ -24,10 +25,11 @@ export const anticipoReconocido = (anticipo, flete, destino, reglas = REGLAS_BAS
 const nombre = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : '');
 
 // Valores de una línea a partir de un viaje ya calculado (se exporta para las pruebas de aceptación)
-export function lineaConductor({ flete, auxiliar = 0, anticipo = 0, pbv = null, destino = '' }, reglas = REGLAS_BASE) {
+export function lineaConductor({ flete, auxiliar = 0, auxiliarPagado = false, anticipo = 0, pbv = null, destino = '' }, reglas = REGLAS_BASE) {
   const rt = retefuente(flete, reglas); const fp = fopat(flete, pbv, destino, reglas);
   const antRec = anticipoReconocido(anticipo, flete, destino, reglas);
-  return { retefuente: rt, fopat: fp, anticipoReconocido: antRec, saldo: flete + auxiliar - antRec - rt - fp };
+  const pagado = !!auxiliarPagado && auxiliar > 0;
+  return { retefuente: rt, fopat: fp, anticipoReconocido: antRec, auxiliarPagado: pagado, saldo: flete + (pagado ? 0 : auxiliar) - antRec - rt - fp };
 }
 
 // Viajes sin liquidar al conductor en el rango; `q`: todas las palabras deben aparecer (placa, conductor, empresa, destino…)
@@ -51,7 +53,7 @@ export async function calcular(empresaId, { desde, hasta, q = '', placa = '', co
     if (palabras.length && !palabras.every(p => texto.includes(p))) continue;
     const flete = Number(v.flete) || 0; const anticipo = Number(v.anticipo) || 0;
     const auxiliar = lineaLiquidacion(v, porId.get(String(v.tarifaRef)), { respaldo: respaldo.get(String(v.cliente?._id)) }).totalAuxiliarPagado;
-    const c = lineaConductor({ flete, auxiliar, anticipo, pbv: pbv.get(v.placa), destino: v.destino }, reglas);
+    const c = lineaConductor({ flete, auxiliar, auxiliarPagado: auxiliarYaPagado(v), anticipo, pbv: pbv.get(v.placa), destino: v.destino }, reglas);
     lineas.push({ viaje: v._id, numero: v.numero, fecha: v.fecha, placa: v.placa, conductor: cond, cedula: v.conductor?.numId || '',
       conductorId: v.conductor?._id || null, clienteId: v.cliente?._id || null, empresa: v.cliente?.nombre || '', siglas: v.cliente?.siglas || '',
       destino: v.destino, manifiesto: v.manifiesto?.numero || '', flete, auxiliar, anticipo, ...c, liquidado: !!v.liquidacionConductor });
@@ -61,7 +63,8 @@ export async function calcular(empresaId, { desde, hasta, q = '', placa = '', co
 
 export function totalesLineas(lineas) {
   const tot = (k) => lineas.reduce((a, l) => a + (Number(l[k]) || 0), 0);
-  return { viajes: lineas.length, flete: tot('flete'), auxiliar: tot('auxiliar'), anticipo: tot('anticipo'), anticipoReconocido: tot('anticipoReconocido'),
+  const auxiliarYaPagado = lineas.reduce((a, l) => a + (l.auxiliarPagado ? Number(l.auxiliar) || 0 : 0), 0);
+  return { viajes: lineas.length, flete: tot('flete'), auxiliar: tot('auxiliar'), auxiliarYaPagado, anticipo: tot('anticipo'), anticipoReconocido: tot('anticipoReconocido'),
     retefuente: tot('retefuente'), fopat: tot('fopat'), saldo: tot('saldo') };
 }
 
@@ -113,13 +116,13 @@ export async function liquidar(empresaId, { viajes: ids, desde, hasta, descontar
   const conductores = [...new Set(elegidas.map(x => x.conductor).filter(Boolean))];
   const l = await LiquidacionConductor.create({ empresa: empresaId, numero, fecha: new Date(), placa: [...new Set(elegidas.map(x => x.placa))].join(', '),
     conductor: cedula ? elegidas[0].conductorId : null, conductorNombre: conductores.join(' / '), cedula, desde, hasta, viajes: elegidas.map(x => x.viaje), lineas: elegidas,
-    flete: t.flete, auxiliar: t.auxiliar, anticipo: t.anticipo, anticipoReconocido: t.anticipoReconocido, retefuente: t.retefuente, fopat: t.fopat,
+    flete: t.flete, auxiliar: t.auxiliar, auxiliarYaPagado: t.auxiliarYaPagado, anticipo: t.anticipo, anticipoReconocido: t.anticipoReconocido, retefuente: t.retefuente, fopat: t.fopat,
     descuentoPrestamos: desc.aplicado, interesPrestamos: desc.interes, neto, agrupacion,
     empresas: [...new Set(elegidas.map(x => x.empresa))].join(', '), creadoPor: usuario });
   await Viaje.updateMany({ empresa: empresaId, _id: { $in: l.viajes } }, { $set: { liquidacionConductor: l._id } });
-  // Asiento: costo del flete y el auxiliar contra anticipo reconocido, retenciones, préstamo (capital e interés) y cuenta por pagar
+  // Asiento: costo del flete y el auxiliar contra anticipo reconocido y auxiliar ya pagado (caja), retenciones, préstamo (capital e interés) y cuenta por pagar
   await postear(empresaId, { fecha: l.fecha, documento: numero, concepto: `Liquidacion ${numero} - ${l.conductorNombre}`, origen: 'LIQ',
-    terceroDoc: cedula, tercero: l.conductorNombre, usuario, lineas: [['6155', t.flete + t.auxiliar], ['1110', -t.anticipoReconocido], ['2365', -t.retefuente], ['2380', -t.fopat],
+    terceroDoc: cedula, tercero: l.conductorNombre, usuario, lineas: [['6155', t.flete + t.auxiliar], ['1110', -(t.anticipoReconocido + t.auxiliarYaPagado)], ['2365', -t.retefuente], ['2380', -t.fopat],
       ['1385', -(desc.aplicado - desc.interes)], ['4210', -desc.interes], ['2205', -neto]] });
   return { liquidacion: l, detallePrestamos };
 }
