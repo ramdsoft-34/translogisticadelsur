@@ -35,6 +35,8 @@ interface Fila {
                 @for (c of clientes(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }</select></div>
             <div class="campo"><label for="iv-man">¿Llevan manifiesto del RNDC?</label>
               <select id="iv-man" [(ngModel)]="manifiesto"><option [ngValue]="true">Sí, se expide en el RNDC</option><option [ngValue]="false">No, con soporte interno (urbanos)</option></select></div>
+            <div class="campo"><label for="iv-aux">Auxiliar de los viajes</label>
+              <select id="iv-aux" [(ngModel)]="auxPagado"><option [ngValue]="true">Ya se pagó al conductor</option><option [ngValue]="false">Pendiente de pago</option></select></div>
           </div></li>
           <li>Elija el archivo y revíselo. <strong>Revisar no guarda nada.</strong>
             <input type="file" accept=".xlsx,.xlsm" (change)="elegir($event)" aria-label="Archivo de Excel con los viajes" /></li>
@@ -76,7 +78,7 @@ interface Fila {
               </td>
               <td data-etiqueta="Planilla">{{ f.planilla || '—' }}</td>
               <td data-etiqueta="Tarifa" class="num">{{ f.tarifa | pesos }}</td>
-              <td data-etiqueta="Aux." class="num">{{ f.diasAuxiliar ? f.diasAuxiliar + ' d' : '—' }}</td>
+              <td data-etiqueta="Aux." class="num">{{ f.diasAuxiliar ? f.diasAuxiliar + ' d' : '—' }}@if (f.diasAuxiliar && f.auxiliarPagado) { <br /><small class="pagado">Pagado</small> }</td>
               <td data-etiqueta="Revisión" class="revision">
                 @switch (f.estado) {
                   @case ('lista') { <span class="chip ok sin-punto">Lista</span> }
@@ -125,7 +127,7 @@ interface Fila {
     .tabla-caja { max-height: 52vh; overflow: auto; box-shadow: none; }
     tr.apagada td { opacity: .62; } tr.apagada td:first-child, tr.apagada td.revision { opacity: 1; }
     .revision { min-width: 220px; font-size: 12.5px; } .revision > div { margin-top: 3px; line-height: 1.35; }
-    .error-texto { color: var(--rojo); }
+    .error-texto { color: var(--rojo); } .pagado { color: var(--verde, #2E7D32); font-weight: 650; }
     .corregir { display: grid; gap: 4px; min-width: 230px; } .corregir select { width: 100%; }
   `],
 })
@@ -143,6 +145,7 @@ export class ImportarViajes {
   readonly resultado = signal<{ creados: any[]; fallidos: any[] } | null>(null);
   cliente = '';
   manifiesto = true;
+  auxPagado = true;
 
   readonly visibles = computed(() => (this.filtro() ? this.filas().filter(f => f.estado === this.filtro()) : this.filas()));
   readonly elegidas = computed(() => this.filas().filter(f => f.incluir && this.sePuede(f)));
@@ -164,7 +167,7 @@ export class ImportarViajes {
     const a = this.archivo(); if (!a) return;
     this.trabajando.set(true);
     try {
-      const r = await this.api.subir<any>('/importaciones/viajes/analizar', a, { cliente: this.cliente, manifiesto: this.manifiesto ? '1' : '0' });
+      const r = await this.api.subir<any>('/importaciones/viajes/analizar', a, { cliente: this.cliente, manifiesto: this.manifiesto ? '1' : '0', auxiliarPagado: this.auxPagado ? '1' : '0' });
       this.tarifas.set(r.tarifasPorCliente || {});
       this.filas.set(r.filas.map((f: any) => ({ ...f, incluir: f.estado === 'lista' })));
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }

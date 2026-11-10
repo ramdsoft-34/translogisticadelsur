@@ -66,7 +66,7 @@ r.get('/viajes/plantilla', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
 // Revisa el archivo: no guarda nada
 r.post('/viajes/analizar', permitir(P.CONFIG_GESTIONAR), binario, async (req, res) => {
   const cliente = /^[a-f0-9]{24}$/i.test(String(req.query.cliente || '')) ? String(req.query.cliente) : '';
-  res.json(await analizarViajes(req.empresaId, req.body, { cliente, manifiesto: req.query.manifiesto !== '0' }));
+  res.json(await analizarViajes(req.empresaId, req.body, { cliente, manifiesto: req.query.manifiesto !== '0', auxiliarPagado: req.query.auxiliarPagado !== '0' }));
 });
 
 const oid = z.string().regex(/^[a-f0-9]{24}$/i);

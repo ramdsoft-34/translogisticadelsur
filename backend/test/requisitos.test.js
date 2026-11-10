@@ -508,6 +508,7 @@ test('Importar viajes: relación de fletes con bloques, repetidos que se aprueba
   const v1 = await M.Viaje.findOne({ empresa: s.empresa, placa: 'IMP001', planilla: '501' }).lean();
   assert.equal(v1.fecha.toISOString().slice(0, 10), dia(1), 'con la fecha del archivo');
   assert.equal(v1.requiereManifiesto, false);
+  assert.equal(f1.auxiliarPagado, true, 'por defecto el auxiliar importado ya está pagado');
   assert.ok(v1.soporteInterno?.mc, 'soporte interno numerado como al registrar');
   const v3 = await M.Viaje.findOne({ empresa: s.empresa, placa: 'IMP002' }).lean();
   assert.equal(v3.flete, t.fleteConductor, 'destino elegido a mano: flete de la tarifa');

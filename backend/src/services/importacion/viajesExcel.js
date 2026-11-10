@@ -30,7 +30,7 @@ export const COLUMNAS_VIAJES = [
   ['Anticipo', 'anticipo', false, 'Vacío = el habitual de la tarifa', []],
   ['Días auxiliar', 'diasAuxiliar', false, '1 a 5. Vacío = sin auxiliar (o se calcula de la columna Auxiliar)', ['DIAS AUX']],
   ['Auxiliar', 'auxiliar', false, 'Valor cobrado de auxiliar (si no se escriben los días)', ['VALOR AUXILIAR']],
-  ['Auxiliar pagado', 'auxiliarPagado', false, 'Sí o No (vacío = No: queda pendiente de pago al conductor)', []],
+  ['Auxiliar pagado', 'auxiliarPagado', false, 'Sí o No (vacío = lo elegido al importar; por defecto Sí, ya se pagó)', []],
   ['Manifiesto RNDC', 'manifiesto', false, 'Sí o No (vacío = lo elegido al importar)', ['LLEVA MANIFIESTO']],
   ['Observaciones', 'observaciones', false, '', []],
 ];
@@ -44,7 +44,7 @@ export async function plantillaViajes() {
     c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF111111' } };
     c.alignment = { wrapText: true, vertical: 'middle' };
   });
-  ws.addRow([new Date(Date.UTC(2026, 9, 16)), 'Nutrisur Pasto', 'SLF645', 'Francisco Noguera', 'Pasto TAT 1.0', 1, 982, 140000, '', '', 1, '', 'No', 'No', 'Ejemplo: bórrelo']);
+  ws.addRow([new Date(Date.UTC(2026, 9, 16)), 'Nutrisur Pasto', 'SLF645', 'Francisco Noguera', 'Pasto TAT 1.0', 1, 982, 140000, '', '', 1, '', 'Sí', 'No', 'Ejemplo: bórrelo']);
   ws.getColumn(1).numFmt = 'dd/mm/yyyy';
   ws.columns.forEach((c) => { c.width = 18; });
   ws.views = [{ state: 'frozen', ySplit: 1 }];
@@ -103,7 +103,7 @@ const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean)
 const dia = (f) => f.toISOString().slice(0, 10);
 
 /** Revisa el archivo y propone cada viaje. No guarda nada. */
-export async function analizarViajes(empresaId, buffer, { cliente: clienteDefecto = '', manifiesto = true } = {}) {
+export async function analizarViajes(empresaId, buffer, { cliente: clienteDefecto = '', manifiesto = true, auxiliarPagado = true } = {}) {
   const leidas = leerFilas(await leerLibro(buffer));
   const clientes = await Cliente.find({ empresa: empresaId }).select('nombre siglas nit razonSocial').lean();
   const tarifas = await Tarifa.find({ empresa: empresaId, activo: { $ne: false } }).select('cliente destino codMunicipio tarifaCliente fleteConductor anticipoHabitual tarifaAuxiliar auxiliarPagado pesoKg destinatario operacion').lean();
@@ -212,7 +212,7 @@ export async function analizarViajes(empresaId, buffer, { cliente: clienteDefect
       else if (Math.abs(calc - p.diasAuxiliar) > 0.01) avisos.push(`Auxiliar $${valorAux.toLocaleString('es-CO')} no es un número exacto de días ($${unidad.toLocaleString('es-CO')} por día): se registran ${p.diasAuxiliar}`);
     }
     if (p.diasAuxiliar > 5) { errores.push('El auxiliar va de 1 a 5 días'); p.diasAuxiliar = 5; }
-    p.auxiliarPagado = siNo(crudo.auxiliarPagado) ?? false;
+    p.auxiliarPagado = siNo(crudo.auxiliarPagado) ?? !!auxiliarPagado;
     p.requiereManifiesto = siNo(crudo.manifiesto) ?? !!manifiesto;
     p.observaciones = txt(crudo.observaciones).slice(0, 500);
 
