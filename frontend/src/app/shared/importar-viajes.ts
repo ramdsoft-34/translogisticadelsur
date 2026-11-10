@@ -51,11 +51,19 @@ interface Fila {
           <button type="button" class="alerta" [class.activo]="filtro() === 'repetida'" (click)="filtro.set('repetida')"><span>Ya subidas</span><strong>{{ cuenta('repetida') }}</strong></button>
           <button type="button" class="error" [class.activo]="filtro() === 'error'" (click)="filtro.set('error')"><span>Con error</span><strong>{{ cuenta('error') }}</strong></button>
         </div>
+        <div class="opciones-revision">
+          <div class="campo"><label for="ivr-man">¿Llevan manifiesto del RNDC?</label>
+            <select id="ivr-man" [ngModel]="manifiesto" (ngModelChange)="cambiarManifiesto($event)">
+              <option [ngValue]="true">Sí, se expide en el RNDC</option><option [ngValue]="false">No, con soporte interno (urbanos)</option></select></div>
+          <div class="campo"><label for="ivr-aux">Auxiliar de los viajes</label>
+            <select id="ivr-aux" [ngModel]="auxPagado" (ngModelChange)="cambiarAuxiliar($event)">
+              <option [ngValue]="true">Ya se pagó al conductor</option><option [ngValue]="false">Pendiente de pago</option></select></div>
+        </div>
         <p class="sutil">Las <strong>listas</strong> ya van marcadas. Las que tienen <strong>correcciones</strong> o <strong>ya están subidas</strong> solo se suben si las marca.
           En las que tienen error elija el conductor o el destino; los demás errores se corrigen en el archivo.</p>
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th><input type="checkbox" aria-label="Marcar todas las que se pueden subir" [checked]="todasMarcadas()" (change)="marcarTodas($any($event.target).checked)" /></th>
-            <th>Fila</th><th>Fecha</th><th>Placa</th><th>Conductor</th><th>Destino</th><th>Planilla</th><th class="num">Tarifa</th><th class="num">Flete conductor</th><th class="num">Anticipo</th><th class="num">Aux.</th><th>Revisión</th></tr></thead>
+            <th>Fila</th><th>Fecha</th><th>Placa</th><th>Conductor</th><th>Destino</th><th>Planilla</th><th class="num">Tarifa</th><th class="num">Flete conductor</th><th class="num">Anticipo</th><th class="num">Aux.</th><th>Documento</th><th>Revisión</th></tr></thead>
           <tbody>@for (f of visibles(); track f.fila) {
             <tr [class.apagada]="!f.incluir">
               <td data-etiqueta="Subir"><input type="checkbox" [checked]="f.incluir" [disabled]="!sePuede(f)" (change)="alternar(f, $any($event.target).checked)" [attr.aria-label]="'Subir la fila ' + f.fila" /></td>
@@ -81,6 +89,7 @@ interface Fila {
               <td data-etiqueta="Flete conductor" class="num"><strong>{{ f.flete | pesos }}</strong></td>
               <td data-etiqueta="Anticipo" class="num">{{ f.anticipo | pesos }}</td>
               <td data-etiqueta="Aux." class="num">{{ f.diasAuxiliar ? f.diasAuxiliar + ' d' : '—' }}@if (f.diasAuxiliar && f.auxiliarPagado) { <br /><small class="pagado">Pagado</small> }</td>
+              <td data-etiqueta="Documento">{{ f.requiereManifiesto ? 'Manifiesto RNDC' : 'Soporte interno' }}</td>
               <td data-etiqueta="Revisión" class="revision">
                 @switch (f.estado) {
                   @case ('lista') { <span class="chip ok sin-punto">Lista</span> }
@@ -129,6 +138,7 @@ interface Fila {
     .tabla-caja { max-height: 52vh; overflow: auto; box-shadow: none; }
     tr.apagada td { opacity: .62; } tr.apagada td:first-child, tr.apagada td.revision { opacity: 1; }
     .revision { min-width: 220px; font-size: 12.5px; } .revision > div { margin-top: 3px; line-height: 1.35; }
+    .opciones-revision { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-bottom: 8px; }
     .error-texto { color: var(--rojo); } .pagado { color: var(--verde, #2E7D32); font-weight: 650; }
     .corregir { display: grid; gap: 4px; min-width: 230px; } .corregir select { width: 100%; }
   `],
@@ -183,6 +193,9 @@ export class ImportarViajes {
     if (f.estado !== 'error' || !this.sePuede(f)) return f;
     return { ...f, estado: f.repetidos.length ? 'repetida' : 'revisar', corregido: true, incluir: !f.repetidos.length };
   }
+  // Se cambian en la revisión para todos los viajes del archivo
+  cambiarManifiesto(v: boolean) { this.manifiesto = v; this.filas.update(l => l.map(x => ({ ...x, requiereManifiesto: v }))); }
+  cambiarAuxiliar(v: boolean) { this.auxPagado = v; this.filas.update(l => l.map(x => ({ ...x, auxiliarPagado: v }))); }
   alternar(f: Fila, v: boolean) { this.actualizar(f, { incluir: v }); }
   marcarTodas(v: boolean) {
     const ids = new Set(this.visibles().filter(f => this.sePuede(f)).map(f => f.fila));
