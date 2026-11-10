@@ -9,6 +9,7 @@ import { auditar } from '../services/auditoria.js';
 import { generarPlantilla, importarMaestros, PLANTILLAS } from '../services/importacion/maestros.js';
 import { importarPlantillaViajes } from '../services/importacion/plantilla.js';
 import { huellaArchivo, MAX_BYTES } from '../services/importacion/excel.js';
+import { completarViajes, ponerConductor } from '../services/importacion/completarViajes.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -51,6 +52,23 @@ r.post('/plantilla-viajes', permitir(P.CONFIG_GESTIONAR), binario, async (req, r
   const resultado = await importarPlantillaViajes(req.empresaId, req.body, { usuario: req.usuario._id });
   await auditar(req, 'importar_plantilla_viajes', { detalle: { archivo: nombreArchivo(req), sha256: huellaArchivo(req.body), resultado } });
   res.json(resultado);
+});
+
+// Completar los datos que les faltan a los viajes (importados del Excel): revisar (sin cambios) o aplicar.
+r.post('/completar-viajes', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const aplicar = req.query.aplicar === '1';
+  const resultado = await completarViajes(req.empresaId, { aplicar });
+  if (aplicar) await auditar(req, 'completar_viajes', { detalle: { revisados: resultado.revisados, viajes: resultado.viajesConCambios, cambios: resultado.cambios, pendientes: resultado.pendientes.length } });
+  res.json(resultado);
+});
+
+// Conductor elegido a mano para un viaje que no lo tiene (aunque ya tenga manifiesto)
+r.post('/completar-viajes/:id/conductor', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  if (!/^[a-f0-9]{24}$/i.test(req.params.id) || !/^[a-f0-9]{24}$/i.test(String(req.body?.conductor || ''))) throw new ErrorHttp(400, 'Datos no válidos');
+  const r2 = await ponerConductor(req.empresaId, req.params.id, req.body.conductor);
+  if (!r2.ok) throw new ErrorHttp(409, r2.error);
+  await auditar(req, 'poner_conductor_viaje', { entidad: 'Viaje', entidadId: req.params.id, detalle: { conductor: req.body.conductor } });
+  res.json(r2);
 });
 
 export default r;

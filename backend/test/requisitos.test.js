@@ -432,3 +432,36 @@ test('RF-ADM-02/04 y RF-MAN-03: al cerrar el mes se guarda la copia, los informe
   assert.equal((await s.conta.get('/api/gestion/respaldo')).status, 403);
   await s.admin.post(`/api/gestion/cierres/${mes}/reabrir`, {});
 });
+
+// ── Completar viajes importados del Excel (solo llena lo vacío) ──────────────
+test('Completar viajes importados: conductor por nombre corto y placa, tarifa por destino, y a mano', async () => {
+  const t = await M.Tarifa.findOne({ empresa: s.empresa, _id: s.tPasto }).lean();
+  const base = { empresa: s.empresa, cliente: s.corbeta, fecha: new Date(`${dia(5)}T00:00:00Z`), estado: 'registrado', historico: true };
+  const [a, b, c] = await M.Viaje.create([
+    { ...base, numero: 9001, placa: 'SLF645', destino: t.destino, conductorNombre: 'Wilson Monteros' },   // una letra de diferencia
+    { ...base, numero: 9002, placa: 'ZZZ999', destino: 'Destino raro', conductorNombre: 'Pedro Nadie' },
+    { ...base, numero: 9003, placa: 'SLF645', destino: t.destino, conductor: s.conductor, conductorNombre: 'Wilson', codDestino: '11111111' },
+  ]);
+  const revisar = await s.admin.post('/api/importaciones/completar-viajes', {});
+  assert.equal(revisar.status, 200, JSON.stringify(revisar.body));
+  assert.equal(revisar.body.aplicado, false);
+  assert.equal((await M.Viaje.findOne({ empresa: s.empresa, _id: a._id }).lean()).conductor, null, 'revisar no cambia nada');
+  assert.ok(revisar.body.pendientes.some(p => p.numero === 9002 && p.falta.includes('conductor') && p.falta.includes('tarifa')));
+  assert.ok(!revisar.body.pendientes.some(p => p.numero === 9001));
+  assert.equal((await s.reportero.post('/api/importaciones/completar-viajes', {})).status, 403);
+
+  const aplicar = await s.admin.post('/api/importaciones/completar-viajes?aplicar=1', {});
+  assert.equal(aplicar.status, 200);
+  const va = await M.Viaje.findOne({ empresa: s.empresa, _id: a._id }).lean();
+  assert.equal(String(va.conductor), String(s.conductor));
+  assert.equal(String(va.tarifaRef), String(s.tPasto));
+  assert.equal(va.codDestino, t.codMunicipio);
+  const vc = await M.Viaje.findOne({ empresa: s.empresa, _id: c._id }).lean();
+  assert.equal(vc.codDestino, '11111111', 'lo que ya tenía no se cambia');
+
+  // El que no se encontró se elige a mano (una sola vez)
+  const mano = await s.admin.post(`/api/importaciones/completar-viajes/${b._id}/conductor`, { conductor: s.conductor });
+  assert.equal(mano.status, 200, JSON.stringify(mano.body));
+  assert.equal((await s.admin.post(`/api/importaciones/completar-viajes/${b._id}/conductor`, { conductor: s.conductor })).status, 409);
+  await M.Viaje.deleteMany({ empresa: s.empresa, numero: { $in: [9001, 9002, 9003] } });
+});
