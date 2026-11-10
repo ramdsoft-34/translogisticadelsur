@@ -8,6 +8,7 @@ import { descifrar } from '../utils/cifrado.js';
 import { txt } from '../utils/texto.js';
 import { datosManifiesto, manifiestoPdf, nombreArchivo } from './reportes/manifiesto.js';
 import { soporteInterno } from './gestion/soporteInterno.js';
+import { resolverConductor } from './gestion/conductorViaje.js';
 import { soporteExpedido } from './documentos/expedidos.js';
 
 const urlGraph = () => (process.env.WHATSAPP_GRAPH_URL || 'https://graph.facebook.com/v23.0').replace(/\/$/, '');
@@ -109,13 +110,14 @@ export async function procesarEnvio(empresaId, envioId) {
   if (!r) return null;
   const terminar = async (set) => (await EnvioWhatsapp.findOneAndUpdate({ empresa: empresaId, _id: envioId }, { $set: set }, { new: true }).lean());
   try {
-    const v = await Viaje.findOne({ empresa: empresaId, _id: r.viaje }).select('conductor manifiesto soporteInterno').lean();
+    const v = await Viaje.findOne({ empresa: empresaId, _id: r.viaje }).select('conductor conductorNombre placa manifiesto soporteInterno').lean();
     const doc = documentoVigente(v);
     if (!doc || doc.documento !== r.documento) {
       return await terminar({ estado: 'descartado', error: `${r.tipo === 'soporte' ? 'El soporte interno' : 'El manifiesto'} ya no está vigente: no se envió` });
     }
-    const conductor = await Tercero.findOne({ empresa: empresaId, _id: v.conductor }).select('nombres celular whatsappAutorizado').lean();
-    if (!conductor) throw new Error('El viaje no tiene conductor');
+    const idConductor = await resolverConductor(empresaId, v);
+    const conductor = idConductor && await Tercero.findOne({ empresa: empresaId, _id: idConductor }).select('nombres celular whatsappAutorizado').lean();
+    if (!conductor) throw new Error(v.conductorNombre ? `No se encontró a «${v.conductorNombre}» en Conductores y terceros: edite el viaje y elija el conductor` : 'El viaje no tiene conductor');
     if (!conductor.whatsappAutorizado) throw new Error('El conductor no ha autorizado recibir mensajes por WhatsApp (Conductores y terceros)');
     const para = celularWhatsapp(conductor.celular);
     if (!para) throw new Error('El conductor no tiene un celular válido de 10 dígitos (Conductores y terceros)');
@@ -146,14 +148,14 @@ export async function prepararEnvio(empresaId, viajeId, { origen = 'automatico',
     if (origen === 'automatico') return null;
     const err = new Error('WhatsApp está desactivado para esta empresa (Configuración → WhatsApp)'); err.status = 400; throw err;
   }
-  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('conductor manifiesto soporteInterno').lean();
+  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('conductor conductorNombre placa manifiesto soporteInterno').lean();
   const doc = documentoVigente(v);
   if (!doc) { const err = new Error('Solo se envía el manifiesto aceptado por el RNDC o el soporte interno vigente'); err.status = 409; throw err; }
   const { tipo, documento } = doc;
   // Automático una sola vez por documento: si ya se envió, se descartó o falló, no se vuelve a crear (abrir el soporte no lo repite)
   if (origen === 'automatico' && await EnvioWhatsapp.exists({ empresa: empresaId, viaje: viajeId, documento })) return null;
   if (origen === 'manual') await EnvioWhatsapp.updateMany({ empresa: empresaId, viaje: viajeId, estado: 'por_aprobar' }, { $set: { estado: 'descartado', error: 'Reemplazado por un envío manual' } });
-  const envio = await EnvioWhatsapp.create({ empresa: empresaId, viaje: viajeId, conductor: v.conductor, tipo, documento, origen, usuario, cuenta: e.whatsapp.modo || 'plataforma',
+  const envio = await EnvioWhatsapp.create({ empresa: empresaId, viaje: viajeId, conductor: await resolverConductor(empresaId, v), tipo, documento, origen, usuario, cuenta: e.whatsapp.modo || 'plataforma',
     estado: origen === 'automatico' ? 'por_aprobar' : 'pendiente' });
   return origen === 'automatico' ? envio.toObject() : procesarEnvio(empresaId, envio._id);
 }
