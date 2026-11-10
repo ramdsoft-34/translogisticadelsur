@@ -5,6 +5,7 @@ import { Avisos } from '../core/avisos.service';
 import { Modal } from '../shared/modal';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { DiaPipe } from '../shared/formato';
+import { ImportarViajes } from '../shared/importar-viajes';
 import { Auth } from '../core/auth.service';
 import { P } from '../core/modelos';
 import { Icono } from '../shared/icono';
@@ -16,7 +17,7 @@ type Tipo = 'terceros' | 'vehiculos' | 'tarifas';
 // que antes estaba en su página (simular, ver errores por fila y aplicar).
 @Component({
   selector: 'app-importar',
-  imports: [RouterLink, Icono, ImportarExcel, Modal, BuscarTercero, DiaPipe],
+  imports: [RouterLink, Icono, ImportarExcel, Modal, BuscarTercero, DiaPipe, ImportarViajes],
   template: `
     <div class="pagina-cab">
       <div><h1>Importar datos</h1>
@@ -41,6 +42,10 @@ type Tipo = 'terceros' | 'vehiculos' | 'tarifas';
           <span class="ir">Elegir archivo</span></button>
       }
       @if (puedePlantilla) {
+        <button type="button" class="opcion" (click)="viajesAbierto.set(true)">
+          <span class="ico"><app-icono nombre="camion" [tam]="20" /></span>
+          <span class="txt"><strong>Viajes</strong><small>Sube viajes desde Excel (la relación de fletes del cliente o la plantilla) como si se hubieran registrado, con su fecha. Avisa los que ya están subidos.</small></span>
+          <span class="ir">Elegir archivo</span></button>
         <a class="opcion" routerLink="/configuracion" [queryParams]="{ tab: 'importar' }">
           <span class="ico"><app-icono nombre="lista" [tam]="20" /></span>
           <span class="txt"><strong>Plantilla completa de viajes</strong><small>El libro de Excel de la operación: viajes históricos, conductores y vehículos a la vez.</small></span>
@@ -93,6 +98,7 @@ type Tipo = 'terceros' | 'vehiculos' | 'tarifas';
       </div>
     </app-modal>
 
+    @if (viajesAbierto()) { <app-importar-viajes [abierto]="true" (cerrar)="viajesAbierto.set(false)" /> }
     @if (abierto(); as t) {
       <app-importar-excel [tipo]="t" [titulo]="TITULOS[t]" [abierto]="true" (cerrar)="abierto.set(null)" (importado)="abierto.set(null)" />
     }`,
@@ -117,6 +123,7 @@ export class Importar {
   readonly puedeTarifas = this.auth.tiene(P.MAESTROS_EDITAR, P.TARIFAS_EDITAR);
   readonly puedePlantilla = this.auth.tiene(P.CONFIG_GESTIONAR);
   readonly abierto = signal<Tipo | null>(null);
+  readonly viajesAbierto = signal(false);
   private api = inject(Api);
   private avisos = inject(Avisos);
   readonly completarAbierto = signal(false);

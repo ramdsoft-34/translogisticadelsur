@@ -10,6 +10,8 @@ import { generarPlantilla, importarMaestros, PLANTILLAS } from '../services/impo
 import { importarPlantillaViajes } from '../services/importacion/plantilla.js';
 import { huellaArchivo, MAX_BYTES } from '../services/importacion/excel.js';
 import { completarViajes, ponerConductor } from '../services/importacion/completarViajes.js';
+import { analizarViajes, plantillaViajes, registrarViajes } from '../services/importacion/viajesExcel.js';
+import { z } from 'zod';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -51,6 +53,37 @@ r.post('/maestros/:tipo', permisoPorTipo, binario, async (req, res) => {
 r.post('/plantilla-viajes', permitir(P.CONFIG_GESTIONAR), binario, async (req, res) => {
   const resultado = await importarPlantillaViajes(req.empresaId, req.body, { usuario: req.usuario._id });
   await auditar(req, 'importar_plantilla_viajes', { detalle: { archivo: nombreArchivo(req), sha256: huellaArchivo(req.body), resultado } });
+  res.json(resultado);
+});
+
+// ── Viajes desde Excel (relación de fletes o plantilla), como si se hubieran registrado ──
+r.get('/viajes/plantilla', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="Plantilla_viajes.xlsx"');
+  res.send(await plantillaViajes());
+});
+
+// Revisa el archivo: no guarda nada
+r.post('/viajes/analizar', permitir(P.CONFIG_GESTIONAR), binario, async (req, res) => {
+  const cliente = /^[a-f0-9]{24}$/i.test(String(req.query.cliente || '')) ? String(req.query.cliente) : '';
+  res.json(await analizarViajes(req.empresaId, req.body, { cliente, manifiesto: req.query.manifiesto !== '0' }));
+});
+
+const oid = z.string().regex(/^[a-f0-9]{24}$/i);
+const filaViaje = z.object({
+  fila: z.number().int().min(1), fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), cliente: oid, tarifaRef: oid, conductor: oid,
+  placa: z.string().trim().max(8), cantidad: z.coerce.number().min(0).max(100000).optional().default(1), planilla: z.string().trim().max(30).optional().default(''),
+  tarifa: z.coerce.number().min(0).optional().default(0), flete: z.coerce.number().min(0).optional().default(0), anticipo: z.coerce.number().min(0).optional().default(0),
+  diasAuxiliar: z.coerce.number().int().min(0).max(5).optional().default(0), auxiliarPagado: z.boolean().optional().default(false),
+  requiereManifiesto: z.boolean().optional().default(true), observaciones: z.string().max(500).optional().default(''), confirmarRepetido: z.boolean().optional().default(false),
+  completarDeTarifa: z.boolean().optional().default(false),
+});
+// Registra los viajes elegidos y aprobados en la revisión
+r.post('/viajes/registrar', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const { filas, archivo } = z.object({ filas: z.array(filaViaje).min(1).max(3000), archivo: z.string().max(120).optional().default('') }).parse(req.body);
+  const resultado = await registrarViajes(req.empresaId, req.usuario._id, filas);
+  await auditar(req, 'importar_viajes_excel', { detalle: { archivo, enviados: filas.length, creados: resultado.creados.length, fallidos: resultado.fallidos.length,
+    numeros: resultado.creados.map((x) => x.numero), repetidosAprobados: filas.filter((x) => x.confirmarRepetido).length } });
   res.json(resultado);
 });
 

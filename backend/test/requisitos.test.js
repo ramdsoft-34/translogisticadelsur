@@ -30,6 +30,7 @@ const api = () => request(app);
 const CLAVE = `Prueba${crypto.randomInt(100000, 999999)}`;
 const s = {};
 const con = (token) => ({
+  token,
   get: (u) => api().get(u).set('Authorization', `Bearer ${token}`),
   // Viajes de la misma placa el mismo día a propósito: se confirman (la pregunta tiene su prueba en integral.test.js)
   post: (u, b) => api().post(u).set('Authorization', `Bearer ${token}`)
@@ -464,4 +465,62 @@ test('Completar viajes importados: conductor por nombre corto y placa, tarifa po
   assert.equal(mano.status, 200, JSON.stringify(mano.body));
   assert.equal((await s.admin.post(`/api/importaciones/completar-viajes/${b._id}/conductor`, { conductor: s.conductor })).status, 409);
   await M.Viaje.deleteMany({ empresa: s.empresa, numero: { $in: [9001, 9002, 9003] } });
+});
+
+// ── Importar viajes desde Excel (relación de fletes del cliente) ─────────────
+test('Importar viajes: relación de fletes con bloques, repetidos que se aprueban y errores que se corrigen', async () => {
+  const ExcelJS = (await import('exceljs')).default;
+  const t = await M.Tarifa.findOne({ empresa: s.empresa, _id: s.tPasto }).lean();
+  await M.Vehiculo.create({ empresa: s.empresa, placa: 'IMP001' });
+  const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('RELACION');
+  ws.addRow(['Relación de cargues para facturación']);
+  const h = ['N°', 'Transportador', 'Placa', 'N° Planilla', 'Destino', 'Fecha', 'Cantidad', 'Tarifa', 'Auxiliar', 'Total'];
+  ws.addRow(h);
+  ws.addRow([1, 'Wilson Montero', 'IMP001', 501, t.destino, new Date(`${dia(1)}T00:00:00Z`), 1, t.tarifaCliente, '', t.tarifaCliente]);
+  ws.addRow([2, 'Wilson Montero', 'IMP001', 502, t.destino.toLowerCase(), new Date(`${dia(2)}T00:00:00Z`), 1, 999999, '', 999999]);
+  ws.addRow(h);                                                           // segundo bloque
+  ws.addRow([1, 'Nadie Inexistente', 'IMP002', 503, 'Destino que no existe', new Date(`${dia(1)}T00:00:00Z`), 1, 100000, '', 100000]);
+  ws.addRow(['TOTAL', 'TOTAL', null, null, null, null, null, null, null, 1]);
+  const buf = Buffer.from(await wb.xlsx.writeBuffer());
+  const { token } = s.admin;
+  const subir = () => api().post(`/api/importaciones/viajes/analizar?cliente=${s.corbeta}&manifiesto=0`).set('Authorization', `Bearer ${token}`)
+    .set('Content-Type', 'application/octet-stream').send(buf);
+
+  const a = await subir();
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  assert.equal(a.body.total, 3);
+  const [f1, f2, f3] = a.body.filas;
+  assert.equal(f1.estado, 'lista', JSON.stringify(f1));
+  assert.equal(String(f1.conductor), String(s.conductor));
+  assert.equal(f2.estado, 'revisar', 'tarifa distinta a la registrada');
+  assert.ok(f2.avisos.some(x => /distinta/.test(x)));
+  assert.equal(f3.estado, 'error');
+  assert.ok(f3.errorConductor && f3.errorDestino);
+  assert.equal((await M.Viaje.countDocuments({ empresa: s.empresa, placa: 'IMP001' })), 0, 'revisar no guarda');
+
+  // Se registran la lista y la aprobada; la de error con conductor y destino elegidos a mano
+  const base = (f) => ({ fila: f.fila, fecha: f.fecha, cliente: f.cliente, tarifaRef: f.tarifaRef, conductor: f.conductor, placa: f.placa, planilla: f.planilla,
+    tarifa: f.tarifa, flete: f.flete, anticipo: f.anticipo, requiereManifiesto: f.requiereManifiesto });
+  const reg = await api().post('/api/importaciones/viajes/registrar').set('Authorization', `Bearer ${token}`)
+    .send({ filas: [base(f1), base(f2), { ...base(f3), conductor: s.conductor, tarifaRef: s.tPasto, completarDeTarifa: true }] });
+  assert.equal(reg.status, 200, JSON.stringify(reg.body));
+  assert.equal(reg.body.creados.length, 3, JSON.stringify(reg.body.fallidos));
+  const v1 = await M.Viaje.findOne({ empresa: s.empresa, placa: 'IMP001', planilla: '501' }).lean();
+  assert.equal(v1.fecha.toISOString().slice(0, 10), dia(1), 'con la fecha del archivo');
+  assert.equal(v1.requiereManifiesto, false);
+  assert.ok(v1.soporteInterno?.mc, 'soporte interno numerado como al registrar');
+  const v3 = await M.Viaje.findOne({ empresa: s.empresa, placa: 'IMP002' }).lean();
+  assert.equal(v3.flete, t.fleteConductor, 'destino elegido a mano: flete de la tarifa');
+
+  // Al subir otra vez el mismo archivo, avisa que ya están subidos y no los deja sin aprobar
+  const b = await subir();
+  assert.deepEqual(b.body.filas.map(f => f.estado).slice(0, 2), ['repetida', 'repetida']);
+  const sinAprobar = await api().post('/api/importaciones/viajes/registrar').set('Authorization', `Bearer ${token}`).send({ filas: [base(b.body.filas[0])] });
+  assert.equal(sinAprobar.body.creados.length, 0);
+  assert.match(sinAprobar.body.fallidos[0].error, /Ya existe/);
+  assert.equal((await s.reportero.post('/api/importaciones/viajes/registrar', { filas: [base(f1)] })).status, 403);
+  const pl = await binario(api().get('/api/importaciones/viajes/plantilla').set('Authorization', `Bearer ${token}`));
+  assert.equal(pl.status, 200);
+  await M.Viaje.deleteMany({ empresa: s.empresa, placa: { $in: ['IMP001', 'IMP002'] } });
+  await M.Vehiculo.deleteMany({ empresa: s.empresa, placa: 'IMP001' });
 });
