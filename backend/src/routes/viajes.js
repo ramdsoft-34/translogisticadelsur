@@ -20,7 +20,7 @@ export const autorizacionSchema = z.object({ email: z.string().trim().max(120), 
   motivo: z.string().trim().max(300) }).optional();
 import * as rastreo from '../services/rastreo/surtrack.js';
 import { asegurarSoporte } from '../services/gestion/soporteInterno.js';
-import { exigirNoFacturado } from '../services/gestion/relaciones.js';
+import { exigirNoFacturado, bloqueadosPorRelacion } from '../services/gestion/relaciones.js';
 import { datosSeguro, limiteSeguro } from '../services/gestion/seguros.js';
 
 const r = Router();
@@ -470,6 +470,137 @@ r.delete('/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   await Viaje.deleteOne(deEmpresa(req, { _id: v._id }));
   await auditar(req, 'eliminar_viaje', { entidad: 'Viaje', entidadId: v._id, detalle: { numero: v.numero, placa: v.placa, destino: v.destino } });
   res.json({ ok: true });
+});
+
+// ── Acciones con varios viajes a la vez ─────────────────────────────────────
+// Cada viaje se revisa con las mismas reglas que al editarlo uno por uno (permiso, liquidaciones, mes cerrado,
+// relación facturada, documentos del RNDC). Con simular=true solo dice a cuáles se aplicaría y por qué se omiten los demás.
+const ACCIONES_MASIVAS = ['auxiliar_pagado', 'auxiliar', 'valores', 'aplicar_tarifa', 'observaciones', 'no_facturar', 'manifiesto', 'eliminar'];
+const masivoSchema = z.object({
+  ids: z.array(oid).min(1).max(1000),
+  accion: z.enum(ACCIONES_MASIVAS),
+  valores: z.object({
+    pagado: z.boolean().optional(), dias: z.coerce.number().int().min(0).max(5).optional(),
+    flete: dinero.optional(), anticipo: dinero.optional(), tarifa: dinero.optional(),
+    texto: z.string().trim().max(200).optional(), modo: z.enum(['agregar', 'reemplazar', 'quitar']).optional(),
+    marcar: z.boolean().optional(), requiere: z.boolean().optional(),
+  }).optional().default({}),
+  simular: z.boolean().optional().default(true),
+});
+const NO_FACTURAR = '[NO FACTURAR]';
+const pesosTxt = (n) => `$ ${Math.round(Number(n) || 0).toLocaleString('es-CO')}`;
+const TITULO = { tarifa: 'Tarifa', flete: 'Flete', anticipo: 'Anticipo' };
+
+// Cambios de una acción para un viaje: { set, texto }, { eliminar, texto } o { omitir: motivo }
+export function cambioMasivo(v, accion, x, tarifa) {
+  switch (accion) {
+    case 'auxiliar_pagado': {
+      if (!v.conAuxiliar) return { omitir: 'No lleva auxiliar' };
+      if (auxiliarYaPagado(v) === !!x.pagado) return { omitir: x.pagado ? 'Ya está como pagado' : 'Ya está como pendiente' };
+      return { set: { auxiliarPagado: !!x.pagado }, texto: x.pagado ? 'Auxiliar: pagado' : 'Auxiliar: pendiente de pago' };
+    }
+    case 'auxiliar': {
+      const dias = Number(x.dias) || 0;
+      if ((v.conAuxiliar ? (v.diasAuxiliar || 1) : 0) === dias) return { omitir: 'Ya tiene ese auxiliar' };
+      return { set: { conAuxiliar: dias > 0, diasAuxiliar: dias, ...(dias ? {} : { auxiliarPagado: null }) }, texto: dias ? `Auxiliar: ${dias} día(s)` : 'Sin auxiliar' };
+    }
+    case 'valores': {
+      const set = {}; const t = [];
+      for (const k of ['tarifa', 'flete', 'anticipo']) {
+        if (x[k] !== undefined && Number(v[k] || 0) !== Number(x[k])) { set[k] = x[k]; t.push(`${TITULO[k]} ${pesosTxt(v[k])} → ${pesosTxt(x[k])}`); }
+      }
+      return t.length ? { set, texto: t.join(' · ') } : { omitir: 'Ya tiene esos valores' };
+    }
+    case 'aplicar_tarifa': {
+      if (!tarifa) return { omitir: 'No tiene tarifa (destino) registrada' };
+      const sug = valoresDesdeTarifa(tarifa); const set = {}; const t = [];
+      // Con documentos del RNDC el flete y el anticipo ya van en el manifiesto: solo se actualiza la tarifa del cliente
+      const campos = v.estado === 'registrado' ? ['tarifa', 'flete', 'anticipo'] : ['tarifa'];
+      for (const k of campos) {
+        if (Number(v[k] || 0) !== Number(sug[k] || 0)) { set[k] = sug[k] || 0; t.push(`${TITULO[k]} ${pesosTxt(v[k])} → ${pesosTxt(sug[k])}`); }
+      }
+      return t.length ? { set, texto: t.join(' · ') } : { omitir: 'Ya tiene los valores de su tarifa' };
+    }
+    case 'observaciones': {
+      const actual = String(v.observaciones || ''); const txt = String(x.texto || '');
+      const nuevo = x.modo === 'reemplazar' ? txt
+        : x.modo === 'quitar' ? actual.split(txt).join('').replace(/\s{2,}/g, ' ').trim()
+          : [actual, txt].filter(Boolean).join(' ').trim();
+      if (nuevo === actual) return { omitir: x.modo === 'quitar' ? 'No tiene ese texto' : 'Ya tiene esas observaciones' };
+      if (nuevo.length > 500) return { omitir: 'Las observaciones pasarían de 500 caracteres' };
+      return { set: { observaciones: nuevo }, texto: `Observaciones: «${nuevo || '(vacías)'}»` };
+    }
+    case 'no_facturar': {
+      const actual = String(v.observaciones || ''); const tiene = actual.toUpperCase().includes(NO_FACTURAR);
+      if (tiene === !!x.marcar) return { omitir: x.marcar ? 'Ya está marcado [NO FACTURAR]' : 'No está marcado [NO FACTURAR]' };
+      const nuevo = x.marcar ? `${NO_FACTURAR} ${actual}`.trim().slice(0, 500) : actual.replace(/\[NO FACTURAR\]/ig, '').replace(/\s{2,}/g, ' ').trim();
+      return { set: { observaciones: nuevo }, texto: x.marcar ? 'No se factura al cliente' : 'Vuelve a facturarse' };
+    }
+    case 'manifiesto': {
+      if (v.estado !== 'registrado' || v.remesa?.numero || v.manifiesto?.numero) return { omitir: 'Ya tiene documentos del RNDC' };
+      if (v.soporteInterno?.mc && x.requiere) return { omitir: 'Ya tiene soporte interno numerado (anúlelo primero)' };
+      if ((v.requiereManifiesto !== false) === !!x.requiere) return { omitir: x.requiere ? 'Ya lleva manifiesto' : 'Ya va con soporte interno' };
+      return { set: { requiereManifiesto: !!x.requiere }, texto: x.requiere ? 'Lleva manifiesto del RNDC' : 'Sin manifiesto: soporte interno' };
+    }
+    case 'eliminar': {
+      if (v.estado !== 'registrado' || v.remesa?.radicado || v.manifiesto?.radicado || v.remesa?.numero || v.manifiesto?.numero) return { omitir: 'Tiene documentos en el RNDC: anúlelos en Manifiestos' };
+      if (v.soporteInterno?.mc) return { omitir: 'Tiene soporte interno numerado: anúlelo primero' };
+      return { eliminar: true, texto: 'Se elimina el viaje' };
+    }
+    default: return { omitir: 'Acción no válida' };
+  }
+}
+
+r.post('/masivo', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
+  const d = masivoSchema.parse(req.body);
+  const x = d.valores;
+  if (d.accion === 'auxiliar_pagado' && x.pagado === undefined) throw new ErrorHttp(400, 'Indique si el auxiliar queda pagado o pendiente');
+  if (d.accion === 'auxiliar' && x.dias === undefined) throw new ErrorHttp(400, 'Indique los días de auxiliar (0 = sin auxiliar)');
+  if (d.accion === 'valores' && ['tarifa', 'flete', 'anticipo'].every((k) => x[k] === undefined)) throw new ErrorHttp(400, 'Escriba al menos un valor');
+  if (d.accion === 'observaciones' && (!x.modo || (x.modo !== 'reemplazar' && !x.texto))) throw new ErrorHttp(400, 'Escriba el texto de las observaciones');
+  if (d.accion === 'no_facturar' && x.marcar === undefined) throw new ErrorHttp(400, 'Indique si se marca o se quita');
+  if (d.accion === 'manifiesto' && x.requiere === undefined) throw new ErrorHttp(400, 'Indique si llevan manifiesto');
+  const ids = [...new Set(d.ids)];
+  const viajes = await Viaje.find(deEmpresa(req, { _id: { $in: ids } })).populate(pob(req.empresaId, 'tarifaRef')).sort({ numero: 1 });
+  const facturados = await bloqueadosPorRelacion(req.empresaId, viajes.map((v) => v._id));
+  const todos = tienePermiso(req.usuario.rol, P.VIAJES_EDITAR_TODOS);
+  const aplicables = []; const omitidos = [];
+  for (const v of viajes) {
+    const base = { _id: v._id, numero: v.numero, placa: v.placa, fecha: v.fecha, destino: v.destino };
+    const omitir = (motivo) => omitidos.push({ ...base, motivo });
+    if (v.estado === 'anulado') { omitir('Está anulado'); continue; }
+    if (!todos && String(v.creadoPor) !== String(req.usuario._id)) { omitir('Solo puede modificar los viajes que usted registró'); continue; }
+    if (v.liquidacion) { omitir('Está en una liquidación de fletes'); continue; }
+    if (v.liquidacionConductor) { omitir('Ya está liquidado al conductor'); continue; }
+    try { await asegurarMesAbierto(req.empresaId, v.fecha); } catch { omitir('El mes está cerrado'); continue; }
+    const c = cambioMasivo(v.toObject(), d.accion, x, v.tarifaRef);
+    if (c.omitir) { omitir(c.omitir); continue; }
+    const campos = Object.keys(c.set || {});
+    if (facturados.has(String(v._id)) && (c.eliminar || campos.some((k) => k !== 'observaciones'))) { omitir(`Está en la relación ${facturados.get(String(v._id))}, ya facturada`); continue; }
+    if (!c.eliminar && v.estado !== 'registrado' && campos.some((k) => !CAMPOS_INTERNOS.includes(k))) { omitir('Tiene documentos en el RNDC: ese dato no se puede cambiar'); continue; }
+    aplicables.push({ ...base, cambio: c.texto, _c: c, _v: v });
+  }
+  const resumen = (l) => l.map(({ _c, _v, ...resto }) => resto);
+  if (d.simular) return res.json({ aplicables: resumen(aplicables), omitidos, noEncontrados: ids.length - viajes.length });
+
+  const aplicados = []; const fallidos = [];
+  for (const a of aplicables) {
+    try {
+      if (a._c.eliminar) {
+        if (a._v.rastreo?.activo) await rastreo.finalizar(req.empresaId, a._v._id);
+        await Viaje.deleteOne(deEmpresa(req, { _id: a._v._id }));
+        await auditar(req, 'eliminar_viaje', { entidad: 'Viaje', entidadId: a._v._id, detalle: { numero: a.numero, placa: a.placa, destino: a.destino, masivo: true } });
+      } else {
+        const antes = a._v.toObject();
+        a._v.set({ ...a._c.set, actualizadoPor: req.usuario._id });
+        await a._v.save();
+        if (a._c.set.requiereManifiesto === false) await asegurarSoporte(req.empresaId, a._v._id);
+        await auditar(req, 'editar_viaje', { entidad: 'Viaje', entidadId: a._v._id, detalle: { numero: a.numero, masivo: d.accion, cambios: cambios(antes, a._v.toObject(), Object.keys(a._c.set)) } });
+      }
+      aplicados.push({ _id: a._id, numero: a.numero, cambio: a.cambio, eliminado: !!a._c.eliminar });
+    } catch (e) { fallidos.push({ _id: a._id, numero: a.numero, motivo: e.message }); }
+  }
+  res.json({ aplicados, fallidos, omitidos });
 });
 
 // Placa principal del conductor (o la de su último viaje) para proponerla al registrar

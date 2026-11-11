@@ -525,3 +525,38 @@ test('Importar viajes: relación de fletes con bloques, repetidos que se aprueba
   await M.Viaje.deleteMany({ empresa: s.empresa, placa: { $in: ['IMP001', 'IMP002'] } });
   await M.Vehiculo.deleteMany({ empresa: s.empresa, placa: 'IMP001' });
 });
+
+// ── Acciones con varios viajes a la vez ──────────────────────────────────────
+test('Viajes masivo: revisar sin cambiar, aplicar auxiliar pagado, omitir los que no aplican y eliminar', async () => {
+  const base = { cliente: s.corbeta, tarifaRef: s.tPasto, destino: 'PASTO 3.0', placa: 'MAS001', conductor: s.conductor };
+  const v1 = await s.admin.post('/api/viajes', { ...base, fecha: dia(1), conAuxiliar: true, diasAuxiliar: 1, auxiliarPagado: false });
+  const v2 = await s.admin.post('/api/viajes', { ...base, fecha: dia(2), conAuxiliar: true, diasAuxiliar: 2, auxiliarPagado: false });
+  const v3 = await s.admin.post('/api/viajes', { ...base, fecha: dia(3) });
+  for (const r of [v1, v2, v3]) assert.equal(r.status, 201, JSON.stringify(r.body));
+  const ids = [v1.body._id, v2.body._id, v3.body._id];
+
+  const sim = await s.admin.post('/api/viajes/masivo', { ids, accion: 'auxiliar_pagado', valores: { pagado: true } });
+  assert.equal(sim.status, 200, JSON.stringify(sim.body));
+  assert.equal(sim.body.aplicables.length, 2);
+  assert.equal(sim.body.omitidos.length, 1);
+  assert.equal(sim.body.omitidos[0].motivo, 'No lleva auxiliar');
+  assert.equal((await M.Viaje.findOne({ empresa: s.empresa, _id: v1.body._id }).lean()).auxiliarPagado, false, 'revisar no cambia nada');
+
+  const ap = await s.admin.post('/api/viajes/masivo', { ids, accion: 'auxiliar_pagado', valores: { pagado: true }, simular: false });
+  assert.equal(ap.body.aplicados.length, 2);
+  assert.equal((await M.Viaje.findOne({ empresa: s.empresa, _id: v2.body._id }).lean()).auxiliarPagado, true);
+
+  const nf = await s.admin.post('/api/viajes/masivo', { ids, accion: 'no_facturar', valores: { marcar: true }, simular: false });
+  assert.equal(nf.body.aplicados.length, 3);
+  assert.match((await M.Viaje.findOne({ empresa: s.empresa, _id: v3.body._id }).lean()).observaciones, /\[NO FACTURAR\]/);
+
+  const val = await s.admin.post('/api/viajes/masivo', { ids, accion: 'valores', valores: { flete: 123000 } });
+  assert.equal(val.body.aplicables.length, 3);
+  assert.match(val.body.aplicables[0].cambio, /Flete .* → \$ 123\.000/);
+
+  assert.equal((await s.reportero.post('/api/viajes/masivo', { ids, accion: 'eliminar', simular: false })).body.aplicados.length, 0, 'el reportero solo cambia los suyos');
+  const el = await s.admin.post('/api/viajes/masivo', { ids, accion: 'eliminar', simular: false });
+  assert.equal(el.status, 200);
+  assert.equal(await M.Viaje.countDocuments({ empresa: s.empresa, _id: { $in: ids } }), 0);
+  assert.equal((await s.admin.post('/api/viajes/masivo', { ids, accion: 'auxiliar_pagado' })).status, 400, 'sin indicar el valor');
+});

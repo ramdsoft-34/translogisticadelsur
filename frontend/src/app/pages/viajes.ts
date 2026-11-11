@@ -20,6 +20,7 @@ import { PlantillasWhatsapp } from '../shared/plantillas-whatsapp';
 import { Confirmar } from '../shared/confirmar';
 import { VisorPdf } from '../shared/visor-pdf';
 import { ExportarViajes } from '../shared/exportar-viajes';
+import { AccionesViajes, ViajeElegido } from '../shared/acciones-viajes';
 import { ESTADOS_RASTREO, Rastreo } from '../core/rastreo.service';
 import { ActivarRastreo } from '../shared/activar-rastreo';
 import { ChecklistConductor } from '../shared/checklist-conductor';
@@ -50,7 +51,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, NgTemplateOutlet, Modal, Icono, MenuAcciones, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
+  imports: [FormsModule, NgTemplateOutlet, Modal, Icono, MenuAcciones, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, AccionesViajes, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
@@ -96,11 +97,15 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
     <div class="tabla-caja">
       <table class="tabla-movil">
-        <thead><tr><th>N°</th><th>Fecha</th><th>Cliente / destino</th><th>Placa</th><th>Conductor</th>
+        <thead><tr>@if (puedeRegistrar) { <th class="col-sel"><input type="checkbox" title="Seleccionar los viajes que se ven" aria-label="Seleccionar los viajes que se ven"
+            [checked]="visiblesElegidos()" [indeterminate]="algunoVisible() && !visiblesElegidos()" (change)="elegirVisibles($any($event.target).checked)" /></th> }
+          <th>N°</th><th>Fecha</th><th>Cliente / destino</th><th>Placa</th><th>Conductor</th>
           <th class="num">Flete</th><th class="num">Anticipo</th><th class="num">Auxiliar</th><th class="num">Saldo</th><th>Estado</th></tr></thead>
         <tbody>
           @for (v of viajes(); track v._id) {
-            <tr class="seleccionable" (click)="editar(v)" tabindex="0" (keydown.enter)="editar(v)">
+            <tr class="seleccionable" [class.elegido]="elegidos().has(v._id)" (click)="editar(v)" tabindex="0" (keydown.enter)="editar(v)">
+              @if (puedeRegistrar) { <td class="col-sel" data-etiqueta="Elegir" (click)="$event.stopPropagation()"><input type="checkbox" [checked]="elegidos().has(v._id)"
+                (change)="elegirViaje(v, $any($event.target).checked)" [attr.aria-label]="'Seleccionar el viaje ' + v.numero" /></td> }
               <td data-etiqueta="N°" class="sutil">{{ v.numero }}</td><td data-etiqueta="Fecha">{{ v.fecha | dia }}</td>
               <td data-etiqueta="Cliente"><span class="celda-doble"><span>{{ v.cliente?.nombre }}</span><small>{{ v.destino }}</small></span></td>
               <td data-etiqueta="Placa"><span class="placa">{{ v.placa }}</span></td><td data-etiqueta="Conductor">{{ v.conductorNombre }}</td>
@@ -119,9 +124,9 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             </tr>
           } @empty {
             @if (cargando()) {
-              @for (i of [1, 2, 3, 4]; track i) { <tr><td colspan="10"><span class="esqueleto"></span></td></tr> }
+              @for (i of [1, 2, 3, 4]; track i) { <tr><td [attr.colspan]="puedeRegistrar ? 11 : 10"><span class="esqueleto"></span></td></tr> }
             } @else {
-              <tr><td colspan="10" class="vacio"><strong>{{ periodo() === 'hoy' ? 'Aún no hay viajes hoy' : 'No hay viajes con estos filtros' }}</strong>
+              <tr><td [attr.colspan]="puedeRegistrar ? 11 : 10" class="vacio"><strong>{{ periodo() === 'hoy' ? 'Aún no hay viajes hoy' : 'No hay viajes con estos filtros' }}</strong>
                 {{ periodo() === 'hoy' ? 'Registre el primer despacho del día o revise otro periodo.' : 'Cambie el periodo o los filtros.' }}
                 @if (puedeRegistrar && periodo() === 'hoy') { <div style="margin-top:12px"><button class="primario" (click)="nuevo()"><app-icono nombre="mas" [tam]="16" />Registrar viaje</button></div> }
               </td></tr>
@@ -129,6 +134,15 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
           }
         </tbody>
       </table>
+      @if (elegidos().size) {
+        <div class="barra-seleccion" role="status">
+          <span><strong>{{ elegidos().size }}</strong> viaje{{ elegidos().size === 1 ? '' : 's' }} seleccionado{{ elegidos().size === 1 ? '' : 's' }}
+            @if (fueraDeVista()) { <small class="sutil"> · {{ fueraDeVista() }} de otras búsquedas</small> }</span>
+          <span class="acciones-barra">
+            <button type="button" (click)="limpiarSeleccion()">Quitar selección</button>
+            <button type="button" class="primario" (click)="accionesAbierto.set(true)">Acciones con la selección</button></span>
+        </div>
+      }
       @if (viajes().length) { <app-cargar-mas [mostrados]="viajes().length" [total]="total()" [cargando]="cargandoMas()" unidad="viajes" (mas)="cargarMas()" /> }
     </div>
 
@@ -346,8 +360,16 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     <app-activar-rastreo (listo)="rastreoListo($event)" />
     <app-checklist-conductor />
     <app-exportar-viajes [clientes]="clientes()" />
+    <app-acciones-viajes [abierto]="accionesAbierto()" [seleccion]="listaElegidos()" (cerrar)="accionesAbierto.set(false)"
+      (quitar)="quitarElegido($event)" (aplicado)="trasAccionMasiva($event)" />
     <app-plantillas-whatsapp [abierto]="plantillasAbierto()" [fecha]="waFecha" (cerrar)="plantillasAbierto.set(false)" (cambiadas)="cargarPlantillas()" />`,
   styles: [`
+    .col-sel { width: 36px; } .col-sel input { width: 18px; height: 18px; min-height: 0; cursor: pointer; }
+    tr.elegido td { background: var(--primario-claro, #FFF8E1); }
+    .barra-seleccion { position: sticky; bottom: 12px; z-index: 5; margin: 10px 12px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between;
+      padding: 10px 14px; border-radius: 14px; background: var(--gris-9, #111); color: #fff; box-shadow: var(--sombra-2); }
+    .barra-seleccion .sutil { color: #ccc; } .acciones-barra { display: flex; gap: 8px; flex-wrap: wrap; }
+    .barra-seleccion button:not(.primario) { background: transparent; color: #fff; border-color: #555; }
     .seguro-campo { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
     .seguro-campo .casilla { margin: 0; white-space: nowrap; }
     .seguro-campo small { min-width: 0; }
@@ -483,6 +505,19 @@ export class Viajes {
   habilitarRndc = false;
   readonly estados = Object.entries(ESTADOS_VIAJE);
   readonly viajes = signal<Viaje[]>([]);
+  // Selección para acciones con varios viajes: se conserva al cambiar filtros, periodo o búsqueda
+  readonly elegidos = signal(new Map<string, ViajeElegido>());
+  readonly accionesAbierto = signal(false);
+  readonly listaElegidos = computed(() => [...this.elegidos().values()].sort((a, b) => a.numero - b.numero));
+  readonly visiblesElegidos = computed(() => !!this.viajes().length && this.viajes().every(v => this.elegidos().has(v._id)));
+  readonly algunoVisible = computed(() => this.viajes().some(v => this.elegidos().has(v._id)));
+  readonly fueraDeVista = computed(() => { const ids = new Set(this.viajes().map(v => v._id)); return [...this.elegidos().keys()].filter(id => !ids.has(id)).length; });
+  private elegido(v: Viaje): ViajeElegido { return { _id: v._id, numero: v.numero, placa: v.placa, fecha: String(v.fecha), destino: v.destino }; }
+  elegirViaje(v: Viaje, si: boolean) { this.elegidos.update(m => { const n = new Map(m); if (si) n.set(v._id, this.elegido(v)); else n.delete(v._id); return n; }); }
+  elegirVisibles(si: boolean) { this.elegidos.update(m => { const n = new Map(m); for (const v of this.viajes()) { if (si) n.set(v._id, this.elegido(v)); else n.delete(v._id); } return n; }); }
+  quitarElegido(id: string) { this.elegidos.update(m => { const n = new Map(m); n.delete(id); if (!n.size) this.accionesAbierto.set(false); return n; }); }
+  limpiarSeleccion() { this.elegidos.set(new Map()); }
+  trasAccionMasiva(r: { eliminados: string[] }) { for (const id of r.eliminados) this.quitarElegido(id); this.cargar(); }
   readonly total = signal(0);
   readonly sumas = signal({ flete: 0, anticipo: 0, saldo: 0, auxiliar: 0, retefuente: 0, fopat: 0 });
   private autorizacion = inject(AutorizacionAdmin);
