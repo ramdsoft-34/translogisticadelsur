@@ -707,3 +707,20 @@ test('Deshacer importación: borra los viajes del archivo con copia en Excel y n
   assert.ok(copia.body.length > 1000, 'copia en Excel');
   await M.Viaje.deleteMany({ empresa: s.empresa, placa: { $in: ['DES001', 'DES002'] } });
 });
+
+test('Duplicados: un viaje anulado por error se reactiva y no vuelve a salir como duplicado', async () => {
+  const fecha = new Date(`${dia(4)}T00:00:00Z`);
+  const base = { empresa: s.empresa, cliente: s.corbeta, placa: 'REA001', fecha, conductor: s.conductor, destino: 'X', flete: 1 };
+  const [a] = await M.Viaje.create([{ ...base, numero: 9201 }]);
+  await new Promise((r) => setTimeout(r, 20));
+  const [b] = await M.Viaje.create([{ ...base, numero: 9202 }]);
+  const an = await s.admin.post('/api/importaciones/duplicados/anular', { ids: [String(b._id)] });
+  assert.equal(an.body.anulados.length, 1);
+  const re = await s.admin.post(`/api/importaciones/duplicados/${b._id}/no-es-duplicado`, {});
+  assert.equal(re.status, 200, JSON.stringify(re.body));
+  const v = await M.Viaje.findOne({ empresa: s.empresa, _id: b._id }).lean();
+  assert.equal(v.estado, 'registrado');
+  assert.equal(v.observaciones, '');
+  assert.ok(!(await s.admin.get('/api/importaciones/duplicados')).body.pares.some((p) => p.placa === 'REA001'), 'ya no sale como duplicado');
+  await M.Viaje.deleteMany({ empresa: s.empresa, _id: { $in: [a._id, b._id] } });
+});

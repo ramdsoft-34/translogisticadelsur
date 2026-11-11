@@ -13,7 +13,7 @@ const resumen = (v) => ({ _id: v._id, numero: v.numero, destino: v.destino, flet
   registrado: v.createdAt, historico: !!v.historico, estado: v.estado });
 
 export async function detectarDuplicados(empresaId) {
-  const viajes = await Viaje.find({ empresa: empresaId, estado: { $ne: 'anulado' } })
+  const viajes = await Viaje.find({ empresa: empresaId, estado: { $ne: 'anulado' }, noDuplicado: { $ne: true } })
     .select('numero fecha placa cliente destino tarifaRef flete manifiesto.numero manifiesto.estado soporteInterno.mc historico estado createdAt liquidacion liquidacionConductor')
     .populate(pob(empresaId, 'cliente', 'nombre')).lean();
   const grupos = new Map();
@@ -46,6 +46,22 @@ export async function detectarDuplicados(empresaId) {
   for (const p of pares) if (!p.bloqueo && facturados.has(String(p.duplicado._id))) p.bloqueo = `Está en la relación ${facturados.get(String(p.duplicado._id))}, ya facturada`;
   pares.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.placa.localeCompare(b.placa));
   return { total: pares.length, seguros: pares.filter((p) => p.certeza === 'seguro').length, revisar: pares.filter((p) => p.certeza === 'revisar').length, pares };
+}
+
+/** Reactiva un viaje que se anuló como duplicado y lo marca como «es otro viaje» (no vuelve a salir como duplicado). */
+export async function reactivarViaje(empresaId, usuario, id) {
+  const v = await Viaje.findOne({ empresa: empresaId, _id: id });
+  if (!v) return { ok: false, error: 'Viaje no encontrado' };
+  if (v.estado !== 'anulado') { v.noDuplicado = true; await v.save(); return { ok: true, numero: v.numero, estado: v.estado } }
+  const conRndc = (d) => txt(v[d]?.numero) && ['aceptado', 'anulado'].includes(v[d]?.estado);
+  if (conRndc('remesa') || conRndc('manifiesto')) return { ok: false, error: 'Ese viaje tiene documentos del RNDC: no se anuló como duplicado' };
+  v.estado = 'registrado';
+  v.noDuplicado = true;
+  v.observaciones = txt(v.observaciones).replace(/^\[ANULADO:[^\]]*\]\s*/, '');
+  if (v.soporteInterno?.estado === 'anulado' && /^Duplicado/.test(txt(v.soporteInterno.anulado?.motivo))) v.soporteInterno.estado = '';
+  v.actualizadoPor = usuario;
+  await v.save();
+  return { ok: true, numero: v.numero, estado: v.estado };
 }
 
 /** Anula los duplicados elegidos (se vuelve a comprobar cada uno). */

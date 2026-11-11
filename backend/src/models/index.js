@@ -322,6 +322,7 @@ const viajeSchema = new Schema({
   remolque: str({ uppercase: true }),
   conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },   // obligatorio al registrar (lo exige la API)
   conductorNombre: str(),                             // nombre tal como se registró (respaldo de viajes históricos)
+  noDuplicado: { type: Boolean, default: false },     // revisado: es otro viaje aunque coincida en placa y día con otro
   titular: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },  // vacío = el conductor
   destinatario: { tipoId: str({ uppercase: true }), numId: str(), sede: str() },
   pesoKg: { type: Number, default: 0, min: 0 },

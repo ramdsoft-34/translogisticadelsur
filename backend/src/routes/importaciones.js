@@ -11,7 +11,7 @@ import { importarPlantillaViajes } from '../services/importacion/plantilla.js';
 import { huellaArchivo, MAX_BYTES } from '../services/importacion/excel.js';
 import { completarViajes, ponerConductor } from '../services/importacion/completarViajes.js';
 import { analizarViajes, plantillaViajes, registrarViajes } from '../services/importacion/viajesExcel.js';
-import { anularDuplicados, detectarDuplicados } from '../services/importacion/duplicados.js';
+import { anularDuplicados, detectarDuplicados, reactivarViaje } from '../services/importacion/duplicados.js';
 import { deshacerImportacion, lotesImportados, respaldoExcel, revisarDeshacer } from '../services/importacion/deshacer.js';
 import { z } from 'zod';
 
@@ -107,6 +107,14 @@ r.get('/respaldos/:id/xlsx', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
 
 // Viajes registrados dos veces (mismo cliente, placa y día): revisar y anular los duplicados
 r.get('/duplicados', permitir(P.CONFIG_GESTIONAR), async (req, res) => res.json(await detectarDuplicados(req.empresaId)));
+// «Es otro viaje»: reactiva el anulado como duplicado (o solo lo marca) para que no vuelva a salir
+r.post('/duplicados/:id/no-es-duplicado', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const id = z.string().regex(/^[a-f0-9]{24}$/i).parse(req.params.id);
+  const r2 = await reactivarViaje(req.empresaId, req.usuario._id, id);
+  if (!r2.ok) throw new ErrorHttp(409, r2.error);
+  await auditar(req, 'reactivar_viaje_duplicado', { entidad: 'Viaje', entidadId: id, detalle: { numero: r2.numero, estado: r2.estado } });
+  res.json(r2);
+});
 r.post('/duplicados/anular', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
   const { ids } = z.object({ ids: z.array(z.string().regex(/^[a-f0-9]{24}$/i)).min(1).max(1000) }).parse(req.body);
   const r2 = await anularDuplicados(req.empresaId, req.usuario._id, ids);
