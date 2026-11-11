@@ -77,7 +77,7 @@ export async function completarViajes(empresaId, { aplicar = false } = {}) {
         elegido = r1.elegido;
         if (!elegido) { const r2 = buscarPorNombre(v.conductorNombre, conductores); elegido = r2.elegido; opciones = r2.opciones.length ? r2.opciones : r1.opciones; }
       }
-      if (elegido) { set.conductor = elegido._id; cuenta.conductor++; } else falta.push('conductor');
+      if (elegido) { set.conductor = elegido._id; set.conductorNombre = nombreDe(elegido); cuenta.conductor++; } else falta.push('conductor');
     }
 
     if (!v.titular) {
@@ -110,7 +110,7 @@ export async function completarViajes(empresaId, { aplicar = false } = {}) {
   if (aplicar && cambios.length) {
     // Solo donde sigue vacío (si alguien lo llenó mientras tanto, se respeta)
     const ops = cambios.flatMap(({ _id, set }) => Object.entries(set).map(([k, val]) => ({
-      updateOne: { filter: { empresa: empresaId, _id, [k]: k === 'codDestino' ? { $in: ['', null] } : null }, update: { $set: { [k]: val } } } })));
+      updateOne: { filter: { empresa: empresaId, _id, ...(k === 'conductorNombre' ? {} : { [k]: k === 'codDestino' ? { $in: ['', null] } : null }) }, update: { $set: { [k]: val } } } })));
     await Viaje.bulkWrite(ops, { ordered: false });
   }
   return { revisados: viajes.length, viajesConCambios: cambios.length, cambios: cuenta, aplicado: !!aplicar, pendientes };
@@ -118,8 +118,8 @@ export async function completarViajes(empresaId, { aplicar = false } = {}) {
 
 /** Pone a mano el conductor de un viaje que no lo tiene (también si ya tiene manifiesto). */
 export async function ponerConductor(empresaId, viajeId, conductorId) {
-  const t = await Tercero.findOne({ empresa: empresaId, _id: conductorId }).select('_id').lean();
+  const t = await Tercero.findOne({ empresa: empresaId, _id: conductorId }).select('_id nombres apellido1 apellido2').lean();
   if (!t) return { ok: false, error: 'El conductor no existe en esta empresa' };
-  const r = await Viaje.updateOne({ empresa: empresaId, _id: viajeId, conductor: null }, { $set: { conductor: t._id } });
+  const r = await Viaje.updateOne({ empresa: empresaId, _id: viajeId, conductor: null }, { $set: { conductor: t._id, conductorNombre: nombreDe(t) } });
   return r.modifiedCount ? { ok: true } : { ok: false, error: 'El viaje ya tiene conductor o no existe' };
 }

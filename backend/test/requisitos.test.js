@@ -647,3 +647,37 @@ test('Bodega: configuración, enlace con cédula, reporte por pestaña, revisió
   await M.Viaje.deleteMany({ empresa: s.empresa, placa: 'BOD001' });
   await M.ReporteBodega.deleteMany({ empresa: s.empresa });
 });
+
+// ── Viajes duplicados (importación del Excel) ────────────────────────────────
+test('Duplicados: detecta el viaje repetido del Excel, conserva el del manifiesto y anula el duplicado con su soporte', async () => {
+  const t = await M.Tarifa.findOne({ empresa: s.empresa, _id: s.tPasto }).lean();
+  const fecha = new Date(`${dia(2)}T00:00:00Z`);
+  const base = { empresa: s.empresa, cliente: s.corbeta, placa: 'DUP001', fecha, conductor: s.conductor, tarifaRef: t._id, flete: 400000 };
+  const [orig] = await M.Viaje.create([{ ...base, numero: 9101, destino: t.destino, estado: 'manifestado', manifiesto: { numero: 'M999', estado: 'aceptado' } }]);
+  await new Promise((r) => setTimeout(r, 20));
+  const [dup, otro] = await M.Viaje.create([
+    { ...base, numero: 9102, destino: t.destino.toLowerCase(), historico: true, requiereManifiesto: false, soporteInterno: { mc: 'MC9102', rc: 'RC9102' } },
+    { ...base, numero: 9103, destino: 'Otro destino', historico: true, tarifaRef: null },
+  ]);
+  const det = await s.admin.get('/api/importaciones/duplicados');
+  assert.equal(det.status, 200, JSON.stringify(det.body));
+  const mios = det.body.pares.filter((p) => p.placa === 'DUP001');
+  assert.equal(mios.length, 2);
+  assert.ok(mios.every((p) => p.original.numero === 9101), 'se conserva el del manifiesto');
+  assert.equal(mios.find((p) => p.duplicado.numero === 9102).certeza, 'seguro');
+  assert.equal(mios.find((p) => p.duplicado.numero === 9103).certeza, 'revisar');
+  assert.equal((await s.reportero.get('/api/importaciones/duplicados')).status, 403);
+
+  const an = await s.admin.post('/api/importaciones/duplicados/anular', { ids: [String(dup._id), String(orig._id)] });
+  assert.equal(an.status, 200, JSON.stringify(an.body));
+  assert.equal(an.body.anulados.length, 1);
+  assert.equal(an.body.omitidos.length, 1, 'el original no se anula');
+  const v = await M.Viaje.findOne({ empresa: s.empresa, _id: dup._id }).lean();
+  assert.equal(v.estado, 'anulado');
+  assert.equal(v.soporteInterno.estado, 'anulado');
+  assert.match(v.observaciones, /Duplicado del viaje N° 9101/);
+  assert.equal((await M.Viaje.findOne({ empresa: s.empresa, _id: orig._id }).lean()).estado, 'manifestado');
+  assert.ok(!(await s.admin.get('/api/importaciones/duplicados')).body.pares.some((p) => p.duplicado.numero === 9102), 'ya no aparece');
+  await M.Viaje.deleteMany({ empresa: s.empresa, placa: 'DUP001' });
+  void otro;
+});

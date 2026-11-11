@@ -11,6 +11,7 @@ import { importarPlantillaViajes } from '../services/importacion/plantilla.js';
 import { huellaArchivo, MAX_BYTES } from '../services/importacion/excel.js';
 import { completarViajes, ponerConductor } from '../services/importacion/completarViajes.js';
 import { analizarViajes, plantillaViajes, registrarViajes } from '../services/importacion/viajesExcel.js';
+import { anularDuplicados, detectarDuplicados } from '../services/importacion/duplicados.js';
 import { z } from 'zod';
 
 const r = Router();
@@ -85,6 +86,15 @@ r.post('/viajes/registrar', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
   await auditar(req, 'importar_viajes_excel', { detalle: { archivo, enviados: filas.length, creados: resultado.creados.length, fallidos: resultado.fallidos.length,
     numeros: resultado.creados.map((x) => x.numero), repetidosAprobados: filas.filter((x) => x.confirmarRepetido).length } });
   res.json(resultado);
+});
+
+// Viajes registrados dos veces (mismo cliente, placa y día): revisar y anular los duplicados
+r.get('/duplicados', permitir(P.CONFIG_GESTIONAR), async (req, res) => res.json(await detectarDuplicados(req.empresaId)));
+r.post('/duplicados/anular', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const { ids } = z.object({ ids: z.array(z.string().regex(/^[a-f0-9]{24}$/i)).min(1).max(1000) }).parse(req.body);
+  const r2 = await anularDuplicados(req.empresaId, req.usuario._id, ids);
+  await auditar(req, 'anular_viajes_duplicados', { detalle: { anulados: r2.anulados.map((x) => `${x.numero} (dup. de ${x.original})`), omitidos: r2.omitidos.length } });
+  res.json(r2);
 });
 
 // Completar los datos que les faltan a los viajes (importados del Excel): revisar (sin cambios) o aplicar.

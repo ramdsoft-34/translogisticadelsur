@@ -144,6 +144,15 @@ r.get('/', permitir(P.VIAJES_VER), async (req, res) => {
   const limite = Math.min(Number(req.query.limite) || 100, 1000);
   const pagina = Math.max(Number(req.query.pagina) || 1, 1);
   const filtro = filtroLista(req);
+  // Buscar también por el nombre completo del conductor vinculado (los importados guardaron solo el nombre corto del Excel)
+  if (req.query.q && filtro.$or) {
+    const palabras = String(req.query.q).trim().split(/\s+/).filter((w) => w.length > 1).slice(0, 6).map((w) => new RegExp(escaparRegex(w), 'i'));
+    if (palabras.length) {
+      const ids = await Tercero.find(deEmpresa(req, { roles: 'conductor', $and: palabras.map((re) => ({ $or: [{ nombres: re }, { apellido1: re }, { apellido2: re }, { numId: re }] })) }))
+        .select('_id').limit(200).lean();
+      if (ids.length) filtro.$or.push({ conductor: { $in: ids.map((t) => t._id) } });
+    }
+  }
   // En la agregación los identificadores no se convierten solos
   const filtroAgg = { ...filtro, empresa: new mongoose.Types.ObjectId(String(req.empresaId)) };
   if (typeof filtroAgg.cliente === 'string') filtroAgg.cliente = new mongoose.Types.ObjectId(filtroAgg.cliente);
