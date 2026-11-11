@@ -7,6 +7,7 @@ import { BuscarTercero } from '../shared/buscar-tercero';
 import { DiaPipe } from '../shared/formato';
 import { ImportarViajes } from '../shared/importar-viajes';
 import { ViajesDuplicados } from '../shared/viajes-duplicados';
+import { DeshacerImportacion } from '../shared/deshacer-importacion';
 import { Auth } from '../core/auth.service';
 import { P } from '../core/modelos';
 import { Icono } from '../shared/icono';
@@ -18,7 +19,7 @@ type Tipo = 'terceros' | 'vehiculos' | 'tarifas';
 // que antes estaba en su página (simular, ver errores por fila y aplicar).
 @Component({
   selector: 'app-importar',
-  imports: [RouterLink, Icono, ImportarExcel, Modal, BuscarTercero, DiaPipe, ImportarViajes, ViajesDuplicados],
+  imports: [RouterLink, Icono, ImportarExcel, Modal, BuscarTercero, DiaPipe, ImportarViajes, ViajesDuplicados, DeshacerImportacion],
   template: `
     <div class="pagina-cab">
       <div><h1>Importar datos</h1>
@@ -51,6 +52,10 @@ type Tipo = 'terceros' | 'vehiculos' | 'tarifas';
           <span class="ico"><app-icono nombre="lista" [tam]="20" /></span>
           <span class="txt"><strong>Plantilla completa de viajes</strong><small>El libro de Excel de la operación: viajes históricos, conductores y vehículos a la vez.</small></span>
           <span class="ir">Abrir</span></a>
+        <button type="button" class="opcion" (click)="deshacerAbierto.set(true)">
+          <span class="ico"><app-icono nombre="x" [tam]="20" /></span>
+          <span class="txt"><strong>Deshacer una importación de viajes</strong><small>Borra los viajes de un archivo subido como si no se hubieran subido. Antes guarda una copia en Excel.</small></span>
+          <span class="ir">Elegir</span></button>
         <button type="button" class="opcion" (click)="duplicadosAbierto.set(true)">
           <span class="ico"><app-icono nombre="alerta" [tam]="20" /></span>
           <span class="txt"><strong>Viajes duplicados</strong><small>Viajes del mismo cliente, placa y día registrados dos veces. Se conserva el primero y se anula el más reciente.</small></span>
@@ -103,6 +108,7 @@ type Tipo = 'terceros' | 'vehiculos' | 'tarifas';
       </div>
     </app-modal>
 
+    <app-deshacer-importacion [abierto]="deshacerAbierto()" (cerrar)="deshacerAbierto.set(false)" />
     <app-viajes-duplicados [abierto]="duplicadosAbierto()" (cerrar)="duplicadosAbierto.set(false)" />
     @if (viajesAbierto()) { <app-importar-viajes [abierto]="true" (cerrar)="viajesAbierto.set(false)" /> }
     @if (abierto(); as t) {
@@ -131,6 +137,7 @@ export class Importar {
   readonly abierto = signal<Tipo | null>(null);
   readonly viajesAbierto = signal(false);
   readonly duplicadosAbierto = signal(false);
+  readonly deshacerAbierto = signal(false);
   private api = inject(Api);
   private avisos = inject(Avisos);
   readonly completarAbierto = signal(false);

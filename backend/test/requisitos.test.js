@@ -681,3 +681,29 @@ test('Duplicados: detecta el viaje repetido del Excel, conserva el del manifiest
   await M.Viaje.deleteMany({ empresa: s.empresa, placa: 'DUP001' });
   void otro;
 });
+
+// ── Deshacer una importación de viajes (con copia) ───────────────────────────
+test('Deshacer importación: borra los viajes del archivo con copia en Excel y no toca lo que tiene documentos', async () => {
+  const t = await M.Tarifa.findOne({ empresa: s.empresa, _id: s.tPasto }).lean();
+  const fila = (n, placa) => ({ fila: n, fecha: dia(3), cliente: String(s.corbeta), tarifaRef: String(s.tPasto), conductor: String(s.conductor), placa, tarifa: t.tarifaCliente, flete: t.fleteConductor, requiereManifiesto: false });
+  const reg = await s.admin.post('/api/importaciones/viajes/registrar', { filas: [fila(1, 'DES001'), fila(2, 'DES002')], archivo: 'relacion_prueba.xlsx' });
+  assert.equal(reg.body.creados.length, 2, JSON.stringify(reg.body));
+  // Uno de ellos ya tiene documentos del RNDC: no se borra
+  await M.Viaje.updateOne({ empresa: s.empresa, placa: 'DES002' }, { $set: { 'manifiesto.numero': 'M777' } });
+  const lotes = await s.admin.get('/api/importaciones/viajes/lotes');
+  const lote = lotes.body.find((l) => l.archivo === 'relacion_prueba.xlsx');
+  assert.ok(lote && lote.existentes === 2, JSON.stringify(lotes.body));
+  const rev = await s.admin.get(`/api/importaciones/viajes/lotes/${lote._id}`);
+  assert.equal(rev.body.borrar, 1);
+  assert.equal(rev.body.omitidos[0].motivo, 'Tiene documentos del RNDC');
+  assert.equal((await s.reportero.post(`/api/importaciones/viajes/lotes/${lote._id}/deshacer`, {})).status, 403);
+  const des = await s.admin.post(`/api/importaciones/viajes/lotes/${lote._id}/deshacer`, {});
+  assert.equal(des.status, 200, JSON.stringify(des.body));
+  assert.equal(des.body.borrados, 1);
+  assert.equal(await M.Viaje.countDocuments({ empresa: s.empresa, placa: 'DES001' }), 0, 'borrado');
+  assert.equal(await M.Viaje.countDocuments({ empresa: s.empresa, placa: 'DES002' }), 1, 'el del manifiesto se queda');
+  const copia = await binario(s.admin.get(`/api/importaciones/respaldos/${des.body.respaldo}/xlsx`));
+  assert.equal(copia.status, 200);
+  assert.ok(copia.body.length > 1000, 'copia en Excel');
+  await M.Viaje.deleteMany({ empresa: s.empresa, placa: { $in: ['DES001', 'DES002'] } });
+});

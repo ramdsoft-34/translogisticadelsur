@@ -12,6 +12,7 @@ import { huellaArchivo, MAX_BYTES } from '../services/importacion/excel.js';
 import { completarViajes, ponerConductor } from '../services/importacion/completarViajes.js';
 import { analizarViajes, plantillaViajes, registrarViajes } from '../services/importacion/viajesExcel.js';
 import { anularDuplicados, detectarDuplicados } from '../services/importacion/duplicados.js';
+import { deshacerImportacion, lotesImportados, respaldoExcel, revisarDeshacer } from '../services/importacion/deshacer.js';
 import { z } from 'zod';
 
 const r = Router();
@@ -86,6 +87,22 @@ r.post('/viajes/registrar', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
   await auditar(req, 'importar_viajes_excel', { detalle: { archivo, enviados: filas.length, creados: resultado.creados.length, fallidos: resultado.fallidos.length,
     numeros: resultado.creados.map((x) => x.numero), repetidosAprobados: filas.filter((x) => x.confirmarRepetido).length } });
   res.json(resultado);
+});
+
+// Deshacer una importación de viajes: lista, revisión, borrado (con copia) y copia en Excel
+const oidImp = z.string().regex(/^[a-f0-9]{24}$/i);
+r.get('/viajes/lotes', permitir(P.CONFIG_GESTIONAR), async (req, res) => res.json(await lotesImportados(req.empresaId)));
+r.get('/viajes/lotes/:id', permitir(P.CONFIG_GESTIONAR), async (req, res) => res.json(await revisarDeshacer(req.empresaId, oidImp.parse(req.params.id))));
+r.post('/viajes/lotes/:id/deshacer', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const r2 = await deshacerImportacion(req.empresaId, req.usuario._id, oidImp.parse(req.params.id));
+  await auditar(req, 'deshacer_importacion_viajes', { entidad: 'RespaldoViajes', entidadId: r2.respaldo, detalle: { borrados: r2.borrados, numeros: r2.numeros, omitidos: r2.omitidos.length } });
+  res.json(r2);
+});
+r.get('/respaldos/:id/xlsx', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const { buffer, nombre } = await respaldoExcel(req.empresaId, oidImp.parse(req.params.id));
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${nombre}"`);
+  res.send(buffer);
 });
 
 // Viajes registrados dos veces (mismo cliente, placa y día): revisar y anular los duplicados

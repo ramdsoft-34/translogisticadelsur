@@ -717,6 +717,15 @@ reporteBodegaSchema.plugin(tenantPlugin);
 reporteBodegaSchema.index({ empresa: 1, cliente: 1, fecha: 1 }, { unique: true });
 reporteBodegaSchema.index({ tokenHash: 1 }, { unique: true, partialFilterExpression: { tokenHash: { $type: 'string' } } });
 export const ReporteBodega = modelo('ReporteBodega', reporteBodegaSchema);
+
+// Copia de los viajes borrados al deshacer una importación (para recuperarlos si hiciera falta)
+const respaldoViajesSchema = new Schema({
+  motivo: str({ maxlength: 300 }), archivo: str({ maxlength: 200 }),
+  usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+  viajes: { type: Array, default: [] },
+}, { timestamps: true });
+respaldoViajesSchema.plugin(tenantPlugin);
+export const RespaldoViajes = modelo('RespaldoViajes', respaldoViajesSchema);
 export const PlataformaWhatsapp = modelo('PlataformaWhatsapp', plataformaWhatsappSchema);
 export const Prestamo = modelo('Prestamo', prestamoSchema);
 export const LiquidacionConductor = modelo('LiquidacionConductor', liquidacionConductorSchema);
