@@ -560,3 +560,90 @@ test('Viajes masivo: revisar sin cambiar, aplicar auxiliar pagado, omitir los qu
   assert.equal(await M.Viaje.countDocuments({ empresa: s.empresa, _id: { $in: ids } }), 0);
   assert.equal((await s.admin.post('/api/viajes/masivo', { ids, accion: 'auxiliar_pagado' })).status, 400, 'sin indicar el valor');
 });
+
+// ── Cargues del día del jefe de bodega (enlace por WhatsApp) ─────────────────
+test('Bodega: configuración, enlace con cédula, reporte por pestaña, revisión y vínculo con los viajes', async () => {
+  const cfg = { activa: true, envioAutomatico: false, hora: '06:30', dias: [1, 2, 3, 4, 5, 6], manifiestoUrbanos: false, manifiestoCorrerias: true, auxiliarPagado: true,
+    jefes: [{ nombre: 'Carlos Ruiz', cedula: '12.345.678', celular: '315 123 4567' }] };
+  assert.equal((await s.admin.put(`/api/bodega/config/${s.corbeta}`, { ...cfg, jefes: [{ nombre: 'X Y', cedula: '1', celular: '3151234567' }] })).status, 400, 'cédula no válida');
+  const c = await s.admin.put(`/api/bodega/config/${s.corbeta}`, cfg);
+  assert.equal(c.status, 200, JSON.stringify(c.body));
+  assert.equal(c.body.bodega.jefes[0].cedula, '12345678');
+  assert.equal(c.body.bodega.jefes[0].celular, '3151234567');
+
+  // Se envía (sin WhatsApp activo queda el enlace creado y el envío como fallido)
+  const env = await s.admin.post('/api/bodega/enviar', { clientes: [s.corbeta] });
+  assert.equal(env.status, 200, JSON.stringify(env.body));
+  const dia = await s.admin.get('/api/bodega/dia');
+  const fila = dia.body.clientes.find((x) => String(x._id) === String(s.corbeta));
+  assert.ok(fila?.reporte?._id, 'el reporte del día existe');
+  const enl = await s.admin.get(`/api/bodega/reportes/${fila.reporte._id}/enlace`);
+  assert.equal(enl.status, 200, JSON.stringify(enl.body));
+  const token = enl.body.enlace.split('/b/')[1];
+  assert.ok(token.length >= 20);
+  assert.equal((await s.reportero.get(`/api/bodega/config/${s.corbeta}`)).status, 200);
+  assert.equal((await s.reportero.put(`/api/bodega/config/${s.corbeta}`, cfg)).status, 403, 'solo quien edita maestros configura');
+
+  // Público: portada sin datos, cédula ajena rechazada, sesión con la del jefe
+  const pub = (u) => api().get(`/api/b/${token}${u}`);
+  const portada = await pub('');
+  assert.equal(portada.status, 200);
+  assert.deepEqual(Object.keys(portada.body).sort(), ['cliente', 'empresa', 'fecha', 'fechaTexto', 'vence']);
+  assert.equal((await api().get('/api/b/inexistente-pero-con-forma-valida1')).status, 404);
+  assert.equal((await api().post(`/api/b/${token}/ingresar`).send({ cedula: '99999999' })).status, 403);
+  const ing = await api().post(`/api/b/${token}/ingresar`).send({ cedula: '12345678' });
+  assert.equal(ing.status, 200, JSON.stringify(ing.body));
+  const sesion = ing.body.sesion;
+  assert.equal((await pub('/datos')).status, 401, 'sin sesión no ve nada');
+  assert.equal((await pub('/datos').set('X-Sesion-Bodega', `${sesion}x`)).status, 401, 'sesión alterada');
+  const datos = await pub('/datos').set('X-Sesion-Bodega', sesion);
+  assert.equal(datos.status, 200, JSON.stringify(datos.body));
+  const tipo = 'correria';
+  assert.equal(datos.body.destinos, undefined, 'al jefe de bodega no se le sugieren destinos');
+  const t = await M.Tarifa.findOne({ empresa: s.empresa, _id: s.tPasto }).lean();
+  assert.ok(!JSON.stringify(datos.body).includes('98765432'), 'nunca muestra cédulas de conductores');
+
+  const guardar = (items, cual = 'hoy', t = tipo) => api().put(`/api/b/${token}/reporte`).set('X-Sesion-Bodega', sesion).send({ cual, tipo: t, items });
+  assert.equal((await guardar([{ placa: 'BOD001', destino: '' }])).status, 400, 'el destino es obligatorio');
+  const g = await guardar([{ placa: 'bod-001', destino: t.destino.toLowerCase(), viajes: 2, auxiliar: 2, planilla: '77', conductorTexto: 'Wilson Montero' }]);
+  assert.equal(g.status, 200, JSON.stringify(g.body));
+  assert.equal(g.body.items[0].placa, 'BOD001');
+
+  // Revisión: un renglón por viaje, con el conductor que escribió la bodega
+  const rev = await s.admin.get(`/api/bodega/reportes/${fila.reporte._id}`);
+  assert.equal(rev.status, 200, JSON.stringify(rev.body));
+  assert.equal(rev.body.filas.length, 2);
+  assert.equal(String(rev.body.filas[0].conductor), String(s.conductor));
+  assert.equal(String(rev.body.filas[0].tarifaRef), String(s.tPasto), 'sugiere la tarifa del destino escrito');
+  assert.equal(rev.body.filas[0].auxiliar, 2);
+  assert.equal(rev.body.filas[0].auxiliarPagado, true);
+  assert.equal(rev.body.filas[0].requiereManifiesto, true);
+
+  // Se registra con el proceso normal y se vincula al renglón
+  const f0 = rev.body.filas[0];
+  const v = await s.admin.post('/api/viajes', { fecha: rev.body.fecha, cliente: s.corbeta, tarifaRef: f0.tarifaRef, destino: f0.destino, placa: 'BOD001', conductor: f0.conductor,
+    planilla: '77', conAuxiliar: true, diasAuxiliar: 1, auxiliarPagado: true, requiereManifiesto: true });
+  assert.equal(v.status, 201, JSON.stringify(v.body));
+  const vin = await s.admin.post(`/api/bodega/reportes/${fila.reporte._id}/vincular`, { item: f0.item, viaje: v.body._id });
+  assert.equal(vin.status, 200, JSON.stringify(vin.body));
+  // La bodega ya no puede quitar lo registrado
+  const g2 = await guardar([]);
+  assert.equal(g2.body.items.length, 1);
+  assert.equal(g2.body.items[0].registrado, true);
+  const rev2 = await s.admin.get(`/api/bodega/reportes/${fila.reporte._id}`);
+  assert.equal(rev2.body.filas.filter((x) => x.registrado).length, 1);
+
+  // Fijar placas
+  const fij = await s.admin.put(`/api/bodega/config/${s.corbeta}/placas`, { placa: 'zzz999', accion: 'agregar' });
+  assert.equal(fij.status, 200, JSON.stringify(fij.body));
+  assert.ok(fij.body.frecuentes.some((x) => x.placa === 'ZZZ999' && x.origen === 'agregada' && x.visible && x.tipos.length === 2));
+  const tp = await s.admin.put(`/api/bodega/config/${s.corbeta}/placas`, { placa: 'ZZZ999', accion: 'tipo', tipo: 'urbano' });
+  assert.deepEqual(tp.body.frecuentes.find((x) => x.placa === 'ZZZ999').tipos, ['urbano'], 'solo en urbanos');
+  const qui = await s.admin.put(`/api/bodega/config/${s.corbeta}/placas`, { placa: 'ZZZ999', accion: 'quitar' });
+  assert.ok(qui.body.frecuentes.some((x) => x.placa === 'ZZZ999' && x.origen === 'quitada' && !x.visible));
+  const bus = await s.admin.get(`/api/bodega/config/${s.corbeta}/buscar?q=wilson`);
+  assert.equal(bus.status, 200);
+  assert.ok(bus.body.some((x) => x.placa === 'SLF645'), 'busca por el nombre del conductor');
+  await M.Viaje.deleteMany({ empresa: s.empresa, placa: 'BOD001' });
+  await M.ReporteBodega.deleteMany({ empresa: s.empresa });
+});

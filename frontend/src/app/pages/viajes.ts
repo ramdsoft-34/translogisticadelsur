@@ -21,6 +21,7 @@ import { Confirmar } from '../shared/confirmar';
 import { VisorPdf } from '../shared/visor-pdf';
 import { ExportarViajes } from '../shared/exportar-viajes';
 import { AccionesViajes, ViajeElegido } from '../shared/acciones-viajes';
+import { CarguesBodega } from '../shared/cargues-bodega';
 import { ESTADOS_RASTREO, Rastreo } from '../core/rastreo.service';
 import { ActivarRastreo } from '../shared/activar-rastreo';
 import { ChecklistConductor } from '../shared/checklist-conductor';
@@ -51,7 +52,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, NgTemplateOutlet, Modal, Icono, MenuAcciones, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, AccionesViajes, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
+  imports: [FormsModule, NgTemplateOutlet, Modal, Icono, MenuAcciones, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, AccionesViajes, CarguesBodega, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
@@ -60,6 +61,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
           <button (click)="abrirWhatsapp()"><app-icono nombre="enviar" [tam]="16" />Reporte por WhatsApp<small>Mensaje por cliente con los viajes seleccionados</small></button>
           <button (click)="descargar()"><app-icono nombre="descargar" [tam]="16" />Exportar Excel o PDF<small>General, por empresa o por placa</small></button>
         </app-menu-acciones>
+        @if (puedeRegistrar) { <button (click)="bodegaAbierto.set(true)" title="Lo que reportan los jefes de bodega por el enlace de WhatsApp"><app-icono nombre="enviar" [tam]="16" />Cargues de bodega</button> }
         @if (puedeRegistrar) { <button class="primario" (click)="nuevo()"><app-icono nombre="mas" [tam]="16" />Registrar viaje</button> }
       </div>
     </div>
@@ -360,6 +362,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     <app-activar-rastreo (listo)="rastreoListo($event)" />
     <app-checklist-conductor />
     <app-exportar-viajes [clientes]="clientes()" />
+    <app-cargues-bodega [abierto]="bodegaAbierto()" (cerrar)="bodegaAbierto.set(false)" (registrados)="cargar()" />
     <app-acciones-viajes [abierto]="accionesAbierto()" [seleccion]="listaElegidos()" (cerrar)="accionesAbierto.set(false)"
       (quitar)="quitarElegido($event)" (aplicado)="trasAccionMasiva($event)" />
     <app-plantillas-whatsapp [abierto]="plantillasAbierto()" [fecha]="waFecha" (cerrar)="plantillasAbierto.set(false)" (cambiadas)="cargarPlantillas()" />`,
@@ -508,6 +511,7 @@ export class Viajes {
   // Selección para acciones con varios viajes: se conserva al cambiar filtros, periodo o búsqueda
   readonly elegidos = signal(new Map<string, ViajeElegido>());
   readonly accionesAbierto = signal(false);
+  readonly bodegaAbierto = signal(false);
   readonly listaElegidos = computed(() => [...this.elegidos().values()].sort((a, b) => a.numero - b.numero));
   readonly visiblesElegidos = computed(() => !!this.viajes().length && this.viajes().every(v => this.elegidos().has(v._id)));
   readonly algunoVisible = computed(() => this.viajes().some(v => this.elegidos().has(v._id)));

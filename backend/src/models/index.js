@@ -178,6 +178,21 @@ const clienteSchema = new Schema({
   valorAuxiliarSinAnticipo: { type: Number, default: 30000, min: 0 },
   // Sus viajes se pueden marcar como «seguro»: el manifiesto se anula al día siguiente antes de las 9:00 a. m.
   seguros: { type: Boolean, default: false },
+  // Cargues del día que reporta el jefe de bodega por un enlace de WhatsApp (urbanos y correrías)
+  bodega: {
+    activa: { type: Boolean, default: false },
+    jefes: { type: [{ _id: false, nombre: str({ maxlength: 80 }), cedula: str({ maxlength: 15 }), celular: str({ maxlength: 15 }) }], default: [] },
+    envioAutomatico: { type: Boolean, default: false },
+    hora: str({ default: '06:30', maxlength: 5 }),                 // HH:MM, hora de Colombia
+    dias: { type: [Number], default: [1, 2, 3, 4, 5, 6] },          // 0 domingo … 6 sábado
+    manifiestoUrbanos: { type: Boolean, default: false },          // valor inicial al revisar (se puede cambiar por viaje)
+    manifiestoCorrerias: { type: Boolean, default: true },
+    auxiliarPagado: { type: Boolean, default: true },
+    fijadas: { type: [String], default: [] },                      // placas que salen siempre en el formulario
+    quitadas: { type: [String], default: [] },                     // placas que no salen aunque carguen seguido
+    // Pestaña en la que sale cada placa en el formulario (si no se elige: la de sus viajes; si nunca ha cargado, las dos)
+    tiposPlaca: { type: [{ _id: false, placa: str({ uppercase: true, maxlength: 8 }), tipo: { type: String, enum: ['urbano', 'correria', 'ambos'] } }], default: [] },
+  },
   activo: { type: Boolean, default: true },
   // Envío de documentos por correo cuando el RNDC acepta remesa y manifiesto
   envios: {
@@ -668,6 +683,40 @@ export const PlantillaWhatsapp = modelo('PlantillaWhatsapp', plantillaWhatsappSc
 export const EnvioCorreo = modelo('EnvioCorreo', envioCorreoSchema);
 export const EnvioWhatsapp = modelo('EnvioWhatsapp', envioWhatsappSchema);
 export const MensajeWhatsapp = modelo('MensajeWhatsapp', mensajeWhatsappSchema);
+
+// ── Cargues del día reportados por el jefe de bodega del cliente (enlace por WhatsApp) ──
+// Un documento por cliente y día. El enlace guarda solo su huella (y cifrado, para reenviar el mismo).
+const itemBodegaSchema = new Schema({
+  tipo: { type: String, enum: ['urbano', 'correria'], required: true },
+  placa: str({ uppercase: true, maxlength: 8 }),
+  conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },    // el habitual que se le mostró
+  conductorTexto: str({ maxlength: 80 }),                                        // «otro conductor» escrito por la bodega
+  tarifaRef: { type: Schema.Types.ObjectId, ref: 'Tarifa', default: null },     // (ya no lo elige la bodega)
+  destinoTexto: str({ maxlength: 80 }),                                          // destino escrito por el jefe de bodega
+  planilla: str({ maxlength: 30 }),
+  viajes: { type: Number, default: 1, min: 1, max: 5 },
+  auxiliar: { type: Number, default: 0, min: 0, max: 5 },                        // cuántos auxiliares
+  registrados: { type: [{ type: Schema.Types.ObjectId, ref: 'Viaje' }], default: [] },   // viajes ya creados desde este renglón
+});
+const reporteBodegaSchema = new Schema({
+  cliente: { type: Schema.Types.ObjectId, ref: 'Cliente', required: true },
+  fecha: { type: Date, required: true },                     // día del cargue (medianoche UTC del día en Colombia)
+  tokenHash: { type: String, default: undefined, select: false },
+  tokenCifrado: { type: String, default: '', select: false },
+  vence: fecha,
+  envio: {
+    enviadoEn: fecha, automatico: { type: Boolean, default: false }, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+    destinatarios: { type: [{ _id: false, nombre: String, celular: String, ok: Boolean, error: String, idMensaje: String }], default: [] },
+  },
+  jefe: { nombre: str(), cedula: str() },
+  reportadoEn: fecha,
+  items: { type: [itemBodegaSchema], default: [] },
+  ingreso: { fallidos: { type: Number, default: 0 }, bloqueadoHasta: fecha },
+}, { timestamps: true });
+reporteBodegaSchema.plugin(tenantPlugin);
+reporteBodegaSchema.index({ empresa: 1, cliente: 1, fecha: 1 }, { unique: true });
+reporteBodegaSchema.index({ tokenHash: 1 }, { unique: true, partialFilterExpression: { tokenHash: { $type: 'string' } } });
+export const ReporteBodega = modelo('ReporteBodega', reporteBodegaSchema);
 export const PlataformaWhatsapp = modelo('PlataformaWhatsapp', plataformaWhatsappSchema);
 export const Prestamo = modelo('Prestamo', prestamoSchema);
 export const LiquidacionConductor = modelo('LiquidacionConductor', liquidacionConductorSchema);

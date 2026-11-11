@@ -11,6 +11,7 @@ export const routes: Routes = [
   // Pública: política de privacidad que se registra en Meta (WhatsApp Business)
   { path: 'politica-privacidad', data: { publica: true }, loadComponent: () => import('./pages/privacidad').then(m => m.Privacidad) },
   { path: 'r/:token', loadComponent: () => import('./pages/relacion-publica').then(m => m.RelacionPublica) },
+  { path: 'b/:token', title: 'Cargues del día', loadComponent: () => import('./pages/bodega-publica').then(m => m.BodegaPublica) },
   // Página pública de la empresa; con sesión iniciada lleva directo a la plataforma
   { path: '', pathMatch: 'full', canActivate: [sinSesion], loadComponent: () => import('./pages/landing').then(m => m.Landing) },
   { path: 'ingresar', canActivate: [sinSesion], loadComponent: () => import('./pages/ingresar').then(m => m.Ingresar) },

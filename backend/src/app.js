@@ -23,6 +23,7 @@ import avisosConductores from './routes/avisosConductores.js';
 import appVersion from './routes/appVersion.js';
 import eventos from './routes/eventos.js';
 import { avisarCambios } from './services/eventos.js';
+import bodega, { publico as bodegaPublico } from './routes/bodega.js';
 
 export function crearApp() {
   const app = express();
@@ -49,6 +50,8 @@ export function crearApp() {
   app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
   app.use('/api', avisarCambios);
   app.use('/api/publico', publico);
+  app.use('/api/b', bodegaPublico);
+  app.use('/api/bodega', bodega);
   app.use('/api/auth', auth);
   app.use('/api/admin', superadmin);
   app.use('/api/usuarios', usuarios);

@@ -271,3 +271,13 @@ export async function consumoDelMes(mes) {
   return filas.map(x => ({ empresa: nombres.get(String(x._id.empresa)) || '', cuenta: x._id.cuenta, mensajes: x.mensajes }))
     .sort((a, b) => a.empresa.localeCompare(b.empresa, 'es'));
 }
+
+/** Envía una plantilla de texto con un botón de enlace cuyo final es variable (cargues de bodega). Devuelve el id del mensaje. */
+export async function enviarPlantillaEnlace(empresaId, para, { plantilla, idioma = 'es', cuerpo = [], sufijo = '' }) {
+  const { cuenta, token } = await cuentaWhatsapp(empresaId);
+  const components = [{ type: 'body', parameters: cuerpo.map(valor) }];
+  if (sufijo) components.push({ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: String(sufijo) }] });
+  const r = await llamarMeta(`${cuenta.phoneNumberId}/messages`, token, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: para, type: 'template', template: { name: plantilla, language: { code: idioma }, components } }) });
+  return r.messages?.[0]?.id || '';
+}

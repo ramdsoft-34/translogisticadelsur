@@ -1,4 +1,5 @@
 import { Turno } from '../core/turno';
+import { ConfigBodega } from '../shared/config-bodega';
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -36,7 +37,7 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
 
 @Component({
   selector: 'app-clientes',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, Moneda, Confirmar, ListaBuscable, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, Moneda, Confirmar, ListaBuscable, ...FORMATOS, ConfigBodega],
   template: `
     <div class="pagina-cab">
       <div><h1>Clientes y tarifas</h1><p class="sutil">Cada cliente es una empresa remitente con sus sedes; cada destino es la sede donde se descarga, con su tarifa, flete y anticipo.</p></div>
@@ -74,7 +75,11 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
             <div class="pestanas">
               <button [class.activa]="pestana() === 'destinos'" (click)="pestana.set('destinos')">Destinos y tarifas<span class="chip sin-punto">{{ tarifasSel().length }}</span></button>
               <button [class.activa]="pestana() === 'sedes'" (click)="pestana.set('sedes')">Sedes<span class="chip sin-punto">{{ sedesCliente().length }}</span></button>
+              <button [class.activa]="pestana() === 'bodega'" (click)="pestana.set('bodega')">Cargues por WhatsApp@if (c.bodega?.activa) { <span class="punto-activa" title="Solicitud activa" aria-label="activa"></span> }</button>
+              <button [class.activa]="pestana() === 'frecuentes'" (click)="pestana.set('frecuentes')">Vehículos frecuentes</button>
             </div>
+            @if (pestana() === 'bodega') { <app-config-bodega [cliente]="c._id" vista="config" /> }
+            @if (pestana() === 'frecuentes') { <app-config-bodega [cliente]="c._id" vista="frecuentes" /> }
 
             @if (pestana() === 'destinos') {
               <div class="barra-detalle">
@@ -99,7 +104,7 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
                     <td class="celda-acciones">@if (puedeTarifas) { <div class="acciones acciones-fila"><button class="pequeno" (click)="editarTarifa(t)">Editar</button>
                       <button class="pequeno peligro" confirmar="¿Eliminar?" (confirmado)="eliminarTarifa(t)" [title]="'Eliminar el destino ' + t.destino">Eliminar</button></div> }</td></tr>
                 } @empty { <tr><td colspan="6" class="vacio">Sin destinos. Agregue los destinos habituales con su tarifa.</td></tr> }</tbody></table>
-            } @else {
+            } @else if (pestana() === 'sedes') {
               <div class="barra-detalle">
                 <p class="sutil">Sedes de {{ c.razonSocial || c.nombre }} registradas como tercero ({{ numIdCliente() || idCli(c) }}). La de cargue va en el manifiesto como remitente.</p>
                 @if (puedeTarifas) { <button class="primario pequeno" (click)="nuevaSede()"><app-icono nombre="mas" [tam]="15" />Nueva sede</button> }
@@ -222,7 +227,8 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
       <ng-container pie><button type="button" (click)="abiertoSede.set(false)">Cancelar</button>
         <button class="primario" type="submit" form="form-sede">Crear sede</button></ng-container>
     </app-modal>`,
-  styles: [`.nota-rndc { margin: 0; font-size: 13px; color: var(--gris-6); display: flex; gap: 8px; align-items: center; }
+  styles: [`
+    .punto-activa { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--verde, #2e7d32); margin-left: 7px; vertical-align: middle; }.nota-rndc { margin: 0; font-size: 13px; color: var(--gris-6); display: flex; gap: 8px; align-items: center; }
     .marca-rndc, :host ::ng-deep .va-rndc label::after { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .04em; line-height: 1;
       padding: 3px 6px; border-radius: 999px; background: var(--azul-claro); color: var(--azul); vertical-align: middle; }
     :host ::ng-deep .va-rndc label::after { content: 'RNDC'; margin-left: 6px; }
@@ -270,7 +276,7 @@ export class Clientes {
   readonly clientes = signal<any[]>([]);
   readonly tarifas = signal<any[]>([]);
   readonly sel = signal<any>(null);
-  readonly pestana = signal<'destinos' | 'sedes'>('destinos');
+  readonly pestana = signal<'destinos' | 'sedes' | 'bodega' | 'frecuentes'>('destinos');
   readonly qCli = signal('');
   readonly qTar = signal('');
   readonly clientesVisibles = computed(() => filtrar(this.clientes(), this.qCli()));
