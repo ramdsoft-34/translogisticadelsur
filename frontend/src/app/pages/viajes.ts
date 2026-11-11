@@ -366,7 +366,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
   styles: [`
     .col-sel { width: 36px; } .col-sel input { width: 18px; height: 18px; min-height: 0; cursor: pointer; }
     tr.elegido td { background: var(--primario-claro, #FFF8E1); }
-    .barra-seleccion { position: sticky; bottom: 12px; z-index: 5; margin: 10px 12px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between;
+    .barra-seleccion { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); width: min(760px, calc(100vw - 32px)); z-index: 40; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between;
       padding: 10px 14px; border-radius: 14px; background: var(--gris-9, #111); color: #fff; box-shadow: var(--sombra-2); }
     .barra-seleccion .sutil { color: #ccc; } .acciones-barra { display: flex; gap: 8px; flex-wrap: wrap; }
     .barra-seleccion button:not(.primario) { background: transparent; color: #fff; border-color: #555; }
