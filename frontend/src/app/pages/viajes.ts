@@ -34,6 +34,8 @@ interface Formulario {
   licencia?: string; conLicencia?: boolean; numeroManifiesto?: string; seguro?: boolean;
   auxiliarPagado?: boolean | null;   // null = según la regla (reportado hoy → pagado)
   _id?: string; fecha: string; cliente: string; tarifaRef: string; destino: string; codDestino: string;
+  // Origen / remitente: vacío = el predeterminado (la sede remitente del cliente)
+  codOrigen?: string; remitente?: { tipoId: string; numId: string; sede: string };
   placa: string; remolque: string; conductor: string; titular: string;
   pesoKg: number | null; cantidad: number | null; conAuxiliar: boolean; diasAuxiliar: number | null; planilla: string;
   tarifa: number | null; flete: number | null; anticipo: number | null; observaciones: string; estado?: string; historico?: boolean;
@@ -41,13 +43,16 @@ interface Formulario {
 }
 
 const vacio = (): Formulario => ({
-  fecha: hoyIso(), cliente: '', tarifaRef: '', destino: '', codDestino: '', placa: '', remolque: '', conductor: '', titular: '',
+  fecha: hoyIso(), cliente: '', tarifaRef: '', destino: '', codDestino: '', codOrigen: '', remitente: { tipoId: '', numId: '', sede: '' }, placa: '', remolque: '', conductor: '', titular: '',
   pesoKg: null, cantidad: 1, conAuxiliar: false, diasAuxiliar: null, planilla: '', tarifa: null, flete: null, anticipo: null, observaciones: '', requiereManifiesto: true,
 });
 
 type Periodo = 'hoy' | 'ayer' | 'semana' | 'mes' | 'rango';
 const POR_PAGINA = 50;
 const leerSeguir = () => { try { return localStorage.getItem('tls_seguir_registrando') !== '0'; } catch { return true; } };
+const digitosTxt = (v: any) => String(v ?? '').replace(/\D/g, '');
+const idClienteTxt = (c: any) => c?.tipoId === 'N' ? digitosTxt(c.nit) + digitosTxt(c.dv) : digitosTxt(c?.nit);
+const ordenarSedesTxt = (l: any[]) => [...l].sort((a, b) => String(a.sede.codigo).localeCompare(String(b.sede.codigo), 'es', { numeric: true }));
 const diasAtras = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return isoLocal(d); };
 const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -197,6 +202,29 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             <div class="placas-conductor" role="group" aria-label="Placas del conductor">
               @for (p of placasConductor(); track p) { <button type="button" class="pequeno" [class.primario]="f.placa === p" (click)="usarPlaca(p)">{{ p }}</button> }
             </div>
+          }
+        </div>
+
+        <label for="v-orig">Origen:</label>
+        <div>
+          <select id="v-orig" name="origen" [ngModel]="valorOrigen()" (ngModelChange)="elegirOrigen($event)" [disabled]="bloqueado() || !f.cliente"
+            title="Dónde se carga (remitente de la remesa). El predeterminado es la sede remitente del cliente">
+            <option value="">{{ f.cliente ? 'Predeterminado' + (sedeFicha() ? ': Sede ' + sedeFicha().sede.codigo + ' · ' + (sedeFicha().sede.nombre || '') : '') : 'Primero elija la empresa' }}</option>
+            @for (x of sedesCliente(); track x.sede.codigo) {
+              @if (x.sede.codigo !== sedeFicha()?.sede?.codigo) { <option [value]="'c:' + x.sede.codigo">Sede {{ x.sede.codigo }} · {{ x.sede.nombre }}</option> }
+            }
+            <option value="otro">Otro remitente (otra empresa)…</option>
+          </select>
+          @if (valorOrigen() === 'otro') {
+            <div class="otro-remitente">
+              <input name="remNum" [ngModel]="f.remitente?.numId" (change)="buscarRemitente($any($event.target).value)" maxlength="15" placeholder="NIT con DV o cédula del remitente" aria-label="Documento del remitente" />
+              <select name="remSede" [ngModel]="f.remitente?.sede || ''" (ngModelChange)="elegirSedeOtro($event)" [disabled]="!sedesOtro().length" aria-label="Sede del remitente">
+                <option value="">{{ sedesOtro().length ? 'Elija la sede…' : 'Sin sedes en la plataforma' }}</option>
+                @for (x of sedesOtro(); track x.sede.codigo) { <option [value]="x.sede.codigo">Sede {{ x.sede.codigo }} · {{ x.sede.nombre }}</option> }
+              </select>
+            </div>
+            @if (nombreOtro()) { <small class="sutil">{{ nombreOtro() }}. {{ nombreCliente() }} sigue como propietario de la carga.</small> }
+            @else if (f.remitente?.numId && !sedesOtro().length) { <small class="sutil">No está en la plataforma: regístrelo o traiga sus sedes del RNDC en Clientes y tarifas.</small> }
           }
         </div>
 
@@ -393,6 +421,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
     .col-form { padding: 12px 14px; border: 1px solid var(--gris-2); border-radius: var(--radio-l); background: var(--gris-0); }
     .registro { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 6px 10px; align-items: center; font-size: 13.5px; }
     .registro > label, .registro > .etq { font-weight: 700; white-space: nowrap; }
+    .otro-remitente { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; margin-top: 6px; }
     .registro input, .registro select, .registro .moneda input { min-height: 34px; height: 34px; padding-top: 4px; padding-bottom: 4px; font-size: 13.5px; }
     .registro .corto { max-width: 170px; }
     .registro .con-casilla { display: flex; gap: 8px; align-items: center; } .registro .con-casilla input[type=text], .registro .con-casilla input:not([type]) { flex: 1; }
@@ -614,7 +643,7 @@ export class Viajes {
   estadoTexto(e: string) { return ESTADOS_VIAJE[e] || e; }
   claseEstado(e: string) { return ({ manifestado: 'marca', cumplido: 'ok', anulado: 'error', remesa: 'alerta' } as Record<string, string>)[e] || ''; }
 
-  nuevo() { this.rastreoSrv.cargar(); this.rastreoForm.set(null); this.viajeRastreo = null; this.rastrear.set(false); this.form.set(vacio()); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.preguntarManifiesto.set(false); this.cargarSiguienteNumero(); this.reporteDelFormulario(this.form().fecha); this.abierto.set(true); }
+  nuevo() { this.rastreoSrv.cargar(); this.rastreoForm.set(null); this.viajeRastreo = null; this.rastrear.set(false); this.form.set(vacio()); this.otroRemitente.set(false); this.sedesOtro.set([]); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.preguntarManifiesto.set(false); this.cargarSiguienteNumero(); this.reporteDelFormulario(this.form().fecha); this.abierto.set(true); }
 
   // El reporte de la columna derecha es el de la fecha del formulario
   // Valor del auxiliar: auxiliar pagado del destino × días (sin tarifa de auxiliar en el destino, la primera del cliente)
@@ -639,7 +668,9 @@ export class Viajes {
     this.numeroEditado.set(v.numero);
     this.form.set({
       _id: v._id, fecha: isoDia(v.fecha), cliente: v.cliente?._id || '', tarifaRef: v.tarifaRef?._id || v.tarifaRef || '',
-      destino: v.destino, codDestino: v.codDestino, placa: v.placa, remolque: v.remolque, conductor: v.conductor?._id || '',
+      destino: v.destino, codDestino: v.codDestino, codOrigen: (v as any).codOrigen || '',
+      remitente: { tipoId: (v as any).remitente?.tipoId || '', numId: (v as any).remitente?.numId || '', sede: (v as any).remitente?.sede || '' },
+      placa: v.placa, remolque: v.remolque, conductor: v.conductor?._id || '',
       titular: v.titular?._id || '', pesoKg: v.pesoKg, cantidad: v.cantidad, conAuxiliar: v.conAuxiliar, diasAuxiliar: v.diasAuxiliar || null, planilla: v.planilla || '', tarifa: v.tarifa,
       flete: v.flete, anticipo: v.anticipo, observaciones: v.observaciones, estado: v.estado, historico: !!v.historico,
       requiereManifiesto: v.requiereManifiesto !== false,
@@ -647,6 +678,9 @@ export class Viajes {
       seguro: !!(v as any).seguro?.marcado, auxiliarPagado: v.conAuxiliar ? !!(v as any).auxiliarPagado : null,
     });
     this.preguntarManifiesto.set(false);
+    this.otroRemitente.set(false); this.sedesOtro.set([]);
+    const rem = (v as any).remitente;
+    if (rem?.numId && digitosTxt(rem.numId) !== idClienteTxt(v.cliente) && digitosTxt(rem.numId) !== digitosTxt((v.cliente as any)?.nit)) this.cargarSedesOtro(digitosTxt(rem.numId));
     this.habilitarRndc = false;
     this.rastreoForm.set((v as any).rastreo || null);
     this.viajeRastreo = v;
@@ -655,7 +689,82 @@ export class Viajes {
     this.abierto.set(true);
   }
 
-  cambiarCliente(_: string) { this.form.update(f => ({ ...f, tarifaRef: '', destino: '', codDestino: '', seguro: false })); }
+  cambiarCliente(_: string) { this.otroRemitente.set(false); this.form.update(f => ({ ...f, tarifaRef: '', destino: '', codDestino: '', codOrigen: '', remitente: { tipoId: '', numId: '', sede: '' }, seguro: false })); }
+
+  // ── Origen / remitente: el predeterminado es la sede remitente del cliente; se puede cambiar por otra sede
+  // del cliente (otro municipio de cargue) o por otra empresa (el cliente sigue como propietario de la carga).
+  readonly sedesCliente = signal<any[]>([]);
+  private numIdSedes = '';
+  private turnoSedesCliente = 0;
+  private readonly clienteIdForm = computed(() => this.form().cliente);
+  private sedesDelCliente = effect(() => {
+    const id = this.clienteIdForm();
+    const c = this.clientes().find(x => x._id === id);
+    untracked(() => this.cargarSedesCliente(c));
+  });
+  private async cargarSedesCliente(c: any) {
+    const turno = ++this.turnoSedesCliente;
+    this.sedesCliente.set([]); this.numIdSedes = '';
+    const nit = digitosTxt(c?.nit);
+    if (!nit) return;
+    for (const numId of [...new Set([idClienteTxt(c), nit])]) {
+      try {
+        const l = (await this.api.get<any>('/maestros/terceros/sedes', { numId })).sedes.filter((x: any) => x.sede?.codigo);
+        if (turno !== this.turnoSedesCliente) return;
+        if (l.length) { this.sedesCliente.set(ordenarSedesTxt(l)); this.numIdSedes = numId; return; }
+      } catch { /* sin sedes */ }
+    }
+  }
+  readonly clienteSel = computed(() => this.clientes().find(x => x._id === this.form().cliente) || null);
+  nombreCliente() { return this.clienteSel()?.nombre || 'El cliente'; }
+  readonly sedeFicha = computed(() => this.sedesCliente().find(x => String(x.sede.codigo) === String(this.clienteSel()?.sedeRemitente || '')) || null);
+  readonly otroRemitente = signal(false);
+  readonly valorOrigen = computed(() => {
+    const f = this.form(); const r = f.remitente;
+    const delCliente = (numId: string) => { const n = digitosTxt(numId); const c = this.clienteSel(); return !!c && (n === idClienteTxt(c) || n === digitosTxt(c.nit)); };
+    if (r?.numId) return delCliente(r.numId) ? (String(r.sede) === String(this.sedeFicha()?.sede?.codigo ?? '') ? '' : 'c:' + r.sede) : 'otro';
+    if (this.otroRemitente()) return 'otro';
+    // Viaje con origen escrito (sin remitente): la sede del cliente en ese municipio
+    const o = String(f.codOrigen || '');
+    if (/^\d{8}$/.test(o)) {
+      const ficha = this.sedeFicha();
+      if (ficha && String(ficha.codMunicipio || '').slice(0, 5) === o.slice(0, 5)) return '';
+      const s = this.sedesCliente().find(x => x.codMunicipio === o) || this.sedesCliente().find(x => String(x.codMunicipio || '').slice(0, 5) === o.slice(0, 5));
+      if (s) return 'c:' + s.sede.codigo;
+    }
+    return '';
+  });
+  elegirOrigen(valor: string) {
+    const vacioRem = { tipoId: '', numId: '', sede: '' };
+    if (valor === 'otro') { this.otroRemitente.set(true); this.sedesOtro.set([]); this.form.update(f => ({ ...f, codOrigen: '', remitente: { tipoId: 'N', numId: '', sede: '' } })); return; }
+    this.otroRemitente.set(false);
+    const s = valor.startsWith('c:') ? this.sedesCliente().find(x => String(x.sede.codigo) === valor.slice(2)) : null;
+    if (!s) { this.form.update(f => ({ ...f, codOrigen: '', remitente: vacioRem })); return; }
+    this.form.update(f => ({ ...f, codOrigen: s.codMunicipio || '', remitente: { tipoId: s.tipoId || this.clienteSel()?.tipoId || 'N', numId: s.numId || this.numIdSedes, sede: String(s.sede.codigo) } }));
+  }
+  readonly sedesOtro = signal<any[]>([]);
+  readonly nombreOtro = computed(() => { const t = this.sedesOtro()[0]; return t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : ''; });
+  async buscarRemitente(texto: string) {
+    const numId = digitosTxt(texto);
+    this.form.update(f => ({ ...f, codOrigen: '', remitente: { tipoId: 'N', numId, sede: '' } }));
+    this.sedesOtro.set([]);
+    if (numId.length < 5) return;
+    const l = await this.cargarSedesOtro(numId);
+    if (l[0]) this.form.update(f => ({ ...f, remitente: { ...f.remitente!, tipoId: l[0].tipoId || 'N' } }));
+    if (l.length === 1) this.elegirSedeOtro(String(l[0].sede.codigo));
+  }
+  private async cargarSedesOtro(numId: string): Promise<any[]> {
+    try {
+      const l = ordenarSedesTxt((await this.api.get<any>('/maestros/terceros/sedes', { numId })).sedes.filter((x: any) => x.sede?.codigo));
+      if (digitosTxt(this.form().remitente?.numId) !== numId) return [];
+      this.sedesOtro.set(l);
+      return l;
+    } catch { return []; }
+  }
+  elegirSedeOtro(sede: string) {
+    const s = this.sedesOtro().find(x => String(x.sede.codigo) === String(sede));
+    this.form.update(f => ({ ...f, codOrigen: s?.codMunicipio || '', remitente: { ...f.remitente!, sede: sede || '' } }));
+  }
   // La casilla «Seguro» solo aparece con clientes que manejan seguros (Clientes y tarifas → Maneja seguros)
   clienteConSeguros() { const id = this.form().cliente; return !!id && !!this.clientes().find(c => c._id === id && (c as any).seguros); }
   // Guarda la marca de seguro si cambió (el viaje ya debe existir)

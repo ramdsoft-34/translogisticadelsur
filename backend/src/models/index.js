@@ -326,6 +326,9 @@ const viajeSchema = new Schema({
   conductorNombre: str(),                             // nombre tal como se registró (respaldo de viajes históricos)
   noDuplicado: { type: Boolean, default: false },     // revisado: es otro viaje aunque coincida en placa y día con otro
   titular: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },  // vacío = el conductor
+  // Remitente (dónde se carga): vacío = el cliente en su sede del municipio de origen o la de su ficha.
+  // Puede ser otra sede del cliente u otra empresa; el cliente sigue como propietario de la carga.
+  remitente: { tipoId: str({ uppercase: true }), numId: str(), sede: str() },
   destinatario: { tipoId: str({ uppercase: true }), numId: str(), sede: str() },
   pesoKg: { type: Number, default: 0, min: 0 },
   cantidad: { type: Number, default: 1, min: 0 },     // viajes o unidades (tarifa por unidad)

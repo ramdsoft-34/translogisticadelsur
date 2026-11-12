@@ -457,6 +457,24 @@ test('RNDC: contraseña incorrecta queda como rechazo del RNDC', async () => {
   assert.equal(r2.body.manifiesto.estado, 'aceptado');
 });
 
+test('Viaje con otro remitente: se guarda, va en la remesa y el cliente queda como propietario', async () => {
+  const v = await s.reportero.post('/api/viajes', { fecha: '2026-10-12', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor,
+    remitente: { tipoId: 'n', numId: '900.123.456-7', sede: '3' } });
+  assert.equal(v.status, 201, JSON.stringify(v.body));
+  assert.deepEqual(v.body.remitente, { tipoId: 'N', numId: '9001234567', sede: '3' });
+  const p = (await s.manif.get(`/api/rndc/viajes/${v.body._id}/vista-previa`)).body;
+  const R = Object.fromEntries(p.remesa.variables);
+  assert.deepEqual([R.NUMIDREMITENTE, R.CODSEDEREMITENTE, R.NUMIDPROPIETARIO], ['9001234567', '3', '8001234567']);
+  assert.equal(p.remitente.origen, 'otro');
+  // Volver al predeterminado
+  const e = await s.reportero.put(`/api/viajes/${v.body._id}`, { remitente: { tipoId: '', numId: '', sede: '' } });
+  assert.equal(e.status, 200, JSON.stringify(e.body));
+  const R2 = Object.fromEntries((await s.manif.get(`/api/rndc/viajes/${v.body._id}/vista-previa`)).body.remesa.variables);
+  assert.equal(R2.NUMIDREMITENTE, '8001234567');
+  const b = await s.adminA.del(`/api/viajes/${v.body._id}`);
+  assert.ok([200, 204].includes(b.status), JSON.stringify(b.body));
+});
+
 test('Manifiestos RNDC: revisar, corregir tras un rechazo y reenviar', async () => {
   const v = await s.reportero.post('/api/viajes', { fecha: '2026-11-02', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
   s.viaje3 = v.body._id;

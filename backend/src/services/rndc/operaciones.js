@@ -15,7 +15,7 @@ import {
   variablesAnulacion, variablesTercero, variablesVehiculo, huella, idCliente, destinoIgualOrigen, PROBLEMA_DESTINO, valoresManifiesto, textoAuxiliar, destinoDistintoTarifa,
 } from './documentos.js';
 import { TIPOS_ID_CONDUCTOR, MOTIVOS_REEMPLAZO } from './catalogos.js';
-import { txt, hoyColombia, normalizar, escaparRegex } from '../../utils/texto.js';
+import { txt, hoyColombia, normalizar, escaparRegex, soloDigitos } from '../../utils/texto.js';
 
 const BLOQUEO_MS = 3 * 60 * 1000;
 const PROBLEMA_CANTIDAD = 'Cantidad cargada: escriba el peso de la carga en kg (el RNDC no acepta cero ni vacío)';
@@ -60,11 +60,16 @@ export async function cargarViaje(empresaId, viajeId) {
   // Remitente: la sede del cliente en el municipio de origen del viaje. Un viaje de Túquerres a Cujacal carga en la
   // sede de Túquerres aunque la sede remitente de la ficha sea la bodega de Cujacal; sin sede en ese municipio,
   // queda la de la ficha.
+  // Remitente elegido en el viaje (otra sede del cliente u otra empresa): manda sobre el origen.
   if (v.cliente) {
     const tipoId = v.cliente.tipoId || 'N'; const numId = idCliente(v.cliente);
     const origen = txt(v.codOrigen);
-    if (R?.NUMIDREMITENTE) {
-      if (R.NUMIDREMITENTE === numId && txt(R.CODSEDEREMITENTE)) v.cliente.sedeRemitente = txt(R.CODSEDEREMITENTE);
+    const elegido = R?.NUMIDREMITENTE ? { tipoId: R.CODTIPOIDREMITENTE || 'N', numId: R.NUMIDREMITENTE, sede: txt(R.CODSEDEREMITENTE) }
+      : v.remitente?.numId ? { tipoId: v.remitente.tipoId || 'N', numId: soloDigitos(v.remitente.numId), sede: txt(v.remitente.sede) } : null;
+    if (elegido) {
+      // El mismo cliente en otra sede: también es la sede del propietario (como al elegirla por el origen)
+      if (elegido.numId === numId) { if (elegido.sede) v.cliente.sedeRemitente = elegido.sede; }
+      else v.remitenteRndc = elegido;
     } else if (/^\d{8}$/.test(origen)) {
       const fija = txt(v.cliente.sedeRemitente)
         ? await Tercero.findOne({ empresa: empresaId, tipoId, numId, 'sede.codigo': txt(v.cliente.sedeRemitente) }).select('codMunicipio').lean() : null;
@@ -83,12 +88,17 @@ export async function cargarViaje(empresaId, viajeId) {
       // La sede en ese municipio exacto; si no, en un centro poblado del mismo municipio (ej. El Plateado en Argelia)
       const sedes = await Tercero.find({ empresa: empresaId, tipoId: v.cliente.tipoId || 'N', numId: idCliente(v.cliente), codMunicipio: new RegExp(`^${codDestino.slice(0, 5)}`) })
         .select('tipoId numId sede codMunicipio').lean();
-      const s = elegirSedeMunicipio(sedes, codDestino, v.cliente.sedeRemitente);
+      const s = elegirSedeMunicipio(sedes, codDestino, v.remitenteRndc ? '' : v.cliente.sedeRemitente);
       if (s) v.destinatarioAuto = { tipoId: s.tipoId, numId: s.numId, sede: s.sede.codigo, nombreSede: s.sede.nombre || '' };
     }
   }
-  // Municipio de la sede del remitente (el cliente): será el origen del manifiesto
-  if (v.cliente && txt(v.cliente.sedeRemitente)) {
+  // Municipio de la sede del remitente: será el origen del manifiesto
+  if (v.remitenteRndc) {
+    const sedeRem = txt(v.remitenteRndc.sede) ? await Tercero.findOne({ empresa: empresaId, tipoId: v.remitenteRndc.tipoId, numId: v.remitenteRndc.numId, 'sede.codigo': txt(v.remitenteRndc.sede) })
+      .select('codMunicipio sede nombres apellido1 apellido2').lean() : null;
+    if (sedeRem?.codMunicipio) v.codOrigenSede = sedeRem.codMunicipio;
+    v.remitenteRndc.registrado = !!sedeRem;
+  } else if (v.cliente && txt(v.cliente.sedeRemitente)) {
     const sedeRem = await Tercero.findOne({ empresa: empresaId, tipoId: v.cliente.tipoId || 'N', numId: idCliente(v.cliente), 'sede.codigo': txt(v.cliente.sedeRemitente) })
       .select('codMunicipio').lean();
     if (sedeRem?.codMunicipio) v.codOrigenSede = sedeRem.codMunicipio;
@@ -290,7 +300,10 @@ export async function vistaPrevia(empresaId, viajeId) {
     // Respuesta textual del RNDC en el último rechazo (para corregir y reenviar)
     ultimoError: ultimo && !(v.manifiesto?.estado === 'aceptado')
       ? { proceso: ultimo.proceso, mensaje: ultimo.mensaje, fecha: ultimo.createdAt, referencia: ultimo.referencia } : null,
-    avisos: [...avisosViaje(v, vehiculo), ...(revDestino.aviso ? [revDestino.aviso] : [])],
+    avisos: [...avisosViaje(v, vehiculo), ...(revDestino.aviso ? [revDestino.aviso] : []),
+      ...(v.remitenteRndc && !v.remitenteRndc.registrado && v.remesa?.estado !== 'aceptado' ? [`El remitente ${v.remitenteRndc.numId} sede ${v.remitenteRndc.sede || '(sin sede)'} no está en la plataforma: verifíquelo o traiga sus sedes del RNDC antes de enviar`] : [])],
+    // Quién carga (remitente) y en qué municipio: el origen del manifiesto
+    remitente: { tipoId: ctx.REM_TIPO, numId: ctx.REM_ID, sede: ctx.REM_SEDE, origen: v.remitenteRndc ? 'otro' : 'cliente', municipio: v.codOrigenSede || '' },
     maestros: [
       vehiculo ? estadoMaestro(empresa, 'vehiculo', 'Vehículo', vehiculo) : { tipo: 'vehiculo', rol: 'Vehículo', referencia: v.placa, estado: 'no_existe', faltantes: [] },
       v.remolque ? (remolque ? estadoMaestro(empresa, 'vehiculo', 'Remolque', remolque) : { tipo: 'vehiculo', rol: 'Remolque', referencia: v.remolque, estado: 'no_existe', faltantes: [] }) : null,

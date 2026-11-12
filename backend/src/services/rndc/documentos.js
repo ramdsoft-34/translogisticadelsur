@@ -123,6 +123,10 @@ export function contextoViaje(empresa, viaje, vehiculo) {
     NIT_CLIENTE: idCliente(cliente),
     TIPO_CLIENTE: cliente.tipoId || 'N',
     SEDE_CLIENTE: cliente.sedeRemitente || '',
+    // Remitente: el elegido en el viaje (otra empresa u otra sede) o el cliente con su sede
+    REM_TIPO: viaje.remitenteRndc?.numId ? (viaje.remitenteRndc.tipoId || 'N') : (cliente.tipoId || 'N'),
+    REM_ID: viaje.remitenteRndc?.numId || idCliente(cliente),
+    REM_SEDE: viaje.remitenteRndc?.numId ? (viaje.remitenteRndc.sede || '') : (cliente.sedeRemitente || ''),
     DEST_TIPO: dest?.tipoId || cliente.tipoId || 'N',
     DEST_ID: dest?.numId || idCliente(cliente),
     // Sin destinatario propio, el destinatario es el cliente con su sede registrada en el RNDC
@@ -192,7 +196,7 @@ export function valoresManifiesto(empresa, viaje, vehiculo) {
 // El RNDC rechaza (REM019) remesas cuyo punto de cargue y de descargue son la misma dirección:
 // pasa cuando el destinatario es el mismo remitente con la misma sede.
 export function destinoIgualOrigen(ctx) {
-  return ctx.DEST_TIPO === ctx.TIPO_CLIENTE && ctx.DEST_ID === ctx.NIT_CLIENTE && String(ctx.DEST_SEDE || '') === String(ctx.SEDE_CLIENTE || '');
+  return ctx.DEST_TIPO === ctx.REM_TIPO && ctx.DEST_ID === ctx.REM_ID && String(ctx.DEST_SEDE || '') === String(ctx.REM_SEDE || '');
 }
 export const PROBLEMA_DESTINO = 'Destinatario: es el mismo remitente en la misma sede (el RNDC lo rechaza con REM019). Elija quién recibe en destino o la sede del cliente en ese municipio';
 
@@ -217,9 +221,9 @@ export function variablesRemesa(empresa, viaje, ctx, consecutivo) {
     ['CODTIPOEMPAQUE', cfg.tipoEmpaque || '0'],
     ['MERCANCIAREMESA', cfg.mercancia?.codigo],
     ['DESCRIPCIONCORTAPRODUCTO', cfg.mercancia?.descripcion],
-    ['CODTIPOIDREMITENTE', ctx.TIPO_CLIENTE],
-    ['NUMIDREMITENTE', ctx.NIT_CLIENTE],
-    ['CODSEDEREMITENTE', ctx.SEDE_CLIENTE],
+    ['CODTIPOIDREMITENTE', ctx.REM_TIPO],
+    ['NUMIDREMITENTE', ctx.REM_ID],
+    ['CODSEDEREMITENTE', ctx.REM_SEDE],
     ['CODTIPOIDDESTINATARIO', ctx.DEST_TIPO],
     ['NUMIDDESTINATARIO', ctx.DEST_ID],
     ['CODSEDEDESTINATARIO', ctx.DEST_SEDE],

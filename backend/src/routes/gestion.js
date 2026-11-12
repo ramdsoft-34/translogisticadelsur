@@ -599,7 +599,7 @@ r.post('/relaciones/copiar/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) 
   const { asegurarMesAbierto } = await import('../services/gestion/cierre.js');
   await asegurarMesAbierto(req.empresaId, f);
   const { siguiente: sig } = await import('../models/index.js');
-  const campos = ['cliente', 'tarifaRef', 'destino', 'codOrigen', 'codDestino', 'placa', 'remolque', 'conductor', 'conductorNombre', 'titular', 'destinatario',
+  const campos = ['cliente', 'tarifaRef', 'destino', 'codOrigen', 'codDestino', 'placa', 'remolque', 'conductor', 'conductorNombre', 'titular', 'remitente', 'destinatario',
     'pesoKg', 'cantidad', 'conAuxiliar', 'diasAuxiliar', 'planilla', 'tarifa', 'flete', 'anticipo', 'observaciones', 'requiereManifiesto'];
   const nuevo = await Viaje.create({ ...Object.fromEntries(campos.map(k => [k, v[k]])), empresa: req.empresaId, numero: await sig(req.empresaId, 'viaje'), fecha: f,
     creadoPor: req.usuario._id, actualizadoPor: req.usuario._id });

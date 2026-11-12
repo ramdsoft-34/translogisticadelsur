@@ -42,6 +42,8 @@ const viajeSchema = z.object({
   titular: oid.nullable().optional(),
   destinatario: z.object({ tipoId: z.string().trim().max(1).optional().default(''), numId: z.string().trim().max(15).optional().default(''),
     sede: z.string().trim().max(6).optional().default('') }).optional(),
+  remitente: z.object({ tipoId: z.string().trim().toUpperCase().max(1).optional().default(''), numId: z.string().trim().transform(v => v.replace(/\D/g, '')).pipe(z.string().max(15)).optional().default(''),
+    sede: z.string().trim().max(6).optional().default('') }).optional(),
   pesoKg: dinero.optional(), cantidad: dinero.optional(), conAuxiliar: z.boolean().optional(),
   diasAuxiliar: z.coerce.number().int().min(0).max(5, 'el auxiliar va de 1 a 5 días').optional(), planilla: z.string().trim().max(30).optional(),
   auxiliarPagado: z.boolean().nullable().optional(),
@@ -73,6 +75,7 @@ export function corregirCliente(v, d) {
   if (!cambiaCliente) return;
   if (d.tarifaRef === undefined) d.tarifaRef = null;
   d.codOrigen = '';
+  if (d.remitente === undefined) d.remitente = { tipoId: '', numId: '', sede: '' };
   d['reporteWhatsapp.fecha'] = null;
   d['reporteWhatsapp.usuario'] = null;
 }

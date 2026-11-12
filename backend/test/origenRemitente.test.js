@@ -78,3 +78,28 @@ test('Sin destinatario: la sede automática en el destino no es la del remitente
     await col('tarifas').updateOne({ _id: tarifa }, { $set: { destinatario: { tipoId: 'N', numId: '8909009431', sede: '1' } } });
   }
 });
+
+test('Remitente elegido en el viaje: otra sede del cliente (sin origen escrito) sale de esa sede', async () => {
+  const { R, M } = await documentos(await viaje({ remitente: { tipoId: 'N', numId: '890.900.943-1', sede: '9' } }));
+  assert.equal(valor(R, 'NUMIDREMITENTE'), '8909009431');
+  assert.equal(valor(R, 'CODSEDEREMITENTE'), '9');
+  assert.equal(valor(R, 'CODSEDEPROPIETARIO'), '9');
+  assert.equal(valor(M, 'CODMUNICIPIOORIGENMANIFIESTO'), '52838000');
+});
+
+test('Remitente de otra empresa: carga donde el proveedor, el cliente sigue como propietario y puede recibir en su ficha', async () => {
+  await col('terceros').insertOne({ empresa: empresa._id, tipoId: 'N', numId: '9001234567', sede: { codigo: '3', nombre: 'PLANTA' }, codMunicipio: '52356000', nombres: 'Proveedor SAS', roles: [] });
+  await col('tarifas').updateOne({ _id: tarifa }, { $set: { destinatario: { tipoId: '', numId: '', sede: '' } } });
+  try {
+    const { ctx, R, M } = await documentos(await viaje({ remitente: { tipoId: 'N', numId: '9001234567', sede: '3' }, destinatario: { tipoId: '', numId: '', sede: '' } }));
+    assert.deepEqual([valor(R, 'CODTIPOIDREMITENTE'), valor(R, 'NUMIDREMITENTE'), valor(R, 'CODSEDEREMITENTE')], ['N', '9001234567', '3']);
+    assert.deepEqual([valor(R, 'NUMIDPROPIETARIO'), valor(R, 'CODSEDEPROPIETARIO')], ['8909009431', '1']);
+    // La bodega de Cujacal (sede de la ficha) recibe: ya no es la sede del remitente
+    assert.deepEqual([valor(R, 'NUMIDDESTINATARIO'), valor(R, 'CODSEDEDESTINATARIO')], ['8909009431', '1']);
+    assert.equal(destinoIgualOrigen(ctx), false);
+    assert.equal(valor(M, 'CODMUNICIPIOORIGENMANIFIESTO'), '52356000');
+    assert.equal(valor(M, 'CODMUNICIPIODESTINOMANIFIESTO'), '52001033');
+  } finally {
+    await col('tarifas').updateOne({ _id: tarifa }, { $set: { destinatario: { tipoId: 'N', numId: '8909009431', sede: '1' } } });
+  }
+});

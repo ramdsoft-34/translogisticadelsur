@@ -250,6 +250,7 @@ const datosExpedicion = z.object({
   cliente: oid.optional(), tarifaRef: oid.nullable().optional(),
   pesoKg: z.coerce.number().min(0).optional(),
   destinatario: z.object({ tipoId: t(1), numId: t(15), sede: t(6) }).optional(),
+  remitente: z.object({ tipoId: t(1), numId: t(15), sede: t(6) }).optional(),
   flete: z.coerce.number().min(0).optional(), anticipo: z.coerce.number().min(0).optional(),
   observaciones: t(500).optional(),
   requiereManifiesto: z.boolean().optional(),
@@ -259,7 +260,7 @@ const datosExpedicion = z.object({
   numeroRemesa: z.string().trim().toUpperCase().regex(/^([A-Z0-9.-]{1,15})?$/, 'número de remesa inválido').optional(),
   numeroManifiesto: z.string().trim().toUpperCase().regex(/^([A-Z0-9.-]{1,15})?$/, 'número de manifiesto inválido').optional(),
 });
-const CAMPOS_REMESA = ['fecha', 'pesoKg', 'destinatario'];
+const CAMPOS_REMESA = ['fecha', 'pesoKg', 'destinatario', 'remitente'];
 
 r.put('/viajes/:id/datos', operar, async (req, res) => {
   const d = Object.fromEntries(Object.entries(datosExpedicion.parse(req.body)).filter(([, v]) => v !== undefined));

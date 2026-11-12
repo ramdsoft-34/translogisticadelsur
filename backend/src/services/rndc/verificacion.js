@@ -68,10 +68,12 @@ export async function verificarViaje(empresaId, viajeId, clave, usuarioId, { for
     ...(v.conductor ? [() => verificarTerceroRndc(empresaId, clave, usuarioId, v.conductor.tipoId, v.conductor.numId, 'Conductor', ['conductor'], forzar)] : []),
     ...(v.titular && String(v.titular._id) !== String(v.conductor?._id)
       ? [() => verificarTerceroRndc(empresaId, clave, usuarioId, v.titular.tipoId, v.titular.numId, 'Titular', ['titular'], forzar)] : []),
-    ...(v.cliente ? [() => verificarTerceroRndc(empresaId, clave, usuarioId, v.cliente.tipoId || 'N', idCliente(v.cliente), 'Remitente', ['remitente'], forzar)] : []),
+    ...(v.cliente ? [() => verificarTerceroRndc(empresaId, clave, usuarioId, ctx.REM_TIPO, ctx.REM_ID, 'Remitente', ['remitente'], forzar)] : []),
+    // Remitente distinto del cliente: el cliente sigue como propietario de la carga
+    ...(v.cliente && ctx.REM_ID !== ctx.NIT_CLIENTE ? [() => verificarTerceroRndc(empresaId, clave, usuarioId, ctx.TIPO_CLIENTE, ctx.NIT_CLIENTE, 'Propietario de la carga', ['remitente'], forzar)] : []),
   ];
   const destino = v.destinatarioRemesa || { tipoId: ctx.DEST_TIPO, numId: ctx.DEST_ID };
-  if (destino.numId && !(destino.numId === ctx.NIT_CLIENTE && destino.tipoId === ctx.TIPO_CLIENTE)) {
+  if (destino.numId && !(destino.numId === ctx.NIT_CLIENTE && destino.tipoId === ctx.TIPO_CLIENTE) && !(destino.numId === ctx.REM_ID && destino.tipoId === ctx.REM_TIPO)) {
     tareas.push(() => verificarTerceroRndc(empresaId, clave, usuarioId, destino.tipoId, destino.numId, 'Destinatario', ['destinatario'], forzar));
   }
   const resultados = [];
