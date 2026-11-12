@@ -26,7 +26,8 @@ before(async () => {
   await col('tarifas').insertOne({ empresa, cliente, destino: 'Sandona 3.0', codMunicipio: '52683000', tarifaCliente: 562000, fleteConductor: 510000, anticipoHabitual: 300000, activo: true });
   v1266 = new mongoose.Types.ObjectId(); vOtro = new mongoose.Types.ObjectId();
   await col('viajes').insertMany([
-    { _id: v1266, empresa, cliente, numero: 1266, fecha, placa: 'SPV505', destino: 'Sandona 3.0', estado: 'registrado' },
+    { _id: v1266, empresa, cliente, numero: 1266, fecha, placa: 'SPV505', destino: 'Sandona 3.0', estado: 'registrado', planilla: '36913', tarifa: 562000, flete: 510000, anticipo: 300000,
+      conductorNombre: 'ALEX FIGUEROA', conAuxiliar: true, diasAuxiliar: 1, auxiliarPagado: true, requiereManifiesto: false },
     { _id: vOtro, empresa, cliente: otroCliente, numero: 1280, fecha, placa: 'SPV505', destino: 'Ipiales', estado: 'registrado' },
   ]);
   rep = await ReporteBodega.create({ empresa, cliente, fecha, items: [
@@ -50,6 +51,9 @@ test('Marcar registrado: el renglón queda con ese viaje, no se repite y el jefe
   const f = r.filas.find((x) => x.placa === 'SPV505');
   assert.equal(f.registrado, String(v1266));
   assert.equal(r.numeros[String(v1266)], 1266);
+  // Muestra lo guardado en el viaje, no ceros
+  assert.deepEqual([f.destino, f.planilla, f.tarifa, f.flete, f.anticipo, f.conductorNombre, f.auxiliar, f.requiereManifiesto],
+    ['Sandona 3.0', '36913', 562000, 510000, 300000, 'ALEX FIGUEROA', 1, false]);
   await assert.rejects(B.vincularViaje(empresa, rep._id, item, v1266), /todos sus viajes registrados/);
   const otro = rep.items.find((x) => x.placa === 'SLF645')._id;
   await assert.rejects(B.vincularViaje(empresa, rep._id, otro, vOtro), /no es de este cliente/);

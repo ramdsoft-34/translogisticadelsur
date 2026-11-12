@@ -139,6 +139,7 @@ const TITULO: Record<Tipo, string> = { urbano: 'Urbanos', correria: 'Correrías'
                     @else if (f.estadoEnvio === 'error') { <span class="chip error sin-punto">No se registró</span><small class="error-texto d-bloque">{{ f.error }}</small> }
                     @else if (!f.conductor || !f.tarifaRef) { <span class="chip error sin-punto">Falta {{ !f.conductor ? 'conductor' : 'destino' }}</span> }
                     @else if (f.repetidos.length) { <span class="chip alerta sin-punto">Ya hay viaje ese día</span><small class="sutil d-bloque">{{ f.repetidos.join(', ') }}</small> }
+                    @else { <span class="chip sin-punto">Listo</span> }
                     @if (!f.registrado && f.repetidos.length) {
                       <div class="acciones-repetido">
                         @for (x of f.existentes || []; track x._id) {
@@ -147,7 +148,6 @@ const TITULO: Record<Tipo, string> = { urbano: 'Urbanos', correria: 'Correrías'
                         <button type="button" class="pequeno" confirmar="Clic otra vez para quitarlo" (confirmado)="quitar(f)" [disabled]="trabajando()" title="Quitar este viaje de la revisión (no borra ningún viaje)">Quitar</button>
                       </div>
                     }
-                    @else { <span class="chip sin-punto">Listo</span> }
                   </td>
                 </tr>
               }</tbody>

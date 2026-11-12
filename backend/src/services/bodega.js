@@ -355,8 +355,18 @@ export async function revision(empresaId, reporteId) {
         existentes: viaje ? [] : otros.filter((v) => String(v.cliente) === String(rep.cliente)).map((v) => ({ _id: String(v._id), numero: v.numero, destino: v.destino })) });
     }
   }
-  const viajesRegistrados = registradosIds.size ? await Viaje.find({ empresa: empresaId, _id: { $in: [...registradosIds] } }).select('numero').lean() : [];
+  const viajesRegistrados = registradosIds.size ? await Viaje.find({ empresa: empresaId, _id: { $in: [...registradosIds] } })
+    .select('numero destino planilla tarifa flete anticipo conductorNombre conAuxiliar diasAuxiliar auxiliarPagado requiereManifiesto').lean() : [];
   const numeros = Object.fromEntries(viajesRegistrados.map((v) => [String(v._id), v.numero]));
+  // Los registrados muestran lo que quedó guardado en el viaje (no lo sugerido por la tarifa)
+  const porViaje = new Map(viajesRegistrados.map((v) => [String(v._id), v]));
+  for (const f of filas) {
+    const v = f.registrado && porViaje.get(f.registrado);
+    if (!v) continue;
+    Object.assign(f, { destino: v.destino || f.destino, planilla: v.planilla || '', tarifa: Number(v.tarifa) || 0, flete: Number(v.flete) || 0, anticipo: Number(v.anticipo) || 0,
+      conductorNombre: v.conductorNombre || f.conductorNombre, auxiliar: v.conAuxiliar ? (Number(v.diasAuxiliar) || 1) : 0, auxiliarPagado: !!v.auxiliarPagado,
+      requiereManifiesto: v.requiereManifiesto !== false });
+  }
   const destinos = [...porId.values()].map((t) => ({ _id: String(t._id), destino: t.destino, tipo: t.tipo, tarifa: Number(t.tarifaCliente) || 0, flete: Number(t.fleteConductor) || 0, anticipo: Number(t.anticipoHabitual) || 0 }))
     .sort((a, b2) => a.destino.localeCompare(b2.destino, 'es'));
   return { _id: rep._id, cliente: { _id: cliente._id, nombre: cliente.nombre }, fecha: iso(rep.fecha), fechaTexto: fechaTexto(rep.fecha),
