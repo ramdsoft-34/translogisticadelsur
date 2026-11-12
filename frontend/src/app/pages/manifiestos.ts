@@ -9,7 +9,7 @@ import { Avisos } from '../core/avisos.service';
 import { RndcClave } from '../core/rndc-clave.service';
 import { Viaje } from '../core/modelos';
 import { Moneda } from '../shared/moneda';
-import { CargarMas } from '../shared/cargar-mas';
+import { Paginador, CambioPagina } from '../shared/paginador';
 import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
 import { FORMATOS, hoyIso, isoDia } from '../shared/formato';
@@ -37,7 +37,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
 
 @Component({
   selector: 'app-manifiestos',
-  imports: [FormsModule, Modal, Icono, Moneda, CargarMas, ExpedirRndc, SelectorMunicipio, BuscarTercero, Confirmar, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, Moneda, Paginador, ExpedirRndc, SelectorMunicipio, BuscarTercero, Confirmar, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>{{ titulo() }}</h1><p class="sutil">{{ descripcion() }}</p></div>
@@ -313,7 +313,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
             }
           </tbody>
         </table>
-        @if (viajes().length) { <app-cargar-mas [mostrados]="viajes().length" [total]="total()" [cargando]="cargandoMas()" unidad="viajes" (mas)="cargarMas()" /> }
+        <app-paginador [total]="total()" [pagina]="pag()" [porPagina]="porPag()" [cargando]="cargandoMas()" unidad="viajes" (cambio)="irPagina($event)" />
       </div>
     } @else {
       <div class="tabla-caja">
@@ -671,28 +671,29 @@ export class Manifiestos {
         if (vigente()) { this.envios.set(l); this.pendientesCorreo.set(p.filter(x => x.tipo === 'manifiesto').length); }
       }
       else {
-        this.pagina = 1;
-        const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: 1, limite: 50, historico: 0, ...this.filtroSoporte() });
+        this.pag.set(1);
+        const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: 1, limite: this.porPag(), historico: 0, ...this.filtroSoporte() });
         if (vigente()) { this.viajes.set(r.viajes); this.total.set(r.total); this.cargarCorreos(r.viajes); }
       }
     } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
   }
 
-  // Carga progresiva de la lista de la pestaña
-  private pagina = 1;
+  // Páginas de la lista de la pestaña (los filtros se conservan al cambiar de página)
+  readonly pag = signal(1);
+  readonly porPag = signal(50);
   readonly total = signal(0);
   readonly cargandoMas = signal(false);
-  async cargarMas() {
-    if (['historial', 'correos'].includes(this.pestana()) || this.cargandoMas() || this.viajes().length >= this.total()) return;
+  async irPagina(c: CambioPagina) {
+    if (['historial', 'correos'].includes(this.pestana())) return;
     this.cargandoMas.set(true);
-    const vigente = this.turno.actual();
+    const vigente = this.turno.tomar();
     try {
-      const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: this.pagina + 1, limite: 50, historico: 0, ...this.filtroSoporte() });
+      const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: c.pagina, limite: c.porPagina, historico: 0, ...this.filtroSoporte() });
       if (!vigente()) return;
-      this.pagina += 1;
-      this.viajes.update(l => [...l, ...r.viajes]);
-      this.cargarCorreos(this.viajes());
-    } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }
+      this.pag.set(c.pagina); this.porPag.set(c.porPagina);
+      this.viajes.set(r.viajes); this.total.set(r.total);
+      this.cargarCorreos(r.viajes);
+    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargandoMas.set(false); }
   }
 
   async nuevoManifiesto() {

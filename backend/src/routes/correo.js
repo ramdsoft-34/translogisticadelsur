@@ -1,5 +1,6 @@
 // Correo de la empresa: cuenta SMTP, envío de documentos por cliente y trazabilidad.
 import { Router } from 'express';
+import { paginacion, pagina, recortar } from '../utils/paginacion.js';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Empresa, Cliente, EnvioCorreo, Viaje } from '../models/index.js';
@@ -143,6 +144,12 @@ r.get('/envios', operar, async (req, res) => {
   if (req.query.viaje) f.viaje = id(req.query.viaje);
   if (req.query.viajes) f.viaje = { $in: String(req.query.viajes).split(',').filter(mongoose.isValidObjectId) };
   if (req.query.estado) f.estado = String(req.query.estado);
+  const p = paginacion(req.query, { porDefecto: 50, maximo: 200 });
+  if (p.activa) {
+    const [total, items] = await Promise.all([EnvioCorreo.countDocuments(f),
+      EnvioCorreo.find(f).sort({ createdAt: -1 }).skip(p.salto).limit(p.limite).populate({ path: 'usuario', select: 'nombre' }).lean()]);
+    return res.json(pagina(items, total, p));
+  }
   const lista = await EnvioCorreo.find(f).sort({ createdAt: -1 }).limit(Math.min(Number(req.query.limite) || 200, 1000))
     .populate({ path: 'usuario', select: 'nombre' }).lean();
   res.json(lista);

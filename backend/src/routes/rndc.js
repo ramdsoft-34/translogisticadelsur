@@ -1,5 +1,6 @@
 // Integración con el RNDC (Registro Nacional de Despachos de Carga).
 import { Router } from 'express';
+import { paginacion, pagina, recortar } from '../utils/paginacion.js';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -651,6 +652,12 @@ r.get('/transacciones', permitir(P.RNDC_OPERAR, P.RNDC_CONSULTAR, P.AUDITORIA_VE
   const f = deEmpresa(req);
   if (req.query.viaje) f.viaje = req.query.viaje;
   if (req.query.ok === '0') f.ok = false;
+  const p = paginacion(req.query, { porDefecto: 50, maximo: 200 });
+  if (p.activa) {
+    const [total, items] = await Promise.all([TransaccionRndc.countDocuments(f),
+      TransaccionRndc.find(f).sort({ createdAt: -1 }).skip(p.salto).limit(p.limite).populate('usuario', 'nombre').lean()]);
+    return res.json(pagina(items, total, p));
+  }
   const lista = await TransaccionRndc.find(f).sort({ createdAt: -1 }).limit(Math.min(Number(req.query.limite) || 100, 500))
     .populate('usuario', 'nombre').lean();
   res.json(lista);

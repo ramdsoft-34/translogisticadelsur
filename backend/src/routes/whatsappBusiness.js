@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import express, { Router } from 'express';
 import mongoose from 'mongoose';
+import { paginacion, pagina, recortar } from '../utils/paginacion.js';
 import { z } from 'zod';
 import { Empresa, EnvioWhatsapp, MensajeWhatsapp, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
@@ -135,23 +136,35 @@ r.get('/mensajes', operar, async (req, res) => {
   // Solo lo que alguien mandó a enviar: lo «por aprobar» (nadie pulsó Enviar) y lo descartado no aparece.
   // La fecha es la del envío (o la del último intento si falló antes de salir).
   const rango = { $gte: desde, $lt: hasta };
-  const lista = await EnvioWhatsapp.find(deEmpresa(req, { estado: { $nin: ['por_aprobar', 'descartado'] },
-    $or: [{ enviadoEn: rango }, { enviadoEn: null, updatedAt: rango }] })).sort({ updatedAt: -1 }).limit(3000)
-    .populate([pob(req.empresaId, 'viaje', 'numero placa destino fecha'), pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId')]).lean();
-  const cuenta = (f) => lista.filter(f).length;
-  const totales = { total: lista.length, enviados: cuenta(x => ENVIADOS.includes(x.estado)),
-    entregados: cuenta(x => ['entregado', 'leido'].includes(x.estado)), leidos: cuenta(x => x.estado === 'leido'), errores: cuenta(x => x.estado === 'error') };
+  const base = deEmpresa(req, { estado: { $nin: ['por_aprobar', 'descartado'] }, $or: [{ enviadoEn: rango }, { enviadoEn: null, updatedAt: rango }] });
+  // Totales del periodo contados en la base (no hace falta traer los mensajes)
+  const porEstado = Object.fromEntries((await EnvioWhatsapp.aggregate([{ $match: { ...base, empresa: new mongoose.Types.ObjectId(String(req.empresaId)) } },
+    { $group: { _id: '$estado', n: { $sum: 1 } } }])).map((x) => [x._id, x.n]));
+  const suma = (l) => l.reduce((a, k) => a + (porEstado[k] || 0), 0);
+  const totales = { total: suma(Object.keys(porEstado)), enviados: suma(ENVIADOS), entregados: suma(['entregado', 'leido']), leidos: suma(['leido']), errores: suma(['error']) };
+  const p = paginacion(req.query, { porDefecto: 50, maximo: 200 });
+  const filtroEstado = q.estado ? { estado: q.estado === 'enviados' ? { $in: ENVIADOS } : q.estado } : {};
+  const poblar = [pob(req.empresaId, 'viaje', 'numero placa destino fecha'), pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId')];
+  let lista; let totalFiltrado = null;
+  if (p.activa && !q.texto) {
+    const f = { ...base, ...filtroEstado };
+    [totalFiltrado, lista] = await Promise.all([EnvioWhatsapp.countDocuments(f), EnvioWhatsapp.find(f).sort({ updatedAt: -1 }).skip(p.salto).limit(p.limite).populate(poblar).lean()]);
+  } else {
+    lista = await EnvioWhatsapp.find({ ...base, ...filtroEstado }).sort({ updatedAt: -1 }).limit(3000).populate(poblar).lean();
+  }
   const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
   const texto = q.texto.toLowerCase();
   const mensajes = lista
-    .filter(x => !q.estado || (q.estado === 'enviados' ? ENVIADOS.includes(x.estado) : x.estado === q.estado))
     .map(x => ({ _id: x._id, fecha: x.enviadoEn || x.updatedAt, tipo: x.tipo || 'manifiesto', documento: x.documento, estado: x.estado, error: x.error, telefono: x.telefono,
       origen: x.origen, cuenta: x.cuenta, intentos: x.intentos, enviadoEn: x.enviadoEn, entregadoEn: x.entregadoEn, leidoEn: x.leidoEn,
       viaje: x.viaje ? { _id: x.viaje._id, numero: x.viaje.numero, placa: x.viaje.placa, destino: x.viaje.destino } : null,
       conductor: x.conductor ? { nombre: nombreDe(x.conductor), numId: x.conductor.numId } : null }))
     .filter(x => !texto || [x.documento, x.telefono, x.viaje?.placa, x.viaje?.numero, x.conductor?.nombre, x.conductor?.numId]
       .some(v => String(v ?? '').toLowerCase().includes(texto)));
-  res.json({ totales, mensajes });
+  if (!p.activa) return res.json({ totales, mensajes });
+  if (totalFiltrado !== null) return res.json({ totales, ...pagina(mensajes, totalFiltrado, p), mensajes });
+  const items = recortar(mensajes, p);
+  res.json({ totales, ...pagina(items, mensajes.length, p), mensajes: items });
 });
 
 // Mensajes que la gente le escribió al número (solo para leerlos)
@@ -160,13 +173,20 @@ r.get('/recibidos', operar, async (req, res) => {
   const desde = new Date(`${q.desde}T05:00:00.000Z`);
   const hasta = new Date(`${q.hasta}T05:00:00.000Z`); hasta.setUTCDate(hasta.getUTCDate() + 1);
   if (!(hasta > desde)) throw new ErrorHttp(400, 'El rango de fechas no es válido');
-  const lista = await MensajeWhatsapp.find(deEmpresa(req, { fecha: { $gte: desde, $lt: hasta } })).sort({ fecha: -1 }).limit(2000)
-    .populate(pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId')).lean();
+  const p = paginacion(req.query, { porDefecto: 50, maximo: 200 });
+  const fRec = deEmpresa(req, { fecha: { $gte: desde, $lt: hasta } });
+  const sinTexto = p.activa && !q.texto;
+  const [totalRec, lista] = await Promise.all([sinTexto ? MensajeWhatsapp.countDocuments(fRec) : null,
+    MensajeWhatsapp.find(fRec).sort({ fecha: -1 }).skip(sinTexto ? p.salto : 0).limit(sinTexto ? p.limite : 2000)
+      .populate(pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId')).lean()]);
   const t = q.texto.toLowerCase();
   const mensajes = lista.map((x) => ({ _id: x._id, fecha: x.fecha, de: x.de, nombre: x.nombre, tipo: x.tipo, texto: x.texto,
     conductor: x.conductor ? { nombre: [x.conductor.nombres, x.conductor.apellido1, x.conductor.apellido2].filter(Boolean).join(' '), numId: x.conductor.numId } : null }))
     .filter((x) => !t || [x.de, x.nombre, x.texto, x.conductor?.nombre, x.conductor?.numId].some((v) => String(v ?? '').toLowerCase().includes(t)));
-  res.json({ total: mensajes.length, mensajes });
+  if (!p.activa) return res.json({ total: mensajes.length, mensajes });
+  if (sinTexto) return res.json({ ...pagina(mensajes, totalRec, p), mensajes });
+  const items = recortar(mensajes, p);
+  res.json({ ...pagina(items, mensajes.length, p), mensajes: items });
 });
 
 const listaViajes = z.object({ viajes: z.array(z.string().refine(x => mongoose.isValidObjectId(x), 'viaje inválido')).min(1).max(200) });

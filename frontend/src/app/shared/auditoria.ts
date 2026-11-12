@@ -1,3 +1,4 @@
+import { Paginador, CambioPagina } from './paginador';
 import { Component, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -9,7 +10,7 @@ import { Icono } from './icono';
 // de la cadena de integridad y exportación a Excel (evidencias para auditores).
 @Component({
   selector: 'app-auditoria',
-  imports: [FormsModule, Icono, ...FORMATOS],
+  imports: [FormsModule, Icono, ...FORMATOS, Paginador],
   template: `
     <div class="filtros">
       @if (global()) {
@@ -39,7 +40,8 @@ import { Icono } from './icono';
           <td>{{ a.usuarioNombre }}</td><td>{{ a.accion }}</td>
           <td><span class="chip" [class.ok]="a.resultado === 'exito'" [class.error]="a.resultado === 'fallo'" [class.alerta]="a.resultado === 'denegado'">{{ a.resultado || 'exito' }}</span></td>
           <td class="sutil detalle">{{ detalle(a.detalle) }}</td><td class="sutil">{{ a.ip }}</td></tr>
-      } @empty { <tr><td colspan="7" class="vacio">Sin registros</td></tr> }</tbody></table></div>`,
+      } @empty { <tr><td colspan="7" class="vacio">Sin registros</td></tr> }</tbody></table>
+      <app-paginador [total]="total()" [pagina]="pag()" [porPagina]="porPag()" [cargando]="cargando()" unidad="registros" (cambio)="cargar($event)" /></div>`,
   styles: ['.detalle { max-width: 420px; word-break: break-word; }'],
 })
 export class VisorAuditoria {
@@ -59,8 +61,15 @@ export class VisorAuditoria {
     if (this.global()) this.api.get<any[]>('/admin/empresas').then(e => this.empresas.set(e)).catch(() => {});
   }
 
-  async cargar() {
-    try { this.lista.set(await this.api.get<any[]>(this.base, this.f)); } catch (e) { this.avisos.error(e); }
+  readonly total = signal(0); readonly pag = signal(1); readonly porPag = signal(50); readonly cargando = signal(false);
+  // Sin «c» (filtros nuevos) vuelve a la primera página; los filtros se conservan al cambiar de página
+  async cargar(c?: CambioPagina) {
+    const pagina = c?.pagina || 1; const limite = c?.porPagina || this.porPag();
+    this.cargando.set(true);
+    try {
+      const r = await this.api.get<any>(this.base, { ...this.f, pagina, limite });
+      this.lista.set(r.items); this.total.set(r.total); this.pag.set(pagina); this.porPag.set(limite);
+    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
   }
 
   async verificar() {

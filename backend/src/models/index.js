@@ -453,6 +453,7 @@ const envioCorreoSchema = new Schema({
 envioCorreoSchema.plugin(tenantPlugin);
 envioCorreoSchema.index({ empresa: 1, viaje: 1, createdAt: -1 });
 envioCorreoSchema.index({ empresa: 1, estado: 1 });
+envioCorreoSchema.index({ empresa: 1, createdAt: -1 });
 
 // ── Cuenta de WhatsApp de Translogística, compartida por las empresas sin número propio (global) ──
 const plataformaWhatsappSchema = new Schema({
@@ -485,6 +486,8 @@ const envioWhatsappSchema = new Schema({
 envioWhatsappSchema.plugin(tenantPlugin);
 envioWhatsappSchema.index({ empresa: 1, viaje: 1, createdAt: -1 });
 envioWhatsappSchema.index({ empresa: 1, idMensaje: 1 });
+envioWhatsappSchema.index({ empresa: 1, updatedAt: -1 });
+envioWhatsappSchema.index({ empresa: 1, enviadoEn: -1 });
 
 // ── Mensajes que la gente le escribe al número de WhatsApp (solo lectura en la plataforma) ──
 const mensajeWhatsappSchema = new Schema({
@@ -513,6 +516,7 @@ const liquidacionSchema = new Schema({
 }, { timestamps: true });
 liquidacionSchema.plugin(tenantPlugin);
 liquidacionSchema.index({ empresa: 1, numero: 1 }, { unique: true });
+liquidacionSchema.index({ empresa: 1, numero: -1 });
 
 // ── Transacciones con el RNDC (la clave nunca se guarda) ────────────────────
 const transaccionSchema = new Schema({
@@ -583,6 +587,7 @@ const prestamoSchema = new Schema({
 }, { timestamps: true });
 prestamoSchema.plugin(tenantPlugin);
 prestamoSchema.index({ empresa: 1, numero: 1 }, { unique: true });
+prestamoSchema.index({ empresa: 1, createdAt: -1 });
 
 // ── Liquidación del conductor (pago por placa y periodo) ────────────────────
 const liquidacionConductorSchema = new Schema({
@@ -605,6 +610,7 @@ const liquidacionConductorSchema = new Schema({
 }, { timestamps: true });
 liquidacionConductorSchema.plugin(tenantPlugin);
 liquidacionConductorSchema.index({ empresa: 1, numero: 1 }, { unique: true });
+liquidacionConductorSchema.index({ empresa: 1, createdAt: -1 });
 
 // ── Contabilidad simplificada (apoyo administrativo; un contador debe revisarla) ──
 const cuentaSchema = new Schema({

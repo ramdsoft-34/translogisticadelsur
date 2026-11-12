@@ -2,6 +2,7 @@
 // de un cliente en un periodo, calcula cobro, pago al conductor y utilidad, y
 // deja una copia fija para facturar.
 import { Router } from 'express';
+import { paginacion, pagina, recortar } from '../utils/paginacion.js';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Liquidacion, Viaje, Tarifa, Cliente, siguiente, pob } from '../models/index.js';
@@ -46,6 +47,13 @@ r.post('/calcular', permitir(P.LIQUIDACION_VER), async (req, res) => {
 });
 
 r.get('/', permitir(P.LIQUIDACION_VER), async (req, res) => {
+  const p = paginacion(req.query, { porDefecto: 25, maximo: 100 });
+  if (p.activa) {
+    const f = deEmpresa(req);
+    const [total, items] = await Promise.all([Liquidacion.countDocuments(f),
+      Liquidacion.find(f).select('-lineas').sort({ numero: -1 }).skip(p.salto).limit(p.limite).populate(pob(req.empresaId, 'cliente', 'nombre')).lean()]);
+    return res.json(pagina(items, total, p));
+  }
   const lista = await Liquidacion.find(deEmpresa(req)).select('-lineas').sort({ numero: -1 }).limit(200).populate(pob(req.empresaId, 'cliente', 'nombre')).lean();
   res.json(lista);
 });

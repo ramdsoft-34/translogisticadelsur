@@ -14,7 +14,7 @@ import { MenuAcciones } from '../shared/menu-acciones';
 import { FORMATOS, hoyIso, inicioMesIso, isoDia } from '../shared/formato';
 import { SelectorMunicipio } from '../shared/municipio';
 import { Moneda } from '../shared/moneda';
-import { CargarMas } from '../shared/cargar-mas';
+import { Paginador, CambioPagina } from '../shared/paginador';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { PlantillasWhatsapp } from '../shared/plantillas-whatsapp';
 import { Confirmar } from '../shared/confirmar';
@@ -52,7 +52,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, NgTemplateOutlet, Modal, Icono, MenuAcciones, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, AccionesViajes, CarguesBodega, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
+  imports: [FormsModule, NgTemplateOutlet, Modal, Icono, MenuAcciones, SelectorMunicipio, Moneda, Paginador, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, AccionesViajes, CarguesBodega, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
@@ -145,7 +145,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             <button type="button" class="primario" (click)="accionesAbierto.set(true)">Acciones con la selección</button></span>
         </div>
       }
-      @if (viajes().length) { <app-cargar-mas [mostrados]="viajes().length" [total]="total()" [cargando]="cargandoMas()" unidad="viajes" (mas)="cargarMas()" /> }
+      <app-paginador [total]="total()" [pagina]="pag()" [porPagina]="porPag()" [cargando]="cargandoMas()" unidad="viajes" (cambio)="irPagina($event)" />
     </div>
 
     <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : (registradosTanda().length ? 'Registrar otro viaje' : 'Registrar viaje')" [abierto]="abierto()" (cerrar)="cerrarFormulario()" [ancho]="true">
@@ -527,7 +527,9 @@ export class Viajes {
   private autorizacion = inject(AutorizacionAdmin);
   readonly cargando = signal(false);
   readonly cargandoMas = signal(false);
-  private pagina = 1;
+  // Página actual y tamaño (se conservan los filtros al cambiar de página; al filtrar se vuelve a la primera)
+  readonly pag = signal(1);
+  readonly porPag = signal(POR_PAGINA);
   readonly clientes = signal<any[]>([]);
   readonly clientesActivos = computed(() => this.clientes().filter(c => c.activo !== false));
   readonly tarifas = signal<any[]>([]);
@@ -582,9 +584,9 @@ export class Viajes {
   async cargar() {
     const vigente = this.turno.tomar();
     this.cargando.set(true);
-    this.pagina = 1;
+    this.pag.set(1);
     try {
-      const r = await this.api.get<any>('/viajes', { ...this.filtro, pagina: 1, limite: POR_PAGINA });
+      const r = await this.api.get<any>('/viajes', { ...this.filtro, pagina: 1, limite: this.porPag() });
       if (!vigente()) return;
       this.viajes.set(r.viajes); this.total.set(r.total);
       if (r.sumas) this.sumas.set(r.sumas);
@@ -592,16 +594,16 @@ export class Viajes {
   }
 
   // Páginas siguientes (carga progresiva)
-  async cargarMas() {
-    if (this.cargandoMas() || this.viajes().length >= this.total()) return;
+  async irPagina(c: CambioPagina) {
     this.cargandoMas.set(true);
-    const vigente = this.turno.actual();
+    const vigente = this.turno.tomar();
     try {
-      const r = await this.api.get<any>('/viajes', { ...this.filtro, pagina: this.pagina + 1, limite: POR_PAGINA });
+      const r = await this.api.get<any>('/viajes', { ...this.filtro, pagina: c.pagina, limite: c.porPagina });
       if (!vigente()) return;
-      this.pagina += 1;
-      this.viajes.update(l => [...l, ...r.viajes]);
-    } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }
+      this.pag.set(c.pagina); this.porPag.set(c.porPagina);
+      this.viajes.set(r.viajes); this.total.set(r.total);
+      if (r.sumas) this.sumas.set(r.sumas);
+    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargandoMas.set(false); }
   }
 
   estadoTexto(e: string) { return ESTADOS_VIAJE[e] || e; }

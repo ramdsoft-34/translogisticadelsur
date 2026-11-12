@@ -1,6 +1,7 @@
 // Módulos de gestión de la plantilla de Excel: liquidación del conductor, préstamos,
 // contabilidad, cierre de mes, relaciones, soporte interno MC/RC y remesas de Dulces & Dulces.
 import { Router } from 'express';
+import { paginacion, pagina, recortar } from '../utils/paginacion.js';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import express from 'express';
@@ -87,6 +88,11 @@ r.post('/liq-conductores', gestionar, async (req, res) => {
 r.get('/liq-conductores', verLiq, async (req, res) => {
   const f = deEmpresa(req);
   if (req.query.q) { const re = new RegExp(String(req.query.q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); f.$or = [{ numero: re }, { conductorNombre: re }, { placa: re }, { cedula: re }]; }
+  const p = paginacion(req.query, { porDefecto: 25, maximo: 100 });
+  if (p.activa) {
+    const [total, items] = await Promise.all([LiquidacionConductor.countDocuments(f), LiquidacionConductor.find(f).select('-lineas').sort({ createdAt: -1 }).skip(p.salto).limit(p.limite).lean()]);
+    return res.json(pagina(items, total, p));
+  }
   res.json(await LiquidacionConductor.find(f).select('-lineas').sort({ createdAt: -1 }).limit(300).lean());
 });
 
@@ -142,8 +148,14 @@ r.get('/liq-conductores-lote/pdf', verLiq, async (req, res) => {
 r.get('/prestamos', verLiq, async (req, res) => {
   const f = deEmpresa(req);
   if (req.query.estado) f.estado = req.query.estado;
+  const conResumen = (p) => ({ ...p, resumen: pre.resumenPrestamo(p), cuotas: p.cuotas.map(c => ({ ...c, estado: pre.estadoCuota(c) })) });
+  const pg = paginacion(req.query, { porDefecto: 25, maximo: 100 });
+  if (pg.activa) {
+    const [total, items] = await Promise.all([Prestamo.countDocuments(f), Prestamo.find(f).sort({ createdAt: -1 }).skip(pg.salto).limit(pg.limite).lean()]);
+    return res.json(pagina(items.map(conResumen), total, pg));
+  }
   const l = await Prestamo.find(f).sort({ createdAt: -1 }).limit(500).lean();
-  res.json(l.map(p => ({ ...p, resumen: pre.resumenPrestamo(p), cuotas: p.cuotas.map(c => ({ ...c, estado: pre.estadoCuota(c) })) })));
+  res.json(l.map(conResumen));
 });
 
 r.post('/prestamos/simular', verLiq, async (req, res) => {

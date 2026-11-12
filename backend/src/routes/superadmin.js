@@ -1,6 +1,7 @@
 // Administración global (solo SuperAdmin): empresas y sus administradores.
 // Son las únicas acciones que no pertenecen a una empresa.
 import { Router } from 'express';
+import { paginacion, pagina } from '../utils/paginacion.js';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import { z } from 'zod';
@@ -134,8 +135,13 @@ function ambito(req) {
 }
 
 r.get('/auditoria', async (req, res) => {
-  const lista = await Auditoria.find(filtroAuditoria(req.query, ambito(req))).sort({ createdAt: -1, seq: -1 })
-    .limit(Math.min(Number(req.query.limite) || 300, 1000)).populate('empresa', 'nombre').lean();
+  const f = filtroAuditoria(req.query, ambito(req));
+  const p = paginacion(req.query, { porDefecto: 50, maximo: 200 });
+  if (p.activa) {
+    const [total, items] = await Promise.all([Auditoria.countDocuments(f), Auditoria.find(f).sort({ createdAt: -1, seq: -1 }).skip(p.salto).limit(p.limite).populate('empresa', 'nombre').lean()]);
+    return res.json(pagina(items, total, p));
+  }
+  const lista = await Auditoria.find(f).sort({ createdAt: -1, seq: -1 }).limit(Math.min(Number(req.query.limite) || 300, 1000)).populate('empresa', 'nombre').lean();
   res.json(lista);
 });
 

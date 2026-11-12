@@ -1,4 +1,5 @@
 import { Turno } from '../core/turno';
+import { Paginador, CambioPagina, enPagina } from '../shared/paginador';
 import { Component, ViewChild, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -30,7 +31,7 @@ const quincena = () => {
 // Descuento de préstamos: las cuotas vencidas o el valor que se escoja. Dos liquidaciones por hoja al imprimir.
 @Component({
   selector: 'app-pago-conductores',
-  imports: [FormsModule, Icono, Modal, Moneda, Confirmar, BuscarTercero, VisorPdf, ...FORMATOS],
+  imports: [FormsModule, Icono, Modal, Moneda, Confirmar, BuscarTercero, VisorPdf, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab"><div><h1>Pago a conductores</h1>
       <p class="sutil">Liquide lo que se le paga a cada conductor o placa: flete más auxiliar, menos el anticipo reconocido, la retefuente, el FOPAT y sus préstamos.</p></div></div>
@@ -138,7 +139,7 @@ const quincena = () => {
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th><input type="checkbox" aria-label="Elegir todas" [checked]="todasLiq()" (change)="alternarTodasLiq()" /></th><th>N°</th><th>Conductor</th><th>Placa</th><th>Periodo</th><th class="num">Flete + auxiliar</th><th class="num">Desc. préstamos</th>
             <th class="num">Neto</th><th class="num">Por pagar</th><th>Estado</th><th></th></tr></thead>
-          <tbody>@for (l of liquidacionesVisibles(); track l._id) {
+          <tbody>@for (l of paginaLiq(); track l._id) {
             <tr><td data-etiqueta="Elegir"><input type="checkbox" [checked]="selLiq().has(l.numero)" (change)="alternarLiq(l.numero)" [attr.aria-label]="'Liquidación ' + l.numero" /></td>
               <td data-etiqueta="N°"><strong class="num-liq">{{ l.numero }}</strong><br /><span class="sutil">{{ l.fecha | dia }}</span></td>
               <td data-etiqueta="Conductor">{{ l.conductorNombre }}@if (l.cedula) { <br /><span class="sutil">C.C. {{ l.cedula }}</span> }</td>
@@ -153,7 +154,8 @@ const quincena = () => {
                 <button class="pequeno" (click)="excel('/gestion/liq-conductores/' + l.numero + '/xlsx', l.numero + '.xlsx')">Excel</button>
                 @if (puedeGestionar && l.estado === 'VIGENTE' && !l.pagado) { <button class="pequeno peligro" confirmar="Clic otra vez para anular" (confirmado)="anularLiq(l)">Anular</button> }
               </div></td></tr>
-          } @empty { <tr><td colspan="11" class="vacio">Aún no hay liquidaciones de conductores</td></tr> }</tbody></table></div>
+          } @empty { <tr><td colspan="11" class="vacio">Aún no hay liquidaciones de conductores</td></tr> }</tbody></table>
+          <app-paginador [total]="liquidacionesVisibles().length" [pagina]="pagLq()" [porPagina]="porLq()" unidad="liquidaciones" (cambio)="pagLq.set($event.pagina); porLq.set($event.porPagina)" /></div>
       }
 
       @case ('prestamos') {
@@ -164,7 +166,7 @@ const quincena = () => {
         </div>
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th>N°</th><th>Fecha</th><th>Conductor</th><th>Concepto</th><th class="num">Capital</th><th>Cuotas</th><th class="num">Pagado</th><th class="num">Pendiente</th><th>Próxima</th><th>Estado</th><th></th></tr></thead>
-          <tbody>@for (p of prestamosVisibles(); track p._id) {
+          <tbody>@for (p of paginaPrest(); track p._id) {
             <tr><td data-etiqueta="N°">{{ p.numero }}</td><td data-etiqueta="Fecha">{{ p.fecha | dia }}</td><td data-etiqueta="Conductor">{{ p.conductorNombre }}<br /><span class="sutil">{{ p.cedula }}</span></td>
               <td data-etiqueta="Concepto">{{ p.concepto }}</td><td data-etiqueta="Capital" class="num">{{ p.capital | pesos }}</td>
               <td data-etiqueta="Cuotas">{{ p.nCuotas }} × {{ p.valorCuota | pesos }} ({{ p.tasaMensual }} %)</td>
@@ -178,7 +180,8 @@ const quincena = () => {
                   @if (!p.abonos.length) { <button class="pequeno peligro" confirmar="Clic otra vez para anular" (confirmado)="anularPrestamo(p)">Anular</button> }
                 }
               </div></td></tr>
-          } @empty { <tr><td colspan="11" class="vacio">No hay préstamos</td></tr> }</tbody></table></div>
+          } @empty { <tr><td colspan="11" class="vacio">No hay préstamos</td></tr> }</tbody></table>
+          <app-paginador [total]="prestamosVisibles().length" [pagina]="pagPr()" [porPagina]="porPr()" unidad="préstamos" (cambio)="pagPr.set($event.pagina); porPr.set($event.porPagina)" /></div>
       }
 
       @case ('relacion') {
@@ -278,6 +281,11 @@ export class PagoConductores {
   readonly prestamos = signal<any[]>([]);
   readonly qp = signal(''); readonly estadoP = signal('');
   readonly prestamosVisibles = computed(() => filtrar<any>(this.prestamos().filter(p => !this.estadoP() || p.estado === this.estadoP()), this.qp()));
+  // Páginas en pantalla (filtros, buscador y totales siguen sobre toda la lista)
+  readonly pagLq = signal(1); readonly porLq = signal(25);
+  readonly paginaLiq = computed(() => enPagina(this.liquidacionesVisibles(), this.pagLq(), this.porLq()));
+  readonly pagPr = signal(1); readonly porPr = signal(25);
+  readonly paginaPrest = computed(() => enPagina(this.prestamosVisibles(), this.pagPr(), this.porPr()));
   readonly relacion = signal<any>(null);
   readonly np = signal<any>(null);
   readonly plan = signal<any>(null);

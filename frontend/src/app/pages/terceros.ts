@@ -16,7 +16,7 @@ import { FORMATOS, isoDia } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
 import { TraerRndc } from '../shared/traer-rndc';
 import { ActualizarVehiculos } from '../shared/actualizar-vehiculos';
-import { CargarMas } from '../shared/cargar-mas';
+import { Paginador, CambioPagina } from '../shared/paginador';
 import { mensajeError } from '../core/api.service';
 import { VistaRndc } from '../shared/vista-rndc';
 import { CuentaAppConductor } from '../shared/cuenta-app-conductor';
@@ -44,7 +44,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
 
 @Component({
   selector: 'app-terceros',
-  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, CargarMas, VistaRndc, CuentaAppConductor, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, Paginador, VistaRndc, CuentaAppConductor, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Conductores y terceros</h1><p class="sutil">Conductores, titulares, propietarios, tenedores y destinatarios que se registran en el RNDC.</p></div>
@@ -107,7 +107,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
           }
         </tbody>
       </table>
-      @if (lista().length) { <app-cargar-mas [mostrados]="lista().length" [total]="total()" [cargando]="cargandoMas()" unidad="terceros" (mas)="cargarMas()" /> }
+      <app-paginador [total]="total()" [pagina]="pag()" [porPagina]="porPag()" [cargando]="cargandoMas()" unidad="terceros" (cambio)="irPagina($event)" />
     </div>
 
     <!-- Paso 1: verificar el documento en la empresa y en el RNDC -->
@@ -285,7 +285,8 @@ export class Terceros {
 
 
   // ── Paginación con carga progresiva ──
-  private pagina = 1;
+  readonly pag = signal(1);
+  readonly porPag = signal(50);
   readonly total = signal(0);
   readonly cargandoMas = signal(false);
   private temporizador: ReturnType<typeof setTimeout> | undefined;
@@ -298,23 +299,22 @@ export class Terceros {
   async cargar() {
     const vigente = this.turno.tomar();
     this.cargando.set(true);
-    this.pagina = 1;
+    this.pag.set(1);
     try {
-      const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, pagina: 1, limite: 50 });
+      const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, pagina: 1, limite: this.porPag() });
       if (vigente()) { this.lista.set(r.items); this.total.set(r.total); }
     } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
   }
 
-  async cargarMas() {
-    if (this.cargandoMas() || this.lista().length >= this.total()) return;
+  async irPagina(c: CambioPagina) {
     this.cargandoMas.set(true);
-    const vigente = this.turno.actual();
+    const vigente = this.turno.tomar();
     try {
-      const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, pagina: this.pagina + 1, limite: 50 });
+      const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, pagina: c.pagina, limite: c.porPagina });
       if (!vigente()) return;
-      this.pagina += 1;
-      this.lista.update(l => [...l, ...r.items]);
-    } catch (e) { this.avisos.error(e); } finally { this.cargandoMas.set(false); }
+      this.pag.set(c.pagina); this.porPag.set(c.porPagina);
+      this.lista.set(r.items); this.total.set(r.total);
+    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargandoMas.set(false); }
   }
 
   vencida(f: string) { return new Date(f) < new Date(); }

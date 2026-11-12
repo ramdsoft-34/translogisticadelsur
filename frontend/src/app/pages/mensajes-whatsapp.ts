@@ -1,3 +1,4 @@
+import { Paginador, CambioPagina } from '../shared/paginador';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -16,7 +17,7 @@ const ESTADOS: Record<string, [string, string]> = {
 
 @Component({
   selector: 'app-mensajes-whatsapp',
-  imports: [FormsModule, Icono, Confirmar, ...FORMATOS],
+  imports: [FormsModule, Icono, Confirmar, Paginador, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Mensajes de WhatsApp</h1>
       <p class="sutil">Manifiestos y soportes internos que se mandaron a enviar al WhatsApp de los conductores: cuándo salieron, si llegaron al celular y si los leyeron. Los que aún no se han enviado no aparecen aquí.</p></div></div>
@@ -49,7 +50,8 @@ const ESTADOS: Record<string, [string, string]> = {
             <tr><td colspan="3" class="vacio">{{ cargando() ? 'Cargando…' : 'Nadie ha escrito al número en este periodo' }}</td></tr>
           }
         </tbody>
-      </table></div>
+      </table>
+      <app-paginador [total]="totalRecibidos()" [pagina]="pagR()" [porPagina]="porR()" [cargando]="cargando()" unidad="mensajes" (cambio)="irRecibidos($event)" /></div>
     } @else {
     @if (totales(); as t) {
       <div class="cifras" role="group" aria-label="Filtrar por estado">
@@ -83,7 +85,8 @@ const ESTADOS: Record<string, [string, string]> = {
           <tr><td colspan="8" class="vacio">{{ cargando() ? 'Cargando…' : 'No hay mensajes en este periodo' }}</td></tr>
         }
       </tbody>
-    </table></div>
+    </table>
+    <app-paginador [total]="totalE()" [pagina]="pagE()" [porPagina]="porE()" [cargando]="cargando()" unidad="mensajes" (cambio)="irEnviados($event)" /></div>
     <p class="sutil" style="margin-top:10px">Si el conductor desactivó la confirmación de lectura en WhatsApp, el mensaje queda en «Entregado» aunque lo haya visto.</p>
     }`,
   styles: [`
@@ -113,6 +116,9 @@ export class MensajesWhatsapp {
   readonly vista = signal<'enviados' | 'recibidos'>('enviados');
   readonly recibidos = signal<any[]>([]);
   readonly totalRecibidos = signal(0);
+  // Páginas (desde el servidor) de cada pestaña; el periodo, el estado y el texto se conservan al cambiar de página
+  readonly pagE = signal(1); readonly porE = signal(50); readonly totalE = signal(0);
+  readonly pagR = signal(1); readonly porR = signal(50);
   private enVivo = inject(EnVivo).al(['whatsapp'], () => this.cargar());
 
   constructor() { this.cargar(); }
@@ -122,14 +128,30 @@ export class MensajesWhatsapp {
   async cargar() {
     if (!this.desde || !this.hasta) return;
     this.cargando.set(true);
-    const periodo = { desde: this.desde, hasta: this.hasta, texto: this.texto.trim() };
+    const periodo = this.periodo();
+    this.pagE.set(1); this.pagR.set(1);
     try {
       const [r, rec] = await Promise.all([
-        this.vista() === 'enviados' ? this.api.get<any>('/whatsapp/mensajes', { ...periodo, estado: this.estado() }) : Promise.resolve(null),
-        this.api.get<any>('/whatsapp/recibidos', periodo),
+        this.vista() === 'enviados' ? this.api.get<any>('/whatsapp/mensajes', { ...periodo, estado: this.estado(), pagina: 1, limite: this.porE() }) : Promise.resolve(null),
+        this.api.get<any>('/whatsapp/recibidos', { ...periodo, pagina: 1, limite: this.porR() }),
       ]);
-      if (r) { this.totales.set(r.totales); this.mensajes.set(r.mensajes); }
+      if (r) { this.totales.set(r.totales); this.mensajes.set(r.mensajes); this.totalE.set(r.total); }
       this.recibidos.set(rec.mensajes); this.totalRecibidos.set(rec.total);
+    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
+  }
+  private periodo() { return { desde: this.desde, hasta: this.hasta, texto: this.texto.trim() }; }
+  async irEnviados(c: CambioPagina) {
+    this.cargando.set(true);
+    try {
+      const r = await this.api.get<any>('/whatsapp/mensajes', { ...this.periodo(), estado: this.estado(), pagina: c.pagina, limite: c.porPagina });
+      this.pagE.set(c.pagina); this.porE.set(c.porPagina); this.totales.set(r.totales); this.mensajes.set(r.mensajes); this.totalE.set(r.total);
+    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
+  }
+  async irRecibidos(c: CambioPagina) {
+    this.cargando.set(true);
+    try {
+      const r = await this.api.get<any>('/whatsapp/recibidos', { ...this.periodo(), pagina: c.pagina, limite: c.porPagina });
+      this.pagR.set(c.pagina); this.porR.set(c.porPagina); this.recibidos.set(r.mensajes); this.totalRecibidos.set(r.total);
     } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
   }
 

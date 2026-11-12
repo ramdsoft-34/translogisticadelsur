@@ -1,3 +1,4 @@
+import { Paginador, CambioPagina, enPagina } from '../shared/paginador';
 import { Component, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -13,7 +14,7 @@ import { filtrar } from '../shared/filtro';
 
 @Component({
   selector: 'app-liquidaciones',
-  imports: [FormsModule, RouterLink, Icono, Confirmar, ...FORMATOS],
+  imports: [FormsModule, RouterLink, Icono, Confirmar, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab"><div><h1>Facturación a clientes</h1>
       <p class="sutil">Relación de viajes por cliente y periodo: lo que se cobra, lo que se paga al conductor y la utilidad. Un viaje liquidado no se vuelve a cobrar.
@@ -55,7 +56,7 @@ import { filtrar } from '../shared/filtro';
           <option value="">Todos los estados</option><option value="borrador">Borrador</option><option value="facturada">Facturada</option><option value="anulada">Anulada</option></select></div>
       <div class="tabla-caja" style="box-shadow:none">
         <table><thead><tr><th>N°</th><th>Cliente</th><th>Periodo</th><th class="num">Viajes</th><th class="num">Total cobrado</th><th class="num">Utilidad</th><th>Estado</th><th></th></tr></thead>
-          <tbody>@for (l of listaVisible(); track l._id) {
+          <tbody>@for (l of paginaLista(); track l._id) {
             <tr><td>{{ l.numero }}</td><td>{{ l.cliente?.nombre }}</td><td>{{ l.titulo }}</td><td class="num">{{ l.totales?.viajes }}</td>
               <td class="num">{{ l.totales?.totalCobrado | pesos }}</td><td class="num">{{ l.totales?.utilidad | pesos }}</td>
               <td><span class="chip" [class.ok]="l.estado === 'facturada'" [class.error]="l.estado === 'anulada'">{{ l.estado }}</span></td>
@@ -65,6 +66,7 @@ import { filtrar } from '../shared/filtro';
                 @if (puedeGestionar && l.estado !== 'anulada') { <button class="pequeno peligro" confirmar="Clic otra vez para anular" (confirmado)="estado(l, 'anulada')">Anular</button> }
               </div></td></tr>
           } @empty { <tr><td colspan="8" class="vacio">Aún no hay liquidaciones</td></tr> }</tbody></table>
+          <app-paginador [total]="listaVisible().length" [pagina]="pagL()" [porPagina]="porL()" unidad="liquidaciones" (cambio)="pagL.set($event.pagina); porL.set($event.porPagina)" />
       </div>
     </div>`,
 })
@@ -78,6 +80,9 @@ export class Liquidaciones {
   readonly q = signal('');
   readonly estadoLiq = signal('');
   readonly listaVisible = computed(() => filtrar(this.lista().filter(l => !this.estadoLiq() || l.estado === this.estadoLiq()), this.q()));
+  // Solo se dibujan las filas de la página (los filtros y el buscador siguen sobre toda la lista)
+  readonly pagL = signal(1); readonly porL = signal(25);
+  readonly paginaLista = computed(() => enPagina(this.listaVisible(), this.pagL(), this.porL()));
   readonly calculo = signal<any>(null);
   readonly guardando = signal(false);
   p = { cliente: '', desde: inicioMesIso(), hasta: hoyIso() };

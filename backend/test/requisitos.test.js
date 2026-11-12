@@ -724,3 +724,33 @@ test('Duplicados: un viaje anulado por error se reactiva y no vuelve a salir com
   assert.ok(!(await s.admin.get('/api/importaciones/duplicados')).body.pares.some((p) => p.placa === 'REA001'), 'ya no sale como duplicado');
   await M.Viaje.deleteMany({ empresa: s.empresa, _id: { $in: [a._id, b._id] } });
 });
+
+// ── Paginación desde el servidor ─────────────────────────────────────────────
+test('Paginación: listas por páginas con total, sin romper las respuestas de siempre', async () => {
+  const urls = ['/api/rndc/transacciones', '/api/correo/envios', '/api/liquidaciones', '/api/gestion/liq-conductores', '/api/gestion/prestamos', '/api/reportes/auditoria'];
+  for (const u of urls) {
+    const sin = await s.admin.get(u);
+    assert.equal(sin.status, 200, `${u}: ${JSON.stringify(sin.body).slice(0, 200)}`);
+    assert.ok(Array.isArray(sin.body), `${u} sin «pagina» sigue devolviendo la lista`);
+    const p1 = await s.admin.get(`${u}?pagina=1&limite=5`);
+    assert.equal(p1.status, 200, u);
+    assert.ok(Array.isArray(p1.body.items) && typeof p1.body.total === 'number', `${u} con página`);
+    assert.ok(p1.body.items.length <= 5);
+    assert.equal(p1.body.paginas, Math.max(1, Math.ceil(p1.body.total / 5)));
+  }
+  // La auditoría tiene muchos registros: la página 2 no repite la 1
+  const a1 = await s.admin.get('/api/reportes/auditoria?pagina=1&limite=5');
+  const a2 = await s.admin.get('/api/reportes/auditoria?pagina=2&limite=5');
+  assert.ok(a1.body.total > 10);
+  assert.ok(!a2.body.items.some((x) => a1.body.items.some((y) => y._id === x._id)), 'páginas distintas');
+  // Mensajes de WhatsApp: totales del periodo y página
+  const d = `desde=${dia(-30)}&hasta=${dia(10)}`;
+  const m = await s.admin.get(`/api/whatsapp/mensajes?${d}&pagina=1&limite=5`);
+  assert.equal(m.status, 200, JSON.stringify(m.body));
+  assert.ok(m.body.totales && Array.isArray(m.body.mensajes) && typeof m.body.total === 'number');
+  const rc = await s.admin.get(`/api/whatsapp/recibidos?${d}&pagina=1&limite=5`);
+  assert.equal(rc.status, 200);
+  assert.ok(Array.isArray(rc.body.mensajes) && typeof rc.body.total === 'number');
+  const mSin = await s.admin.get(`/api/whatsapp/mensajes?${d}`);
+  assert.ok(mSin.body.totales && Array.isArray(mSin.body.mensajes), 'sin página igual que antes');
+});
