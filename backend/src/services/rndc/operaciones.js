@@ -55,6 +55,27 @@ export async function cargarViaje(empresaId, viajeId) {
     const { totalAuxiliarPagado } = lineaLiquidacion(v, v.tarifaRef, { respaldo: respaldosAuxiliar(tarifas).get(String(v.cliente?._id)) });
     v.textoAuxiliar = textoAuxiliar(Number(v.diasAuxiliar) > 0 ? Number(v.diasAuxiliar) : (Number(v.cantidad) || 1), totalAuxiliarPagado);
   }
+  // Remesa ya aceptada: mandan el remitente y el destinatario que se le enviaron al RNDC
+  const R = v.remesa?.estado === 'aceptado' ? await variablesEnviadas(empresaId, v._id, 3) : null;
+  // Remitente: la sede del cliente en el municipio de origen del viaje. Un viaje de Túquerres a Cujacal carga en la
+  // sede de Túquerres aunque la sede remitente de la ficha sea la bodega de Cujacal; sin sede en ese municipio,
+  // queda la de la ficha.
+  if (v.cliente) {
+    const tipoId = v.cliente.tipoId || 'N'; const numId = idCliente(v.cliente);
+    const origen = txt(v.codOrigen);
+    if (R?.NUMIDREMITENTE) {
+      if (R.NUMIDREMITENTE === numId && txt(R.CODSEDEREMITENTE)) v.cliente.sedeRemitente = txt(R.CODSEDEREMITENTE);
+    } else if (/^\d{8}$/.test(origen)) {
+      const fija = txt(v.cliente.sedeRemitente)
+        ? await Tercero.findOne({ empresa: empresaId, tipoId, numId, 'sede.codigo': txt(v.cliente.sedeRemitente) }).select('codMunicipio').lean() : null;
+      if (txt(fija?.codMunicipio).slice(0, 5) !== origen.slice(0, 5)) {
+        const sedes = await Tercero.find({ empresa: empresaId, tipoId, numId, codMunicipio: new RegExp(`^${origen.slice(0, 5)}`) })
+          .select('tipoId numId sede codMunicipio').lean();
+        const s = elegirSedeMunicipio(sedes, origen);
+        if (s) { v.sedeRemitenteFicha = txt(v.cliente.sedeRemitente); v.cliente.sedeRemitente = txt(s.sede.codigo); }
+      }
+    }
+  }
   // Sin destinatario en el viaje ni en la tarifa: la sede del cliente en el municipio de destino
   if (!v.destinatario?.numId && !v.tarifaRef?.destinatario?.numId && v.cliente) {
     const codDestino = v.codDestino || v.tarifaRef?.codMunicipio;
@@ -75,12 +96,9 @@ export async function cargarViaje(empresaId, viajeId) {
   // Municipio de la sede del destinatario: será el destino del manifiesto
   let dest = v.destinatario?.numId ? v.destinatario : v.tarifaRef?.destinatario?.numId ? v.tarifaRef.destinatario : v.destinatarioAuto;
   // Con la remesa aceptada manda el destinatario que se le envió al RNDC (el manifiesto debe ir a ese municipio)
-  if (v.remesa?.estado === 'aceptado') {
-    const R = await variablesEnviadas(empresaId, v._id, 3);
-    if (R?.NUMIDDESTINATARIO) {
-      dest = { tipoId: R.CODTIPOIDDESTINATARIO, numId: R.NUMIDDESTINATARIO, sede: R.CODSEDEDESTINATARIO };
-      v.destinatarioRemesa = dest;
-    }
+  if (R?.NUMIDDESTINATARIO) {
+    dest = { tipoId: R.CODTIPOIDDESTINATARIO, numId: R.NUMIDDESTINATARIO, sede: R.CODSEDEDESTINATARIO };
+    v.destinatarioRemesa = dest;
   }
   if (dest?.numId && txt(dest.sede)) {
     const sede = await Tercero.findOne({ empresa: empresaId, tipoId: dest.tipoId || 'N', numId: dest.numId, 'sede.codigo': txt(dest.sede) })
@@ -307,6 +325,8 @@ export async function vistaPrevia(empresaId, viajeId) {
     sedesCliente: v.cliente ? (await Tercero.find({ empresa: empresaId, tipoId: v.cliente.tipoId || 'N', numId: idCliente(v.cliente) })
       .select('tipoId numId sede codMunicipio').limit(400).lean())
       .map(x => ({ tipoId: x.tipoId, numId: x.numId, sede: x.sede?.codigo || '', nombre: x.sede?.nombre || '', codMunicipio: x.codMunicipio || '' }))
+      // Un registro sin código de sede no sirve como remitente ni destinatario en el RNDC: no se ofrece
+      .filter(x => x.sede)
       .sort((a, b2) => (Number(a.sede) || 0) - (Number(b2.sede) || 0)) : [],
     noAjustables: NO_AJUSTABLES,
     descripciones: await descripciones(empresaId, [...remesa, ...manifiesto]),
