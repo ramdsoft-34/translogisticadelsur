@@ -751,15 +751,16 @@ export class Viajes {
     const ops = this.opcionesOrigen();
     const igual = ops.find(o => n(o.texto) === q || (o.sede && (n(o.sede.sede?.nombre) === q || String(o.sede.sede?.codigo) === q)));
     if (igual || exacta) return igual || null;
+    // Varias parecidas: la primera de la lista, y antes la que empieza con lo escrito (nombre de la sede)
     const parecidas = ops.filter(o => n(o.texto).includes(q));
-    return parecidas.length === 1 ? parecidas[0] : null;
+    return parecidas.find(o => o.sede && n(o.sede.sede?.nombre).startsWith(q)) || parecidas[0] || null;
   }
   escribirOrigen(texto: string) {
     const o = this.buscarOpcionOrigen(texto, true);
     if (o && n2(texto) === n2(o.texto)) { this.origenTexto.set(null); this.elegirOrigen(o.valor); return; }
     this.origenTexto.set(texto);
   }
-  // Al salir del campo: lo escrito que coincide con una sola opción se toma; vacío = predeterminado; si no, queda lo anterior
+  // Al salir del campo: se toma la opción que coincide con lo escrito (la primera si hay varias); vacío = predeterminado; si no, queda lo anterior
   cerrarOrigen() {
     const t = this.origenTexto();
     if (t === null) return;
