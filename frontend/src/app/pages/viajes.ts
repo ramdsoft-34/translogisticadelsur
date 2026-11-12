@@ -50,6 +50,7 @@ const vacio = (): Formulario => ({
 type Periodo = 'hoy' | 'ayer' | 'semana' | 'mes' | 'rango';
 const POR_PAGINA = 50;
 const leerSeguir = () => { try { return localStorage.getItem('tls_seguir_registrando') !== '0'; } catch { return true; } };
+const n2 = (x: string) => String(x || '').trim().toLowerCase();
 const digitosTxt = (v: any) => String(v ?? '').replace(/\D/g, '');
 const idClienteTxt = (c: any) => c?.tipoId === 'N' ? digitosTxt(c.nit) + digitosTxt(c.dv) : digitosTxt(c?.nit);
 const ordenarSedesTxt = (l: any[]) => [...l].sort((a, b) => String(a.sede.codigo).localeCompare(String(b.sede.codigo), 'es', { numeric: true }));
@@ -207,17 +208,14 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
         <label for="v-orig">Origen:</label>
         <div>
-          <select id="v-orig" name="origen" [ngModel]="valorOrigen()" (ngModelChange)="elegirOrigen($event)" [disabled]="bloqueado() || !f.cliente"
-            title="Dónde se carga (remitente de la remesa). El predeterminado es la sede remitente del cliente">
-            <option value="">{{ f.cliente ? 'Predeterminado' + (sedeFicha() ? ': Sede ' + sedeFicha().sede.codigo + ' · ' + (sedeFicha().sede.nombre || '') : '') : 'Primero elija la empresa' }}</option>
-            @for (x of sedesCliente(); track x.sede.codigo) {
-              @if (x.sede.codigo !== sedeFicha()?.sede?.codigo) { <option [value]="'c:' + x.sede.codigo">Sede {{ x.sede.codigo }} · {{ x.sede.nombre }}</option> }
-            }
-            <option value="otro">Otro remitente (otra empresa)…</option>
-          </select>
+          <input id="v-orig" name="origen" list="lista-origenes" [ngModel]="origenTexto() ?? textoOrigen()" (ngModelChange)="escribirOrigen($event)"
+            (focus)="$any($event.target).select()" (blur)="cerrarOrigen()" (keydown.enter)="$event.preventDefault(); cerrarOrigen(); irADestino()" [disabled]="bloqueado() || !f.cliente"
+            [placeholder]="f.cliente ? 'Escriba para buscar la sede o el municipio' : 'Primero elija la empresa'"
+            title="Dónde se carga (remitente de la remesa). El predeterminado es la sede remitente del cliente" />
+          <datalist id="lista-origenes">@for (o of opcionesOrigen(); track o.valor) { <option [value]="o.texto"></option> }</datalist>
           @if (valorOrigen() === 'otro') {
             <div class="otro-remitente">
-              <input name="remNum" [ngModel]="f.remitente?.numId" (change)="buscarRemitente($any($event.target).value)" maxlength="15" placeholder="NIT con DV o cédula del remitente" aria-label="Documento del remitente" />
+              <input id="v-rem-num" name="remNum" [ngModel]="f.remitente?.numId" (change)="buscarRemitente($any($event.target).value)" maxlength="15" placeholder="NIT con DV o cédula del remitente" aria-label="Documento del remitente" />
               <select name="remSede" [ngModel]="f.remitente?.sede || ''" (ngModelChange)="elegirSedeOtro($event)" [disabled]="!sedesOtro().length" aria-label="Sede del remitente">
                 <option value="">{{ sedesOtro().length ? 'Elija la sede…' : 'Sin sedes en la plataforma' }}</option>
                 @for (x of sedesOtro(); track x.sede.codigo) { <option [value]="x.sede.codigo">Sede {{ x.sede.codigo }} · {{ x.sede.nombre }}</option> }
@@ -643,7 +641,7 @@ export class Viajes {
   estadoTexto(e: string) { return ESTADOS_VIAJE[e] || e; }
   claseEstado(e: string) { return ({ manifestado: 'marca', cumplido: 'ok', anulado: 'error', remesa: 'alerta' } as Record<string, string>)[e] || ''; }
 
-  nuevo() { this.rastreoSrv.cargar(); this.rastreoForm.set(null); this.viajeRastreo = null; this.rastrear.set(false); this.form.set(vacio()); this.otroRemitente.set(false); this.sedesOtro.set([]); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.preguntarManifiesto.set(false); this.cargarSiguienteNumero(); this.reporteDelFormulario(this.form().fecha); this.abierto.set(true); }
+  nuevo() { this.rastreoSrv.cargar(); this.rastreoForm.set(null); this.viajeRastreo = null; this.rastrear.set(false); this.form.set(vacio()); this.otroRemitente.set(false); this.origenTexto.set(null); this.sedesOtro.set([]); this.bloqueado.set(false); this.registradosTanda.set([]); this.placasConductor.set([]); this.preguntarManifiesto.set(false); this.cargarSiguienteNumero(); this.reporteDelFormulario(this.form().fecha); this.abierto.set(true); }
 
   // El reporte de la columna derecha es el de la fecha del formulario
   // Valor del auxiliar: auxiliar pagado del destino × días (sin tarifa de auxiliar en el destino, la primera del cliente)
@@ -678,7 +676,7 @@ export class Viajes {
       seguro: !!(v as any).seguro?.marcado, auxiliarPagado: v.conAuxiliar ? !!(v as any).auxiliarPagado : null,
     });
     this.preguntarManifiesto.set(false);
-    this.otroRemitente.set(false); this.sedesOtro.set([]);
+    this.otroRemitente.set(false); this.sedesOtro.set([]); this.origenTexto.set(null);
     const rem = (v as any).remitente;
     if (rem?.numId && digitosTxt(rem.numId) !== idClienteTxt(v.cliente) && digitosTxt(rem.numId) !== digitosTxt((v.cliente as any)?.nit)) this.cargarSedesOtro(digitosTxt(rem.numId));
     this.habilitarRndc = false;
@@ -689,7 +687,7 @@ export class Viajes {
     this.abierto.set(true);
   }
 
-  cambiarCliente(_: string) { this.otroRemitente.set(false); this.form.update(f => ({ ...f, tarifaRef: '', destino: '', codDestino: '', codOrigen: '', remitente: { tipoId: '', numId: '', sede: '' }, seguro: false })); }
+  cambiarCliente(_: string) { this.otroRemitente.set(false); this.origenTexto.set(null); this.form.update(f => ({ ...f, tarifaRef: '', destino: '', codDestino: '', codOrigen: '', remitente: { tipoId: '', numId: '', sede: '' }, seguro: false })); }
 
   // ── Origen / remitente: el predeterminado es la sede remitente del cliente; se puede cambiar por otra sede
   // del cliente (otro municipio de cargue) o por otra empresa (el cliente sigue como propietario de la carga).
@@ -734,6 +732,44 @@ export class Viajes {
     }
     return '';
   });
+  // Campo de texto con búsqueda: cada opción es una sede del cliente (la de la ficha es la predeterminada) u «otro remitente»
+  readonly opcionesOrigen = computed(() => {
+    const ficha = this.sedeFicha();
+    return [
+      { valor: '', texto: 'Predeterminado' + (ficha ? `: Sede ${ficha.sede.codigo} · ${ficha.sede.nombre || ''}` : ''), sede: ficha },
+      ...this.sedesCliente().filter(x => x.sede.codigo !== ficha?.sede?.codigo).map(x => ({ valor: 'c:' + x.sede.codigo, texto: `Sede ${x.sede.codigo} · ${x.sede.nombre || ''}`, sede: x })),
+      { valor: 'otro', texto: 'Otro remitente (otra empresa)', sede: null },
+    ];
+  });
+  readonly textoOrigen = computed(() => this.opcionesOrigen().find(o => o.valor === this.valorOrigen())?.texto || '');
+  // Lo que se va escribiendo (null = se muestra la opción elegida)
+  readonly origenTexto = signal<string | null>(null);
+  private buscarOpcionOrigen(texto: string, exacta: boolean) {
+    const n = (x: string) => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const q = n(texto);
+    if (!q) return null;
+    const ops = this.opcionesOrigen();
+    const igual = ops.find(o => n(o.texto) === q || (o.sede && (n(o.sede.sede?.nombre) === q || String(o.sede.sede?.codigo) === q)));
+    if (igual || exacta) return igual || null;
+    const parecidas = ops.filter(o => n(o.texto).includes(q));
+    return parecidas.length === 1 ? parecidas[0] : null;
+  }
+  escribirOrigen(texto: string) {
+    const o = this.buscarOpcionOrigen(texto, true);
+    if (o && n2(texto) === n2(o.texto)) { this.origenTexto.set(null); this.elegirOrigen(o.valor); return; }
+    this.origenTexto.set(texto);
+  }
+  // Al salir del campo: lo escrito que coincide con una sola opción se toma; vacío = predeterminado; si no, queda lo anterior
+  cerrarOrigen() {
+    const t = this.origenTexto();
+    if (t === null) return;
+    this.origenTexto.set(null);
+    if (!t.trim()) { this.elegirOrigen(''); return; }
+    const o = this.buscarOpcionOrigen(t, false);
+    if (o) this.elegirOrigen(o.valor);
+  }
+  // Enter en Origen no guarda el viaje: toma la opción y sigue en Destino
+  irADestino() { setTimeout(() => document.getElementById(this.valorOrigen() === 'otro' ? 'v-rem-num' : 'v-dest')?.focus(), 30); }
   elegirOrigen(valor: string) {
     const vacioRem = { tipoId: '', numId: '', sede: '' };
     if (valor === 'otro') { this.otroRemitente.set(true); this.sedesOtro.set([]); this.form.update(f => ({ ...f, codOrigen: '', remitente: { tipoId: 'N', numId: '', sede: '' } })); return; }
