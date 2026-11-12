@@ -214,7 +214,8 @@ export class CarguesBodega {
   algunoEnviado(c: any) { return (c.reporte?.destinatarios || []).some((d: any) => d.ok); }
   jefesTexto(c: any) { return c.jefes.length ? c.jefes.map((j: any) => j.nombre).join(', ') : 'Sin jefe de bodega'; }
   filasDe(t: Tipo) { return this.filas().filter(f => f.tipo === t); }
-  destinosDe(t: Tipo) { return (this.rev()?.destinos || []).filter((d: any) => d.tipo === t); }
+  // Todos los destinos registrados del cliente; primero los del tipo de la fila (urbano o correría)
+  destinosDe(t: Tipo) { const l = this.rev()?.destinos || []; return [...l.filter((d: any) => d.tipo === t), ...l.filter((d: any) => d.tipo !== t)]; }
   sePuede(f: Fila) { return !f.registrado && !!f.conductor && !!f.tarifaRef; }
   todasElegidas() { const l = this.visibles().filter(f => this.sePuede(f)); return !!l.length && l.every(f => f.elegida); }
   elegirTodas(v: boolean) { const ids = new Set(this.visibles().filter(f => this.sePuede(f)).map(f => f.item + f.n)); this.filas.update(l => l.map(f => (ids.has(f.item + f.n) ? { ...f, elegida: v } : f))); }
