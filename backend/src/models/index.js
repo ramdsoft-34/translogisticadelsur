@@ -716,6 +716,7 @@ const itemBodegaSchema = new Schema({
   viajes: { type: Number, default: 1, min: 1, max: 5 },
   auxiliar: { type: Number, default: 0, min: 0, max: 5 },                        // cuántos auxiliares
   registrados: { type: [{ type: Schema.Types.ObjectId, ref: 'Viaje' }], default: [] },   // viajes ya creados desde este renglón
+  quitados: { type: Number, default: 0, min: 0, max: 5 },                        // viajes que la transportadora quitó de la revisión
 });
 const reporteBodegaSchema = new Schema({
   cliente: { type: Schema.Types.ObjectId, ref: 'Cliente', required: true },

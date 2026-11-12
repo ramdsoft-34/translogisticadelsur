@@ -8,7 +8,7 @@ import { environment } from '../../environments/environment';
 type Tipo = 'urbano' | 'correria';
 interface Tarjeta {
   clave: string; tipo: Tipo; placa: string; conductor: string | null; conductorNombre: string; cargues: number; frecuente: boolean;
-  cargo: boolean | null; destino: string; planilla: string; viajes: number; auxiliar: number; otro: boolean; conductorTexto: string; registrado: boolean;
+  cargo: boolean | null; destino: string; planilla: string; viajes: number; auxiliar: number; otro: boolean; conductorTexto: string; registrado: boolean; quitado?: boolean;
 }
 const TITULO: Record<Tipo, string> = { urbano: 'Urbanos', correria: 'Correrías' };
 const RE_PLACA = /^[A-Z0-9]{5,6}$/;
@@ -67,7 +67,7 @@ const RE_PLACA = /^[A-Z0-9]{5,6}$/;
               <div class="fila1">
                 <span class="placa">{{ c.placa }}</span>
                 <div class="quien"><strong>{{ c.conductorNombre || 'Conductor por confirmar' }}</strong>
-                  <small>@if (c.registrado) { Ya registrado por la transportadora } @else if (c.frecuente) { {{ c.cargues ? c.cargues + ' cargue' + (c.cargues === 1 ? '' : 's') + ' con ustedes' : 'Vehículo habitual' }} } @else { Placa agregada }</small></div>
+                  <small>@if (c.registrado) { {{ c.quitado ? 'Revisado por la transportadora' : 'Ya registrado por la transportadora' }} } @else if (c.frecuente) { {{ c.cargues ? c.cargues + ' cargue' + (c.cargues === 1 ? '' : 's') + ' con ustedes' : 'Vehículo habitual' }} } @else { Placa agregada }</small></div>
                 @if (!c.registrado) {
                   <div class="sino" role="group" [attr.aria-label]="'¿' + c.placa + ' cargó?'">
                     <button type="button" class="si-b" [class.on]="c.cargo === true" [attr.aria-pressed]="c.cargo === true" (click)="marcar(c, true)">Sí</button>
@@ -278,7 +278,7 @@ export class BodegaPublica {
       let c = l.find(x => x.tipo === it.tipo && x.placa === it.placa && x.cargo === null);
       if (!c) { c = nueva(it.tipo, { placa: it.placa, conductor: it.conductor }); l.push(c); }
       Object.assign(c, { cargo: true, destino: it.destino || '', planilla: it.planilla || '', viajes: it.viajes || 1, auxiliar: Number(it.auxiliar) || 0,
-        otro: !!it.conductorTexto, conductorTexto: it.conductorTexto || '', registrado: !!it.registrado });
+        otro: !!it.conductorTexto, conductorTexto: it.conductorTexto || '', registrado: !!it.registrado, quitado: !!it.quitado });
     }
     this.tarjetas.set(l);
   }

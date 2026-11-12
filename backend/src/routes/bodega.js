@@ -69,8 +69,17 @@ r.get('/reportes/:id/enlace', permitir(P.VIAJES_REGISTRAR), async (req, res) => 
 });
 
 r.post('/reportes/:id/vincular', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
-  const d = z.object({ item: oid, viaje: oid }).parse(req.body);
-  res.json(await B.vincularViaje(req.empresaId, oid.parse(req.params.id), d.item, d.viaje));
+  const d = z.object({ item: oid, viaje: oid, existente: z.boolean().optional() }).parse(req.body);
+  const x = await B.vincularViaje(req.empresaId, oid.parse(req.params.id), d.item, d.viaje);
+  // Marcado a mano con un viaje que ya existía (no registrado desde la revisión)
+  if (d.existente) await auditar(req, 'bodega_marcar_registrado', { entidad: 'Viaje', entidadId: d.viaje, detalle: { reporte: req.params.id, item: d.item } });
+  res.json(x);
+});
+r.post('/reportes/:id/quitar', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
+  const d = z.object({ item: oid }).parse(req.body);
+  const x = await B.quitarViaje(req.empresaId, oid.parse(req.params.id), d.item);
+  await auditar(req, 'bodega_quitar_viaje', { detalle: { reporte: req.params.id, item: d.item, placa: x.placa } });
+  res.json(x);
 });
 
 // Configuración en Clientes y tarifas

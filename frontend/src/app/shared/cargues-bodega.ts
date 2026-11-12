@@ -8,6 +8,7 @@ import { Avisos } from '../core/avisos.service';
 import { AutorizacionAdmin } from '../core/autorizacion.service';
 import { EnVivo } from '../core/en-vivo.service';
 import { Modal } from './modal';
+import { Confirmar } from './confirmar';
 import { Icono } from './icono';
 import { Moneda } from './moneda';
 import { BuscarTercero } from './buscar-tercero';
@@ -18,7 +19,7 @@ type Tipo = 'urbano' | 'correria';
 interface Fila {
   item: string; n: number; tipo: Tipo; placa: string; planilla: string; conductor: string | null; conductorNombre: string; avisoConductor: string;
   tarifaRef: string | null; destino: string; tarifa: number; flete: number; anticipo: number; requiereManifiesto: boolean; auxiliar: number; auxiliarPagado: boolean; destinoEscrito: string;
-  registrado: string | null; repetidos: string[]; elegida: boolean; estadoEnvio?: 'ok' | 'error'; error?: string; numero?: number;
+  registrado: string | null; repetidos: string[]; existentes?: { _id: string; numero: number; destino: string }[]; elegida: boolean; estadoEnvio?: 'ok' | 'error'; error?: string; numero?: number;
 }
 const TITULO: Record<Tipo, string> = { urbano: 'Urbanos', correria: 'Correrías' };
 
@@ -26,7 +27,7 @@ const TITULO: Record<Tipo, string> = { urbano: 'Urbanos', correria: 'Correrías'
 // Cada viaje se registra con el mismo proceso de «Registrar viaje» (repetidos, documentos vencidos, mes cerrado, tarifa).
 @Component({
   selector: 'app-cargues-bodega',
-  imports: [FormsModule, Modal, Icono, Moneda, BuscarTercero, FechaHoraPipe, PesosPipe, Paginador],
+  imports: [Confirmar, FormsModule, Modal, Icono, Moneda, BuscarTercero, FechaHoraPipe, PesosPipe, Paginador],
   template: `
     <app-modal [titulo]="rev() ? 'Revisar cargues · ' + rev().cliente.nombre : 'Cargues de bodega'" [abierto]="abierto()" (cerrar)="salir()" [ancho]="true">
       @if (!rev()) {
@@ -138,6 +139,14 @@ const TITULO: Record<Tipo, string> = { urbano: 'Urbanos', correria: 'Correrías'
                     @else if (f.estadoEnvio === 'error') { <span class="chip error sin-punto">No se registró</span><small class="error-texto d-bloque">{{ f.error }}</small> }
                     @else if (!f.conductor || !f.tarifaRef) { <span class="chip error sin-punto">Falta {{ !f.conductor ? 'conductor' : 'destino' }}</span> }
                     @else if (f.repetidos.length) { <span class="chip alerta sin-punto">Ya hay viaje ese día</span><small class="sutil d-bloque">{{ f.repetidos.join(', ') }}</small> }
+                    @if (!f.registrado && f.repetidos.length) {
+                      <div class="acciones-repetido">
+                        @for (x of f.existentes || []; track x._id) {
+                          <button type="button" class="pequeno" (click)="marcarRegistrado(f, x)" [disabled]="trabajando()" [title]="'Este renglón es el viaje N° ' + x.numero + ' que ya está registrado'">Marcar registrado (N° {{ x.numero }})</button>
+                        }
+                        <button type="button" class="pequeno" confirmar="Clic otra vez para quitarlo" (confirmado)="quitar(f)" [disabled]="trabajando()" title="Quitar este viaje de la revisión (no borra ningún viaje)">Quitar</button>
+                      </div>
+                    }
                     @else { <span class="chip sin-punto">Listo</span> }
                   </td>
                 </tr>
@@ -172,7 +181,8 @@ const TITULO: Record<Tipo, string> = { urbano: 'Urbanos', correria: 'Correrías'
     .col-val { min-width: 230px; } .val { display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: center; gap: 6px; margin-bottom: 4px; }
     .val small { color: var(--gris-5); font-size: 11.5px; } .val .moneda { width: 100%; } .val .moneda input { width: 100%; min-width: 0; min-height: 32px; font-size: 13px; }
     .col-doc { min-width: 175px; } .sel-aux { width: auto; min-height: 30px; font-size: 12.5px; } .aux { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 6px; } .aux .casilla { margin: 0; font-size: 12.5px; }
-    .col-estado { width: 1%; min-width: 110px; } .d-bloque { display: block; margin-top: 4px; font-size: 11.5px; }
+    .acciones-repetido { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+    .col-estado { width: 1%; min-width: 150px; } .d-bloque { display: block; margin-top: 4px; font-size: 11.5px; }
     tr.apagada td { background: var(--gris-1); }
     @media (max-width: 760px) { .cli { grid-template-columns: 1fr; } .cli-acciones { justify-content: flex-start; } }
   `],
@@ -271,6 +281,33 @@ export class CarguesBodega {
       this.rev.set(r); this.filas.set(r.filas.map((f: any) => this.nueva(f)));
       this.tipo.set(this.filasDe('urbano').length || !this.filasDe('correria').length ? 'urbano' : 'correria');
     } catch (e) { this.avisos.error(e); }
+  }
+  // «Ya hay viaje ese día»: el renglón es ese viaje (queda registrado y el jefe ya no lo cambia) o se quita de la revisión
+  async marcarRegistrado(f: Fila, x: { _id: string; numero: number }) {
+    const r = this.rev(); if (!r) return;
+    this.trabajando.set(true);
+    try {
+      await this.api.post(`/bodega/reportes/${r._id}/vincular`, { item: f.item, viaje: x._id, existente: true });
+      this.rev.set({ ...r, numeros: { ...r.numeros, [x._id]: x.numero } });
+      this.filas.update(l => l.map(y => {
+        if (y.item === f.item && y.n === f.n) return { ...y, registrado: x._id, elegida: false, repetidos: [], existentes: [] };
+        // El mismo viaje ya no se ofrece en los demás renglones
+        return { ...y, existentes: (y.existentes || []).filter(e => e._id !== x._id), repetidos: y.repetidos.filter(t => !t.startsWith(`N° ${x.numero} ·`)) };
+      }));
+      this.avisos.ok(`${f.placa}: marcado como el viaje N° ${x.numero}`);
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
+  }
+  async quitar(f: Fila) {
+    const r = this.rev(); if (!r) return;
+    this.trabajando.set(true);
+    try {
+      await this.api.post(`/bodega/reportes/${r._id}/quitar`, { item: f.item });
+      // Se quita el último pendiente del renglón (los demás conservan lo que ya se editó)
+      const pendientes = this.filas().filter(y => y.item === f.item && !y.registrado);
+      const ultimo = pendientes[pendientes.length - 1] || f;
+      this.filas.update(l => l.filter(y => !(y.item === ultimo.item && y.n === ultimo.n)));
+      this.avisos.ok(`${f.placa}: quitado de la revisión`);
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
   volver() { this.rev.set(null); this.filas.set([]); this.cargar(); }
   salir() { this.rev.set(null); this.filas.set([]); this.cerrar.emit(); }

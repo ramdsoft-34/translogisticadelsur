@@ -233,7 +233,9 @@ async function reporteDe(r, cual) {
   return reporteDelDia(r.empresa, r.cliente, new Date(r.fecha.getTime() - DIA));
 }
 const itemPublico = (i) => ({ id: String(i._id), tipo: i.tipo, placa: i.placa, conductor: i.conductor ? String(i.conductor) : null, conductorTexto: i.conductorTexto,
-  destino: i.destinoTexto, planilla: i.planilla, viajes: i.viajes, auxiliar: Number(i.auxiliar) || 0, registrado: i.registrados.length > 0 });
+  destino: i.destinoTexto, planilla: i.planilla, viajes: i.viajes, auxiliar: Number(i.auxiliar) || 0,
+  // Registrado (o quitado) por la transportadora: el jefe de bodega ya no lo puede cambiar
+  registrado: i.registrados.length > 0 || (Number(i.quitados) || 0) > 0, quitado: !i.registrados.length && (Number(i.quitados) || 0) > 0 });
 
 /** Lo que ve el jefe de bodega: los vehículos de su formulario por pestaña y lo que ya reportó (el destino lo escribe él). */
 export async function datosFormulario(token, sesion, cual = 'hoy') {
@@ -277,10 +279,10 @@ export async function guardarReporte(token, sesion, { cual = 'hoy', tipo, items 
       conductor: conductores.has(String(x?.conductor || '')) ? x.conductor : null });
   }
   // Se conservan los renglones de la otra pestaña y los ya registrados de esta
-  const fijos = rep.items.filter((i) => i.tipo !== tipo || i.registrados.length);
-  const clave = (i) => `${i.placa}|${normalizar(i.destinoTexto)}`;
-  const fijosClave = new Set(fijos.filter((i) => i.tipo === tipo).map(clave));
-  rep.items = [...fijos, ...limpios.filter((i) => !fijosClave.has(clave(i)))];
+  const fijos = rep.items.filter((i) => i.tipo !== tipo || i.registrados.length || (Number(i.quitados) || 0) > 0);
+  // Una placa ya registrada (o quitada) por la transportadora en esta pestaña no se vuelve a cambiar desde la página
+  const placasFijas = new Set(fijos.filter((i) => i.tipo === tipo).map((i) => i.placa));
+  rep.items = [...fijos, ...limpios.filter((i) => !placasFijas.has(i.placa))];
   rep.jefe = { nombre: jefe.nombre, cedula };
   rep.reportadoEn = new Date();
   await rep.save();
@@ -322,7 +324,7 @@ export async function revision(empresaId, reporteId) {
   const conductores = (await Tercero.find({ empresa: empresaId, roles: 'conductor' }).select('nombres apellido1 apellido2 placas placaPrincipal').lean())
     .map((t) => Object.assign(t, { _s: new Set(normalizar(nombreDe(t)).split(' ').filter((w) => w.length > 1)) }));
   const porIdCond = new Map(conductores.map((t) => [String(t._id), t]));
-  const existentes = await Viaje.find({ empresa: empresaId, fecha: rep.fecha, estado: { $ne: 'anulado' }, placa: { $in: rep.items.map((i) => i.placa) } }).select('numero placa destino').lean();
+  const existentes = await Viaje.find({ empresa: empresaId, fecha: rep.fecha, estado: { $ne: 'anulado' }, placa: { $in: rep.items.map((i) => i.placa) } }).select('numero placa destino cliente').lean();
   const registradosIds = new Set(rep.items.flatMap((i) => i.registrados.map(String)));
   const vehs = new Map((await Vehiculo.find({ empresa: empresaId, placa: { $in: rep.items.map((i) => i.placa) } }).select('placa conductorHabitual').lean()).map((v) => [v.placa, v]));
   const filas = [];
@@ -340,13 +342,17 @@ export async function revision(empresaId, reporteId) {
     } else if (i.conductor) cond = porIdCond.get(String(i.conductor)) || null;
     else if (vehs.get(i.placa)?.conductorHabitual) cond = porIdCond.get(String(vehs.get(i.placa).conductorHabitual)) || null;
     const otros = existentes.filter((v) => v.placa === i.placa && !registradosIds.has(String(v._id)));
-    for (let n = 0; n < i.viajes; n++) {
+    // Los viajes quitados por la transportadora ya no salen (los registrados siempre se muestran)
+    const mostrar = Math.max(i.registrados.length, i.viajes - (Number(i.quitados) || 0));
+    for (let n = 0; n < mostrar; n++) {
       const viaje = i.registrados[n] || null;
       filas.push({ item: String(i._id), n, tipo: i.tipo, placa: i.placa, planilla: i.planilla, auxiliar: Number(i.auxiliar) || 0, destinoEscrito: i.destinoTexto || '',
         conductor: cond ? String(cond._id) : null, conductorNombre: cond ? nombreDe(cond) : '', avisoConductor,
         tarifaRef: t ? String(t._id) : null, destino: t?.destino || '', tarifa: sug.tarifa || 0, flete: sug.flete || 0, anticipo: sug.anticipo || 0,
         requiereManifiesto: i.tipo === 'urbano' ? !!b.manifiestoUrbanos : b.manifiestoCorrerias !== false, auxiliarPagado: b.auxiliarPagado !== false,
-        registrado: viaje ? String(viaje) : null, repetidos: viaje ? [] : otros.map((v) => `N° ${v.numero} · ${v.destino}`) });
+        registrado: viaje ? String(viaje) : null, repetidos: viaje ? [] : otros.map((v) => `N° ${v.numero} · ${v.destino}`),
+        // Los del mismo cliente se pueden marcar como el viaje de este renglón
+        existentes: viaje ? [] : otros.filter((v) => String(v.cliente) === String(rep.cliente)).map((v) => ({ _id: String(v._id), numero: v.numero, destino: v.destino })) });
     }
   }
   const viajesRegistrados = registradosIds.size ? await Viaje.find({ empresa: empresaId, _id: { $in: [...registradosIds] } }).select('numero').lean() : [];
@@ -365,11 +371,25 @@ export async function vincularViaje(empresaId, reporteId, itemId, viajeId) {
   if (!item) throw new ErrorHttp(404, 'Renglón no encontrado');
   const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId, cliente: rep.cliente }).select('_id').lean();
   if (!v) throw new ErrorHttp(400, 'El viaje no es de este cliente');
-  if (item.registrados.length >= item.viajes) throw new ErrorHttp(409, 'Ese renglón ya tiene todos sus viajes registrados');
-  if (!item.registrados.some((x) => String(x) === String(v._id))) item.registrados.push(v._id);
+  if (item.registrados.length >= item.viajes - (Number(item.quitados) || 0)) throw new ErrorHttp(409, 'Ese renglón ya tiene todos sus viajes registrados');
+  if (rep.items.some((x) => x.registrados.some((y) => String(y) === String(v._id)))) throw new ErrorHttp(409, 'Ese viaje ya está marcado en otro renglón del reporte');
+  item.registrados.push(v._id);
   await rep.save();
   publicar(empresaId, { recurso: 'bodega', ruta: '/vincular', metodo: 'POST' });
   return { ok: true };
+}
+
+/** Quita de la revisión un viaje pendiente del renglón (p. ej. ya estaba registrado por otro lado). El jefe de bodega ya no lo puede cambiar. */
+export async function quitarViaje(empresaId, reporteId, itemId) {
+  const rep = await ReporteBodega.findOne({ empresa: empresaId, _id: reporteId });
+  if (!rep) throw new ErrorHttp(404, 'Reporte no encontrado');
+  const item = rep.items.id(itemId);
+  if (!item) throw new ErrorHttp(404, 'Renglón no encontrado');
+  if (item.viajes - (Number(item.quitados) || 0) - item.registrados.length <= 0) throw new ErrorHttp(409, 'Ese renglón no tiene viajes pendientes: los registrados no se quitan');
+  item.quitados = (Number(item.quitados) || 0) + 1;
+  await rep.save();
+  publicar(empresaId, { recurso: 'bodega', ruta: '/quitar', metodo: 'POST' });
+  return { ok: true, placa: item.placa };
 }
 
 // ── Envío automático a la hora configurada ──
