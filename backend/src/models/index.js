@@ -264,7 +264,9 @@ const terceroSchema = new Schema({
 }, { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } });
 terceroSchema.plugin(tenantPlugin);
 terceroSchema.index({ empresa: 1, tipoId: 1, numId: 1, 'sede.codigo': 1 }, { unique: true });
-terceroSchema.index({ empresa: 1, nombres: 1, apellido1: 1 });
+// Índices de listas según la regla ESR de MongoDB (igualdad → orden → rango) y con el mismo orden que usa la consulta,
+// para que la página salga del índice sin ordenar en memoria.
+terceroSchema.index({ empresa: 1, nombres: 1, apellido1: 1, _id: 1 });
 // Una persona (cédula, pasaporte…) no se repite en la empresa; con NIT sí, una por sede
 terceroSchema.pre('save', async function () {
   if (this.tipoId === 'N' || (!this.isNew && !this.isModified('numId') && !this.isModified('tipoId'))) return;
@@ -402,8 +404,9 @@ const viajeSchema = new Schema({
 }, { timestamps: true });
 viajeSchema.plugin(tenantPlugin);
 viajeSchema.index({ empresa: 1, numero: 1 }, { unique: true });
-viajeSchema.index({ empresa: 1, fecha: -1 });
-viajeSchema.index({ empresa: 1, estado: 1 });
+viajeSchema.index({ empresa: 1, fecha: -1, numero: -1 });
+viajeSchema.index({ empresa: 1, estado: 1, fecha: -1, numero: -1 });
+viajeSchema.index({ empresa: 1, cliente: 1, fecha: -1, numero: -1 });
 viajeSchema.index({ empresa: 1, 'manifiesto.numero': 1 });
 viajeSchema.index({ empresa: 1, 'rastreo.activo': 1 });
 viajeSchema.index({ empresa: 1, 'rastreo.activado': -1 });
@@ -452,8 +455,8 @@ const envioCorreoSchema = new Schema({
 }, { timestamps: true });
 envioCorreoSchema.plugin(tenantPlugin);
 envioCorreoSchema.index({ empresa: 1, viaje: 1, createdAt: -1 });
-envioCorreoSchema.index({ empresa: 1, estado: 1 });
-envioCorreoSchema.index({ empresa: 1, createdAt: -1 });
+envioCorreoSchema.index({ empresa: 1, estado: 1, createdAt: -1, _id: -1 });
+envioCorreoSchema.index({ empresa: 1, createdAt: -1, _id: -1 });
 
 // ── Cuenta de WhatsApp de Translogística, compartida por las empresas sin número propio (global) ──
 const plataformaWhatsappSchema = new Schema({
@@ -486,7 +489,7 @@ const envioWhatsappSchema = new Schema({
 envioWhatsappSchema.plugin(tenantPlugin);
 envioWhatsappSchema.index({ empresa: 1, viaje: 1, createdAt: -1 });
 envioWhatsappSchema.index({ empresa: 1, idMensaje: 1 });
-envioWhatsappSchema.index({ empresa: 1, updatedAt: -1 });
+envioWhatsappSchema.index({ empresa: 1, updatedAt: -1, _id: -1 });
 envioWhatsappSchema.index({ empresa: 1, enviadoEn: -1 });
 
 // ── Mensajes que la gente le escribe al número de WhatsApp (solo lectura en la plataforma) ──
@@ -499,7 +502,7 @@ const mensajeWhatsappSchema = new Schema({
   fecha: { type: Date, default: Date.now },
 }, { timestamps: true });
 mensajeWhatsappSchema.plugin(tenantPlugin);
-mensajeWhatsappSchema.index({ empresa: 1, fecha: -1 });
+mensajeWhatsappSchema.index({ empresa: 1, fecha: -1, _id: -1 });
 mensajeWhatsappSchema.index({ empresa: 1, idMensaje: 1 }, { unique: true, partialFilterExpression: { idMensaje: { $gt: '' } } });
 
 // ── Liquidación de fletes (relación para facturar y pagar) ──────────────────
@@ -516,7 +519,6 @@ const liquidacionSchema = new Schema({
 }, { timestamps: true });
 liquidacionSchema.plugin(tenantPlugin);
 liquidacionSchema.index({ empresa: 1, numero: 1 }, { unique: true });
-liquidacionSchema.index({ empresa: 1, numero: -1 });
 
 // ── Transacciones con el RNDC (la clave nunca se guarda) ────────────────────
 const transaccionSchema = new Schema({
@@ -532,7 +534,8 @@ const transaccionSchema = new Schema({
   duracionMs: { type: Number, default: 0 },
 }, { timestamps: true });
 transaccionSchema.plugin(tenantPlugin);
-transaccionSchema.index({ empresa: 1, createdAt: -1 });
+transaccionSchema.index({ empresa: 1, createdAt: -1, _id: -1 });
+transaccionSchema.index({ empresa: 1, viaje: 1, createdAt: -1 });
 
 // ── Contadores atómicos por empresa (viajes, remesas, manifiestos…) ─────────
 const contadorSchema = new Schema({ clave: str({ required: true }), valor: { type: Number, default: 0 } });
@@ -557,7 +560,7 @@ const auditoriaSchema = new Schema({
   hash: str({ required: true }),
   // minimize: false conserva los objetos vacíos del detalle tal como se calculó el hash
 }, { timestamps: { createdAt: true, updatedAt: false }, minimize: false });
-auditoriaSchema.index({ empresa: 1, createdAt: -1 });
+auditoriaSchema.index({ empresa: 1, createdAt: -1, seq: -1 });
 auditoriaSchema.index({ cadena: 1, seq: 1 }, { unique: true });
 // Registro de solo inserción: se bloquea cualquier modificación o borrado desde la aplicación.
 for (const op of ['updateOne', 'updateMany', 'findOneAndUpdate', 'replaceOne', 'findOneAndReplace', 'deleteOne', 'deleteMany', 'findOneAndDelete']) {
@@ -587,7 +590,7 @@ const prestamoSchema = new Schema({
 }, { timestamps: true });
 prestamoSchema.plugin(tenantPlugin);
 prestamoSchema.index({ empresa: 1, numero: 1 }, { unique: true });
-prestamoSchema.index({ empresa: 1, createdAt: -1 });
+prestamoSchema.index({ empresa: 1, createdAt: -1, _id: -1 });
 
 // ── Liquidación del conductor (pago por placa y periodo) ────────────────────
 const liquidacionConductorSchema = new Schema({
@@ -610,7 +613,7 @@ const liquidacionConductorSchema = new Schema({
 }, { timestamps: true });
 liquidacionConductorSchema.plugin(tenantPlugin);
 liquidacionConductorSchema.index({ empresa: 1, numero: 1 }, { unique: true });
-liquidacionConductorSchema.index({ empresa: 1, createdAt: -1 });
+liquidacionConductorSchema.index({ empresa: 1, createdAt: -1, _id: -1 });
 
 // ── Contabilidad simplificada (apoyo administrativo; un contador debe revisarla) ──
 const cuentaSchema = new Schema({

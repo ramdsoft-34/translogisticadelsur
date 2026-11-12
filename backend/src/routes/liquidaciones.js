@@ -2,7 +2,7 @@
 // de un cliente en un periodo, calcula cobro, pago al conductor y utilidad, y
 // deja una copia fija para facturar.
 import { Router } from 'express';
-import { paginacion, pagina, recortar } from '../utils/paginacion.js';
+import { paginacion, pagina, listarPagina } from '../utils/paginacion.js';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Liquidacion, Viaje, Tarifa, Cliente, siguiente, pob } from '../models/index.js';
@@ -10,7 +10,7 @@ import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../midd
 import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
 import { lineaLiquidacion, totalesLiquidacion, respaldosAuxiliar, NO_FACTURAR } from '../services/calculos.js';
-import { parseFecha, fmtFecha } from '../utils/texto.js';
+import { parseFecha, fmtFecha, escaparRegex } from '../utils/texto.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -50,8 +50,16 @@ r.get('/', permitir(P.LIQUIDACION_VER), async (req, res) => {
   const p = paginacion(req.query, { porDefecto: 25, maximo: 100 });
   if (p.activa) {
     const f = deEmpresa(req);
-    const [total, items] = await Promise.all([Liquidacion.countDocuments(f),
-      Liquidacion.find(f).select('-lineas').sort({ numero: -1 }).skip(p.salto).limit(p.limite).populate(pob(req.empresaId, 'cliente', 'nombre')).lean()]);
+    if (['borrador', 'facturada', 'anulada'].includes(req.query.estado)) f.estado = req.query.estado;
+    const texto = String(req.query.q || '').trim().slice(0, 60);
+    if (texto) {
+      // Número, título, factura o nombre del cliente
+      const re = new RegExp(escaparRegex(texto), 'i');
+      const clientes = await Cliente.find(deEmpresa(req, { nombre: re })).select('_id').limit(100).lean();
+      f.$or = [{ titulo: re }, ...(/^\d+$/.test(texto) ? [{ numero: Number(texto) }] : []),
+        ...(clientes.length ? [{ cliente: { $in: clientes.map((c) => c._id) } }] : [])];
+    }
+    const { items, total } = await listarPagina(Liquidacion, f, p, { orden: { numero: -1 }, unico: true, select: '-lineas', populate: pob(req.empresaId, 'cliente', 'nombre') });
     return res.json(pagina(items, total, p));
   }
   const lista = await Liquidacion.find(deEmpresa(req)).select('-lineas').sort({ numero: -1 }).limit(200).populate(pob(req.empresaId, 'cliente', 'nombre')).lean();

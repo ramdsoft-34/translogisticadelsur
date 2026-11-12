@@ -1,4 +1,3 @@
-import { Turno } from '../core/turno';
 import { Component, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { Router } from '@angular/router';
@@ -16,7 +15,8 @@ import { FORMATOS, isoDia } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
 import { TraerRndc } from '../shared/traer-rndc';
 import { ActualizarVehiculos } from '../shared/actualizar-vehiculos';
-import { Paginador, CambioPagina } from '../shared/paginador';
+import { Paginador } from '../shared/paginador';
+import { ListaServidor } from '../shared/lista-servidor';
 import { mensajeError } from '../core/api.service';
 import { VistaRndc } from '../shared/vista-rndc';
 import { CuentaAppConductor } from '../shared/cuenta-app-conductor';
@@ -60,7 +60,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
       </div>
     </div>
     <app-importar-excel tipo="terceros" titulo="conductores y terceros" [abierto]="importar()" (cerrar)="importar.set(false)" (importado)="cargar()" />
-    <app-actualizar-vehiculos tipo="terceros" [abierto]="actualizar()" (cerrar)="actualizar.set(false); cargar()" (actualizados)="cargar()" />
+    <app-actualizar-vehiculos tipo="terceros" [abierto]="actualizar()" (cerrar)="actualizar.set(false); refrescarLista()" (actualizados)="refrescarLista()" />
     <app-traer-rndc tipo="terceros" [abierto]="traer()" (cerrar)="traer.set(false)" (traidos)="cargar()" />
     <app-cuenta-app-conductor #cuentaApp />
     <div class="pestanas" role="tablist" aria-label="Tipo de tercero">
@@ -107,7 +107,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
           }
         </tbody>
       </table>
-      <app-paginador [total]="total()" [pagina]="pag()" [porPagina]="porPag()" [cargando]="cargandoMas()" unidad="terceros" (cambio)="irPagina($event)" />
+      <app-paginador [total]="total()" [pagina]="listaPag.pagina()" [porPagina]="listaPag.porPagina()" [cargando]="listaPag.cambiando()" unidad="terceros" (cambio)="listaPag.ir($event)" />
     </div>
 
     <!-- Paso 1: verificar el documento en la empresa y en el RNDC -->
@@ -262,8 +262,13 @@ export class Terceros {
   consultarRndc = true;
   sincronizar = false;
   readonly tipos = Object.entries(TIPOS_ID);
-  readonly lista = signal<any[]>([]);
-  readonly cargando = signal(false);
+  // Lista por páginas desde el servidor (filtros conservados al cambiar de página; al filtrar, primera página)
+  readonly listaPag = new ListaServidor<any>({
+    pedir: (p) => this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, ...p }),
+    alError: (e) => this.avisos.error(e),
+  });
+  readonly lista = this.listaPag.items;
+  readonly cargando = this.listaPag.cargando;
   readonly trabajando = signal(false);
   readonly abierto = signal(false);
   readonly importar = signal(false);
@@ -275,7 +280,7 @@ export class Terceros {
   nombre = nombreTercero;
 
   // Cambios de otros usuarios: la pantalla se actualiza sola
-  private enVivo = inject(EnVivo).al(['maestros', 'rndc', 'rastreo'], () => this.cargar());
+  private enVivo = inject(EnVivo).al(['maestros', 'rndc', 'rastreo'], () => this.refrescarLista());
 
   // App de conductores: el botón «App» solo aparece si el servidor y la empresa la tienen habilitada
   private rastreo = inject(Rastreo);
@@ -285,37 +290,16 @@ export class Terceros {
 
 
   // ── Paginación con carga progresiva ──
-  readonly pag = signal(1);
-  readonly porPag = signal(50);
-  readonly total = signal(0);
-  readonly cargandoMas = signal(false);
+  readonly total = this.listaPag.total;
   private temporizador: ReturnType<typeof setTimeout> | undefined;
   buscarDiferido() { clearTimeout(this.temporizador); this.temporizador = setTimeout(() => this.cargar(), 300); }
 
   rndc = '';
   activos = '';
-  irRol(rol: string) { this.rol = rol; this.lista.set([]); this.total.set(0); this.cargar(); }
-  private turno = new Turno();
-  async cargar() {
-    const vigente = this.turno.tomar();
-    this.cargando.set(true);
-    this.pag.set(1);
-    try {
-      const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, pagina: 1, limite: this.porPag() });
-      if (vigente()) { this.lista.set(r.items); this.total.set(r.total); }
-    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
-  }
-
-  async irPagina(c: CambioPagina) {
-    this.cargandoMas.set(true);
-    const vigente = this.turno.tomar();
-    try {
-      const r = await this.api.get<any>('/maestros/terceros', { q: this.q, rol: this.rol, rndc: this.rndc, activos: this.activos, pagina: c.pagina, limite: c.porPagina });
-      if (!vigente()) return;
-      this.pag.set(c.pagina); this.porPag.set(c.porPagina);
-      this.lista.set(r.items); this.total.set(r.total);
-    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargandoMas.set(false); }
-  }
+  irRol(rol: string) { this.rol = rol; this.listaPag.limpiar(); this.cargar(); }
+  // Filtros nuevos: primera página. Datos que cambiaron (guardar, RNDC, otros usuarios): la misma página al día.
+  cargar() { return this.listaPag.recargar(); }
+  refrescarLista() { return this.listaPag.refrescar(); }
 
   vencida(f: string) { return new Date(f) < new Date(); }
   chip(e: string) { return ({ enviado: 'ok', error: 'error' } as Record<string, string>)[e] || 'alerta'; }
@@ -445,7 +429,7 @@ export class Terceros {
     try {
       const guardado = f._id ? await this.api.put<any>(`/maestros/terceros/${f._id}`, cuerpo) : await this.api.post<any>('/maestros/terceros', cuerpo);
       this.avisos.ok('Tercero guardado');
-      this.abierto.set(false); this.cargar();
+      this.abierto.set(false); this.refrescarLista();
       if (this.sincronizar && this.puedeRndc) await this.enviar(guardado);
     } catch (e) { this.avisos.mostrar(await mensajeError(e), 'error'); } finally { this.trabajando.set(false); }
   }
@@ -459,7 +443,7 @@ export class Terceros {
       if (r.sinCambios) this.avisos.mostrar(r.mensaje, 'info');
       else if (r.ok) this.avisos.ok(`${nombreTercero(t)} registrado en el RNDC`);
       else this.avisos.mostrar(`El RNDC rechazó el registro: ${r.mensaje}`, 'error');
-      this.cargar();
+      this.refrescarLista();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 }

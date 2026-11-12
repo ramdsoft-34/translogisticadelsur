@@ -14,13 +14,15 @@ export class Auth {
   readonly usuario = signal<Usuario | null>(null);
   readonly esSuper = computed(() => this.usuario()?.rol === 'superadmin');
   private restaurando: Promise<Usuario | null> | null = null;
+  // Momento de la última consulta de la sesión al servidor (para no repetirla al entrar)
+  private consultadaEn = 0;
 
   // Recupera la sesión de la cookie (una sola consulta aunque la pidan varios guardias a la vez)
   restaurar(): Promise<Usuario | null> {
     if (this.usuario()) return Promise.resolve(this.usuario());
     if (!this.restaurando) {
       this.restaurando = this.api.get<Usuario>('/auth/yo')
-        .then(u => { this.usuario.set(u); return u; })
+        .then(u => { this.usuario.set(u); this.consultadaEn = Date.now(); return u; })
         .catch(() => null)
         .finally(() => { this.restaurando = null; });
     }
@@ -40,6 +42,13 @@ export class Auth {
 
   async refrescar() {
     this.usuario.set(await this.api.get<Usuario>('/auth/yo'));
+    this.consultadaEn = Date.now();
+  }
+
+  // Permisos al día al abrir la plataforma, sin repetir la consulta que el guardia acaba de hacer al recargar
+  async refrescarSiVieja(ms = 10000) {
+    if (Date.now() - this.consultadaEn < ms) return;
+    await this.refrescar();
   }
 
   async cambiarClave(actual: string, nueva: string) {

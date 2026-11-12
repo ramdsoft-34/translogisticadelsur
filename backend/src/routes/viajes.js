@@ -1,6 +1,7 @@
 // Viajes (bitácora). Cada viaje concentra los datos operativos y el estado de
 // sus documentos en el RNDC (remesa, manifiesto y cumplidos).
 import { Router } from 'express';
+import { paginacion, listarPagina } from '../utils/paginacion.js';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Viaje, Cliente, Tarifa, Tercero, Vehiculo, PlantillaWhatsapp, siguiente, proximo, pob } from '../models/index.js';
@@ -141,8 +142,9 @@ function filtroLista(req) {
 }
 
 r.get('/', permitir(P.VIAJES_VER), async (req, res) => {
-  const limite = Math.min(Number(req.query.limite) || 100, 1000);
-  const pagina = Math.max(Number(req.query.pagina) || 1, 1);
+  // Página con cursor para la contigua y total/sumas solo en la primera (ver utils/paginacion.js)
+  const p = paginacion(req.query, { porDefecto: 100, maximo: 1000, minimo: 1 });
+  const { pagina, limite } = p;
   const filtro = filtroLista(req);
   // Buscar también por el nombre completo del conductor vinculado (los importados guardaron solo el nombre corto del Excel)
   if (req.query.q && filtro.$or) {
@@ -156,11 +158,13 @@ r.get('/', permitir(P.VIAJES_VER), async (req, res) => {
   // En la agregación los identificadores no se convierten solos
   const filtroAgg = { ...filtro, empresa: new mongoose.Types.ObjectId(String(req.empresaId)) };
   if (typeof filtroAgg.cliente === 'string') filtroAgg.cliente = new mongoose.Types.ObjectId(filtroAgg.cliente);
-  const [total, listaSinAux, sumas] = await Promise.all([
-    Viaje.countDocuments(filtro),
-    Viaje.find(filtro).sort({ fecha: -1, numero: -1 }).skip((pagina - 1) * limite).limit(limite).populate(POBLAR(req)).lean(),
+  // Total y sumas de todo el filtro solo en la primera página (o si se piden con contar=1): en las demás el navegador ya los tiene
+  const contar = p.contar;
+  const [{ items: listaSinAux, total }, sumas] = await Promise.all([
+    // El N° de viaje es único por empresa: el orden (fecha, número) coincide con los índices y no necesita desempate
+    listarPagina(Viaje, filtro, p, { orden: { fecha: -1, numero: -1 }, unico: true, populate: POBLAR(req) }),
     // Totales de TODO el filtro (no solo de la página cargada)
-    pagina === 1 ? Viaje.aggregate([{ $match: filtroAgg }, { $group: { _id: null, flete: { $sum: '$flete' }, anticipo: { $sum: '$anticipo' }, tarifa: { $sum: '$tarifa' } } }]) : null,
+    contar ? Viaje.aggregate([{ $match: filtroAgg }, { $group: { _id: null, flete: { $sum: '$flete' }, anticipo: { $sum: '$anticipo' }, tarifa: { $sum: '$tarifa' } } }]) : null,
   ]);
   const lista = await conAuxiliar(req, listaSinAux);
   // Sin coincidencias la agregación no devuelve grupo: las sumas son cero

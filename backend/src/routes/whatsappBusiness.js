@@ -2,9 +2,10 @@
 import crypto from 'node:crypto';
 import express, { Router } from 'express';
 import mongoose from 'mongoose';
-import { paginacion, pagina, recortar } from '../utils/paginacion.js';
+import { paginacion, pagina, listarPagina } from '../utils/paginacion.js';
+import { escaparRegex } from '../utils/texto.js';
 import { z } from 'zod';
-import { Empresa, EnvioWhatsapp, MensajeWhatsapp, pob } from '../models/index.js';
+import { Empresa, EnvioWhatsapp, MensajeWhatsapp, Viaje, Tercero, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { env } from '../config/env.js';
@@ -137,35 +138,49 @@ r.get('/mensajes', operar, async (req, res) => {
   // La fecha es la del envío (o la del último intento si falló antes de salir).
   const rango = { $gte: desde, $lt: hasta };
   const base = deEmpresa(req, { estado: { $nin: ['por_aprobar', 'descartado'] }, $or: [{ enviadoEn: rango }, { enviadoEn: null, updatedAt: rango }] });
-  // Totales del periodo contados en la base (no hace falta traer los mensajes)
-  const porEstado = Object.fromEntries((await EnvioWhatsapp.aggregate([{ $match: { ...base, empresa: new mongoose.Types.ObjectId(String(req.empresaId)) } },
-    { $group: { _id: '$estado', n: { $sum: 1 } } }])).map((x) => [x._id, x.n]));
-  const suma = (l) => l.reduce((a, k) => a + (porEstado[k] || 0), 0);
-  const totales = { total: suma(Object.keys(porEstado)), enviados: suma(ENVIADOS), entregados: suma(['entregado', 'leido']), leidos: suma(['leido']), errores: suma(['error']) };
   const p = paginacion(req.query, { porDefecto: 50, maximo: 200 });
+  // Totales del periodo contados en la base (sin traer los mensajes); al pasar de página el navegador ya los tiene
+  let totales = null;
+  if (!p.activa || p.contar) {
+    const porEstado = Object.fromEntries((await EnvioWhatsapp.aggregate([{ $match: { ...base, empresa: new mongoose.Types.ObjectId(String(req.empresaId)) } },
+      { $group: { _id: '$estado', n: { $sum: 1 } } }])).map((x) => [x._id, x.n]));
+    const suma = (l) => l.reduce((a, k) => a + (porEstado[k] || 0), 0);
+    totales = { total: suma(Object.keys(porEstado)), enviados: suma(ENVIADOS), entregados: suma(['entregado', 'leido']), leidos: suma(['leido']), errores: suma(['error']) };
+  }
   const filtroEstado = q.estado ? { estado: q.estado === 'enviados' ? { $in: ENVIADOS } : q.estado } : {};
   const poblar = [pob(req.empresaId, 'viaje', 'numero placa destino fecha'), pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId')];
-  let lista; let totalFiltrado = null;
-  if (p.activa && !q.texto) {
-    const f = { ...base, ...filtroEstado };
-    [totalFiltrado, lista] = await Promise.all([EnvioWhatsapp.countDocuments(f), EnvioWhatsapp.find(f).sort({ updatedAt: -1 }).skip(p.salto).limit(p.limite).populate(poblar).lean()]);
-  } else {
-    lista = await EnvioWhatsapp.find({ ...base, ...filtroEstado }).sort({ updatedAt: -1 }).limit(3000).populate(poblar).lean();
+  // El texto se busca en la base: documento, teléfono, placa o N° del viaje, nombre o cédula del conductor
+  const f = { ...base, ...filtroEstado };
+  if (q.texto) {
+    const [viajes, conductores] = await Promise.all([viajesQueCoinciden(req, q.texto), tercerosQueCoinciden(req, q.texto)]);
+    const re = new RegExp(escaparRegex(q.texto), 'i');
+    f.$and = [{ $or: [{ documento: re }, { telefono: re }, ...(viajes.length ? [{ viaje: { $in: viajes } }] : []), ...(conductores.length ? [{ conductor: { $in: conductores } }] : [])] }];
   }
+  let lista; let totalFiltrado = null;
+  if (p.activa) ({ items: lista, total: totalFiltrado } = await listarPagina(EnvioWhatsapp, f, p, { orden: { updatedAt: -1 }, populate: poblar }));
+  else lista = await EnvioWhatsapp.find(f).sort({ updatedAt: -1, _id: -1 }).limit(3000).populate(poblar).lean();
   const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
-  const texto = q.texto.toLowerCase();
   const mensajes = lista
     .map(x => ({ _id: x._id, fecha: x.enviadoEn || x.updatedAt, tipo: x.tipo || 'manifiesto', documento: x.documento, estado: x.estado, error: x.error, telefono: x.telefono,
       origen: x.origen, cuenta: x.cuenta, intentos: x.intentos, enviadoEn: x.enviadoEn, entregadoEn: x.entregadoEn, leidoEn: x.leidoEn,
       viaje: x.viaje ? { _id: x.viaje._id, numero: x.viaje.numero, placa: x.viaje.placa, destino: x.viaje.destino } : null,
-      conductor: x.conductor ? { nombre: nombreDe(x.conductor), numId: x.conductor.numId } : null }))
-    .filter(x => !texto || [x.documento, x.telefono, x.viaje?.placa, x.viaje?.numero, x.conductor?.nombre, x.conductor?.numId]
-      .some(v => String(v ?? '').toLowerCase().includes(texto)));
+      conductor: x.conductor ? { nombre: nombreDe(x.conductor), numId: x.conductor.numId } : null }));
   if (!p.activa) return res.json({ totales, mensajes });
-  if (totalFiltrado !== null) return res.json({ totales, ...pagina(mensajes, totalFiltrado, p), mensajes });
-  const items = recortar(mensajes, p);
-  res.json({ totales, ...pagina(items, mensajes.length, p), mensajes: items });
+  res.json({ totales, ...pagina(mensajes, totalFiltrado, p), mensajes });
 });
+
+// Viajes y terceros cuyo número, placa, nombre o cédula coincide con lo escrito (para buscar mensajes en la base)
+async function viajesQueCoinciden(req, texto) {
+  const re = new RegExp(escaparRegex(texto.toUpperCase()));
+  const o = [{ placa: re }, ...(/^\d+$/.test(texto) ? [{ numero: Number(texto) }] : [])];
+  return (await Viaje.find(deEmpresa(req, { $or: o })).sort({ fecha: -1 }).select('_id').limit(1000).lean()).map((v) => v._id);
+}
+async function tercerosQueCoinciden(req, texto) {
+  const palabras = texto.split(/\s+/).filter(Boolean).slice(0, 5).map((w) => new RegExp(escaparRegex(w), 'i'));
+  if (!palabras.length) return [];
+  return (await Tercero.find(deEmpresa(req, { $and: palabras.map((re) => ({ $or: [{ nombres: re }, { apellido1: re }, { apellido2: re }, { numId: re }] })) }))
+    .select('_id').limit(300).lean()).map((t) => t._id);
+}
 
 // Mensajes que la gente le escribió al número (solo para leerlos)
 r.get('/recibidos', operar, async (req, res) => {
@@ -175,18 +190,20 @@ r.get('/recibidos', operar, async (req, res) => {
   if (!(hasta > desde)) throw new ErrorHttp(400, 'El rango de fechas no es válido');
   const p = paginacion(req.query, { porDefecto: 50, maximo: 200 });
   const fRec = deEmpresa(req, { fecha: { $gte: desde, $lt: hasta } });
-  const sinTexto = p.activa && !q.texto;
-  const [totalRec, lista] = await Promise.all([sinTexto ? MensajeWhatsapp.countDocuments(fRec) : null,
-    MensajeWhatsapp.find(fRec).sort({ fecha: -1 }).skip(sinTexto ? p.salto : 0).limit(sinTexto ? p.limite : 2000)
-      .populate(pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId')).lean()]);
-  const t = q.texto.toLowerCase();
+  // Texto buscado en la base: número, nombre de perfil, mensaje, o nombre / cédula del conductor
+  if (q.texto) {
+    const re = new RegExp(escaparRegex(q.texto), 'i');
+    const conductores = await tercerosQueCoinciden(req, q.texto);
+    fRec.$or = [{ de: re }, { nombre: re }, { texto: re }, ...(conductores.length ? [{ conductor: { $in: conductores } }] : [])];
+  }
+  const poblarRec = pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId');
+  let lista; let totalRec = null;
+  if (p.activa) ({ items: lista, total: totalRec } = await listarPagina(MensajeWhatsapp, fRec, p, { orden: { fecha: -1 }, populate: poblarRec }));
+  else lista = await MensajeWhatsapp.find(fRec).sort({ fecha: -1, _id: -1 }).limit(2000).populate(poblarRec).lean();
   const mensajes = lista.map((x) => ({ _id: x._id, fecha: x.fecha, de: x.de, nombre: x.nombre, tipo: x.tipo, texto: x.texto,
-    conductor: x.conductor ? { nombre: [x.conductor.nombres, x.conductor.apellido1, x.conductor.apellido2].filter(Boolean).join(' '), numId: x.conductor.numId } : null }))
-    .filter((x) => !t || [x.de, x.nombre, x.texto, x.conductor?.nombre, x.conductor?.numId].some((v) => String(v ?? '').toLowerCase().includes(t)));
+    conductor: x.conductor ? { nombre: [x.conductor.nombres, x.conductor.apellido1, x.conductor.apellido2].filter(Boolean).join(' '), numId: x.conductor.numId } : null }));
   if (!p.activa) return res.json({ total: mensajes.length, mensajes });
-  if (sinTexto) return res.json({ ...pagina(mensajes, totalRec, p), mensajes });
-  const items = recortar(mensajes, p);
-  res.json({ ...pagina(items, mensajes.length, p), mensajes: items });
+  res.json({ ...pagina(mensajes, totalRec, p), mensajes });
 });
 
 const listaViajes = z.object({ viajes: z.array(z.string().refine(x => mongoose.isValidObjectId(x), 'viaje inválido')).min(1).max(200) });

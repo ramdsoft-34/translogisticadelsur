@@ -1,6 +1,6 @@
 // Integración con el RNDC (Registro Nacional de Despachos de Carga).
 import { Router } from 'express';
-import { paginacion, pagina, recortar } from '../utils/paginacion.js';
+import { paginacion, pagina, listarPagina } from '../utils/paginacion.js';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -12,7 +12,7 @@ import { auditar, cambios } from '../services/auditoria.js';
 import * as op from '../services/rndc/operaciones.js';
 import * as cat from '../services/rndc/catalogos.js';
 import { env } from '../config/env.js';
-import { parseFecha } from '../utils/texto.js';
+import { parseFecha, escaparRegex } from '../utils/texto.js';
 import { titularDePlaca, corregirCliente } from './viajes.js';
 import { asegurarMesAbierto } from '../services/gestion/cierre.js';
 import { asegurarSoporte } from '../services/gestion/soporteInterno.js';
@@ -650,16 +650,28 @@ r.post('/importar/vehiculos', permitir(P.MAESTROS_EDITAR), permitir(P.RNDC_CONSU
 // ── Historial de transacciones ─────────────────────────────────────────────
 r.get('/transacciones', permitir(P.RNDC_OPERAR, P.RNDC_CONSULTAR, P.AUDITORIA_VER), async (req, res) => {
   const f = deEmpresa(req);
-  if (req.query.viaje) f.viaje = req.query.viaje;
+  if (req.query.viaje && mongoose.isValidObjectId(req.query.viaje)) f.viaje = req.query.viaje;
   if (req.query.ok === '0') f.ok = false;
+  if (req.query.ok === '1') f.ok = true;
   const p = paginacion(req.query, { porDefecto: 50, maximo: 200 });
   if (p.activa) {
-    const [total, items] = await Promise.all([TransaccionRndc.countDocuments(f),
-      TransaccionRndc.find(f).sort({ createdAt: -1 }).skip(p.salto).limit(p.limite).populate('usuario', 'nombre').lean()]);
+    // Búsqueda en la base: referencia, mensaje, radicado, nombre del usuario o proceso (el navegador manda los
+    // códigos de proceso cuyo nombre coincide con lo escrito)
+    const texto = String(req.query.q || '').trim().slice(0, 60);
+    if (texto) {
+      const re = new RegExp(escaparRegex(texto), 'i');
+      const usuarios = await Usuario.find({ empresa: req.empresaId, nombre: re }).select('_id').limit(50).lean();
+      const procesos = String(req.query.procesos || '').split(',').filter(Boolean).map(Number).filter(Number.isInteger).slice(0, 30);
+      f.$or = [{ referencia: re }, { mensaje: re }, { radicado: re },
+        ...(usuarios.length ? [{ usuario: { $in: usuarios.map((u) => u._id) } }] : []), ...(procesos.length ? [{ proceso: { $in: procesos } }] : [])];
+    }
+    // La lista no lleva el XML enviado ni la respuesta (unos 5 KB por fila): solo lo que muestra la tabla
+    const { items, total } = await listarPagina(TransaccionRndc, f, p, { orden: { createdAt: -1 }, select: '-solicitud -respuesta -url',
+      populate: { path: 'usuario', select: 'nombre' } });
     return res.json(pagina(items, total, p));
   }
-  const lista = await TransaccionRndc.find(f).sort({ createdAt: -1 }).limit(Math.min(Number(req.query.limite) || 100, 500))
-    .populate('usuario', 'nombre').lean();
+  const lista = await TransaccionRndc.find(f).sort({ createdAt: -1, _id: -1 }).limit(Math.min(Number(req.query.limite) || 100, 500))
+    .select('-solicitud -respuesta -url').populate('usuario', 'nombre').lean();
   res.json(lista);
 });
 

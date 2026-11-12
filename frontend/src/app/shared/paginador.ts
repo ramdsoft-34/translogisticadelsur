@@ -90,9 +90,3 @@ export class Paginador {
   }
 }
 
-// Página de una lista ya filtrada en el navegador (si la página quedó fuera de rango, la última)
-export function enPagina<T>(lista: T[], pagina: number, porPagina: number): T[] {
-  const n = Math.max(1, Math.ceil(lista.length / porPagina));
-  const p = Math.min(Math.max(1, pagina), n);
-  return lista.slice((p - 1) * porPagina, p * porPagina);
-}

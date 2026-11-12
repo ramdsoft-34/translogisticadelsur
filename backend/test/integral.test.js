@@ -394,7 +394,11 @@ test('RNDC: despacho de remesa + manifiesto contra el simulador', async () => {
   // La transacción quedó registrada sin la clave
   const tx = await s.manif.get(`/api/rndc/transacciones?viaje=${s.viaje}`);
   assert.equal(tx.body.length, 2);
-  assert.ok(tx.body.every(t => !t.solicitud.includes(CLAVE_RNDC) && t.solicitud.includes('<password>*****</password>')));
+  // La lista no lleva el XML (es pesado); lo guardado tiene la clave oculta
+  assert.ok(tx.body.every(t => t.solicitud === undefined && t.respuesta === undefined));
+  const guardadas = await M.TransaccionRndc.find({ empresa: { $exists: true }, viaje: s.viaje }).lean();
+  assert.equal(guardadas.length, 2);
+  assert.ok(guardadas.every(t => !t.solicitud.includes(CLAVE_RNDC) && t.solicitud.includes('<password>*****</password>')));
   // Envío al simulador con el NIT con dígito de verificación y la remesa en el manifiesto
   const m = [...sim.estado.manifiestos.values()][0];
   assert.equal(m.NUMNITEMPRESATRANSPORTE, '9001112221');

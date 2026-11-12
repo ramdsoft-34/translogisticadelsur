@@ -14,7 +14,8 @@ import { MenuAcciones } from '../shared/menu-acciones';
 import { FORMATOS, hoyIso, inicioMesIso, isoDia } from '../shared/formato';
 import { SelectorMunicipio } from '../shared/municipio';
 import { Moneda } from '../shared/moneda';
-import { Paginador, CambioPagina } from '../shared/paginador';
+import { Paginador } from '../shared/paginador';
+import { ListaServidor } from '../shared/lista-servidor';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { PlantillasWhatsapp } from '../shared/plantillas-whatsapp';
 import { Confirmar } from '../shared/confirmar';
@@ -145,7 +146,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
             <button type="button" class="primario" (click)="accionesAbierto.set(true)">Acciones con la selección</button></span>
         </div>
       }
-      <app-paginador [total]="total()" [pagina]="pag()" [porPagina]="porPag()" [cargando]="cargandoMas()" unidad="viajes" (cambio)="irPagina($event)" />
+      <app-paginador [total]="total()" [pagina]="lista.pagina()" [porPagina]="lista.porPagina()" [cargando]="lista.cambiando()" unidad="viajes" (cambio)="lista.ir($event)" />
     </div>
 
     <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : (registradosTanda().length ? 'Registrar otro viaje' : 'Registrar viaje')" [abierto]="abierto()" (cerrar)="cerrarFormulario()" [ancho]="true">
@@ -507,7 +508,15 @@ export class Viajes {
   waLimpiar() { this.waSeleccion.set(new Set()); this.cargarWhatsapp(); }
   habilitarRndc = false;
   readonly estados = Object.entries(ESTADOS_VIAJE);
-  readonly viajes = signal<Viaje[]>([]);
+  // Lista por páginas desde el servidor (los filtros se conservan al cambiar de página; al filtrar se vuelve a la primera)
+  readonly lista = new ListaServidor<Viaje>({
+    pedir: (p) => this.api.get<any>('/viajes', { ...this.filtro, ...p }),
+    items: (r) => r.viajes,
+    alCargar: (r) => { if (r.sumas) this.sumas.set(r.sumas); },
+    alError: (e) => this.avisos.error(e),
+    porPagina: POR_PAGINA,
+  });
+  readonly viajes = this.lista.items;
   // Selección para acciones con varios viajes: se conserva al cambiar filtros, periodo o búsqueda
   readonly elegidos = signal(new Map<string, ViajeElegido>());
   readonly accionesAbierto = signal(false);
@@ -521,21 +530,35 @@ export class Viajes {
   elegirVisibles(si: boolean) { this.elegidos.update(m => { const n = new Map(m); for (const v of this.viajes()) { if (si) n.set(v._id, this.elegido(v)); else n.delete(v._id); } return n; }); }
   quitarElegido(id: string) { this.elegidos.update(m => { const n = new Map(m); n.delete(id); if (!n.size) this.accionesAbierto.set(false); return n; }); }
   limpiarSeleccion() { this.elegidos.set(new Map()); }
-  trasAccionMasiva(r: { eliminados: string[] }) { for (const id of r.eliminados) this.quitarElegido(id); this.cargar(); }
-  readonly total = signal(0);
+  trasAccionMasiva(r: { eliminados: string[] }) { for (const id of r.eliminados) this.quitarElegido(id); this.actualizar(); }
+  readonly total = this.lista.total;
   readonly sumas = signal({ flete: 0, anticipo: 0, saldo: 0, auxiliar: 0, retefuente: 0, fopat: 0 });
   private autorizacion = inject(AutorizacionAdmin);
-  readonly cargando = signal(false);
-  readonly cargandoMas = signal(false);
-  // Página actual y tamaño (se conservan los filtros al cambiar de página; al filtrar se vuelve a la primera)
-  readonly pag = signal(1);
-  readonly porPag = signal(POR_PAGINA);
+  readonly cargando = this.lista.cargando;
   readonly clientes = signal<any[]>([]);
   readonly clientesActivos = computed(() => this.clientes().filter(c => c.activo !== false));
-  readonly tarifas = signal<any[]>([]);
   readonly placas = signal<any[]>([]);
   readonly form = signal<Formulario>(vacio());
-  readonly tarifasCliente = computed(() => this.tarifas().filter(t => (t.cliente?._id || t.cliente) === this.form().cliente && t.activo !== false));
+  // Destinos y tarifas: solo los del cliente elegido en el formulario, pedidos una vez por cliente (antes se
+  // descargaban todas las tarifas de la empresa al abrir la pantalla: unos 300 KB)
+  private readonly tarifasPorCliente = signal(new Map<string, any[]>());
+  private readonly pidiendoTarifas = new Set<string>();
+  readonly tarifasCliente = computed(() => (this.tarifasPorCliente().get(this.form().cliente) || []).filter(t => t.activo !== false));
+  private readonly cargarTarifasDelCliente = effect(() => {
+    const cliente = this.form().cliente;
+    if (cliente) untracked(() => this.tarifasDe(cliente));
+  });
+  private async tarifasDe(cliente: string, forzar = false) {
+    if ((!forzar && this.tarifasPorCliente().has(cliente)) || this.pidiendoTarifas.has(cliente)) return;
+    this.pidiendoTarifas.add(cliente);
+    try {
+      const t = await this.api.get<any[]>('/maestros/tarifas', { cliente });
+      this.tarifasPorCliente.update(m => new Map(m).set(cliente, t));
+      // Si el destino ya estaba elegido (viaje abierto antes de que llegaran las tarifas), se completan sus datos
+      const f = this.form();
+      if (f.cliente === cliente && f.tarifaRef && !f.codDestino) this.cambiarDestino(f.tarifaRef);
+    } catch (e) { this.avisos.error(e); } finally { this.pidiendoTarifas.delete(cliente); }
+  }
   readonly abierto = signal(false);
   readonly guardando = signal(false);
   readonly bloqueado = signal(false);
@@ -545,7 +568,12 @@ export class Viajes {
   private temporizadorPlacas: ReturnType<typeof setTimeout> | undefined;
 
   // Cambios de otros usuarios: la pantalla se actualiza sola
-  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'rastreo', 'liquidaciones', 'gestion', 'maestros'], () => this.cargar());
+  // (se queda en la página que se está viendo; si cambian los maestros se vuelven a pedir las tarifas)
+  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'rastreo', 'liquidaciones', 'gestion', 'maestros'], () => this.actualizar());
+  private enVivoTarifas = inject(EnVivo).al(['maestros'], () => {
+    this.tarifasPorCliente.set(new Map());
+    const cli = this.form().cliente; if (cli) this.tarifasDe(cli, true);
+  }, 600, false);
 
   constructor() {
     this.cargar();
@@ -574,37 +602,14 @@ export class Viajes {
 
   async cargarMaestros() {
     try {
-      const [c, t] = await Promise.all([this.api.get<any[]>('/maestros/clientes'), this.api.get<any[]>('/maestros/tarifas')]);
-      this.clientes.set(c); this.tarifas.set(t);
+      this.clientes.set(await this.api.get<any[]>('/maestros/clientes'));
     } catch (e) { this.avisos.error(e); }
   }
 
-  // Primera página (reinicia la lista)
-  private turno = new Turno();
-  async cargar() {
-    const vigente = this.turno.tomar();
-    this.cargando.set(true);
-    this.pag.set(1);
-    try {
-      const r = await this.api.get<any>('/viajes', { ...this.filtro, pagina: 1, limite: this.porPag() });
-      if (!vigente()) return;
-      this.viajes.set(r.viajes); this.total.set(r.total);
-      if (r.sumas) this.sumas.set(r.sumas);
-    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
-  }
-
-  // Páginas siguientes (carga progresiva)
-  async irPagina(c: CambioPagina) {
-    this.cargandoMas.set(true);
-    const vigente = this.turno.tomar();
-    try {
-      const r = await this.api.get<any>('/viajes', { ...this.filtro, pagina: c.pagina, limite: c.porPagina });
-      if (!vigente()) return;
-      this.pag.set(c.pagina); this.porPag.set(c.porPagina);
-      this.viajes.set(r.viajes); this.total.set(r.total);
-      if (r.sumas) this.sumas.set(r.sumas);
-    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargandoMas.set(false); }
-  }
+  // Filtros nuevos: primera página
+  cargar() { return this.lista.recargar(); }
+  // Datos que cambiaron (guardar, eliminar, cambios de otros usuarios): la misma página, al día
+  actualizar() { return this.lista.refrescar(); }
 
   estadoTexto(e: string) { return ESTADOS_VIAJE[e] || e; }
   claseEstado(e: string) { return ({ manifestado: 'marca', cumplido: 'ok', anulado: 'error', remesa: 'alerta' } as Record<string, string>)[e] || ''; }
@@ -673,7 +678,7 @@ export class Viajes {
 
   // Al escoger un destino con tarifa se sugieren sus valores.
   cambiarDestino(id: string) {
-    const t = this.tarifas().find(x => x._id === id);
+    const t = this.tarifasCliente().find(x => x._id === id);
     if (!t) return;
     this.form.update(f => ({ ...f, destino: t.destino, codDestino: t.codMunicipio, tarifa: t.tarifaCliente, flete: t.fleteConductor,
       anticipo: t.anticipoHabitual, pesoKg: t.pesoKg || f.pesoKg }));
@@ -738,7 +743,7 @@ export class Viajes {
     this.seguirRegistrando.set(!this.seguirRegistrando());
     try { localStorage.setItem('tls_seguir_registrando', this.seguirRegistrando() ? '1' : '0'); } catch { /* sin almacenamiento */ }
   }
-  cerrarFormulario() { this.abierto.set(false); if (this.registradosTanda().length) this.cargar(); this.registradosTanda.set([]); }
+  cerrarFormulario() { this.abierto.set(false); if (this.registradosTanda().length) this.actualizar(); this.registradosTanda.set([]); }
 
   // Al crear, la respuesta «¿Requiere manifiesto?» (Sí / No) define cómo se guarda el viaje.
   async guardar(requiere?: boolean) {
@@ -826,7 +831,7 @@ export class Viajes {
       }
       this.abierto.set(false);
       this.registradosTanda.set([]);
-      this.cargar();
+      this.actualizar();
     } catch (e) { this.avisos.error(e); } finally { this.guardando.set(false); }
   }
 
@@ -838,7 +843,7 @@ export class Viajes {
       await this.api.delete(`/viajes/${this.form()._id}`);
       this.avisos.ok('Viaje eliminado');
       this.abierto.set(false);
-      this.cargar();
+      this.actualizar();
     } catch (e) { this.avisos.error(e); }
   }
 
@@ -879,7 +884,7 @@ export class Viajes {
     try {
       await this.api.post('/viajes/reporte-whatsapp/marcar', { viajes: m.viajes });
       this.avisos.ok(`${m.cliente}: ${m.cantidad} vehículo(s) marcados como reportados`);
-      this.cargarWhatsapp(); this.cargar();
+      this.cargarWhatsapp(); this.actualizar();
     } catch (e) { this.avisos.error(e); }
   }
 
@@ -899,9 +904,9 @@ export class Viajes {
     const v = this.viajeRastreo || { ...this.form(), conductorNombre: '', cliente: this.clientes().find(c => c._id === this.form().cliente) };
     this.activador().abrir(v, cambiar ? this.rastreoForm() : undefined);
   }
-  rastreoListo(r: any) { this.rastreoForm.set(r); this.cargar(); }
+  rastreoListo(r: any) { this.rastreoForm.set(r); this.actualizar(); }
   async terminarRastreo() {
-    try { this.rastreoForm.set(await this.rastreoSrv.finalizar(this.form()._id!)); this.avisos.ok('Rastreo terminado'); this.cargar(); }
+    try { this.rastreoForm.set(await this.rastreoSrv.finalizar(this.form()._id!)); this.avisos.ok('Rastreo terminado'); this.actualizar(); }
     catch (e) { this.avisos.error(e); }
   }
 

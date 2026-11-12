@@ -1,5 +1,4 @@
 import { textoLimite } from '../core/seguro';
-import { Turno } from '../core/turno';
 import { Component, computed, inject, input, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
@@ -9,13 +8,13 @@ import { Avisos } from '../core/avisos.service';
 import { RndcClave } from '../core/rndc-clave.service';
 import { Viaje } from '../core/modelos';
 import { Moneda } from '../shared/moneda';
-import { Paginador, CambioPagina } from '../shared/paginador';
+import { Paginador } from '../shared/paginador';
+import { ListaServidor, conPausa } from '../shared/lista-servidor';
 import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
 import { FORMATOS, hoyIso, isoDia } from '../shared/formato';
 import { ExpedirRndc } from '../shared/expedir-rndc';
 import { Confirmar } from '../shared/confirmar';
-import { filtrar } from '../shared/filtro';
 import { SelectorMunicipio } from '../shared/municipio';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { Auth } from '../core/auth.service';
@@ -117,12 +116,12 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       } @else {
         @if (pestana() === 'historial') {
           <div class="campo"><label for="m-res">Resultado</label>
-            <select id="m-res" [ngModel]="resultadoHist()" (ngModelChange)="resultadoHist.set($event)">
+            <select id="m-res" [ngModel]="resultadoHist()" (ngModelChange)="resultadoHist.set($event); cargar()">
               <option value="">Todos</option><option value="ok">Aceptados</option><option value="error">Rechazados</option></select></div>
         }
         <div class="campo crece"><label for="m-t">Buscar</label>
           <input id="m-t" type="search" [placeholder]="pestana() === 'correos' ? 'Manifiesto, destinatario, estado o error' : 'Referencia, proceso, usuario o mensaje'"
-            [ngModel]="texto()" (ngModelChange)="texto.set($event)" /></div>
+            [ngModel]="texto()" (ngModelChange)="texto.set($event); buscarTexto()" /></div>
       }
     </section>
 
@@ -172,7 +171,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       </div>
       <div class="tabla-caja"><table>
         <thead><tr><th>Fecha</th><th>Manifiesto</th><th>Documento</th><th>Destinatarios</th><th>Estado</th><th>Intentos</th><th></th></tr></thead>
-        <tbody>@for (e of enviosVisibles(); track e._id) {
+        <tbody>@for (e of listaCorreos.items(); track e._id) {
           <tr><td data-etiqueta="Fecha">{{ e.createdAt | fechaHora }}</td><td data-etiqueta="Manifiesto">{{ e.documento }}</td>
             <td data-etiqueta="Documento">{{ e.tipo === 'salida' ? 'Carta de salida' : 'Manifiesto PDF' }}<br /><span class="sutil">{{ e.origen === 'manual' ? 'Manual' : 'Automático' }}{{ e.usuario?.nombre ? ' · ' + e.usuario.nombre : '' }}</span></td>
             <td class="destinos">
@@ -187,8 +186,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
               @if (e.error) { <div class="error-correo">{{ e.error }}</div> }</td>
             <td class="num">{{ e.intentos }}</td>
             <td>@if (e.estado === 'error') { <button class="pequeno" (click)="reintentar(e)" [disabled]="trabajando()">Reintentar</button> }</td></tr>
-        } @empty { <tr><td colspan="7" class="vacio">Sin correos registrados</td></tr> }</tbody>
-      </table></div>
+        } @empty { <tr><td colspan="7" class="vacio">{{ listaCorreos.cargando() ? 'Cargando…' : 'Sin correos registrados' }}</td></tr> }</tbody>
+      </table>
+      <app-paginador [total]="listaCorreos.total()" [pagina]="listaCorreos.pagina()" [porPagina]="listaCorreos.porPagina()" [cargando]="listaCorreos.cambiando()" unidad="correos" (cambio)="listaCorreos.ir($event)" /></div>
     } @else if (pestana() !== 'historial') {
       <div class="tabla-caja">
         <table class="tabla-movil">
@@ -313,21 +313,22 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
             }
           </tbody>
         </table>
-        <app-paginador [total]="total()" [pagina]="pag()" [porPagina]="porPag()" [cargando]="cargandoMas()" unidad="viajes" (cambio)="irPagina($event)" />
+        <app-paginador [total]="total()" [pagina]="listaViajes.pagina()" [porPagina]="listaViajes.porPagina()" [cargando]="listaViajes.cambiando()" unidad="viajes" (cambio)="listaViajes.ir($event)" />
       </div>
     } @else {
       <div class="tabla-caja">
         <table>
           <thead><tr><th>Fecha</th><th>Proceso</th><th>Referencia</th><th>Usuario</th><th>Resultado</th><th>Ambiente</th></tr></thead>
           <tbody>
-            @for (t of transaccionesVisibles(); track t._id) {
+            @for (t of listaHist.items(); track t._id) {
               <tr><td>{{ t.createdAt | fechaHora }}</td><td>{{ procesos()[t.proceso] || t.proceso }}{{ t.tipo !== 1 ? ' (consulta)' : '' }}</td>
                 <td>{{ t.referencia }}</td><td>{{ t.usuario?.nombre }}</td>
                 <td>@if (t.ok) { <span class="chip ok">Aceptado {{ t.radicado ? '· ' + t.radicado : '' }}</span> } @else { <span class="chip error" [title]="t.mensaje">Rechazado</span><div class="sutil">{{ t.mensaje }}</div> }</td>
                 <td>{{ t.ambiente }}</td></tr>
-            } @empty { <tr><td colspan="6" class="vacio">Sin envíos registrados</td></tr> }
+            } @empty { <tr><td colspan="6" class="vacio">{{ listaHist.cargando() ? 'Cargando…' : 'Sin envíos registrados' }}</td></tr> }
           </tbody>
         </table>
+        <app-paginador [total]="listaHist.total()" [pagina]="listaHist.pagina()" [porPagina]="listaHist.porPagina()" [cargando]="listaHist.cambiando()" unidad="envíos" (cambio)="listaHist.ir($event)" />
       </div>
     }
 
@@ -562,9 +563,27 @@ export class Manifiestos {
   private avisos = inject(Avisos);
   private clave = inject(RndcClave);
   readonly pestana = signal<Pestana>('pendientes');
-  readonly viajes = signal<Viaje[]>([]);
-  readonly transacciones = signal<any[]>([]);
-  readonly cargando = signal(false);
+  // Listas por páginas desde el servidor: viajes de la pestaña, envíos al RNDC y correos.
+  // Los filtros se conservan al cambiar de página; al filtrar se vuelve a la primera.
+  readonly listaViajes = new ListaServidor<Viaje>({
+    pedir: (p) => this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), historico: 0, ...this.filtroSoporte(), ...p }),
+    items: (r) => r.viajes,
+    alCargar: (r) => this.cargarCorreos(r.viajes),
+    alError: (e) => this.avisos.error(e),
+  });
+  // Envíos al RNDC: el texto se busca en el servidor (referencia, mensaje, radicado, usuario o proceso)
+  readonly listaHist = new ListaServidor<any>({
+    pedir: (p) => this.api.get<any>('/rndc/transacciones', { ...p, q: this.texto().trim(), procesos: this.procesosQueCoinciden(),
+      ok: this.resultadoHist() === 'ok' ? 1 : this.resultadoHist() === 'error' ? 0 : '' }),
+    alError: (e) => this.avisos.error(e),
+  });
+  readonly listaCorreos = new ListaServidor<any>({
+    pedir: (p) => this.api.get<any>('/correo/envios', { ...p, q: this.texto().trim(), estado: this.filtroCorreo() }),
+    alError: (e) => this.avisos.error(e),
+  });
+  readonly viajes = this.listaViajes.items;
+  readonly total = this.listaViajes.total;
+  readonly cargando = this.listaViajes.cargando;
   readonly trabajando = signal(false);
   readonly seleccion = signal(new Set<string>());
   readonly todos = computed(() => this.viajes().length > 0 && this.seleccion().size === this.viajes().length);
@@ -576,16 +595,19 @@ export class Manifiestos {
   ver(id: string) { this.soloVer.set(true); this.expedir.set(id); }
   abrirExpedir(id: string) { this.soloVer.set(false); this.expedir.set(id); }
   // Correos de documentos
-  readonly envios = signal<any[]>([]);
   // Filtros: los de las listas de viajes van al servidor; los de Correos e Historial, sobre lo cargado
   filtro = { desde: '', hasta: '', cliente: '', q: '' };
   readonly texto = signal('');
   readonly resultadoHist = signal('');
   readonly clientesFiltro = signal<any[]>([]);
-  readonly enviosVisibles = computed(() => filtrar(this.envios().map(e => ({ ...e, _estado: this.textoCorreo(e.estado) })), this.texto()));
-  readonly transaccionesVisibles = computed(() => filtrar(this.transacciones()
-    .filter(t => !this.resultadoHist() || (this.resultadoHist() === 'ok') === !!t.ok)
-    .map(t => ({ ...t, _proceso: this.procesos()[t.proceso] || '' })), this.texto()));
+  // Códigos de proceso del RNDC cuyo nombre contiene lo escrito (p. ej. «manifiesto»), para buscarlos en el servidor
+  private procesosQueCoinciden() {
+    const t = this.texto().trim().toLocaleLowerCase('es');
+    if (!t) return '';
+    return Object.entries(this.procesos()).filter(([, n]) => String(n).toLocaleLowerCase('es').includes(t)).map(([c]) => c).join(',');
+  }
+  // Al escribir se espera a que se deje de teclear antes de buscar
+  readonly buscarTexto = conPausa(() => this.cargar());
   private filtrosViajes() {
     return Object.fromEntries(Object.entries(this.filtro).filter(([, v]) => v));
   }
@@ -610,7 +632,8 @@ export class Manifiestos {
   readonly momentos: [string, string][] = [['llegada', 'Llegada'], ['entrada', 'Entrada'], ['salida', 'Salida']];
 
   // Cambios de otros usuarios: la pantalla se actualiza sola
-  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'correo', 'whatsapp', 'maestros'], () => this.cargar());
+  // (se queda en la página que se está viendo)
+  private enVivo = inject(EnVivo).al(['viajes', 'rndc', 'correo', 'whatsapp', 'maestros'], () => this.actualizar());
 
   // Vista fija desde el menú (Soporte interno, Envíos al RNDC, Correos); vacía = Manifiestos con sus pestañas
   readonly vista = input<'' | 'soporte' | 'historial' | 'correos'>('');
@@ -639,12 +662,11 @@ export class Manifiestos {
   }
 
   ir(p: Pestana) {
-    this.pestana.set(p); this.seleccion.set(new Set()); this.texto.set('');
-    this.viajes.set([]); this.total.set(0); this.transacciones.set([]); this.envios.set([]);
+    this.pestana.set(p); this.seleccion.set(new Set()); this.texto.set(''); this.buscarTexto.cancelar();
+    this.listaViajes.limpiar(); this.listaHist.limpiar(); this.listaCorreos.limpiar();
     this.cargar();
   }
 
-  private turno = new Turno();
   // Seguros por anular (alerta arriba de las pestañas)
   readonly seguros = signal<any[]>([]);
   readonly segurosVencidos = computed(() => this.seguros().filter(x => x.vencido).length);
@@ -656,44 +678,24 @@ export class Manifiestos {
     catch (e) { this.avisos.error(e); }
   }
 
-  async cargar() {
-    this.cargarSeguros();
-    const vigente = this.turno.tomar();
-    this.cargando.set(true);
-    try {
-      if (this.pestana() === 'historial') {
-        const t = await this.api.get<any[]>('/rndc/transacciones', { limite: 200 });
-        if (vigente()) this.transacciones.set(t);
-      }
-      else if (this.pestana() === 'correos') {
-        const [l, p] = await Promise.all([this.api.get<any[]>('/correo/envios', { limite: 300, ...(this.filtroCorreo() ? { estado: this.filtroCorreo() } : {}) }),
-          this.api.get<any[]>('/correo/envios', { estado: 'pendiente', limite: 1000 })]);
-        if (vigente()) { this.envios.set(l); this.pendientesCorreo.set(p.filter(x => x.tipo === 'manifiesto').length); }
-      }
-      else {
-        this.pag.set(1);
-        const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: 1, limite: this.porPag(), historico: 0, ...this.filtroSoporte() });
-        if (vigente()) { this.viajes.set(r.viajes); this.total.set(r.total); this.cargarCorreos(r.viajes); }
-      }
-    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
+  // Lista de la pestaña actual
+  private listaActual() {
+    return this.pestana() === 'historial' ? this.listaHist : this.pestana() === 'correos' ? this.listaCorreos : this.listaViajes;
   }
-
-  // Páginas de la lista de la pestaña (los filtros se conservan al cambiar de página)
-  readonly pag = signal(1);
-  readonly porPag = signal(50);
-  readonly total = signal(0);
-  readonly cargandoMas = signal(false);
-  async irPagina(c: CambioPagina) {
-    if (['historial', 'correos'].includes(this.pestana())) return;
-    this.cargandoMas.set(true);
-    const vigente = this.turno.tomar();
-    try {
-      const r = await this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), pagina: c.pagina, limite: c.porPagina, historico: 0, ...this.filtroSoporte() });
-      if (!vigente()) return;
-      this.pag.set(c.pagina); this.porPag.set(c.porPagina);
-      this.viajes.set(r.viajes); this.total.set(r.total);
-      this.cargarCorreos(r.viajes);
-    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargandoMas.set(false); }
+  // Filtros nuevos: primera página
+  cargar() { return this.traer(false); }
+  // Datos que cambiaron (manifestar, cumplir, anular, otros usuarios): la misma página al día
+  actualizar() { return this.traer(true); }
+  private traer(mismaPagina: boolean) {
+    this.cargarSeguros();
+    if (this.pestana() === 'correos') this.contarPendientesCorreo();
+    const l = this.listaActual();
+    return mismaPagina ? l.refrescar() : l.recargar();
+  }
+  // Manifiestos esperando el envío agrupado: solo se pide el total (antes se traían hasta 1.000 para contarlos)
+  private contarPendientesCorreo() {
+    this.api.get<any>('/correo/envios', { estado: 'pendiente', tipo: 'manifiesto', pagina: 1, limite: 5 })
+      .then(r => this.pendientesCorreo.set(r.total || 0)).catch(() => {});
   }
 
   async nuevoManifiesto() {
@@ -862,7 +864,7 @@ export class Manifiestos {
     try {
       const r = await this.api.post<any>(`/correo/envios/${e._id}/reintentar`, {});
       if (r?.estado === 'enviado') this.avisos.ok('Correo enviado'); else this.avisos.mostrar(`No se pudo enviar: ${r?.error || 'error desconocido'}`, 'error');
-      this.cargar();
+      this.actualizar();
     } catch (x) { this.avisos.error(x); } finally { this.trabajando.set(false); }
   }
 
@@ -874,7 +876,7 @@ export class Manifiestos {
       if (!r.length) this.avisos.mostrar('No había manifiestos pendientes', 'info');
       else if (!fallos.length) this.avisos.ok(`${r.length} correo(s) enviados con ${r.reduce((a, x) => a + x.cantidad, 0)} manifiesto(s)`);
       else this.avisos.mostrar(`No se pudo enviar: ${fallos[0].error}`, 'error');
-      this.cargar();
+      this.actualizar();
     } catch (x) { this.avisos.error(x); } finally { this.trabajando.set(false); }
   }
 
@@ -928,7 +930,7 @@ export class Manifiestos {
     this.revisarClave(r.map(x => x.error || x.remesa?.mensaje || x.manifiesto?.mensaje));
     this.avisos.mostrar(`${ok} de ${ids.length} viaje(s) manifestados. Los rechazados muestran el motivo en la lista.`, ok === ids.length ? 'ok' : 'error');
     this.seleccion.set(new Set());
-    this.cargar();
+    this.actualizar();
   }
 
   // Ver el PDF del manifiesto en pantalla (sin descargarlo). En el celular se abre en otra pestaña.
@@ -954,7 +956,7 @@ export class Manifiestos {
     this.trabajando.set(true);
     try {
       const s = await this.api.post<any>(`/gestion/soportes/viajes/${c.viaje._id}/cumplir`, { llegada: c.llegada, cantidad: c.cantidad, observaciones: c.observaciones });
-      this.avisos.ok(`Soporte ${s.mc} cumplido`); this.soporteCumplir.set(null); this.cargar();
+      this.avisos.ok(`Soporte ${s.mc} cumplido`); this.soporteCumplir.set(null); this.actualizar();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
   async anularSoporte() {
@@ -962,14 +964,14 @@ export class Manifiestos {
     this.trabajando.set(true);
     try {
       const s = await this.api.post<any>(`/gestion/soportes/viajes/${a.viaje._id}/anular`, { motivo: a.motivo, soloCumplido: a.soloCumplido });
-      this.avisos.ok(a.soloCumplido ? `Cumplido del soporte ${s.mc} anulado` : `Soporte ${s.mc} anulado`); this.soporteAnular.set(null); this.cargar();
+      this.avisos.ok(a.soloCumplido ? `Cumplido del soporte ${s.mc} anulado` : `Soporte ${s.mc} anulado`); this.soporteAnular.set(null); this.actualizar();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
   async reemplazarSoporte(v: Viaje) {
     this.trabajando.set(true);
     try {
       const s = await this.api.post<any>(`/gestion/soportes/viajes/${v._id}`, { reemplazar: true });
-      this.avisos.ok(`Nuevo soporte ${s.mc} / ${s.rc}`); this.cargar();
+      this.avisos.ok(`Nuevo soporte ${s.mc} / ${s.rc}`); this.actualizar();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 
@@ -982,7 +984,7 @@ export class Manifiestos {
       const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
       this.cerrarPdf();
       this.pdfVisto.set({ titulo: `Soporte interno ${s.mc} / ${s.rc}`, url, seguro: this.sanitizer.bypassSecurityTrustResourceUrl(url) });
-      if (!(v as any).soporteInterno?.mc) this.cargar();
+      if (!(v as any).soporteInterno?.mc) this.actualizar();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 
@@ -1086,14 +1088,14 @@ export class Manifiestos {
       if (!r) return;
       this.cerrarCumplido();
       this.mostrarResultadoLote('Cumplidos', r);
-      this.cargar();
+      this.actualizar();
       return;
     }
     const r = await this.conClave(cl => this.api.post<any>(`/rndc/viajes/${v._id}/cumplir`, { clave: cl, remesa: limpio(c.remesa), manifiesto: limpio(c.manifiesto) }));
     if (!r) return;
     if (r.cumplidoManifiesto?.estado === 'aceptado') { this.avisos.ok(`Viaje ${v.numero} cumplido en el RNDC`); this.cumplirViaje.set(null); }
     else this.avisos.mostrar(r.cumplidoManifiesto?.mensaje || r.cumplidoRemesa?.mensaje || 'El RNDC rechazó el cumplido', 'error');
-    this.cargar();
+    this.actualizar();
   }
 
   documentosAnulables(): [string, string][] {
@@ -1126,7 +1128,7 @@ export class Manifiestos {
       if (!r) return;
       this.cerrarAnular();
       this.mostrarResultadoLote('Anulaciones', r);
-      this.cargar();
+      this.actualizar();
       return;
     }
     const r = await this.conClave(c => this.api.post<any>(`/rndc/viajes/${v._id}/anular`, { clave: c, ...this.anulacion() }));
@@ -1134,6 +1136,6 @@ export class Manifiestos {
     if (r.ok) { this.avisos.ok(`Anulación aceptada (radicado ${r.radicado})`); this.anularViaje.set(null); }
     else if (r.manifiesto?.ok) { this.anularViaje.set(null); this.avisos.mostrar(r.mensaje, 'error'); }
     else { this.revisarClave([r.mensaje]); this.avisos.mostrar(`El RNDC rechazó la anulación: ${r.mensaje}`, 'error'); }
-    this.cargar();
+    this.actualizar();
   }
 }

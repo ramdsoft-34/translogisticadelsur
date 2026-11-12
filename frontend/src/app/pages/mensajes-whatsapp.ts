@@ -1,5 +1,6 @@
-import { Paginador, CambioPagina } from '../shared/paginador';
-import { Component, inject, signal } from '@angular/core';
+import { Paginador } from '../shared/paginador';
+import { ListaServidor } from '../shared/lista-servidor';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Avisos } from '../core/avisos.service';
@@ -51,7 +52,7 @@ const ESTADOS: Record<string, [string, string]> = {
           }
         </tbody>
       </table>
-      <app-paginador [total]="totalRecibidos()" [pagina]="pagR()" [porPagina]="porR()" [cargando]="cargando()" unidad="mensajes" (cambio)="irRecibidos($event)" /></div>
+      <app-paginador [total]="totalRecibidos()" [pagina]="listaR.pagina()" [porPagina]="listaR.porPagina()" [cargando]="listaR.cambiando()" unidad="mensajes" (cambio)="listaR.ir($event)" /></div>
     } @else {
     @if (totales(); as t) {
       <div class="cifras" role="group" aria-label="Filtrar por estado">
@@ -86,7 +87,7 @@ const ESTADOS: Record<string, [string, string]> = {
         }
       </tbody>
     </table>
-    <app-paginador [total]="totalE()" [pagina]="pagE()" [porPagina]="porE()" [cargando]="cargando()" unidad="mensajes" (cambio)="irEnviados($event)" /></div>
+    <app-paginador [total]="listaE.total()" [pagina]="listaE.pagina()" [porPagina]="listaE.porPagina()" [cargando]="listaE.cambiando()" unidad="mensajes" (cambio)="listaE.ir($event)" /></div>
     <p class="sutil" style="margin-top:10px">Si el conductor desactivó la confirmación de lectura en WhatsApp, el mensaje queda en «Entregado» aunque lo haya visto.</p>
     }`,
   styles: [`
@@ -110,50 +111,43 @@ export class MensajesWhatsapp {
   texto = '';
   readonly estado = signal('');
   readonly totales = signal<any>(null);
-  readonly mensajes = signal<any[]>([]);
-  readonly cargando = signal(false);
+  // Páginas (desde el servidor) de cada pestaña; el periodo, el estado y el texto se conservan al cambiar de página.
+  // Las cifras de arriba (totales por estado) solo llegan con la primera página: al pasar de página se conservan.
+  readonly listaE = new ListaServidor<any>({
+    pedir: (p) => this.api.get<any>('/whatsapp/mensajes', { ...this.periodo(), estado: this.estado(), ...p }),
+    items: (r) => r.mensajes,
+    alCargar: (r) => { if (r.totales) this.totales.set(r.totales); },
+    alError: (e) => this.avisos.error(e),
+  });
+  readonly listaR = new ListaServidor<any>({
+    pedir: (p) => this.api.get<any>('/whatsapp/recibidos', { ...this.periodo(), ...p }),
+    items: (r) => r.mensajes,
+    alError: (e) => this.avisos.error(e),
+  });
+  readonly mensajes = this.listaE.items;
+  readonly recibidos = this.listaR.items;
+  readonly totalRecibidos = this.listaR.total;
+  readonly cargando = computed(() => this.listaE.cargando() || this.listaR.cargando());
   readonly trabajando = signal(false);
   readonly vista = signal<'enviados' | 'recibidos'>('enviados');
-  readonly recibidos = signal<any[]>([]);
-  readonly totalRecibidos = signal(0);
-  // Páginas (desde el servidor) de cada pestaña; el periodo, el estado y el texto se conservan al cambiar de página
-  readonly pagE = signal(1); readonly porE = signal(50); readonly totalE = signal(0);
-  readonly pagR = signal(1); readonly porR = signal(50);
-  private enVivo = inject(EnVivo).al(['whatsapp'], () => this.cargar());
+  // (se queda en la página que se está viendo)
+  private enVivo = inject(EnVivo).al(['whatsapp'], () => this.actualizar());
 
   constructor() { this.cargar(); }
 
   ver(v: 'enviados' | 'recibidos') { this.vista.set(v); this.cargar(); }
 
+  // Periodo, estado o texto nuevos: primera página. Los recibidos se piden siempre (el número de la pestaña).
   async cargar() {
     if (!this.desde || !this.hasta) return;
-    this.cargando.set(true);
-    const periodo = this.periodo();
-    this.pagE.set(1); this.pagR.set(1);
-    try {
-      const [r, rec] = await Promise.all([
-        this.vista() === 'enviados' ? this.api.get<any>('/whatsapp/mensajes', { ...periodo, estado: this.estado(), pagina: 1, limite: this.porE() }) : Promise.resolve(null),
-        this.api.get<any>('/whatsapp/recibidos', { ...periodo, pagina: 1, limite: this.porR() }),
-      ]);
-      if (r) { this.totales.set(r.totales); this.mensajes.set(r.mensajes); this.totalE.set(r.total); }
-      this.recibidos.set(rec.mensajes); this.totalRecibidos.set(rec.total);
-    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
+    await Promise.all([this.vista() === 'enviados' ? this.listaE.recargar() : null, this.listaR.recargar()]);
+  }
+  // Cambios avisados por WhatsApp (entregado, leído, mensajes nuevos): la misma página al día
+  async actualizar() {
+    if (!this.desde || !this.hasta) return;
+    await Promise.all([this.vista() === 'enviados' ? this.listaE.refrescar() : null, this.listaR.refrescar()]);
   }
   private periodo() { return { desde: this.desde, hasta: this.hasta, texto: this.texto.trim() }; }
-  async irEnviados(c: CambioPagina) {
-    this.cargando.set(true);
-    try {
-      const r = await this.api.get<any>('/whatsapp/mensajes', { ...this.periodo(), estado: this.estado(), pagina: c.pagina, limite: c.porPagina });
-      this.pagE.set(c.pagina); this.porE.set(c.porPagina); this.totales.set(r.totales); this.mensajes.set(r.mensajes); this.totalE.set(r.total);
-    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
-  }
-  async irRecibidos(c: CambioPagina) {
-    this.cargando.set(true);
-    try {
-      const r = await this.api.get<any>('/whatsapp/recibidos', { ...this.periodo(), pagina: c.pagina, limite: c.porPagina });
-      this.pagR.set(c.pagina); this.porR.set(c.porPagina); this.recibidos.set(r.mensajes); this.totalRecibidos.set(r.total);
-    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
-  }
 
   filtrar(v: string) { this.estado.set(this.estado() === v ? '' : v); this.cargar(); }
   texto_(e: string) { return ESTADOS[e]?.[0] || e; }
@@ -166,7 +160,7 @@ export class MensajesWhatsapp {
       const r = await this.api.post<any>(`/whatsapp/envios/${m._id}/reintentar`, {});
       if (r?.estado === 'error') this.avisos.mostrar(`No se envió: ${r.error}`, 'error', 9000);
       else this.avisos.ok('Mensaje reenviado por WhatsApp');
-      await this.cargar();
+      await this.actualizar();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 }

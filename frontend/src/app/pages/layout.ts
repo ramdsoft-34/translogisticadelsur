@@ -337,7 +337,7 @@ export class Layout {
       // Si debe cambiar la contraseña, no puede usar otras secciones
       if (this.u()?.debeCambiarClave && !ev.urlAfterRedirects.startsWith('/mi-cuenta')) this.router.navigateByUrl('/mi-cuenta');
     });
-    this.auth.refrescar().catch(() => { /* el interceptor maneja 401 */ });
+    this.auth.refrescarSiVieja().catch(() => { /* el interceptor maneja 401 */ });
     this.vigilarInactividad();
   }
 

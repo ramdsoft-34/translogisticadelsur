@@ -754,3 +754,50 @@ test('Paginación: listas por páginas con total, sin romper las respuestas de s
   const mSin = await s.admin.get(`/api/whatsapp/mensajes?${d}`);
   assert.ok(mSin.body.totales && Array.isArray(mSin.body.mensajes), 'sin página igual que antes');
 });
+
+test('Paginación optimizada: cursor igual a skip, total solo en la primera página y listas livianas', async () => {
+  // Auditoría: suficientes registros para varias páginas
+  const u = '/api/reportes/auditoria';
+  const p1 = (await s.admin.get(`${u}?pagina=1&limite=5`)).body;
+  assert.ok(p1.total > 15 && typeof p1.paginas === 'number');
+  const p2skip = (await s.admin.get(`${u}?pagina=2&limite=5`)).body;
+  assert.equal(p2skip.total, null, 'la página 2 no vuelve a contar');
+  assert.equal(p2skip.paginas, null);
+  assert.equal(typeof (await s.admin.get(`${u}?pagina=2&limite=5&contar=1`)).body.total, 'number', 'contar=1 fuerza el total');
+  const ids = (b) => b.items.map((x) => x._id);
+  const p2cur = (await s.admin.get(`${u}?pagina=2&limite=5&despuesDe=${p1.items.at(-1)._id}`)).body;
+  assert.deepEqual(ids(p2cur), ids(p2skip), 'siguiente con cursor = siguiente con skip');
+  const p3skip = (await s.admin.get(`${u}?pagina=3&limite=5`)).body;
+  const p3cur = (await s.admin.get(`${u}?pagina=3&limite=5&despuesDe=${p2cur.items.at(-1)._id}`)).body;
+  assert.deepEqual(ids(p3cur), ids(p3skip));
+  const p2atras = (await s.admin.get(`${u}?pagina=2&limite=5&antesDe=${p3cur.items[0]._id}`)).body;
+  assert.deepEqual(ids(p2atras), ids(p2skip), 'anterior con cursor = anterior con skip');
+  // Un cursor que no pertenece a la empresa o no existe no rompe: se usa skip
+  const raro = (await s.admin.get(`${u}?pagina=2&limite=5&despuesDe=${'0'.repeat(24)}`)).body;
+  assert.deepEqual(ids(raro), ids(p2skip));
+  const malo = await s.admin.get(`${u}?pagina=2&limite=5&despuesDe[$gt]=`);
+  assert.equal(malo.status, 200);
+
+  // RNDC: la lista no trae el XML enviado ni la respuesta
+  await M.TransaccionRndc.create({ empresa: s.empresa, proceso: 4, tipo: 1, referencia: 'Viaje PAG-1', solicitud: '<x>'.repeat(500), respuesta: '<y>'.repeat(500), ok: false, mensaje: 'Rechazo de prueba paginación' });
+  const tr = (await s.admin.get('/api/rndc/transacciones?pagina=1&limite=5&q=PAG-1')).body;
+  assert.equal(tr.total, 1);
+  assert.equal(tr.items[0].respuesta, undefined); assert.equal(tr.items[0].solicitud, undefined);
+  assert.equal((await s.admin.get('/api/rndc/transacciones?pagina=1&limite=5&q=paginación')).body.total, 1, 'busca en el mensaje');
+  assert.equal((await s.admin.get('/api/rndc/transacciones?pagina=1&limite=5&q=zzz-no-existe&procesos=4')).body.total >= 1, true, 'busca por proceso');
+  assert.equal((await s.admin.get('/api/rndc/transacciones?pagina=1&limite=5&q=zzz-no-existe')).body.total, 0);
+  await M.TransaccionRndc.deleteMany({ empresa: s.empresa, referencia: 'Viaje PAG-1' });
+
+  // Liquidaciones de conductores: cifras de arriba calculadas en la base con la primera página
+  const lc = (await s.admin.get('/api/gestion/liq-conductores?pagina=1&limite=5')).body;
+  assert.ok('resumen' in lc);
+  assert.ok(!('resumen' in (await s.admin.get('/api/gestion/liq-conductores?pagina=2&limite=5')).body));
+  // Búsqueda y estado en la base
+  for (const url of ['/api/liquidaciones?pagina=1&limite=5&q=zzz-no-existe&estado=borrador', '/api/gestion/prestamos?pagina=1&limite=5&q=zzz-no-existe&estado=VIGENTE',
+    '/api/correo/envios?pagina=1&limite=5&q=zzz-no-existe', `/api/whatsapp/mensajes?desde=${dia(-30)}&hasta=${dia(10)}&pagina=1&limite=5&texto=zzz-no-existe`,
+    `/api/whatsapp/recibidos?desde=${dia(-30)}&hasta=${dia(10)}&pagina=1&limite=5&texto=zzz-no-existe`]) {
+    const r = await s.admin.get(url);
+    assert.equal(r.status, 200, `${url}: ${JSON.stringify(r.body).slice(0, 200)}`);
+    assert.equal(r.body.total, 0, url);
+  }
+});

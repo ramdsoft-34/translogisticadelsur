@@ -24,6 +24,8 @@ if echo "$cambios" | grep -q '^frontend/' || [ "${1:-}" = "--todo" ]; then
   # Archivos de versiones anteriores (14 días) para las páginas que ya estaban abiertas
   find dist/frontend/browser -maxdepth 1 -type f \( -name 'chunk-*.js' -o -name 'main-*.js' -o -name 'polyfills-*.js' -o -name 'styles-*.css' \) -mtime -14 \
     -exec cp -p --update=none {} dist-nuevo/frontend/browser/ \;
+  # Copia comprimida de cada archivo de texto (nginx la sirve con gzip_static): -k conserva el original y la misma fecha
+  find dist-nuevo/frontend/browser -maxdepth 1 -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.svg' -o -name '*.json' \) -size +1k -exec gzip -9 -k -f {} \;
   rm -rf dist-viejo
   mv dist dist-viejo
   mv dist-nuevo dist

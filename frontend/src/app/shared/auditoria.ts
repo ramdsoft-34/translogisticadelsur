@@ -1,4 +1,5 @@
-import { Paginador, CambioPagina } from './paginador';
+import { Paginador } from './paginador';
+import { ListaServidor } from './lista-servidor';
 import { Component, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -41,14 +42,19 @@ import { Icono } from './icono';
           <td><span class="chip" [class.ok]="a.resultado === 'exito'" [class.error]="a.resultado === 'fallo'" [class.alerta]="a.resultado === 'denegado'">{{ a.resultado || 'exito' }}</span></td>
           <td class="sutil detalle">{{ detalle(a.detalle) }}</td><td class="sutil">{{ a.ip }}</td></tr>
       } @empty { <tr><td colspan="7" class="vacio">Sin registros</td></tr> }</tbody></table>
-      <app-paginador [total]="total()" [pagina]="pag()" [porPagina]="porPag()" [cargando]="cargando()" unidad="registros" (cambio)="cargar($event)" /></div>`,
+      <app-paginador [total]="registros.total()" [pagina]="registros.pagina()" [porPagina]="registros.porPagina()" [cargando]="registros.cambiando()" unidad="registros" (cambio)="registros.ir($event)" /></div>`,
   styles: ['.detalle { max-width: 420px; word-break: break-word; }'],
 })
 export class VisorAuditoria {
   private api = inject(Api);
   private avisos = inject(Avisos);
   readonly global = input(false);
-  readonly lista = signal<any[]>([]);
+  // Registros por páginas desde el servidor (los filtros se conservan al cambiar de página)
+  readonly registros = new ListaServidor<any>({
+    pedir: (p) => this.api.get<any>(this.base, { ...this.f, ...p }),
+    alError: (e) => this.avisos.error(e),
+  });
+  readonly lista = this.registros.items;
   readonly empresas = signal<any[]>([]);
   readonly verificacion = signal<any[]>([]);
   readonly verificando = signal(false);
@@ -61,16 +67,8 @@ export class VisorAuditoria {
     if (this.global()) this.api.get<any[]>('/admin/empresas').then(e => this.empresas.set(e)).catch(() => {});
   }
 
-  readonly total = signal(0); readonly pag = signal(1); readonly porPag = signal(50); readonly cargando = signal(false);
-  // Sin «c» (filtros nuevos) vuelve a la primera página; los filtros se conservan al cambiar de página
-  async cargar(c?: CambioPagina) {
-    const pagina = c?.pagina || 1; const limite = c?.porPagina || this.porPag();
-    this.cargando.set(true);
-    try {
-      const r = await this.api.get<any>(this.base, { ...this.f, pagina, limite });
-      this.lista.set(r.items); this.total.set(r.total); this.pag.set(pagina); this.porPag.set(limite);
-    } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
-  }
+  // Filtros nuevos: primera página
+  cargar() { return this.registros.recargar(); }
 
   async verificar() {
     this.verificando.set(true);

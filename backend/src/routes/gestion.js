@@ -1,7 +1,7 @@
 // Módulos de gestión de la plantilla de Excel: liquidación del conductor, préstamos,
 // contabilidad, cierre de mes, relaciones, soporte interno MC/RC y remesas de Dulces & Dulces.
 import { Router } from 'express';
-import { paginacion, pagina, recortar } from '../utils/paginacion.js';
+import { paginacion, pagina, listarPagina } from '../utils/paginacion.js';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import express from 'express';
@@ -88,10 +88,19 @@ r.post('/liq-conductores', gestionar, async (req, res) => {
 r.get('/liq-conductores', verLiq, async (req, res) => {
   const f = deEmpresa(req);
   if (req.query.q) { const re = new RegExp(String(req.query.q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); f.$or = [{ numero: re }, { conductorNombre: re }, { placa: re }, { cedula: re }]; }
+  if (['VIGENTE', 'ANULADA'].includes(req.query.estado)) f.estado = req.query.estado;
   const p = paginacion(req.query, { porDefecto: 25, maximo: 100 });
   if (p.activa) {
-    const [total, items] = await Promise.all([LiquidacionConductor.countDocuments(f), LiquidacionConductor.find(f).select('-lineas').sort({ createdAt: -1 }).skip(p.salto).limit(p.limite).lean()]);
-    return res.json(pagina(items, total, p));
+    const { items, total } = await listarPagina(LiquidacionConductor, f, p, { orden: { createdAt: -1 }, select: '-lineas' });
+    // Cifras de arriba (todas las vigentes de la empresa, no solo la página): se calculan en la base con la primera página
+    let resumen;
+    if (p.contar) {
+      const [r] = await LiquidacionConductor.aggregate([{ $match: { empresa: new mongoose.Types.ObjectId(String(req.empresaId)), estado: { $ne: 'ANULADA' } } },
+        { $group: { _id: null, vigentes: { $sum: 1 }, neto: { $sum: { $ifNull: ['$neto', 0] } },
+          pagado: { $sum: { $min: [{ $ifNull: ['$pagado', 0] }, { $ifNull: ['$neto', 0] }] } } } }]);
+      resumen = r ? { vigentes: r.vigentes, neto: r.neto, pagado: r.pagado, porPagar: r.neto - r.pagado } : null;
+    }
+    return res.json(pagina(items, total, p, p.contar ? { resumen } : {}));
   }
   res.json(await LiquidacionConductor.find(f).select('-lineas').sort({ createdAt: -1 }).limit(300).lean());
 });
@@ -151,7 +160,10 @@ r.get('/prestamos', verLiq, async (req, res) => {
   const conResumen = (p) => ({ ...p, resumen: pre.resumenPrestamo(p), cuotas: p.cuotas.map(c => ({ ...c, estado: pre.estadoCuota(c) })) });
   const pg = paginacion(req.query, { porDefecto: 25, maximo: 100 });
   if (pg.activa) {
-    const [total, items] = await Promise.all([Prestamo.countDocuments(f), Prestamo.find(f).sort({ createdAt: -1 }).skip(pg.salto).limit(pg.limite).lean()]);
+    // Número, conductor, cédula, placa o concepto
+    const texto = String(req.query.q || '').trim().slice(0, 60);
+    if (texto) { const re = new RegExp(texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); f.$or = [{ numero: re }, { conductorNombre: re }, { cedula: re }, { placa: re }, { concepto: re }]; }
+    const { items, total } = await listarPagina(Prestamo, f, pg, { orden: { createdAt: -1 } });
     return res.json(pagina(items.map(conResumen), total, pg));
   }
   const l = await Prestamo.find(f).sort({ createdAt: -1 }).limit(500).lean();

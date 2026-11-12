@@ -1,5 +1,6 @@
 import { Turno } from '../core/turno';
-import { Paginador, CambioPagina, enPagina } from '../shared/paginador';
+import { Paginador } from '../shared/paginador';
+import { ListaServidor, conPausa } from '../shared/lista-servidor';
 import { Component, ViewChild, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -14,7 +15,6 @@ import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
 import { Confirmar } from '../shared/confirmar';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { VisorPdf } from '../shared/visor-pdf';
-import { filtrar } from '../shared/filtro';
 
 type Pestana = 'liquidar' | 'liquidaciones' | 'prestamos' | 'relacion';
 const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -133,13 +133,13 @@ const quincena = () => {
           </div>
         }
         <div class="acciones" style="margin-bottom:12px">
-          <div class="filtro-rapido" style="margin:0"><input type="search" placeholder="Buscar N°, conductor, placa o cédula" [value]="q()" (input)="q.set($any($event.target).value)" aria-label="Buscar liquidaciones" /></div>
+          <div class="filtro-rapido" style="margin:0"><input type="search" placeholder="Buscar N°, conductor, placa o cédula" [value]="q()" (input)="q.set($any($event.target).value); buscarLiq()" aria-label="Buscar liquidaciones" /></div>
           <button style="margin-left:auto" [disabled]="!selLiq().size" (click)="imprimirLote()"><app-icono nombre="ojo" [tam]="15" />Imprimir {{ selLiq().size || '' }} (dos por hoja)</button>
         </div>
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th><input type="checkbox" aria-label="Elegir todas" [checked]="todasLiq()" (change)="alternarTodasLiq()" /></th><th>N°</th><th>Conductor</th><th>Placa</th><th>Periodo</th><th class="num">Flete + auxiliar</th><th class="num">Desc. préstamos</th>
             <th class="num">Neto</th><th class="num">Por pagar</th><th>Estado</th><th></th></tr></thead>
-          <tbody>@for (l of paginaLiq(); track l._id) {
+          <tbody>@for (l of liquidaciones(); track l._id) {
             <tr><td data-etiqueta="Elegir"><input type="checkbox" [checked]="selLiq().has(l.numero)" (change)="alternarLiq(l.numero)" [attr.aria-label]="'Liquidación ' + l.numero" /></td>
               <td data-etiqueta="N°"><strong class="num-liq">{{ l.numero }}</strong><br /><span class="sutil">{{ l.fecha | dia }}</span></td>
               <td data-etiqueta="Conductor">{{ l.conductorNombre }}@if (l.cedula) { <br /><span class="sutil">C.C. {{ l.cedula }}</span> }</td>
@@ -154,19 +154,19 @@ const quincena = () => {
                 <button class="pequeno" (click)="excel('/gestion/liq-conductores/' + l.numero + '/xlsx', l.numero + '.xlsx')">Excel</button>
                 @if (puedeGestionar && l.estado === 'VIGENTE' && !l.pagado) { <button class="pequeno peligro" confirmar="Clic otra vez para anular" (confirmado)="anularLiq(l)">Anular</button> }
               </div></td></tr>
-          } @empty { <tr><td colspan="11" class="vacio">Aún no hay liquidaciones de conductores</td></tr> }</tbody></table>
-          <app-paginador [total]="liquidacionesVisibles().length" [pagina]="pagLq()" [porPagina]="porLq()" unidad="liquidaciones" (cambio)="pagLq.set($event.pagina); porLq.set($event.porPagina)" /></div>
+          } @empty { <tr><td colspan="11" class="vacio">{{ liqs.cargando() ? 'Cargando…' : q() ? 'Ninguna liquidación coincide con la búsqueda' : 'Aún no hay liquidaciones de conductores' }}</td></tr> }</tbody></table>
+          <app-paginador [total]="liqs.total()" [pagina]="liqs.pagina()" [porPagina]="liqs.porPagina()" [cargando]="liqs.cambiando()" unidad="liquidaciones" (cambio)="liqs.ir($event)" /></div>
       }
 
       @case ('prestamos') {
         <div class="acciones" style="margin-bottom:12px">
-          <div class="filtro-rapido" style="margin:0"><input type="search" placeholder="Buscar conductor, cédula o concepto" [value]="qp()" (input)="qp.set($any($event.target).value)" aria-label="Buscar préstamos" /></div>
-          <select aria-label="Estado" [value]="estadoP()" (change)="estadoP.set($any($event.target).value)"><option value="">Todos</option><option value="VIGENTE">Vigentes</option><option value="PAGADO">Pagados</option><option value="ANULADO">Anulados</option></select>
+          <div class="filtro-rapido" style="margin:0"><input type="search" placeholder="Buscar conductor, cédula o concepto" [value]="qp()" (input)="qp.set($any($event.target).value); buscarPrest()" aria-label="Buscar préstamos" /></div>
+          <select aria-label="Estado" [value]="estadoP()" (change)="estadoP.set($any($event.target).value); cargarPrestamos()"><option value="">Todos</option><option value="VIGENTE">Vigentes</option><option value="PAGADO">Pagados</option><option value="ANULADO">Anulados</option></select>
           @if (puedeGestionar) { <button class="primario" style="margin-left:auto" (click)="nuevoPrestamo()"><app-icono nombre="mas" />Nuevo préstamo o descuento</button> }
         </div>
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th>N°</th><th>Fecha</th><th>Conductor</th><th>Concepto</th><th class="num">Capital</th><th>Cuotas</th><th class="num">Pagado</th><th class="num">Pendiente</th><th>Próxima</th><th>Estado</th><th></th></tr></thead>
-          <tbody>@for (p of paginaPrest(); track p._id) {
+          <tbody>@for (p of prestamos(); track p._id) {
             <tr><td data-etiqueta="N°">{{ p.numero }}</td><td data-etiqueta="Fecha">{{ p.fecha | dia }}</td><td data-etiqueta="Conductor">{{ p.conductorNombre }}<br /><span class="sutil">{{ p.cedula }}</span></td>
               <td data-etiqueta="Concepto">{{ p.concepto }}</td><td data-etiqueta="Capital" class="num">{{ p.capital | pesos }}</td>
               <td data-etiqueta="Cuotas">{{ p.nCuotas }} × {{ p.valorCuota | pesos }} ({{ p.tasaMensual }} %)</td>
@@ -180,8 +180,8 @@ const quincena = () => {
                   @if (!p.abonos.length) { <button class="pequeno peligro" confirmar="Clic otra vez para anular" (confirmado)="anularPrestamo(p)">Anular</button> }
                 }
               </div></td></tr>
-          } @empty { <tr><td colspan="11" class="vacio">No hay préstamos</td></tr> }</tbody></table>
-          <app-paginador [total]="prestamosVisibles().length" [pagina]="pagPr()" [porPagina]="porPr()" unidad="préstamos" (cambio)="pagPr.set($event.pagina); porPr.set($event.porPagina)" /></div>
+          } @empty { <tr><td colspan="11" class="vacio">{{ prests.cargando() ? 'Cargando…' : 'No hay préstamos' }}</td></tr> }</tbody></table>
+          <app-paginador [total]="prests.total()" [pagina]="prests.pagina()" [porPagina]="prests.porPagina()" [cargando]="prests.cambiando()" unidad="préstamos" (cambio)="prests.ir($event)" /></div>
       }
 
       @case ('relacion') {
@@ -271,21 +271,29 @@ export class PagoConductores {
   readonly agrupar = signal<'conductor' | 'placa_empresa'>('conductor');
   readonly descuentos = signal<Record<string, number | null>>({});
   readonly selLiq = signal(new Set<string>());
-  readonly todasLiq = computed(() => this.liquidacionesVisibles().length > 0 && this.liquidacionesVisibles().every(l => this.selLiq().has(l.numero)));
+  readonly todasLiq = computed(() => this.liquidaciones().length > 0 && this.liquidaciones().every(l => this.selLiq().has(l.numero)));
   @ViewChild('visor') visorPdf?: VisorPdf;
   readonly calc = signal<any>(null);
   readonly sel = signal(new Set<string>());
-  readonly liquidaciones = signal<any[]>([]);
+  // Liquidaciones y préstamos por páginas desde el servidor: la búsqueda y el estado se filtran allá, y las cifras
+  // de arriba (todas las liquidaciones vigentes) las calcula el servidor con la primera página.
   readonly q = signal('');
-  readonly liquidacionesVisibles = computed(() => filtrar<any>(this.liquidaciones(), this.q()));
-  readonly prestamos = signal<any[]>([]);
   readonly qp = signal(''); readonly estadoP = signal('');
-  readonly prestamosVisibles = computed(() => filtrar<any>(this.prestamos().filter(p => !this.estadoP() || p.estado === this.estadoP()), this.qp()));
-  // Páginas en pantalla (filtros, buscador y totales siguen sobre toda la lista)
-  readonly pagLq = signal(1); readonly porLq = signal(25);
-  readonly paginaLiq = computed(() => enPagina(this.liquidacionesVisibles(), this.pagLq(), this.porLq()));
-  readonly pagPr = signal(1); readonly porPr = signal(25);
-  readonly paginaPrest = computed(() => enPagina(this.prestamosVisibles(), this.pagPr(), this.porPr()));
+  readonly liqs = new ListaServidor<any>({
+    pedir: (p) => this.api.get<any>('/gestion/liq-conductores', { ...p, q: this.q().trim() }),
+    alCargar: (r) => { if ('resumen' in r) this.resumenLiq.set(r.resumen); },
+    alError: (e) => this.avisos.error(e),
+    porPagina: 25,
+  });
+  readonly prests = new ListaServidor<any>({
+    pedir: (p) => this.api.get<any>('/gestion/prestamos', { ...p, q: this.qp().trim(), estado: this.estadoP() }),
+    alError: (e) => this.avisos.error(e),
+    porPagina: 25,
+  });
+  readonly liquidaciones = this.liqs.items;
+  readonly prestamos = this.prests.items;
+  readonly buscarLiq = conPausa(() => this.cargarLiquidaciones());
+  readonly buscarPrest = conPausa(() => this.cargarPrestamos());
   readonly relacion = signal<any>(null);
   readonly np = signal<any>(null);
   readonly plan = signal<any>(null);
@@ -336,7 +344,7 @@ export class PagoConductores {
   cambiarAgrupacion() { this.agrupar.set(this.agrupacion); this.sel.set(new Set()); this.descuentos.set({}); }
   ponerDescuento(clave: string, v: number | null) { this.descuentos.update(d => ({ ...d, [clave]: v })); }
   alternarLiq(n: string) { const s = new Set(this.selLiq()); if (s.has(n)) s.delete(n); else s.add(n); this.selLiq.set(s); }
-  alternarTodasLiq() { this.selLiq.set(this.todasLiq() ? new Set() : new Set(this.liquidacionesVisibles().map(l => l.numero))); }
+  alternarTodasLiq() { this.selLiq.set(this.todasLiq() ? new Set() : new Set(this.liquidaciones().map(l => l.numero))); }
   imprimirLote() { this.visorPdf?.ver('/gestion/liq-conductores-lote/pdf', 'Liquidaciones (dos por hoja)', { numeros: [...this.selLiq()].join(','), ver: 1 }); }
   private turnoCalculo = new Turno();
   async calcular() {
@@ -373,12 +381,7 @@ export class PagoConductores {
     const pagado = Number(l.pagado) || 0;
     return pagado >= l.neto - 0.5 ? ['Pagada', 'ok'] : pagado > 0 ? ['Pago parcial', 'alerta'] : ['Por pagar', 'alerta'];
   }
-  readonly resumenLiq = computed(() => {
-    const v = this.liquidaciones().filter(l => l.estado !== 'ANULADA');
-    if (!v.length) return null;
-    const neto = v.reduce((a, l) => a + (Number(l.neto) || 0), 0); const pagado = v.reduce((a, l) => a + Math.min(Number(l.pagado) || 0, Number(l.neto) || 0), 0);
-    return { vigentes: v.length, neto, pagado, porPagar: neto - pagado };
-  });
+  readonly resumenLiq = signal<{ vigentes: number; neto: number; pagado: number; porPagar: number } | null>(null);
   todosGrupo(g: any) { return g.lineas.every((l: any) => this.sel().has(l.viaje)); }
   alternarGrupo(g: any) {
     const s = new Set(this.sel()); const todos = this.todosGrupo(g);
@@ -397,14 +400,14 @@ export class PagoConductores {
       await this.calcular();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
-  async cargarLiquidaciones() { try { this.liquidaciones.set(await this.api.get('/gestion/liq-conductores')); } catch (e) { this.avisos.error(e); } }
+  cargarLiquidaciones() { return this.liqs.recargar(); }
   async anularLiq(l: any) {
-    try { await this.api.post(`/gestion/liq-conductores/${l.numero}/anular`, {}); this.avisos.ok(`Liquidación ${l.numero} anulada; los viajes quedan sin liquidar`); this.cargarLiquidaciones(); }
+    try { await this.api.post(`/gestion/liq-conductores/${l.numero}/anular`, {}); this.avisos.ok(`Liquidación ${l.numero} anulada; los viajes quedan sin liquidar`); this.liqs.refrescar(); }
     catch (e) { this.avisos.error(e); }
   }
   async excel(ruta: string, nombre: string, params: any = {}) { try { await this.api.descargar(ruta, params, nombre); } catch (e) { this.avisos.error(e); } }
 
-  async cargarPrestamos() { try { this.prestamos.set(await this.api.get('/gestion/prestamos')); } catch (e) { this.avisos.error(e); } }
+  cargarPrestamos() { return this.prests.recargar(); }
   nuevoPrestamo() {
     this.plan.set(null);
     this.np.set({ conductor: '', placa: '', concepto: '', capital: null, tasaMensual: 0, nCuotas: 1, primeraCuota: '', observacion: '' });
@@ -434,11 +437,11 @@ export class PagoConductores {
     this.trabajando.set(true);
     try {
       const r = await this.api.post<any>(`/gestion/prestamos/${a.numero}/abonar`, { valor: a.valor, nota: a.nota });
-      this.avisos.ok(`Abono aplicado: ${r.aplicado.toLocaleString('es-CO')}`); this.abono.set(null); this.cargarPrestamos();
+      this.avisos.ok(`Abono aplicado: ${r.aplicado.toLocaleString('es-CO')}`); this.abono.set(null); this.prests.refrescar();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
   async anularPrestamo(p: any) {
-    try { await this.api.post(`/gestion/prestamos/${p.numero}/anular`, { motivo: 'Anulado desde la plataforma' }); this.avisos.ok(`Préstamo ${p.numero} anulado`); this.cargarPrestamos(); }
+    try { await this.api.post(`/gestion/prestamos/${p.numero}/anular`, { motivo: 'Anulado desde la plataforma' }); this.avisos.ok(`Préstamo ${p.numero} anulado`); this.prests.refrescar(); }
     catch (e) { this.avisos.error(e); }
   }
   async cargarRelacion() { try { this.relacion.set(await this.api.get('/gestion/relaciones/pago-conductores', { desde: this.f.desde, hasta: this.f.hasta })); } catch (e) { this.avisos.error(e); } }

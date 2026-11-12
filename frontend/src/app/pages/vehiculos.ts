@@ -1,4 +1,3 @@
-import { Turno } from '../core/turno';
 import { Component, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -14,7 +13,8 @@ import { FORMATOS, isoDia } from '../shared/formato';
 import { ImportarExcel } from '../shared/importar-excel';
 import { TraerRndc } from '../shared/traer-rndc';
 import { ActualizarVehiculos } from '../shared/actualizar-vehiculos';
-import { Paginador, CambioPagina } from '../shared/paginador';
+import { Paginador } from '../shared/paginador';
+import { ListaServidor } from '../shared/lista-servidor';
 import { mensajeError } from '../core/api.service';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { VistaRndc } from '../shared/vista-rndc';
@@ -48,7 +48,7 @@ const vacio = () => ({
     </div>
     <app-importar-excel tipo="vehiculos" titulo="vehículos" [abierto]="importar()" (cerrar)="importar.set(false)" (importado)="cargar()" />
     <app-traer-rndc tipo="vehiculos" [abierto]="traer()" (cerrar)="traer.set(false)" (traidos)="cargar()" />
-    <app-actualizar-vehiculos [abierto]="actualizar()" (cerrar)="actualizar.set(false); cargar()" (actualizados)="cargar()" />
+    <app-actualizar-vehiculos [abierto]="actualizar()" (cerrar)="actualizar.set(false); refrescarLista()" (actualizados)="refrescarLista()" />
     <div class="barra"><div class="campo crece"><label for="v-q">Buscar placa</label>
       <input id="v-q" type="search" placeholder="ABC123" [(ngModel)]="q" (input)="buscarDiferido()" style="text-transform:uppercase" /></div>
       <div class="campo"><label for="v-cl">Tipo</label><select id="v-cl" [(ngModel)]="clase" (change)="cargar()"><option value="">Todos</option>
@@ -79,7 +79,7 @@ const vacio = () => ({
           }
         </tbody>
       </table>
-      <app-paginador [total]="total()" [pagina]="pag()" [porPagina]="porPag()" [cargando]="cargandoMas()" unidad="vehículos" (cambio)="irPagina($event)" />
+      <app-paginador [total]="total()" [pagina]="listaPag.pagina()" [porPagina]="listaPag.porPagina()" [cargando]="listaPag.cambiando()" unidad="vehículos" (cambio)="listaPag.ir($event)" />
     </div>
 
     <app-modal titulo="Vehículos de Sur Track" [abierto]="!!planSt()" (cerrar)="planSt.set(null)" [ancho]="true">
@@ -189,8 +189,13 @@ export class Vehiculos {
   placaBuscar = '';
   consultarRndc = true;
   sincronizar = false;
-  readonly lista = signal<any[]>([]);
-  readonly cargando = signal(false);
+  // Lista por páginas desde el servidor (filtros conservados al cambiar de página; al filtrar, primera página)
+  readonly listaPag = new ListaServidor<any>({
+    pedir: (p) => this.api.get<any>('/maestros/vehiculos', { q: this.q, clase: this.clase, soat: this.soat, activos: this.activos, ...p }),
+    alError: (e) => this.avisos.error(e),
+  });
+  readonly lista = this.listaPag.items;
+  readonly cargando = this.listaPag.cargando;
   readonly trabajando = signal(false);
   readonly abierto = signal(false);
   readonly importar = signal(false);
@@ -223,7 +228,7 @@ export class Vehiculos {
   private claseNueva = 'vehiculo';
   readonly vistaRndc = signal<[string, string][] | null>(null);
   // Cambios de otros usuarios: la pantalla se actualiza sola
-  private enVivo = inject(EnVivo).al(['maestros', 'rndc', 'rastreo'], () => this.cargar());
+  private enVivo = inject(EnVivo).al(['maestros', 'rndc', 'rastreo'], () => this.refrescarLista());
 
   constructor() {
     this.cargar();
@@ -240,37 +245,16 @@ export class Vehiculos {
 
 
   // ── Paginación con carga progresiva ──
-  readonly pag = signal(1);
-  readonly porPag = signal(50);
-  readonly total = signal(0);
-  readonly cargandoMas = signal(false);
+  readonly total = this.listaPag.total;
   private temporizador: ReturnType<typeof setTimeout> | undefined;
   buscarDiferido() { clearTimeout(this.temporizador); this.temporizador = setTimeout(() => this.cargar(), 300); }
 
   clase = '';
   soat = '';
   activos = '';
-  private turno = new Turno();
-  async cargar() {
-    const vigente = this.turno.tomar();
-    this.cargando.set(true);
-    this.pag.set(1);
-    try {
-      const r = await this.api.get<any>('/maestros/vehiculos', { q: this.q, clase: this.clase, soat: this.soat, activos: this.activos, pagina: 1, limite: this.porPag() });
-      if (vigente()) { this.lista.set(r.items); this.total.set(r.total); }
-    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargando.set(false); }
-  }
-
-  async irPagina(c: CambioPagina) {
-    this.cargandoMas.set(true);
-    const vigente = this.turno.tomar();
-    try {
-      const r = await this.api.get<any>('/maestros/vehiculos', { q: this.q, clase: this.clase, soat: this.soat, activos: this.activos, pagina: c.pagina, limite: c.porPagina });
-      if (!vigente()) return;
-      this.pag.set(c.pagina); this.porPag.set(c.porPagina);
-      this.lista.set(r.items); this.total.set(r.total);
-    } catch (e) { if (vigente()) this.avisos.error(e); } finally { if (vigente()) this.cargandoMas.set(false); }
-  }
+  // Filtros nuevos: primera página. Datos que cambiaron (guardar, RNDC, otros usuarios): la misma página al día.
+  cargar() { return this.listaPag.recargar(); }
+  refrescarLista() { return this.listaPag.refrescar(); }
 
   vencida(f: string) { return !!f && new Date(f) < new Date(); }
   chip(e: string) { return ({ enviado: 'ok', error: 'error' } as Record<string, string>)[e] || 'alerta'; }
@@ -347,7 +331,7 @@ export class Vehiculos {
     try {
       const guardado = f._id ? await this.api.put<any>(`/maestros/vehiculos/${f._id}`, cuerpo) : await this.api.post<any>('/maestros/vehiculos', cuerpo);
       this.avisos.ok('Vehículo guardado');
-      this.abierto.set(false); this.cargar();
+      this.abierto.set(false); this.refrescarLista();
       if (this.sincronizar && this.puedeRndc) await this.enviar(guardado);
     } catch (e) { this.avisos.mostrar(await mensajeError(e), 'error'); } finally { this.trabajando.set(false); }
   }
@@ -361,7 +345,7 @@ export class Vehiculos {
       if (r.sinCambios) this.avisos.mostrar(r.mensaje, 'info');
       else if (r.ok) this.avisos.ok(`Vehículo ${v.placa} registrado en el RNDC`);
       else this.avisos.mostrar(`El RNDC rechazó el registro: ${r.mensaje}`, 'error');
-      this.cargar();
+      this.refrescarLista();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 }

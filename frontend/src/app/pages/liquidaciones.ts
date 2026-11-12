@@ -1,5 +1,6 @@
-import { Paginador, CambioPagina, enPagina } from '../shared/paginador';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Paginador } from '../shared/paginador';
+import { ListaServidor, conPausa } from '../shared/lista-servidor';
+import { Component, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -10,7 +11,6 @@ import { P } from '../core/modelos';
 import { Icono } from '../shared/icono';
 import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
 import { Confirmar } from '../shared/confirmar';
-import { filtrar } from '../shared/filtro';
 
 @Component({
   selector: 'app-liquidaciones',
@@ -51,12 +51,12 @@ import { filtrar } from '../shared/filtro';
     </div>
 
     <div class="tarjeta">
-      <div class="cab-filtro"><h2>Liquidaciones guardadas</h2><div class="filtro-rapido"><input type="search" placeholder="Buscar N°, cliente o periodo" aria-label="Buscar N°, cliente o periodo" [value]="q()" (input)="q.set($any($event.target).value)" /></div>
-        <select aria-label="Filtrar por estado" [value]="estadoLiq()" (change)="estadoLiq.set($any($event.target).value)">
+      <div class="cab-filtro"><h2>Liquidaciones guardadas</h2><div class="filtro-rapido"><input type="search" placeholder="Buscar N°, cliente o periodo" aria-label="Buscar N°, cliente o periodo" [value]="q()" (input)="q.set($any($event.target).value); buscar()" /></div>
+        <select aria-label="Filtrar por estado" [value]="estadoLiq()" (change)="estadoLiq.set($any($event.target).value); cargar()">
           <option value="">Todos los estados</option><option value="borrador">Borrador</option><option value="facturada">Facturada</option><option value="anulada">Anulada</option></select></div>
       <div class="tabla-caja" style="box-shadow:none">
         <table><thead><tr><th>N°</th><th>Cliente</th><th>Periodo</th><th class="num">Viajes</th><th class="num">Total cobrado</th><th class="num">Utilidad</th><th>Estado</th><th></th></tr></thead>
-          <tbody>@for (l of paginaLista(); track l._id) {
+          <tbody>@for (l of lista(); track l._id) {
             <tr><td>{{ l.numero }}</td><td>{{ l.cliente?.nombre }}</td><td>{{ l.titulo }}</td><td class="num">{{ l.totales?.viajes }}</td>
               <td class="num">{{ l.totales?.totalCobrado | pesos }}</td><td class="num">{{ l.totales?.utilidad | pesos }}</td>
               <td><span class="chip" [class.ok]="l.estado === 'facturada'" [class.error]="l.estado === 'anulada'">{{ l.estado }}</span></td>
@@ -65,8 +65,8 @@ import { filtrar } from '../shared/filtro';
                 @if (puedeGestionar && l.estado === 'borrador') { <button class="pequeno" (click)="estado(l, 'facturada')">Marcar facturada</button> }
                 @if (puedeGestionar && l.estado !== 'anulada') { <button class="pequeno peligro" confirmar="Clic otra vez para anular" (confirmado)="estado(l, 'anulada')">Anular</button> }
               </div></td></tr>
-          } @empty { <tr><td colspan="8" class="vacio">Aún no hay liquidaciones</td></tr> }</tbody></table>
-          <app-paginador [total]="listaVisible().length" [pagina]="pagL()" [porPagina]="porL()" unidad="liquidaciones" (cambio)="pagL.set($event.pagina); porL.set($event.porPagina)" />
+          } @empty { <tr><td colspan="8" class="vacio">{{ liq.cargando() ? 'Cargando…' : q() || estadoLiq() ? 'Ninguna liquidación con estos filtros' : 'Aún no hay liquidaciones' }}</td></tr> }</tbody></table>
+          <app-paginador [total]="liq.total()" [pagina]="liq.pagina()" [porPagina]="liq.porPagina()" [cargando]="liq.cambiando()" unidad="liquidaciones" (cambio)="liq.ir($event)" />
       </div>
     </div>`,
 })
@@ -76,26 +76,30 @@ export class Liquidaciones {
   private avisos = inject(Avisos);
   readonly puedeGestionar = this.auth.tiene(P.LIQUIDACION_GESTIONAR);
   readonly clientes = signal<any[]>([]);
-  readonly lista = signal<any[]>([]);
   readonly q = signal('');
   readonly estadoLiq = signal('');
-  readonly listaVisible = computed(() => filtrar(this.lista().filter(l => !this.estadoLiq() || l.estado === this.estadoLiq()), this.q()));
-  // Solo se dibujan las filas de la página (los filtros y el buscador siguen sobre toda la lista)
-  readonly pagL = signal(1); readonly porL = signal(25);
-  readonly paginaLista = computed(() => enPagina(this.listaVisible(), this.pagL(), this.porL()));
+  // Liquidaciones por páginas desde el servidor; el estado y la búsqueda (N°, cliente o periodo) se filtran allá
+  readonly liq = new ListaServidor<any>({
+    pedir: (p) => this.api.get<any>('/liquidaciones', { ...p, q: this.q().trim(), estado: this.estadoLiq() }),
+    alError: (e) => this.avisos.error(e),
+    porPagina: 25,
+  });
+  readonly lista = this.liq.items;
+  readonly buscar = conPausa(() => this.cargar());
   readonly calculo = signal<any>(null);
   readonly guardando = signal(false);
   p = { cliente: '', desde: inicioMesIso(), hasta: hoyIso() };
 
   // Cambios de otros usuarios: la pantalla se actualiza sola
-  private enVivo = inject(EnVivo).al(['liquidaciones', 'viajes'], () => this.cargar());
+  private enVivo = inject(EnVivo).al(['liquidaciones', 'viajes'], () => this.liq.refrescar());
 
   constructor() {
     this.api.get<any[]>('/maestros/clientes').then(c => this.clientes.set(c)).catch(e => this.avisos.error(e));
     this.cargar();
   }
 
-  async cargar() { try { this.lista.set(await this.api.get<any[]>('/liquidaciones')); } catch (e) { this.avisos.error(e); } }
+  // Filtros nuevos: primera página
+  cargar() { return this.liq.recargar(); }
   sinTarifa(c: any) { return c.lineas.filter((l: any) => l.sinTarifa).length; }
 
   async calcular() {
@@ -112,7 +116,7 @@ export class Liquidaciones {
   }
 
   async estado(l: any, estado: string) {
-    try { await this.api.put(`/liquidaciones/${l._id}/estado`, { estado }); this.cargar(); } catch (e) { this.avisos.error(e); }
+    try { await this.api.put(`/liquidaciones/${l._id}/estado`, { estado }); this.liq.refrescar(); } catch (e) { this.avisos.error(e); }
   }
 
   async descargar(l: any, tipo: string) {

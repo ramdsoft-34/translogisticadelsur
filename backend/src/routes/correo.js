@@ -1,6 +1,6 @@
 // Correo de la empresa: cuenta SMTP, envío de documentos por cliente y trazabilidad.
 import { Router } from 'express';
-import { paginacion, pagina, recortar } from '../utils/paginacion.js';
+import { paginacion, pagina, listarPagina } from '../utils/paginacion.js';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Empresa, Cliente, EnvioCorreo, Viaje } from '../models/index.js';
@@ -10,7 +10,7 @@ import { auditar } from '../services/auditoria.js';
 import { cifrar } from '../utils/cifrado.js';
 import express from 'express';
 import { enviarRelacion, enviarManual } from '../services/correo.js';
-import { parseFecha } from '../utils/texto.js';
+import { parseFecha, escaparRegex } from '../utils/texto.js';
 import { enviarPrueba, programarEnvios, procesarEnvio, enviarPendientes, aprobarEnvios, descartarEnvios, enviarGrupoCliente, cartaSalida, datosCorreo, SALIDA_BASE, MARCADORES_SALIDA } from '../services/correo.js';
 
 const r = Router();
@@ -144,13 +144,16 @@ r.get('/envios', operar, async (req, res) => {
   if (req.query.viaje) f.viaje = id(req.query.viaje);
   if (req.query.viajes) f.viaje = { $in: String(req.query.viajes).split(',').filter(mongoose.isValidObjectId) };
   if (req.query.estado) f.estado = String(req.query.estado);
+  if (['manifiesto', 'salida'].includes(req.query.tipo)) f.tipo = req.query.tipo;
   const p = paginacion(req.query, { porDefecto: 50, maximo: 200 });
   if (p.activa) {
-    const [total, items] = await Promise.all([EnvioCorreo.countDocuments(f),
-      EnvioCorreo.find(f).sort({ createdAt: -1 }).skip(p.salto).limit(p.limite).populate({ path: 'usuario', select: 'nombre' }).lean()]);
+    // Búsqueda en la base: manifiesto, destinatario, copia o error
+    const texto = String(req.query.q || '').trim().slice(0, 60);
+    if (texto) { const re = new RegExp(escaparRegex(texto), 'i'); f.$or = [{ documento: re }, { destinatarios: re }, { cc: re }, { error: re }]; }
+    const { items, total } = await listarPagina(EnvioCorreo, f, p, { orden: { createdAt: -1 }, populate: { path: 'usuario', select: 'nombre' } });
     return res.json(pagina(items, total, p));
   }
-  const lista = await EnvioCorreo.find(f).sort({ createdAt: -1 }).limit(Math.min(Number(req.query.limite) || 200, 1000))
+  const lista = await EnvioCorreo.find(f).sort({ createdAt: -1, _id: -1 }).limit(Math.min(Number(req.query.limite) || 200, 1000))
     .populate({ path: 'usuario', select: 'nombre' }).lean();
   res.json(lista);
 });

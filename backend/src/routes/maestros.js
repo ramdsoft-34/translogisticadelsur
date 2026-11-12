@@ -1,6 +1,7 @@
 // Maestros de la empresa: clientes y sus destinos/tarifas, terceros
 // (conductores, propietarios, tenedores…), vehículos y el catálogo DIVIPOLA.
 import { Router } from 'express';
+import { paginacion } from '../utils/paginacion.js';
 import { elegirSedeMunicipio } from '../services/gestion/sedeMunicipio.js';
 import mongoose from 'mongoose';
 import { z } from 'zod';
@@ -35,10 +36,10 @@ async function listar(req, res, consulta, contar, transformar = (x) => x) {
     const lista = await consulta.limit(Math.min(Number(req.query.limite) || 500, 10000));
     return res.json(lista.map(transformar));
   }
-  const limite = Math.min(Math.max(Number(req.query.limite) || 50, 1), 200);
-  const pagina = Math.max(Number(req.query.pagina) || 1, 1);
-  const [total, items] = await Promise.all([contar, consulta.skip((pagina - 1) * limite).limit(limite)]);
-  res.json({ total, pagina, limite, items: items.map(transformar) });
+  // El total solo se cuenta en la primera página: al pasar de página el navegador ya lo tiene
+  const p = paginacion(req.query, { porDefecto: 50, maximo: 200, minimo: 1 });
+  const [total, items] = await Promise.all([p.contar ? contar : null, consulta.skip(p.salto).limit(p.limite)]);
+  res.json({ total, pagina: p.pagina, limite: p.limite, items: items.map(transformar) });
 }
 
 // ── Municipios (catálogo global, solo lectura) ─────────────────────────────
@@ -201,7 +202,8 @@ r.get('/terceros', ver, async (req, res) => {
   const palabras = String(req.query.q || '').trim().split(/\s+/).filter(Boolean).slice(0, 5);
   if (palabras.length) filtro.$and = palabras.map(w => { const re = buscarSinTildes(w); return { $or: [{ nombres: re }, { apellido1: re }, { apellido2: re }, { numId: re }] }; });
   if (req.query.conPlacas === '1' && req.query.pagina === undefined) return res.json(await conductoresConPlacas(req, filtro, !palabras.length));
-  await listar(req, res, Tercero.find(filtro).sort({ nombres: 1, apellido1: 1 }), Tercero.countDocuments(filtro), x => x.toJSON());
+  // Orden con desempate por _id (dos terceros con el mismo nombre no se repiten ni se pierden entre páginas)
+  await listar(req, res, Tercero.find(filtro).sort({ nombres: 1, apellido1: 1, _id: 1 }), Tercero.countDocuments(filtro), x => x.toJSON());
 });
 // Conductores con sus placas: la del vehículo donde es conductor habitual y la de su último viaje.
 // Sin texto de búsqueda, primero los que manejaron más recientemente.
