@@ -17,6 +17,7 @@ import { Moneda } from '../shared/moneda';
 import { CargarMas } from '../shared/cargar-mas';
 import { BuscarTercero } from '../shared/buscar-tercero';
 import { PlantillasWhatsapp } from '../shared/plantillas-whatsapp';
+import { AnticiposDia } from '../shared/anticipos-dia';
 import { Confirmar } from '../shared/confirmar';
 import { VisorPdf } from '../shared/visor-pdf';
 import { ExportarViajes } from '../shared/exportar-viajes';
@@ -48,7 +49,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 @Component({
   selector: 'app-viajes',
-  imports: [FormsModule, NgTemplateOutlet, Modal, Icono, MenuAcciones, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
+  imports: [AnticiposDia, FormsModule, NgTemplateOutlet, Modal, Icono, MenuAcciones, SelectorMunicipio, Moneda, CargarMas, BuscarTercero, PlantillasWhatsapp, Confirmar, VisorPdf, ExportarViajes, RouterLink, ActivarRastreo, ChecklistConductor, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Viajes</h1><p class="sutil">{{ descripcionPeriodo() }}</p></div>
@@ -61,6 +62,12 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       </div>
     </div>
 
+    <!-- Fase 15: dos pestañas dentro de Viajes (el menú no cambia) -->
+    <div class="pestanas">
+      <button type="button" [class.activa]="pestana() === 'viajes'" (click)="pestana.set('viajes')">🚚 Viajes</button>
+      <button type="button" [class.activa]="pestana() === 'anticipos'" (click)="pestana.set('anticipos')">💵 Soportes de anticipos</button>
+    </div>
+    @if (pestana() === 'anticipos') { <app-anticipos-dia /> } @else {
     <section class="barra" aria-label="Filtros">
       <div class="campo"><span class="etiqueta">Periodo</span>
         <div class="segmentos" role="group" aria-label="Periodo">
@@ -112,6 +119,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
                 @if (v.rastreo?.activo) { <a class="chip sin-punto gps" [class]="claseRastreo(v.rastreo!.estado)" [routerLink]="['/monitoreo']" [queryParams]="{ viaje: v._id }"
                   (click)="$event.stopPropagation()" title="Ver en el mapa de Monitoreo">GPS · {{ textoRastreo(v.rastreo!.estado) }}</a> }
                 @if (v.reporteWhatsapp?.fecha) { <span class="chip ok sin-punto" title="Reportado por WhatsApp">WA</span> }
+                @if ($any(v).anticipo > 0 && v.estado !== 'anulado') { <span class="chip sin-punto" [class]="claseAnticipo(v)" [title]="textoAnticipo(v)">💵 {{ textoAnticipo(v) }}</span> }
               </span></td>
             </tr>
           } @empty {
@@ -128,6 +136,7 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
       </table>
       @if (viajes().length) { <app-cargar-mas [mostrados]="viajes().length" [total]="total()" [cargando]="cargandoMas()" unidad="viajes" (mas)="cargarMas()" /> }
     </div>
+    }
 
     <app-modal [titulo]="form()._id ? 'Viaje N° ' + numeroEditado() : (registradosTanda().length ? 'Registrar otro viaje' : 'Registrar viaje')" [abierto]="abierto()" (cerrar)="cerrarFormulario()" [ancho]="true">
       <div class="registro-columnas">
@@ -413,6 +422,22 @@ export class Viajes {
   waPlantilla = '';
   readonly periodos: [Periodo, string][] = [['hoy', 'Hoy'], ['ayer', 'Ayer'], ['semana', '7 días'], ['mes', 'Este mes'], ['rango', 'Rango']];
   readonly periodo = signal<Periodo>('hoy');
+  readonly pestana = signal<'viajes' | 'anticipos'>('viajes');
+  // Fase 15: chip del soporte del anticipo (mismos estados que la pestaña «Soportes de anticipos»)
+  claseAnticipo(v: any) {
+    const s = v.soporteAnticipo; if (!s?.subido) return 'chip sin-punto alerta';
+    if (s.whatsapp === 'leido' || s.confirmado) return 'chip sin-punto info';
+    if (s.whatsapp === 'error' || Date.now() - new Date(s.subido).getTime() > 2 * 3600e3) return 'chip sin-punto error';
+    return 'chip sin-punto';
+  }
+  textoAnticipo(v: any) {
+    const s = v.soporteAnticipo; if (!s?.subido) return 'Sin soporte';
+    if (s.whatsapp === 'leido') return '✓✓ Leído';
+    if (s.confirmado) return '✓ Confirmado';
+    if (s.whatsapp === 'error') return 'No enviado';
+    if (Date.now() - new Date(s.subido).getTime() > 2 * 3600e3) return 'Sin leer +2 h';
+    return ({ entregado: '✓✓ Entregado', enviado: '✓ Enviado', manual: 'Enviado a mano' } as any)[s.whatsapp] || 'Soporte';
+  }
   readonly waAbierto = signal(false);
   readonly waMensajes = signal<any[]>([]);
   waFecha = hoyIso();

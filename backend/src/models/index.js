@@ -468,6 +468,8 @@ const viajeSchema = new Schema({
   envioConductor: { token: str(), creado: fecha, whatsapp: fecha, whatsappPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
     abierto: fecha, ultimaApertura: fecha, aperturas: { type: Number, default: 0 }, surtrack: fecha },
   reporteWhatsapp: { fecha, usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null } },                      // manifiesto anulado que reemplaza el nuevo
+  // Fase 15: resumen del soporte del anticipo (chip 💵 en Viajes). El detalle y la imagen están en SoporteAnticipo.
+  soporteAnticipo: { id: { type: Schema.Types.ObjectId, default: null }, forma: str(), subido: fecha, whatsapp: str(), leido: fecha, confirmado: fecha },
   enviandoRndc: fecha,                                // bloqueo para no enviar dos veces a la vez
   creadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
   actualizadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },

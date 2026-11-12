@@ -9,6 +9,7 @@ export const routes: Routes = [
   { path: 'verificar/:codigo', loadComponent: () => import('./pages/verificar').then(m => m.Verificar) },
   { path: 'm/:token', loadComponent: () => import('./pages/manifiesto-conductor').then(m => m.ManifiestoConductor) },
   { path: 'f/:token', loadComponent: () => import('./pages/firma-capacitacion').then(m => m.FirmaCapacitacion) },
+  { path: 'a/:token', loadComponent: () => import('./pages/mensajero-anticipos').then(m => m.MensajeroAnticipos) },   // fase 15: mensajero de anticipos
   { path: 'r/:token', loadComponent: () => import('./pages/relacion-publica').then(m => m.RelacionPublica) },
   // Página pública de la empresa; con sesión iniciada lleva directo a la plataforma
   { path: '', pathMatch: 'full', canActivate: [sinSesion], loadComponent: () => import('./pages/landing').then(m => m.Landing) },
