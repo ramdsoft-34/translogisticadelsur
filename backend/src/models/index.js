@@ -474,9 +474,14 @@ const plataformaWhatsappSchema = new Schema({
 
 // ── Manifiestos enviados al conductor por WhatsApp Business ─────────────────
 const envioWhatsappSchema = new Schema({
-  viaje: { type: Schema.Types.ObjectId, ref: 'Viaje', required: true },
+  // Manifiesto y soporte van a un viaje; la solicitud al jefe de bodega va a un cliente (sin viaje)
+  viaje: { type: Schema.Types.ObjectId, ref: 'Viaje', default: null, required: function requerido() { return this.tipo !== 'bodega'; } },
   conductor: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null },
-  tipo: { type: String, enum: ['manifiesto', 'soporte'], default: 'manifiesto' },   // soporte interno MC/RC en viajes sin RNDC
+  // soporte: interno MC/RC en viajes sin RNDC · bodega: enlace del día al jefe de bodega del cliente
+  tipo: { type: String, enum: ['manifiesto', 'soporte', 'bodega'], default: 'manifiesto' },
+  cliente: { type: Schema.Types.ObjectId, ref: 'Cliente', default: null },
+  reporteBodega: { type: Schema.Types.ObjectId, ref: 'ReporteBodega', default: null },
+  destinatario: str(),                      // a quién (el jefe de bodega; el conductor va en «conductor»)
   documento: str(),                         // n.° del manifiesto (o MC del soporte interno)
   telefono: str(),
   cuenta: { type: String, enum: ['plataforma', 'propia'], default: 'plataforma' },   // de qué número salió (para el cobro)

@@ -105,7 +105,7 @@ function documentoVigente(v) {
 
 // Envía un manifiesto (o soporte interno) ya aprobado. Se revisa de nuevo: pudo anularse o cambiar el conductor mientras esperaba.
 export async function procesarEnvio(empresaId, envioId) {
-  const r = await EnvioWhatsapp.findOneAndUpdate({ empresa: empresaId, _id: envioId, estado: { $in: ['pendiente', 'error'] } },
+  const r = await EnvioWhatsapp.findOneAndUpdate({ empresa: empresaId, _id: envioId, tipo: { $ne: 'bodega' }, estado: { $in: ['pendiente', 'error'] } },
     { $set: { estado: 'enviando', error: '' }, $inc: { intentos: 1 } }, { new: true }).lean();
   if (!r) return null;
   const terminar = async (set) => (await EnvioWhatsapp.findOneAndUpdate({ empresa: empresaId, _id: envioId }, { $set: set }, { new: true }).lean());

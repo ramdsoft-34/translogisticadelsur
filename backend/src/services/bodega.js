@@ -8,7 +8,7 @@
 // han cargado con su cliente (nunca cédulas ni el resto de la flota).
 import crypto from 'node:crypto';
 import mongoose from 'mongoose';
-import { Cliente, Empresa, ReporteBodega, Tarifa, Tercero, Vehiculo, Viaje } from '../models/index.js';
+import { Cliente, Empresa, EnvioWhatsapp, ReporteBodega, Tarifa, Tercero, Vehiculo, Viaje } from '../models/index.js';
 import { ErrorHttp } from '../middleware/auth.js';
 import { env } from '../config/env.js';
 import { cifrar, descifrar } from '../utils/cifrado.js';
@@ -141,15 +141,24 @@ export async function enviarSolicitud(empresaId, clienteId, { usuario = null, au
     r.tokenHash = huella(token); r.tokenCifrado = cifrar(token);
   }
   r.vence = new Date(hoy.getTime() + DIA + 5 * 3600000 - 1000);          // 11:59:59 p. m. en Colombia
-  const empresa = await Empresa.findById(empresaId).select('nombre').lean();
+  const empresa = await Empresa.findById(empresaId).select('nombre whatsapp.modo').lean();
   const destinatarios = [];
   for (const j of jefes) {
+    // Cada solicitud queda en Mensajes de WhatsApp (con entregado / leído / error que avisa Meta)
+    const envio = await EnvioWhatsapp.create({ empresa: empresaId, tipo: 'bodega', cliente: cliente._id, reporteBodega: r._id, documento: 'Cargues de bodega',
+      destinatario: j.nombre || '', telefono: celularWhatsapp(j.celular) || '', estado: 'enviando', intentos: 1,
+      origen: automatico ? 'automatico' : 'manual', usuario, cuenta: empresa?.whatsapp?.modo || 'plataforma' });
     try {
       const idMensaje = await enviarPlantillaEnlace(empresaId, celularWhatsapp(j.celular), { plantilla: PLANTILLA_BODEGA,
         // Plantilla «cargues_bodega»: Hola, {{1}}. {{2}} le solicita reportar los vehículos que cargan hoy, {{3}}, para {{4}}. … (botón con /b/{{1}})
         cuerpo: [primerNombre(j.nombre) || 'jefe de bodega', empresa?.nombre || 'La transportadora', fechaTexto(hoy), cliente.nombre], sufijo: token });
       destinatarios.push({ nombre: j.nombre, celular: j.celular, ok: true, error: '', idMensaje });
-    } catch (e) { destinatarios.push({ nombre: j.nombre, celular: j.celular, ok: false, error: String(e.message || e).slice(0, 300), idMensaje: '' }); }
+      await EnvioWhatsapp.updateOne({ empresa: empresaId, _id: envio._id }, { $set: { estado: 'enviado', idMensaje, enviadoEn: new Date() } });
+    } catch (e) {
+      const error = String(e.message || e).slice(0, 300);
+      destinatarios.push({ nombre: j.nombre, celular: j.celular, ok: false, error, idMensaje: '' });
+      await EnvioWhatsapp.updateOne({ empresa: empresaId, _id: envio._id }, { $set: { estado: 'error', error } });
+    }
   }
   r.envio = { enviadoEn: new Date(), automatico, usuario, destinatarios };
   await r.save();

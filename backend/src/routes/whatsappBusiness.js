@@ -5,7 +5,7 @@ import mongoose from 'mongoose';
 import { paginacion, pagina, listarPagina } from '../utils/paginacion.js';
 import { escaparRegex } from '../utils/texto.js';
 import { z } from 'zod';
-import { Empresa, EnvioWhatsapp, MensajeWhatsapp, Viaje, Tercero, pob } from '../models/index.js';
+import { Cliente, Empresa, EnvioWhatsapp, MensajeWhatsapp, Viaje, Tercero, pob } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { env } from '../config/env.js';
@@ -148,13 +148,16 @@ r.get('/mensajes', operar, async (req, res) => {
     totales = { total: suma(Object.keys(porEstado)), enviados: suma(ENVIADOS), entregados: suma(['entregado', 'leido']), leidos: suma(['leido']), errores: suma(['error']) };
   }
   const filtroEstado = q.estado ? { estado: q.estado === 'enviados' ? { $in: ENVIADOS } : q.estado } : {};
-  const poblar = [pob(req.empresaId, 'viaje', 'numero placa destino fecha'), pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId')];
-  // El texto se busca en la base: documento, teléfono, placa o N° del viaje, nombre o cédula del conductor
+  const poblar = [pob(req.empresaId, 'viaje', 'numero placa destino fecha'), pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId'), pob(req.empresaId, 'cliente', 'nombre')];
+  // El texto se busca en la base: documento, teléfono, placa o N° del viaje, nombre o cédula del conductor,
+  // y en las solicitudes a bodega el jefe de bodega o el cliente
   const f = { ...base, ...filtroEstado };
   if (q.texto) {
-    const [viajes, conductores] = await Promise.all([viajesQueCoinciden(req, q.texto), tercerosQueCoinciden(req, q.texto)]);
     const re = new RegExp(escaparRegex(q.texto), 'i');
-    f.$and = [{ $or: [{ documento: re }, { telefono: re }, ...(viajes.length ? [{ viaje: { $in: viajes } }] : []), ...(conductores.length ? [{ conductor: { $in: conductores } }] : [])] }];
+    const [viajes, conductores, clientes] = await Promise.all([viajesQueCoinciden(req, q.texto), tercerosQueCoinciden(req, q.texto),
+      Cliente.find(deEmpresa(req, { nombre: re })).select('_id').limit(200).lean().then((l) => l.map((c) => c._id))]);
+    f.$and = [{ $or: [{ documento: re }, { telefono: re }, { destinatario: re }, ...(viajes.length ? [{ viaje: { $in: viajes } }] : []),
+      ...(conductores.length ? [{ conductor: { $in: conductores } }] : []), ...(clientes.length ? [{ cliente: { $in: clientes } }] : [])] }];
   }
   let lista; let totalFiltrado = null;
   if (p.activa) ({ items: lista, total: totalFiltrado } = await listarPagina(EnvioWhatsapp, f, p, { orden: { updatedAt: -1 }, populate: poblar }));
@@ -164,7 +167,8 @@ r.get('/mensajes', operar, async (req, res) => {
     .map(x => ({ _id: x._id, fecha: x.enviadoEn || x.updatedAt, tipo: x.tipo || 'manifiesto', documento: x.documento, estado: x.estado, error: x.error, telefono: x.telefono,
       origen: x.origen, cuenta: x.cuenta, intentos: x.intentos, enviadoEn: x.enviadoEn, entregadoEn: x.entregadoEn, leidoEn: x.leidoEn,
       viaje: x.viaje ? { _id: x.viaje._id, numero: x.viaje.numero, placa: x.viaje.placa, destino: x.viaje.destino } : null,
-      conductor: x.conductor ? { nombre: nombreDe(x.conductor), numId: x.conductor.numId } : null }));
+      conductor: x.conductor ? { nombre: nombreDe(x.conductor), numId: x.conductor.numId } : null,
+      destinatario: x.destinatario || '', cliente: x.cliente ? { _id: x.cliente._id, nombre: x.cliente.nombre } : null }));
   if (!p.activa) return res.json({ totales, mensajes });
   res.json({ totales, ...pagina(mensajes, totalFiltrado, p), mensajes });
 });
@@ -230,6 +234,8 @@ r.post('/viajes/:id/enviar', operar, async (req, res) => {
 });
 
 r.post('/envios/:id/reintentar', operar, async (req, res) => {
+  const e = await EnvioWhatsapp.findOne(deEmpresa(req, { _id: id(req.params.id) })).select('tipo').lean();
+  if (e?.tipo === 'bodega') throw new ErrorHttp(409, 'La solicitud al jefe de bodega se vuelve a enviar desde Viajes → Cargues de bodega');
   const x = await procesarEnvio(req.empresaId, id(req.params.id));
   if (!x) throw new ErrorHttp(409, 'Este envío no se puede reintentar');
   await auditar(req, 'reintentar_whatsapp', { entidad: 'EnvioWhatsapp', entidadId: req.params.id, detalle: { estado: x.estado } });

@@ -21,7 +21,7 @@ const ESTADOS: Record<string, [string, string]> = {
   imports: [FormsModule, Icono, Confirmar, Paginador, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Mensajes de WhatsApp</h1>
-      <p class="sutil">Manifiestos y soportes internos que se mandaron a enviar al WhatsApp de los conductores: cuándo salieron, si llegaron al celular y si los leyeron. Los que aún no se han enviado no aparecen aquí.</p></div></div>
+      <p class="sutil">Manifiestos y soportes internos que se mandaron a enviar al WhatsApp de los conductores, y las solicitudes de cargues a los jefes de bodega: cuándo salieron, si llegaron al celular y si los leyeron. Los que aún no se han enviado no aparecen aquí.</p></div></div>
 
     <div class="pestanas" role="tablist" style="margin-bottom:14px">
       <button type="button" role="tab" [class.activa]="vista() === 'enviados'" [attr.aria-selected]="vista() === 'enviados'" (click)="ver('enviados')">Enviados</button>
@@ -32,7 +32,7 @@ const ESTADOS: Record<string, [string, string]> = {
     <div class="filtros">
       <div class="campo"><label for="w-d">Desde</label><input id="w-d" type="date" [(ngModel)]="desde" (change)="cargar()" /></div>
       <div class="campo"><label for="w-h">Hasta</label><input id="w-h" type="date" [(ngModel)]="hasta" (change)="cargar()" /></div>
-      <div class="campo"><label for="w-t">Buscar</label><input id="w-t" type="search" placeholder="Conductor, placa, documento o celular" [(ngModel)]="texto" (keyup.enter)="cargar()" (search)="cargar()" /></div>
+      <div class="campo"><label for="w-t">Buscar</label><input id="w-t" type="search" placeholder="Conductor, jefe de bodega, cliente, placa, documento o celular" [(ngModel)]="texto" (keyup.enter)="cargar()" (search)="cargar()" /></div>
       <button type="button" (click)="cargar()" [disabled]="cargando()">Buscar</button>
     </div>
 
@@ -64,20 +64,21 @@ const ESTADOS: Record<string, [string, string]> = {
     }
 
     <div class="tabla-caja"><table class="tabla-movil">
-      <thead><tr><th>Fecha</th><th>Conductor</th><th>Documento</th><th>Viaje</th><th>Estado</th><th>Entregado</th><th>Leído</th><th></th></tr></thead>
+      <thead><tr><th>Fecha</th><th>Para</th><th>Documento</th><th>Viaje o cliente</th><th>Estado</th><th>Entregado</th><th>Leído</th><th></th></tr></thead>
       <tbody>
         @for (m of mensajes(); track m._id) {
           <tr>
             <td data-etiqueta="Fecha">{{ m.fecha | fechaHora }}</td>
-            <td data-etiqueta="Conductor">{{ m.conductor?.nombre || 'Sin conductor' }}<br /><span class="sutil">{{ celular(m.telefono) }}</span></td>
-            <td data-etiqueta="Documento">{{ m.documento }}<br /><span class="sutil">{{ m.tipo === 'soporte' ? 'Soporte interno' : 'Manifiesto' }}</span></td>
-            <td data-etiqueta="Viaje">@if (m.viaje) { N° {{ m.viaje.numero }} · <strong>{{ m.viaje.placa }}</strong><br /><span class="sutil">{{ m.viaje.destino }}</span> }</td>
+            <td data-etiqueta="Para">{{ m.tipo === 'bodega' ? (m.destinatario || 'Jefe de bodega') : (m.conductor?.nombre || 'Sin conductor') }}<br /><span class="sutil">{{ m.tipo === 'bodega' ? 'Jefe de bodega · ' : '' }}{{ celular(m.telefono) }}</span></td>
+            <td data-etiqueta="Documento">{{ m.documento }}<br /><span class="sutil">{{ m.tipo === 'bodega' ? 'Solicitud a bodega' : m.tipo === 'soporte' ? 'Soporte interno' : 'Manifiesto' }}</span></td>
+            <td data-etiqueta="Viaje o cliente">@if (m.viaje) { N° {{ m.viaje.numero }} · <strong>{{ m.viaje.placa }}</strong><br /><span class="sutil">{{ m.viaje.destino }}</span> }
+              @else if (m.cliente) { <strong>{{ m.cliente.nombre }}</strong><br /><span class="sutil">Cargues del día</span> }</td>
             <td data-etiqueta="Estado"><span class="chip" [class]="clase(m.estado)">{{ texto_(m.estado) }}</span>
               @if (m.error) { <br /><span class="sutil error-texto">{{ m.error }}</span> }</td>
             <td data-etiqueta="Entregado">{{ m.entregadoEn ? (m.entregadoEn | fechaHora) : '—' }}</td>
             <td data-etiqueta="Leído">{{ m.leidoEn ? (m.leidoEn | fechaHora) : '—' }}</td>
             <td class="celda-acciones">
-              @if (m.estado === 'error') {
+              @if (m.estado === 'error' && m.tipo !== 'bodega') {
                 <button class="pequeno" confirmar="Clic otra vez para reenviar" (confirmado)="reintentar(m)" [disabled]="trabajando()"><app-icono nombre="enviar" [tam]="15" />Reintentar</button>
               }
             </td>

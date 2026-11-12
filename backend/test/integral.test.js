@@ -999,6 +999,31 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     assert.equal(msj.totales.porAprobar, undefined);
     assert.equal((await s.reportero.get('/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31')).status, 403);
 
+    // Solicitud al jefe de bodega: también queda en Mensajes de WhatsApp (sin viaje) y Meta le avisa entregado / leído
+    const cfgB = { activa: true, envioAutomatico: false, hora: '07:00', dias: [1, 2, 3, 4, 5], manifiestoUrbanos: false, manifiestoCorrerias: true, auxiliarPagado: true,
+      jefes: [{ nombre: 'Marta Bodega', cedula: '1085123456', celular: '3157778899' }] };
+    assert.equal((await s.adminA.put(`/api/bodega/config/${s.cliente}`, cfgB)).status, 200);
+    const sol = (await s.manif.post('/api/bodega/enviar', { clientes: [s.cliente] })).body;
+    assert.equal(sol.resultados[0].enviados, 1, JSON.stringify(sol));
+    const mB = JSON.parse(llamadas.filter(x => x.ruta.endsWith('/messages')).at(-1).cuerpo.toString());
+    assert.equal(mB.template.name, 'cargues_bodega');
+    const enLista = async () => (await s.manif.get('/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31&texto=Marta')).body.mensajes;
+    const [bod] = await enLista();
+    assert.ok(bod, 'la solicitud a bodega aparece en Mensajes');
+    assert.equal(bod.tipo, 'bodega');
+    assert.equal(bod.estado, 'enviado');
+    assert.equal(bod.destinatario, 'Marta Bodega');
+    assert.equal(bod.cliente.nombre, 'Distribuidora Sur');
+    assert.equal(bod.telefono, '573157778899');
+    assert.equal(bod.viaje, null);
+    const idB = `wamid.prueba${llamadas.filter(x => x.ruta.endsWith('/messages')).length}`;
+    const avisoB = JSON.stringify({ entry: [{ changes: [{ value: { statuses: [{ id: idB, status: 'read', timestamp: '1793900500' }] } }] }] });
+    assert.equal((await avisar(avisoB, firmar(avisoB))).status, 200);
+    assert.equal((await enLista())[0].estado, 'leido', 'Meta avisa que el jefe de bodega lo leyó');
+    assert.equal((await s.manif.get('/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31&texto=Distribuidora')).body.mensajes.some(x => x.tipo === 'bodega'), true);
+    assert.equal((await s.manif.post(`/api/whatsapp/envios/${bod._id}/reintentar`, {})).status, 409, 'se reenvía desde Cargues de bodega');
+    await s.adminA.put(`/api/bodega/config/${s.cliente}`, { ...cfgB, activa: false, jefes: [] });
+
     // El SuperAdmin deja lista la cuenta de cada empresa por separado; el token nunca vuelve y la otra empresa no cambia
     assert.equal((await s.adminA.get('/api/admin/whatsapp/empresas')).status, 403);
     const listaEmp = (await s.sa.get('/api/admin/whatsapp/empresas')).body;
