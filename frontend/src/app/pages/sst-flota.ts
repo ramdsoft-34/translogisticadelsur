@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { ListaServidor, conPausa } from '../shared/lista-servidor';
 import { Component, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -37,7 +39,7 @@ const FUENTES: Record<string, string> = { web: 'registrado en la web', preoperac
 // Flota e inspecciones: documentos, pólizas y mantenimiento de cada vehículo, y los preoperacionales de la app.
 @Component({
   selector: 'app-sst-flota',
-  imports: [FormsModule, Icono, Modal, Confirmar, VisorPdf, ...FORMATOS],
+  imports: [FormsModule, Icono, Modal, Confirmar, VisorPdf, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab">
       <div><h1>Flota e inspecciones</h1>
@@ -45,11 +47,14 @@ const FUENTES: Record<string, string> = { web: 'registrado en la web', preoperac
     </div>
 
     <div class="pestanas" role="tablist">
-      <button type="button" role="tab" [class.activa]="vista() === 'vehiculos'" (click)="vista.set('vehiculos')">Vehículos ({{ flota().length }})</button>
+      <button type="button" role="tab" [class.activa]="vista() === 'vehiculos'" (click)="vista.set('vehiculos')">Vehículos ({{ vehiculos.total() }})</button>
       <button type="button" role="tab" [class.activa]="vista() === 'inspecciones'" (click)="verInspecciones()">Inspecciones</button>
     </div>
 
     @if (vista() === 'vehiculos') {
+      <div class="barra">
+        <div class="campo crece"><label for="f-q">Buscar</label><input id="f-q" type="search" placeholder="Placa, marca o conductor" [(ngModel)]="fBuscar" (input)="buscarVehiculo()" /></div>
+      </div>
       <div class="tabla-caja"><table class="tabla-movil">
         <thead><tr><th>Vehículo</th><th>Documentos</th><th>Próximo mantenimiento</th><th>Último preoperacional</th><th class="celda-acciones"><span class="visualmente-oculto">Acciones</span></th></tr></thead>
         <tbody>
@@ -71,10 +76,11 @@ const FUENTES: Record<string, string> = { web: 'registrado en la web', preoperac
             </tr>
           } @empty {
             @if (cargando()) { @for (i of [1, 2, 3]; track i) { <tr><td colspan="5"><span class="esqueleto"></span></td></tr> } }
-            @else { <tr><td colspan="5" class="vacio"><strong>Sin vehículos</strong>Los vehículos se registran en Datos → Vehículos.</td></tr> }
+            @else { <tr><td colspan="5" class="vacio"><strong>Sin vehículos</strong>{{ fBuscar ? 'Ningún vehículo coincide con la búsqueda.' : 'Los vehículos se registran en Datos → Vehículos.' }}</td></tr> }
           }
         </tbody>
-      </table></div>
+      </table>
+      <app-paginador [total]="vehiculos.total()" [pagina]="vehiculos.pagina()" [porPagina]="vehiculos.porPagina()" [cargando]="vehiculos.cambiando()" unidad="vehículos" (cambio)="vehiculos.ir($event)" /></div>
     } @else {
       <div class="barra">
         <div class="campo"><label for="i-d">Desde</label><input id="i-d" type="date" [(ngModel)]="fDesde" [max]="hoy" /></div>
@@ -108,7 +114,8 @@ const FUENTES: Record<string, string> = { web: 'registrado en la web', preoperac
             @else { <tr><td colspan="7" class="vacio">Sin inspecciones en ese periodo.</td></tr> }
           }
         </tbody>
-      </table></div>
+      </table>
+      <app-paginador [total]="insp.total()" [pagina]="insp.pagina()" [porPagina]="insp.porPagina()" [cargando]="insp.cambiando()" unidad="inspecciones" (cambio)="insp.ir($event)" /></div>
     }
 
     <!-- Hoja de vida -->
@@ -223,10 +230,22 @@ export class SstFlota {
   readonly CHIP = CHIP_VENCE; readonly FUENTES = FUENTES;
   readonly hoy = hoyIso();
   readonly vista = signal<'vehiculos' | 'inspecciones'>('vehiculos');
-  readonly flota = signal<Vehiculo[]>([]);
-  readonly cargando = signal(true);
-  readonly inspecciones = signal<Inspeccion[]>([]);
-  readonly cargandoInsp = signal(false);
+  // Vehículos e inspecciones por páginas desde el servidor (búsqueda y filtros conservados al cambiar de página)
+  readonly vehiculos = new ListaServidor<Vehiculo>({
+    pedir: (p) => this.api.get<any>('/sst/flota', { buscar: this.fBuscar.trim(), ...p }),
+    alError: (e) => this.avisos.error(e),
+  });
+  readonly insp = new ListaServidor<Inspeccion>({
+    pedir: (p) => this.api.get<any>('/sst/inspecciones', { desde: this.fDesde, hasta: this.fHasta, placa: this.fPlaca.trim().toUpperCase(), resultado: this.fResultado, ...p }),
+    alCargar: (r) => this.usaApp.set(r.usaApp),
+    alError: (e) => this.avisos.error(e),
+  });
+  readonly flota = this.vehiculos.items;
+  readonly cargando = this.vehiculos.cargando;
+  readonly inspecciones = this.insp.items;
+  readonly cargandoInsp = this.insp.cargando;
+  fBuscar = '';
+  readonly buscarVehiculo = conPausa(() => this.vehiculos.recargar());
   readonly usaApp = signal(true);
   readonly hoja = signal<Hoja | null>(null);
   readonly trabajando = signal(false);
@@ -246,19 +265,12 @@ export class SstFlota {
     if (r.get('vista') === 'inspecciones' || ruta.data['vista'] === 'inspecciones') { if (r.get('resultado')) this.fResultado = r.get('resultado')!; if (r.get('desde')) this.fDesde = r.get('desde')!; this.verInspecciones(); }
   }
 
-  async cargar() {
-    this.cargando.set(true);
-    try { this.flota.set(await this.api.get<Vehiculo[]>('/sst/flota')); } catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
-  }
+  // Al guardar la hoja de vida o un mantenimiento se queda en la misma página
+  cargar() { return this.vehiculos.refrescar(); }
 
   verInspecciones() { this.vista.set('inspecciones'); this.cargarInspecciones(); }
-  async cargarInspecciones() {
-    this.cargandoInsp.set(true);
-    try {
-      const r = await this.api.get<{ usaApp: boolean; items: Inspeccion[] }>('/sst/inspecciones', { desde: this.fDesde, hasta: this.fHasta, placa: this.fPlaca.trim().toUpperCase(), resultado: this.fResultado });
-      this.usaApp.set(r.usaApp); this.inspecciones.set(r.items);
-    } catch (e) { this.avisos.error(e); } finally { this.cargandoInsp.set(false); }
-  }
+  // Filtros nuevos (Consultar): primera página
+  cargarInspecciones() { return this.insp.recargar(); }
 
   verPdf(i: Inspeccion) { this.visor().ver(`/sst/inspecciones/${i.checklistId}/pdf`, `Preoperacional ${i.placa}`); }
   abrirRevision(i: Inspeccion) { this.accion = ''; this.revisando.set(i); }

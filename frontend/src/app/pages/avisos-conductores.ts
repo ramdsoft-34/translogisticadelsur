@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { ListaServidor } from '../shared/lista-servidor';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -35,7 +37,7 @@ const ahoraLocal = (min = 0) => {
 // y no se manda dos veces lo mismo por error. Lo enviado no se cambia: se reenvía como copia.
 @Component({
   selector: 'app-avisos-conductores',
-  imports: [FormsModule, Icono, Modal, Confirmar, ...FORMATOS],
+  imports: [FormsModule, Icono, Modal, Confirmar, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab">
       <div><h1>Avisos a conductores</h1>
@@ -80,6 +82,8 @@ const ahoraLocal = (min = 0) => {
               }
             </tbody>
           </table>
+          <!-- Sur Track entrega el historial de a 25 avisos: el tamaño de página es fijo -->
+          <app-paginador [total]="historial.total()" [pagina]="historial.pagina()" [porPagina]="historial.porPagina()" [tamanos]="[25]" [cargando]="historial.cambiando()" unidad="avisos" (cambio)="historial.ir($event)" />
         </div>
         @if (automaticos().length) {
           <h2 class="subtitulo">Automáticos de los últimos 30 días</h2>
@@ -235,9 +239,16 @@ export class AvisosConductores {
   readonly ESTADO = ESTADO; readonly PLANILLA = PLANILLA;
   readonly PUSH: Record<string, string> = { enviado: 'Enviado', fallido: 'Falló el envío', sin_dispositivo: 'Sin celular registrado', pendiente: 'Pendiente' };
   readonly pestana = signal<Pestana>('historial');
-  readonly lista = signal<Notificacion[]>([]);
+  // Historial por páginas (antes solo se veía la primera página de Sur Track: los 25 más recientes)
+  readonly historial = new ListaServidor<Notificacion>({
+    pedir: (p) => this.api.get<any>('/avisos-conductores', { pagina: p.pagina }),
+    alCargar: (r) => this.automaticos.set(r.automaticos || []),
+    alError: (e) => this.avisos.error(e),
+    porPagina: 25,
+  });
+  readonly lista = this.historial.items;
   readonly automaticos = signal<{ tipo: string; nombre: string; total: number; entregados: number; leidos: number; ultimo: string }[]>([]);
-  readonly cargando = signal(false);
+  readonly cargando = this.historial.cargando;
   readonly trabajando = signal(false);
   readonly conductores = signal<Conductor[]>([]);
   readonly reglas = signal<Regla[]>([]);
@@ -262,12 +273,7 @@ export class AvisosConductores {
     if (p === 'nuevo') this.calcularPrevia();
     if (p === 'automaticos') this.cargarReglas();
   }
-  async cargar() {
-    this.cargando.set(true);
-    try { const r = await this.api.get<any>('/avisos-conductores'); this.lista.set(r.items); this.automaticos.set(r.automaticos); }
-    catch (e) { this.avisos.error(e); }
-    finally { this.cargando.set(false); }
-  }
+  cargar() { return this.historial.recargar(); }
   textoDestino(d: Destino) {
     if (d.modo === 'todos') return 'Todos con la app';
     if (d.modo === 'conductores') return d.conductores.length === 1 ? (this.conductores().find(c => c.id === d.conductores[0])?.nombre || '1 conductor') : `${d.conductores.length} conductores`;
@@ -329,12 +335,12 @@ export class AvisosConductores {
 
   async enviarYa(n: Notificacion, extra: { confirmarTotal?: number; forzar?: boolean } = {}) {
     this.trabajando.set(true);
-    try { await this.api.post(`/avisos-conductores/${n.id}/enviar`, extra); this.avisos.ok('Aviso enviado'); this.confirmar.set(null); await this.cargar(); }
+    try { await this.api.post(`/avisos-conductores/${n.id}/enviar`, extra); this.avisos.ok('Aviso enviado'); this.confirmar.set(null); await this.historial.refrescar(); }
     catch (e: any) { this.manejarControl(e, x => this.enviarYa(n, { ...extra, ...x })); }
     finally { this.trabajando.set(false); }
   }
   async cancelar(n: Notificacion) {
-    try { await this.api.post(`/avisos-conductores/${n.id}/cancelar`, {}); this.avisos.ok('Aviso cancelado'); await this.cargar(); } catch (e) { this.avisos.error(e); }
+    try { await this.api.post(`/avisos-conductores/${n.id}/cancelar`, {}); this.avisos.ok('Aviso cancelado'); await this.historial.refrescar(); } catch (e) { this.avisos.error(e); }
   }
   async verDetalle(n: Notificacion) { try { this.detalle.set(await this.api.get<Notificacion>(`/avisos-conductores/${n.id}`)); } catch (e) { this.avisos.error(e); } }
   abrirReenvio(n: Notificacion) { this.reenvioA = ''; this.reenvio.set(n); }

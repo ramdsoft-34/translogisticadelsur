@@ -138,6 +138,9 @@ const formatoSchema = new Schema({
 }, { timestamps: true });
 formatoSchema.plugin(tenantPlugin);
 formatoSchema.index({ empresa: 1, codigo: 1, consecutivo: 1 }, { unique: true });
+// Lista de diligenciados por páginas: mismo orden de la consulta (más recientes primero) para no ordenar en memoria
+formatoSchema.index({ empresa: 1, updatedAt: -1, _id: -1 });
+formatoSchema.index({ empresa: 1, codigo: 1, updatedAt: -1, _id: -1 });
 
 // ── Word y Excel propios (se les pone el membrete y las variables al descargarlos) ──
 const archivoSstSchema = new Schema({

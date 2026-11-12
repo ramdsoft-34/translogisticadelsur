@@ -27,7 +27,7 @@ export interface OpcionesLista<T, R> {
 //  - cursor para la página contigua (el servidor no recorre lo que salta; ver backend/src/utils/paginacion.js);
 //  - respuestas tardías: si se pidió otra página o se cambió un filtro, la respuesta anterior se descarta;
 //  - estado de carga: «cargando» al recargar con filtros nuevos y «cambiando» al pasar de página.
-export class ListaServidor<T extends { _id?: string }, R = any> {
+export class ListaServidor<T = any, R = any> {
   readonly items = signal<T[]>([]);
   readonly total = signal(0);
   readonly pagina = signal(1);
@@ -55,7 +55,8 @@ export class ListaServidor<T extends { _id?: string }, R = any> {
   private async cargar(pagina: number, limite: number, nueva: boolean, contar = false): Promise<boolean> {
     const vigente = this.turno.tomar();
     const p: PeticionPagina = { pagina, limite };
-    const vistos = this.items();
+    // El cursor usa el _id de los registros (las listas calculadas, que usan «id», se paginan sin cursor)
+    const vistos = this.items() as { _id?: string }[];
     // A la página contigua con el mismo tamaño se va con cursor
     if (!nueva && limite === this.porPagina() && vistos.length) {
       if (pagina === this.pagina() + 1 && vistos.at(-1)?._id) p.despuesDe = vistos.at(-1)!._id;

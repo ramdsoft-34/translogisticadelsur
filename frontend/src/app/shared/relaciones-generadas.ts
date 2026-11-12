@@ -1,3 +1,5 @@
+import { Paginador } from './paginador';
+import { PaginaLocal } from './pagina-local';
 import { Component, inject, input, output, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -17,7 +19,7 @@ const lista = (t: string) => String(t || '').split(/[,;\s]+/).map(x => x.trim())
 // plantilla de la empresa, envío por WhatsApp a sus contactos (enlace propio de la relación), facturar y reabrir.
 @Component({
   selector: 'app-relaciones-generadas',
-  imports: [FormsModule, Modal, VisorPdf, Confirmar, Icono, ...FORMATOS],
+  imports: [FormsModule, Modal, VisorPdf, Confirmar, Icono, ...FORMATOS, Paginador],
   template: `
     <app-visor-pdf />
     <section class="tarjeta filtros">
@@ -37,7 +39,7 @@ const lista = (t: string) => String(t || '').split(/[,;\s]+/).map(x => x.trim())
       <div class="tabla-caja"><table class="tabla-movil">
         <thead><tr><th>N°</th><th>Empresa</th><th>Periodo</th><th>Grupo</th><th class="num">Viajes</th><th class="num">Total</th><th>Estado</th><th>Enviada</th><th></th></tr></thead>
         <tbody>
-          @for (x of filas(); track x._id) {
+          @for (x of pagFilas.items(); track x._id) {
             <tr>
               <td data-etiqueta="N°" class="nw"><strong>{{ x.numero }}</strong>@if ((x.version || 1) > 1) { <small class="version">v{{ x.version }}</small> }</td>
               <td data-etiqueta="Empresa">{{ x.cliente }}</td>
@@ -68,7 +70,8 @@ const lista = (t: string) => String(t || '').split(/[,;\s]+/).map(x => x.trim())
             </tr>
           } @empty { <tr><td colspan="9" class="vacio">No hay relaciones guardadas con estos filtros. Genere una en «Generar relación».</td></tr> }
         </tbody>
-      </table></div>
+      </table>
+      <app-paginador [total]="pagFilas.total()" [pagina]="pagFilas.pagina()" [porPagina]="pagFilas.porPagina()" unidad="relaciones" (cambio)="pagFilas.ir($event)" /></div>
       <p class="sutil nota">Una relación <strong>facturada</strong> queda cerrada: sus viajes ya no se pueden editar, eliminar ni volver a cobrar.
         Si hay que corregir, el administrador la reabre con un motivo y queda en el historial.</p>
     </section>
@@ -156,6 +159,7 @@ export class RelacionesGeneradas {
   readonly ANIOS = (() => { const y = new Date().getFullYear(); return [y, y - 1, y - 2]; })();
   f = { cliente: '', estado: '', anio: new Date().getFullYear() };
   readonly filas = signal<any[]>([]);
+  readonly pagFilas = new PaginaLocal<any>(() => this.filas());
   readonly ocupado = signal(false);
   readonly correo = signal<any>(null);
   readonly wa = signal<any>(null);

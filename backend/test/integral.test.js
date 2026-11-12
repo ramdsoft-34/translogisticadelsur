@@ -1376,6 +1376,11 @@ test('Gestión: préstamo, liquidación del conductor con descuento y contabilid
   const f = await s.conta.post('/api/gestion/contabilidad/facturas', { cliente: s.cliente, desde: '2026-11-12', hasta: '2026-11-12', retefuentePct: 1 });
   assert.equal(f.status, 201, JSON.stringify(f.body));
   assert.equal(f.body.neto, f.body.total - f.body.retefuente);
+  // Facturas por páginas desde la base, con búsqueda por número
+  const fp = (await s.conta.get(`/api/gestion/contabilidad/facturas?pagina=1&limite=5&buscar=${f.body.numero}`)).body;
+  assert.ok(fp.total >= 1 && fp.items.some((x) => x.numero === f.body.numero), JSON.stringify(fp).slice(0, 200));
+  assert.equal((await s.conta.get('/api/gestion/contabilidad/facturas?pagina=1&limite=5&buscar=zzz-no-existe')).body.total, 0);
+  assert.ok(Array.isArray((await s.conta.get('/api/gestion/contabilidad/facturas')).body), 'sin página, la lista de siempre');
   assert.equal((await s.conta.post('/api/gestion/contabilidad/cobros', { factura: f.body.numero })).status, 200);
   assert.equal((await s.conta.post('/api/gestion/contabilidad/pagos', { liquidacion: L.numero })).status, 200);
   assert.equal((await s.conta.get('/api/gestion/contabilidad/informes/cxp')).body.filas.length, 0, 'liquidación pagada');
@@ -1718,6 +1723,10 @@ test('App nueva: invitar al conductor, viaje al servidor nuevo, fotos privadas y
   const lp = await adm.get('/api/sst/planillas?periodo=2026-12&estado=pendiente');
   assert.equal(lp.status, 200, JSON.stringify(lp.body));
   assert.equal(lp.body.items.length, 1);
+  // Por páginas: la página y su total, con los indicadores del mes completo
+  const lpp = (await adm.get('/api/sst/planillas?periodo=2026-12&estado=pendiente&pagina=1&limite=5')).body;
+  assert.deepEqual([lpp.items.length, lpp.total, 'indicadores' in lpp], [1, 1, true]);
+  assert.equal((await adm.get('/api/sst/planillas?periodo=2026-12&estado=pendiente&pagina=1&limite=5&buscar=zzz')).body.total, 0);
   assert.deepEqual([appSt.ultimaConsulta.periodo, appSt.ultimaConsulta.estado, appSt.ultimaConsulta.empresaId], ['2026-12', 'pendiente', String(empA)]);
   await M.Usuario.create({ nombre: 'Consulta App', email: 'consulta.app@a.test', rol: 'consulta', empresa: empA, passwordHash: await bcrypt.hash(CLAVE, 10) });
   const consulta = con(await login('consulta.app@a.test'));

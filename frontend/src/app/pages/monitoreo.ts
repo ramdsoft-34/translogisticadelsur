@@ -1,4 +1,5 @@
-import { Turno } from '../core/turno';
+import { Paginador } from '../shared/paginador';
+import { ListaServidor } from '../shared/lista-servidor';
 import { AfterViewInit, Component, ElementRef, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -27,7 +28,7 @@ const hace = (h: string | Date | null | undefined) => {
 // y enlace de los rastreos que se iniciaron desde Cooespatrans.
 @Component({
   selector: 'app-monitoreo',
-  imports: [FormsModule, RouterLink, Icono, Modal, Confirmar, ChecklistConductor, ...FORMATOS],
+  imports: [FormsModule, RouterLink, Icono, Modal, Confirmar, ChecklistConductor, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab">
       <div><h1>Monitoreo</h1>
@@ -59,7 +60,7 @@ const hace = (h: string | Date | null | undefined) => {
         <table class="tabla-movil">
           <thead><tr><th>Viaje</th><th>Rastreo</th><th>Vehículo</th><th>Conductor</th><th>Cliente</th><th>Destino / clientes</th><th class="num">Km</th><th>Estado</th><th></th></tr></thead>
           <tbody>
-            @for (x of historialItems(); track x._id) {
+            @for (x of hist.items(); track x._id) {
               <tr>
                 <td data-etiqueta="Viaje"><span class="celda-doble"><strong>N° {{ x.numero }}</strong><small class="sutil">{{ x.fecha | dia }} · {{ x.codigoExterno }}</small></span></td>
                 <td data-etiqueta="Inicio">{{ x.activado | fechaHora }}@if (x.finalizado) { <small class="sutil d-bloque">Fin {{ x.finalizado | fechaHora }}</small> }</td>
@@ -72,12 +73,10 @@ const hace = (h: string | Date | null | undefined) => {
                   @if (x.origen === 'cooespatrans') { <small class="sutil d-bloque">Desde Cooespatrans</small> }</td>
                 <td><button type="button" class="pequeno" (click)="verDetalle(x)">Ver seguimiento</button></td>
               </tr>
-            } @empty { <tr><td colspan="9" class="vacio">{{ cargandoHistorial() ? 'Cargando…' : 'No hay viajes terminados con estos filtros' }}</td></tr> }
+            } @empty { <tr><td colspan="9" class="vacio">{{ hist.cargando() ? 'Cargando…' : 'No hay viajes terminados con estos filtros' }}</td></tr> }
           </tbody>
         </table>
-        @if (historialItems().length < historialTotal()) {
-          <div class="mas"><button type="button" (click)="cargarHistorial(true)" [disabled]="cargandoHistorial()">Ver más ({{ historialItems().length }} de {{ historialTotal() }})</button></div>
-        }
+        <app-paginador [total]="hist.total()" [pagina]="hist.pagina()" [porPagina]="hist.porPagina()" [cargando]="hist.cambiando()" unidad="viajes" (cambio)="hist.ir($event)" />
       </div>
     } @else if (estado() && !estado()!.habilitado) {
       <div class="tarjeta vacio-grande">
@@ -323,7 +322,7 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
   private viajeInicial = inject(ActivatedRoute).snapshot.queryParamMap.get('viaje');
 
   // Cambios de otros usuarios: la pantalla se actualiza sola
-  private enVivo = inject(EnVivo).al(['rastreo', 'viajes', 'rndc'], () => (this.pestana() === 'historial' ? this.cargarHistorial() : this.estado()?.habilitado && this.cargar()));
+  private enVivo = inject(EnVivo).al(['rastreo', 'viajes', 'rndc'], () => (this.pestana() === 'historial' ? this.hist.refrescar() : this.estado()?.habilitado && this.cargar()));
 
   async ngAfterViewInit() {
     await this.rastreo.cargar(true);
@@ -480,24 +479,12 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
     else if (this.estado()?.habilitado) { this.primeraVez = true; setTimeout(() => this.iniciarMapa(), 0); }
   }
   h = { desde: '', hasta: '', placa: '', modalidad: '' };
-  readonly historialItems = signal<any[]>([]);
-  readonly historialTotal = signal(0);
-  readonly cargandoHistorial = signal(false);
-  private paginaHistorial = 1;
-  private turnoHistorial = new Turno();
-  async cargarHistorial(mas = false) {
-    const vigente = this.turnoHistorial.tomar();
-    this.cargandoHistorial.set(true);
-    try {
-      const pagina = mas ? this.paginaHistorial + 1 : 1;
-      const r = await this.api.get<any>('/rastreo/historial', { ...this.h, placa: this.h.placa.toUpperCase(), pagina, limite: 30 });
-      if (!vigente()) return;
-      this.paginaHistorial = pagina;
-      this.historialItems.set(mas ? [...this.historialItems(), ...r.items] : r.items);
-      this.historialTotal.set(r.total);
-    } catch (e) { if (vigente()) this.avisos.error(e); }
-    finally { if (vigente()) this.cargandoHistorial.set(false); }
-  }
+  // Historial por páginas desde el servidor (antes «Ver más» acumulaba filas); los filtros se conservan al cambiar de página
+  readonly hist = new ListaServidor<any>({
+    pedir: (p) => this.api.get<any>('/rastreo/historial', { ...this.h, placa: this.h.placa.toUpperCase(), pagina: p.pagina, limite: p.limite, ...(p.contar ? { contar: 1 } : {}) }),
+    alError: (e) => this.avisos.error(e),
+  });
+  cargarHistorial() { return this.hist.recargar(); }
 
   readonly detalle = signal<any>(null);
   detalleId = '';

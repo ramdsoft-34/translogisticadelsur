@@ -46,3 +46,23 @@ test('rangoDespues: comparación lexicográfica según la dirección de cada cam
   // Un campo vacío no permite un rango seguro: se usa skip
   assert.equal(rangoDespues({ fecha: -1, _id: -1 }, { fecha: null, _id: id }), null);
 });
+
+test('filtrarTexto: todas las palabras, sin tildes ni mayúsculas, en cualquier valor de la fila', async () => {
+  const { filtrarTexto } = await import('../src/utils/paginacion.js');
+  const l = [{ nombre: 'José Pérez', placa: 'ABC123', soat: { estado: 'vencido' } }, { nombre: 'Ana Ruiz', placa: 'XYZ987' }];
+  assert.deepEqual(filtrarTexto(l, 'jose abc').map((x) => x.placa), ['ABC123']);
+  assert.deepEqual(filtrarTexto(l, 'VENCIDO').map((x) => x.placa), ['ABC123'], 'busca en objetos anidados');
+  assert.equal(filtrarTexto(l, '').length, 2);
+  assert.equal(filtrarTexto(l, 'ana abc').length, 0);
+});
+
+test('paginaDeLista: sin «pagina» responde null y con «pagina» solo la página con el total filtrado', async () => {
+  const { paginaDeLista } = await import('../src/utils/paginacion.js');
+  const l = Array.from({ length: 60 }, (_, i) => ({ id: i, nombre: i % 2 ? 'impar' : 'par' }));
+  assert.equal(paginaDeLista(l, {}), null);
+  const p2 = paginaDeLista(l, { pagina: '2', limite: '25' }, {}, { indicadores: { x: 1 } });
+  assert.deepEqual([p2.items[0].id, p2.items.length, p2.total, p2.paginas, p2.indicadores.x], [25, 25, 60, 3, 1]);
+  const b = paginaDeLista(l, { pagina: '1', limite: '25', buscar: 'impar' });
+  assert.equal(b.total, 30);
+  assert.ok(b.items.every((x) => x.nombre === 'impar'));
+});

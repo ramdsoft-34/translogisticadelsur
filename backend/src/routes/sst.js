@@ -2,6 +2,7 @@
 // vencimientos, capacitaciones, formatos y tablero).
 // Ver: sst.ver (admin y consulta). Registrar y decidir: sst.gestionar (admin).
 import express, { Router } from 'express';
+import { paginacion, paginaDeLista } from '../utils/paginacion.js';
 import { z } from 'zod';
 import { Empresa } from '../models/index.js';
 import { SstCapacitacion } from '../models/sst.js';
@@ -46,7 +47,12 @@ const filtros = (q) => z.object({
   q: z.string().trim().max(100).optional(),
 }).parse({ periodo: q.periodo || undefined, estado: q.estado || undefined, q: q.q || undefined });
 
-r.get('/planillas', ver, async (req, res) => res.json(await pl.listar(req.empresaId, filtros(req.query))));
+r.get('/planillas', ver, async (req, res) => {
+  const d = await pl.listar(req.empresaId, filtros(req.query));
+  // Con «pagina» se envía solo esa página; los indicadores siguen siendo de todo el mes
+  const pg = Array.isArray(d?.items) ? paginaDeLista(d.items, req.query, { porDefecto: 50, maximo: 200 }, { indicadores: d.indicadores }) : null;
+  res.json(pg || d);
+});
 
 r.get('/planillas/exportar', ver, async (req, res) => {
   const d = await pl.listar(req.empresaId, filtros(req.query));
@@ -164,7 +170,9 @@ const datosColab = {
 };
 r.get('/colaboradores', ver, async (req, res) => {
   const q = z.object({ q: txt(100), tipo: z.enum(['', 'conductor', 'directo']).default(''), inactivos: z.enum(['', '1']).default('') }).parse(req.query);
-  res.json(await col.listar(req.empresaId, { q: q.q, tipo: q.tipo, inactivos: q.inactivos === '1' }));
+  const lista = await col.listar(req.empresaId, { q: q.q, tipo: q.tipo, inactivos: q.inactivos === '1' });
+  // Con «pagina» solo la página (el selector de asistentes de Capacitaciones sigue pidiendo la lista completa)
+  res.json(paginaDeLista(lista, req.query, { porDefecto: 50, maximo: 200 }) || lista);
 });
 r.post('/colaboradores/traer', gestionar, async (req, res) => {
   const r1 = await col.traer(req.empresaId);
@@ -280,7 +288,11 @@ r.delete('/colaboradores/:id/comparendos/:c', gestionar, async (req, res) => {
 });
 
 // ═════════════ Flota e inspecciones ═════════════
-r.get('/flota', ver, async (req, res) => res.json(await flota.listar(req.empresaId, await insp.ultimosPorPlaca(req.empresaId))));
+r.get('/flota', ver, async (req, res) => {
+  const lista = await flota.listar(req.empresaId, await insp.ultimosPorPlaca(req.empresaId));
+  // Con «pagina» y «buscar» (placa, marca o conductor) se envía solo la página
+  res.json(paginaDeLista(lista, req.query, { porDefecto: 50, maximo: 200 }) || lista);
+});
 // Último preoperacional del vehículo (para su kilometraje)
 async function preoDe(req, vehiculoId) {
   const v = await flota.hojaDeVida(req.empresaId, vehiculoId);
@@ -321,7 +333,8 @@ r.delete('/flota/:id/mantenimientos/:m', gestionar, async (req, res) => {
 const diaQ = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
 r.get('/inspecciones', ver, async (req, res) => {
   const q = z.object({ desde: diaQ, hasta: diaQ, placa: txt(10), resultado: z.enum(['', 'apto', 'no_apto']).default('') }).parse(req.query);
-  res.json(await insp.listar(req.empresaId, q));
+  const r1 = await insp.listar(req.empresaId, q);
+  res.json(paginaDeLista(r1.items, req.query, { porDefecto: 50, maximo: 200 }, { usaApp: r1.usaApp }) || r1);
 });
 r.get('/inspecciones/hoy', ver, async (req, res) => res.json(await insp.hoy(req.empresaId)));
 r.get('/inspecciones/:id', ver, async (req, res) => res.json(await insp.detalle(req.empresaId, id(req.params.id))));
@@ -369,7 +382,9 @@ const datosCap = z.object({
 r.get('/capacitaciones', ver, async (req, res) => {
   const { anio } = z.object({ anio: z.coerce.number().int().min(2020).max(2100).default(() => new Date().getFullYear()) }).parse(req.query);
   await sstApp.sincronizarFirmas(req.empresaId).catch(() => 0);
-  res.json(await cap.listar(req.empresaId, anio));
+  const pr = await cap.listar(req.empresaId, anio);
+  // Indicadores del año completo; con «pagina» solo esa página de sesiones
+  res.json(paginaDeLista(pr.items, req.query, { porDefecto: 25, maximo: 100 }, { anio: pr.anio, indicadores: pr.indicadores }) || pr);
 });
 r.post('/capacitaciones', gestionar, async (req, res) => {
   const k = await cap.crear(req.empresaId, datosCap.parse(req.body), req.usuario._id);
@@ -455,6 +470,8 @@ r.get('/formatos/:codigo/en-blanco', ver, async (req, res) => {
 });
 r.get('/diligenciados', ver, async (req, res) => {
   const q = z.object({ codigo: txt(20), q: txt(100) }).parse(req.query);
+  const p = paginacion(req.query, { porDefecto: 50, maximo: 200 });
+  if (p.activa) return res.json(await fmt.paginaDiligenciados(req.empresaId, q, p));
   res.json(await fmt.listarDiligenciados(req.empresaId, q));
 });
 const cuerpoFormato = z.object({
@@ -495,7 +512,10 @@ r.get('/diligenciados/:id/pdf', ver, async (req, res) => {
 });
 
 // ── Word y Excel propios ──
-r.get('/archivos', ver, async (req, res) => res.json(await archivos.listar(req.empresaId)));
+r.get('/archivos', ver, async (req, res) => {
+  const lista = await archivos.listar(req.empresaId);
+  res.json(paginaDeLista(lista, req.query, { porDefecto: 50, maximo: 200 }) || lista);
+});
 r.post('/archivos', gestionar, express.raw({ type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'], limit: archivos.MAX_ARCHIVO }), async (req, res) => {
   if (!Buffer.isBuffer(req.body)) throw new ErrorHttp(400, 'Adjunte el archivo');
@@ -525,7 +545,10 @@ r.get('/variables', ver, async (req, res) => res.json(datos.variables(await dato
 // ── Reportes de incidentes desde la app ──
 r.get('/incidentes', ver, async (req, res) => {
   const { estado } = z.object({ estado: z.enum(['', 'recibido', 'en_investigacion', 'cerrado']).default('') }).parse(req.query);
-  res.json(await sstApp.incidentes(req.empresaId, estado));
+  const r1 = await sstApp.incidentes(req.empresaId, estado);
+  // «sinRevisar» (el número de la pestaña) se cuenta sobre todos los reportes, no solo la página
+  const sinRevisar = r1.items.filter((i) => i.estado === 'recibido').length;
+  res.json(paginaDeLista(r1.items, req.query, { porDefecto: 50, maximo: 200 }, { usaApp: r1.usaApp, sinRevisar }) || r1);
 });
 r.put('/incidentes/:id', gestionar, async (req, res) => {
   const d = z.object({ estado: z.enum(['recibido', 'en_investigacion', 'cerrado']), nota: txt(500) }).parse(req.body);

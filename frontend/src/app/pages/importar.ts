@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { PaginaLocal } from '../shared/pagina-local';
 import { Component, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Api } from '../core/api.service';
@@ -19,7 +21,7 @@ type Tipo = 'terceros' | 'vehiculos' | 'tarifas';
 // que antes estaba en su página (simular, ver errores por fila y aplicar).
 @Component({
   selector: 'app-importar',
-  imports: [RouterLink, Icono, ImportarExcel, Modal, BuscarTercero, DiaPipe, ImportarViajes, ViajesDuplicados, DeshacerImportacion],
+  imports: [RouterLink, Icono, ImportarExcel, Modal, BuscarTercero, DiaPipe, ImportarViajes, ViajesDuplicados, DeshacerImportacion, Paginador],
   template: `
     <div class="pagina-cab">
       <div><h1>Importar datos</h1>
@@ -85,7 +87,7 @@ type Tipo = 'terceros' | 'vehiculos' | 'tarifas';
           <p class="sutil">El nombre escrito en el Excel no coincide con nadie de Conductores y terceros (o coincide con varios). Elíjalo una vez por viaje.</p>
           <div class="tabla-caja"><table class="tabla-movil">
             <thead><tr><th>N°</th><th>Fecha</th><th>Placa</th><th>Escrito en el Excel</th><th>Conductor</th></tr></thead>
-            <tbody>@for (p of pendientesConductor(); track p._id) {
+            <tbody>@for (p of pagPendientes.items(); track p._id) {
               <tr><td data-etiqueta="N°">{{ p.numero }}</td><td data-etiqueta="Fecha">{{ p.fecha | dia }}</td><td data-etiqueta="Placa">{{ p.placa }}</td>
                 <td data-etiqueta="Escrito">{{ p.conductorNombre || '—' }}
                   @if (p.opciones?.length) { <br /><small class="sutil">Posibles: {{ nombresOpciones(p) }}</small> }</td>
@@ -94,7 +96,8 @@ type Tipo = 'terceros' | 'vehiculos' | 'tarifas';
                   @else { <div class="fila-elegir"><app-buscar-tercero rol="conductor" [conPlacas]="true" (elegido)="elegir(p, $event)" />
                     <button type="button" class="primario" [disabled]="!elegidos()[p._id]" (click)="ponerConductor(p)">Guardar</button></div> }</td></tr>
             }</tbody>
-          </table></div>
+          </table>
+          <app-paginador [total]="pagPendientes.total()" [pagina]="pagPendientes.pagina()" [porPagina]="pagPendientes.porPagina()" unidad="viajes" (cambio)="pagPendientes.ir($event)" /></div>
         }
         @if (pendientesTarifa().length) {
           <h3>Sin tarifa ({{ pendientesTarifa().length }})</h3>
@@ -147,6 +150,8 @@ export class Importar {
   readonly elegidos = signal<Record<string, any>>({});
   elegir(p: any, t: any) { this.elegidos.update(m => ({ ...m, [p._id]: t })); }
   pendientesConductor() { return (this.resultado()?.pendientes || []).filter((p: any) => p.falta.includes('conductor')); }
+  // Viajes sin conductor por páginas en pantalla
+  readonly pagPendientes = new PaginaLocal<any>(() => this.pendientesConductor());
   pendientesTarifa() { return (this.resultado()?.pendientes || []).filter((p: any) => p.falta.includes('tarifa')); }
   nombresOpciones(p: any) { return p.opciones.map((o: any) => o.nombre).join(' · '); }
   resumenTarifas() {

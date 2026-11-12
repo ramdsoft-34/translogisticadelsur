@@ -58,3 +58,15 @@ describe('Paginador', () => {
     expect(botones.every((b) => b.disabled)).toBe(true);
   });
 });
+
+describe('Paginador con tamaño fijo', () => {
+  it('con un solo tamaño no muestra el selector', () => {
+    const f = TestBed.createComponent(Paginador);
+    f.componentRef.setInput('total', 120);
+    f.componentRef.setInput('porPagina', 25);
+    f.componentRef.setInput('tamanos', [25]);
+    f.detectChanges();
+    expect((f.nativeElement as HTMLElement).querySelector('select')).toBeNull();
+    expect((f.nativeElement as HTMLElement).querySelectorAll('button').length).toBeGreaterThan(0);
+  });
+});

@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { ListaServidor, conPausa } from '../shared/lista-servidor';
 import { Component, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -30,7 +32,7 @@ const ESTADOS_INC: Record<string, string> = { recibido: 'Sin revisar', en_invest
 // los diligenciados, los Word y Excel propios con variables y los reportes de incidentes que llegan de la app.
 @Component({
   selector: 'app-sst-formatos',
-  imports: [FormsModule, RouterLink, Icono, Modal, Confirmar, VisorPdf, FirmaPad, ...FORMATOS],
+  imports: [FormsModule, RouterLink, Icono, Modal, Confirmar, VisorPdf, FirmaPad, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab">
       <div><h1>Formatos</h1>
@@ -64,7 +66,7 @@ const ESTADOS_INC: Record<string, string> = { recibido: 'Sin revisar', en_invest
         <div class="barra">
           <div class="campo"><label for="d-cod">Formato</label><select id="d-cod" [(ngModel)]="fCodigo" (change)="cargarDiligenciados()"><option value="">Todos</option>
             @for (f of catalogo(); track f.codigo) { @if (!f.soloApp) { <option [value]="f.codigo">{{ f.codigo }}</option> } }</select></div>
-          <div class="campo crece"><label for="d-q">Buscar</label><input id="d-q" type="search" [(ngModel)]="fQ" (change)="cargarDiligenciados()" placeholder="Número, placa, nombre…" /></div>
+          <div class="campo crece"><label for="d-q">Buscar</label><input id="d-q" type="search" [(ngModel)]="fQ" (input)="buscarDiligenciados()" placeholder="Número, placa, nombre…" /></div>
         </div>
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th>Número</th><th>Formato</th><th>Estado</th><th>Actualizado</th><th>Autor</th><th class="celda-acciones"><span class="visualmente-oculto">Acciones</span></th></tr></thead>
@@ -79,9 +81,10 @@ const ESTADOS_INC: Record<string, string> = { recibido: 'Sin revisar', en_invest
                   @if (puede) { <button class="pequeno" (click)="editar(x)"><app-icono nombre="editar" [tam]="15" />{{ x.estado === 'final' ? 'Nueva versión' : 'Continuar' }}</button> }
                   @if (puede && x.estado === 'borrador') { <button class="pequeno texto" confirmar="Clic otra vez para borrar" (confirmado)="borrar(x)">Borrar</button> }
                 </div></td></tr>
-            } @empty { <tr><td colspan="6" class="vacio">Sin formatos diligenciados.</td></tr> }
+            } @empty { <tr><td colspan="6" class="vacio">{{ dilig.cargando() ? 'Cargando…' : 'Sin formatos diligenciados.' }}</td></tr> }
           </tbody>
-        </table></div>
+        </table>
+        <app-paginador [total]="dilig.total()" [pagina]="dilig.pagina()" [porPagina]="dilig.porPagina()" [cargando]="dilig.cambiando()" unidad="formatos" (cambio)="dilig.ir($event)" /></div>
       }
       @case ('propios') {
         <div class="tarjeta">
@@ -105,9 +108,10 @@ const ESTADOS_INC: Record<string, string> = { recibido: 'Sin revisar', en_invest
                 <td data-etiqueta="Subido">{{ a.fecha | dia }} · {{ a.subidoPor }}</td>
                 <td class="celda-acciones"><div class="acciones"><button class="pequeno" (click)="descargarArchivo(a)"><app-icono nombre="descargar" [tam]="15" />Descargar con datos</button>
                   @if (puede) { <button class="pequeno texto" confirmar="Clic otra vez para borrar" (confirmado)="borrarArchivo(a)">Borrar</button> }</div></td></tr>
-            } @empty { <tr><td colspan="4" class="vacio">Sin archivos propios.</td></tr> }
+            } @empty { <tr><td colspan="4" class="vacio">{{ arch.cargando() ? 'Cargando…' : 'Sin archivos propios.' }}</td></tr> }
           </tbody>
-        </table></div>
+        </table>
+        <app-paginador [total]="arch.total()" [pagina]="arch.pagina()" [porPagina]="arch.porPagina()" [cargando]="arch.cambiando()" unidad="archivos" (cambio)="arch.ir($event)" /></div>
       }
       @case ('reportes') {
         <p class="sutil">Incidentes, accidentes viales y condiciones inseguras que reportan los conductores desde la app. Es el reporte inicial: la investigación se hace después.</p>
@@ -124,9 +128,10 @@ const ESTADOS_INC: Record<string, string> = { recibido: 'Sin revisar', en_invest
                   <select class="pequeno" [ngModel]="i.estado" (ngModelChange)="estadoIncidente(i, $event)" [attr.aria-label]="'Estado del reporte'"><option value="recibido">Sin revisar</option><option value="en_investigacion">En investigación</option><option value="cerrado">Cerrado</option></select>
                 } @else { <span class="chip">{{ ESTADOS_INC[i.estado] }}</span> }</td>
                 <td class="celda-acciones">@if (puede) { <button class="pequeno" (click)="comoFormato(i)">Registrar en PESV-FOR-01</button> }</td></tr>
-            } @empty { <tr><td colspan="6" class="vacio">Sin reportes.</td></tr> }
+            } @empty { <tr><td colspan="6" class="vacio">{{ inc.cargando() ? 'Cargando…' : 'Sin reportes.' }}</td></tr> }
           </tbody>
-        </table></div>
+        </table>
+        <app-paginador [total]="inc.total()" [pagina]="inc.pagina()" [porPagina]="inc.porPagina()" [cargando]="inc.cambiando()" unidad="reportes" (cambio)="inc.ir($event)" /></div>
       }
     }
 
@@ -244,10 +249,23 @@ export class SstFormatos {
   readonly opcionesItem: [string, string][] = [['cumple', 'Cumple'], ['no_cumple', 'No cumple'], ['na', 'N/A']];
   readonly vista = signal<Vista>('plataforma');
   readonly catalogo = signal<Formato[]>([]);
-  readonly diligenciados = signal<Diligenciado[]>([]);
-  readonly archivos = signal<Archivo[]>([]);
+  // Listas por páginas desde el servidor (filtro y búsqueda conservados al cambiar de página)
+  readonly dilig = new ListaServidor<Diligenciado>({
+    pedir: (p) => this.api.get<any>('/sst/diligenciados', { codigo: this.fCodigo, q: this.fQ.trim(), ...p }),
+    alError: (e) => this.avisos.error(e),
+  });
+  readonly arch = new ListaServidor<Archivo>({ pedir: (p) => this.api.get<any>('/sst/archivos', { ...p }), alError: (e) => this.avisos.error(e) });
+  // El número de la pestaña (sin revisar) lo cuenta el servidor sobre todos los reportes
+  readonly inc = new ListaServidor<Incidente>({
+    pedir: (p) => this.api.get<any>('/sst/incidentes', { ...p }),
+    alCargar: (r) => { this.usaApp.set(r.usaApp); this.sinRevisar.set(r.sinRevisar || 0); },
+    alError: (e) => this.avisos.error(e),
+  });
+  readonly diligenciados = this.dilig.items;
+  readonly archivos = this.arch.items;
+  readonly buscarDiligenciados = conPausa(() => this.dilig.recargar());
   readonly variables = signal<[string, string][]>([]);
-  readonly incidentes = signal<Incidente[]>([]);
+  readonly incidentes = this.inc.items;
   readonly usaApp = signal(true);
   readonly sinRevisar = signal(0);
   readonly def = signal<Definicion | null>(null);
@@ -273,21 +291,21 @@ export class SstFormatos {
     if (v === 'reportes') this.cargarIncidentes();
   }
 
-  async cargarDiligenciados() {
-    try { this.diligenciados.set(await this.api.get<Diligenciado[]>('/sst/diligenciados', { codigo: this.fCodigo, q: this.fQ })); } catch (e) { this.avisos.error(e); }
-  }
+  cargarDiligenciados() { return this.dilig.recargar(); }
   async cargarArchivos() {
+    this.arch.recargar();
     try {
-      const [a, v] = await Promise.all([this.api.get<Archivo[]>('/sst/archivos'), this.api.get<Record<string, string>>('/sst/variables')]);
-      this.archivos.set(a); this.variables.set(Object.entries(v).map(([k, x]) => [k, String(x ?? '')]));
+      const v = await this.api.get<Record<string, string>>('/sst/variables');
+      this.variables.set(Object.entries(v).map(([k, x]) => [k, String(x ?? '')]));
     } catch (e) { this.avisos.error(e); }
   }
+  // soloContar: al abrir la pantalla solo se necesita el número de la pestaña (se pide una página mínima)
   async cargarIncidentes(soloContar = false) {
+    if (!soloContar) { await this.inc.recargar(); return; }
     try {
-      const r = await this.api.get<{ usaApp: boolean; items: Incidente[] }>('/sst/incidentes');
-      this.usaApp.set(r.usaApp); this.sinRevisar.set(r.items.filter((i) => i.estado === 'recibido').length);
-      if (!soloContar) this.incidentes.set(r.items);
-    } catch (e) { if (!soloContar) this.avisos.error(e); }
+      const r = await this.api.get<any>('/sst/incidentes', { pagina: 1, limite: 5 });
+      this.usaApp.set(r.usaApp); this.sinRevisar.set(r.sinRevisar || 0);
+    } catch { /* solo era el número de la pestaña */ }
   }
 
   enBlanco(f: Formato) { this.visor().ver(`/sst/formatos/${f.codigo}/en-blanco`, `${f.codigo} en blanco`); }
@@ -345,11 +363,11 @@ export class SstFormatos {
       this.actual.set(r);
       for (const k of r.firmados) this.firmas[k] = 'guardada';
       if (final) { this.def.set(null); this.verPdf(r); this.avisos.ok(`${r.numero} guardado (versión ${r.version}).`); } else this.avisos.ok(`Borrador ${r.numero} guardado.`);
-      if (this.vista() === 'diligenciados') this.cargarDiligenciados();
+      if (this.vista() === 'diligenciados') this.dilig.refrescar();
     } catch (e) { this.error.set(await mensajeError(e)); } finally { this.trabajando.set(false); }
   }
   async borrar(x: Diligenciado) {
-    try { await this.api.delete(`/sst/diligenciados/${x.id}`); this.cargarDiligenciados(); } catch (e) { this.avisos.error(e); }
+    try { await this.api.delete(`/sst/diligenciados/${x.id}`); this.dilig.refrescar(); } catch (e) { this.avisos.error(e); }
   }
 
   async subirArchivo(ev: Event) {
@@ -363,10 +381,10 @@ export class SstFormatos {
     } catch (e) { this.avisos.error(e); }
   }
   descargarArchivo(a: Archivo) { this.api.descargar(`/sst/archivos/${a.id}`, undefined, a.nombre).catch((e) => this.avisos.error(e)); }
-  async borrarArchivo(a: Archivo) { try { await this.api.delete(`/sst/archivos/${a.id}`); this.cargarArchivos(); } catch (e) { this.avisos.error(e); } }
+  async borrarArchivo(a: Archivo) { try { await this.api.delete(`/sst/archivos/${a.id}`); this.arch.refrescar(); } catch (e) { this.avisos.error(e); } }
 
   async estadoIncidente(i: Incidente, estado: string) {
-    try { await this.api.put(`/sst/incidentes/${i.id}`, { estado, nota: '' }); this.avisos.ok('Estado actualizado.'); this.cargarIncidentes(); } catch (e) { this.avisos.error(e); }
+    try { await this.api.put(`/sst/incidentes/${i.id}`, { estado, nota: '' }); this.avisos.ok('Estado actualizado.'); this.inc.refrescar(); } catch (e) { this.avisos.error(e); }
   }
   async comoFormato(i: Incidente) {
     try {

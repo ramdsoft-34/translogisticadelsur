@@ -661,6 +661,7 @@ const facturaContSchema = new Schema({
 }, { timestamps: true });
 facturaContSchema.plugin(tenantPlugin);
 facturaContSchema.index({ empresa: 1, numero: 1 }, { unique: true });
+facturaContSchema.index({ empresa: 1, createdAt: -1, _id: -1 });
 
 // ── Fase 12: remesas de los clientes (base de viajes VPL del cliente y la remesa impresa con el formato de la cooperativa) ──
 // vpl = número interno del cliente (p. ej. Dulces & Dulces) · remesa = consecutivo interno de la cooperativa

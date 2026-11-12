@@ -1,3 +1,5 @@
+import { Paginador } from './paginador';
+import { PaginaLocal } from './pagina-local';
 import { Component, computed, inject, input, output, signal } from '@angular/core';
 import { Api } from '../core/api.service';
 import { Avisos } from '../core/avisos.service';
@@ -7,7 +9,7 @@ import { DiaPipe, PesosPipe } from './formato';
 // Viajes registrados dos veces: se conserva el primero (o el del manifiesto) y se anula el más reciente.
 @Component({
   selector: 'app-viajes-duplicados',
-  imports: [Modal, DiaPipe, PesosPipe],
+  imports: [Modal, DiaPipe, PesosPipe, Paginador],
   template: `
     <app-modal titulo="Viajes duplicados" [abierto]="abierto()" (cerrar)="cerrar.emit()" [ancho]="true">
       @if (cargando()) { <p class="sutil">Buscando viajes repetidos…</p> }
@@ -28,7 +30,7 @@ import { DiaPipe, PesosPipe } from './formato';
           <div class="tabla-caja"><table class="tabla-movil">
             <thead><tr><th><input type="checkbox" aria-label="Marcar todos" [checked]="todos()" (change)="marcarTodos($any($event.target).checked)" /></th>
               <th>Día · placa</th><th>Se conserva</th><th>Se anula (más reciente)</th></tr></thead>
-            <tbody>@for (p of visibles(); track p.duplicado._id) {
+            <tbody>@for (p of pagPares.items(); track p.duplicado._id) {
               <tr [class.bloq]="!!p.bloqueo">
                 <td data-etiqueta="Anular"><input type="checkbox" [disabled]="!!p.bloqueo" [checked]="marcados().has(p.duplicado._id)" (change)="alternar(p.duplicado._id, $any($event.target).checked)" [attr.aria-label]="'Anular el viaje ' + p.duplicado.numero" /></td>
                 <td data-etiqueta="Día · placa"><strong>{{ p.fecha | dia }}</strong><br /><span class="placa">{{ p.placa }}</span><br /><small class="sutil">{{ p.cliente }}</small></td>
@@ -43,7 +45,8 @@ import { DiaPipe, PesosPipe } from './formato';
                   @if (p.bloqueo) { <small class="error-texto">No se puede anular: {{ p.bloqueo }}</small> }</td>
               </tr>
             } @empty { <tr><td colspan="4" class="vacio">Nada en esta pestaña.</td></tr> }</tbody>
-          </table></div>
+          </table>
+          <app-paginador [total]="pagPares.total()" [pagina]="pagPares.pagina()" [porPagina]="pagPares.porPagina()" unidad="pares" (cambio)="pagPares.ir($event)" /></div>
         }
       }
       <ng-container pie>
@@ -72,6 +75,7 @@ export class ViajesDuplicados {
   readonly vista = signal<'seguro' | 'revisar'>('seguro');
   readonly marcados = signal(new Set<string>());
   readonly visibles = computed(() => (this.datos()?.pares || []).filter((p: any) => p.certeza === this.vista()));
+  readonly pagPares = new PaginaLocal<any>(() => this.visibles(), { reiniciarCon: () => this.vista() });
   private iniciado = false;
 
   ngDoCheck() { if (this.abierto() && !this.iniciado) { this.iniciado = true; this.cargar(); } if (!this.abierto()) this.iniciado = false; }

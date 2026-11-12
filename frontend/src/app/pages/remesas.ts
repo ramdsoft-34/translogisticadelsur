@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { PaginaLocal } from '../shared/pagina-local';
 import { Component, computed, inject, input, model, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -101,7 +103,7 @@ export class AjusteLogoRemesa {
 // → Imprimir (1 o 2 por hoja carta con línea para cortar, PDF o un PDF por remesa) → Configuración del formato por empresa.
 @Component({
   selector: 'app-remesas',
-  imports: [FormsModule, RouterLink, DecimalPipe, Icono, Modal, Confirmar, VisorPdf, AjusteLogoRemesa, ...FORMATOS],
+  imports: [FormsModule, RouterLink, DecimalPipe, Icono, Modal, Confirmar, VisorPdf, AjusteLogoRemesa, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab"><div><h1>Remesas</h1>
       <p class="sutil">Base de viajes del cliente (VPL), consecutivo de remesas de la empresa e impresión con el formato de la remesa.</p></div></div>
@@ -211,7 +213,7 @@ export class AjusteLogoRemesa {
           <thead><tr><th><input type="checkbox" aria-label="Seleccionar todo" [checked]="todasSel()" (change)="seleccionar(todasSel() ? 'ninguna' : 'todas')" /></th>
             <th>Remesa N°</th><th>Ruta / zona</th><th>Conductor</th><th class="num">Flete</th><th>Estado</th><th class="celda-acciones"><span class="visualmente-oculto">Acciones</span></th></tr></thead>
           <tbody>
-            @for (x of visibles(); track x._id) {
+            @for (x of pagRemesas.items(); track x._id) {
               <tr [class.marcada]="sel().has(x._id)">
                 <td data-etiqueta="Elegir"><input type="checkbox" [checked]="sel().has(x._id)" (change)="alternar(x._id)" [attr.aria-label]="'Remesa ' + x.remesa" /></td>
                 <td data-etiqueta="Remesa N°"><div class="celda-doble"><strong class="rem">{{ x.remesa || '—' }}</strong><small>VPL {{ x.vpl }} · {{ x.fecha | dia }}</small></div></td>
@@ -233,7 +235,8 @@ export class AjusteLogoRemesa {
                 </td>
               </tr>
             } @empty { <tr><td colspan="7" class="vacio">No hay remesas con estos filtros. Cárguelas en «Cargar base».</td></tr> }
-          </tbody></table></div>
+          </tbody></table>
+          <app-paginador [total]="pagRemesas.total()" [pagina]="pagRemesas.pagina()" [porPagina]="pagRemesas.porPagina()" unidad="remesas" (cambio)="pagRemesas.ir($event)" /></div>
         <p class="sutil nota">Hoja: <b>{{ hojaTexto() }}</b> (se cambia en «Imprimir»). Con 2 por hoja, el botón de imprimir de una fila imprime esa remesa arriba y la siguiente pendiente abajo.</p>
       </section>
     }
@@ -437,6 +440,8 @@ export class Remesas {
   readonly q = signal('');
   readonly sel = signal(new Set<string>());
   readonly visibles = computed(() => filtrar<any>(this.lista(), this.q()));
+  // Páginas en pantalla: «Seleccionar todo», imprimir y los totales siguen sobre toda la lista filtrada
+  readonly pagRemesas = new PaginaLocal<any>(() => this.visibles(), { reiniciarCon: () => this.q() });
   readonly todasSel = computed(() => this.visibles().length > 0 && this.visibles().every(x => this.sel().has(x._id)));
   readonly marcadas = () => this.lista().filter(x => this.sel().has(x._id));
   readonly pendientesLista = computed(() => this.visibles().filter(x => !x.impreso));

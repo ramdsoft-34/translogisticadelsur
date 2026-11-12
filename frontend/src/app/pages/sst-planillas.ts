@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { ListaServidor } from '../shared/lista-servidor';
 import { Component, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -37,12 +39,12 @@ const enDias = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Amer
 // y solo la oficina habilita una carga tardía. Nada de meses anteriores se reemplaza ni se borra.
 @Component({
   selector: 'app-sst-planillas',
-  imports: [FormsModule, Icono, Modal, Confirmar, VisorPdf, ...FORMATOS],
+  imports: [FormsModule, Icono, Modal, Confirmar, VisorPdf, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab">
       <div><h1>Planillas de seguridad social</h1>
         <p class="sutil">Se pide a los conductores que tienen la app: un PDF por mes, del día 1 al 5. Después queda vencida y solo la oficina habilita una carga tardía.</p></div>
-      <div class="acciones"><button (click)="exportar()" [disabled]="!datos()?.items?.length"><app-icono nombre="descargar" />Exportar a Excel</button></div>
+      <div class="acciones"><button (click)="exportar()" [disabled]="!planillas.total()"><app-icono nombre="descargar" />Exportar a Excel</button></div>
     </div>
 
     <div class="filtros">
@@ -73,7 +75,7 @@ const enDias = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Amer
       <table>
         <thead><tr><th>Conductor</th><th>Estado</th><th>Recibida</th><th class="celda-acciones">Acciones</th></tr></thead>
         <tbody>
-          @for (p of datos()?.items ?? []; track p.id) {
+          @for (p of planillas.items(); track p.id) {
             <tr>
               <td><div class="celda-doble"><strong>{{ p.nombre || '—' }}</strong>
                 <small>C.C. {{ p.cedula }}@if (!p.tieneApp) { · <span class="sin-app">ya no tiene la app</span> }</small></div></td>
@@ -105,6 +107,7 @@ const enDias = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Amer
           }
         </tbody>
       </table>
+      <app-paginador [total]="planillas.total()" [pagina]="planillas.pagina()" [porPagina]="planillas.porPagina()" [cargando]="planillas.cambiando()" unidad="conductores" (cambio)="planillas.ir($event)" />
     </div>
 
     <app-visor-pdf />
@@ -195,9 +198,16 @@ export class SstPlanillas {
   readonly ESTADOS = ESTADOS; readonly CHIP = CHIP; readonly EVENTOS = EVENTOS;
   readonly mesActual = mesActual();
   readonly manana = enDias(1); readonly maxTardia = enDias(31);
+  // Indicadores del mes (sobre todos los conductores) y la lista por páginas desde el servidor;
+  // mes, estado y búsqueda se conservan al cambiar de página
   readonly datos = signal<Respuesta | null>(null);
-  readonly cargando = signal(false);
   readonly error = signal('');
+  readonly planillas = new ListaServidor<Planilla>({
+    pedir: (p) => { this.error.set(''); return this.api.get<any>('/sst/planillas', { periodo: this.periodo, estado: this.estado(), q: this.q.trim(), ...p }); },
+    alCargar: (r) => this.datos.set({ indicadores: r.indicadores, items: [] } as unknown as Respuesta),
+    alError: (e: any) => { this.datos.set(null); this.error.set(e?.error?.error || 'Intente de nuevo en unos minutos.'); },
+  });
+  readonly cargando = this.planillas.cargando;
   readonly estado = signal<'' | Estado>('');
   readonly modal = signal<'historial' | 'tardia' | 'excluir' | 'subir' | null>(null);
   readonly sel = signal<Planilla | null>(null);
@@ -206,20 +216,12 @@ export class SstPlanillas {
   readonly trabajando = signal(false);
   readonly visor = viewChild.required(VisorPdf);
   periodo = mesActual(); q = ''; motivo = ''; hasta = enDias(3);
-  private pedido = 0;
   private temporizador: ReturnType<typeof setTimeout> | undefined;
 
   constructor() { this.cargar(); }
 
-  async cargar() {
-    const n = ++this.pedido;   // una respuesta tardía no reemplaza la actual
-    this.cargando.set(true); this.error.set('');
-    try {
-      const d = await this.api.get<Respuesta>('/sst/planillas', { periodo: this.periodo, estado: this.estado(), q: this.q.trim() });
-      if (n === this.pedido) this.datos.set(d);
-    } catch (e: any) { if (n === this.pedido) { this.datos.set(null); this.error.set(e?.error?.error || 'Intente de nuevo en unos minutos.'); } }
-    finally { if (n === this.pedido) this.cargando.set(false); }
-  }
+  // Filtros nuevos: primera página (una respuesta tardía no reemplaza la actual)
+  cargar() { return this.planillas.recargar(); }
   buscarDiferido() { clearTimeout(this.temporizador); this.temporizador = setTimeout(() => this.cargar(), 300); }
 
   exportar() { this.api.descargar('/sst/planillas/exportar', { periodo: this.periodo, estado: this.estado(), q: this.q.trim() }, 'planillas.xlsx').catch(e => this.avisos.error(e)); }
@@ -247,7 +249,7 @@ export class SstPlanillas {
   private async accion(fn: () => Promise<unknown>, ok: string) {
     if (this.trabajando()) return;
     this.trabajando.set(true);
-    try { await fn(); this.avisos.ok(ok); this.modal.set(null); await this.cargar(); }
+    try { await fn(); this.avisos.ok(ok); this.modal.set(null); await this.planillas.refrescar(); }
     catch (e) { this.avisos.error(e); }
     finally { this.trabajando.set(false); }
   }

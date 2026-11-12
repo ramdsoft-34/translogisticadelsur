@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { PaginaLocal } from '../shared/pagina-local';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -12,7 +14,7 @@ const empresaVacia = () => ({ nombre: '', nit: '', dv: '', direccion: '', telefo
 
 @Component({
   selector: 'app-admin-empresas',
-  imports: [FormsModule, Modal, Icono, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab">
       <div><h1>Empresas</h1><p class="sutil">Cada empresa trabaja con sus propios datos y usuarios. Aquí se crean las empresas y sus administradores.</p></div>
@@ -21,14 +23,15 @@ const empresaVacia = () => ({ nombre: '', nit: '', dv: '', direccion: '', telefo
     <div class="filtro-rapido"><input type="search" placeholder="Buscar empresa, NIT o ciudad" aria-label="Buscar empresa, NIT o ciudad" [value]="q()" (input)="q.set($any($event.target).value)" /></div>
     <div class="tabla-caja"><table>
       <thead><tr><th>Empresa</th><th>NIT</th><th>Ciudad</th><th class="num">Usuarios</th><th>RNDC</th><th>Estado</th><th></th></tr></thead>
-      <tbody>@for (e of empresasVisibles(); track e._id) {
+      <tbody>@for (e of pagEmpresas.items(); track e._id) {
         <tr><td><strong>{{ e.nombre }}</strong></td><td>{{ e.nit }}{{ e.dv ? '-' + e.dv : '' }}</td><td>{{ e.ciudad }}</td>
           <td class="num">{{ e.usuarios }}</td><td>{{ e.rndc?.ambiente }}</td>
           <td><span class="chip" [class.ok]="e.activa" [class.error]="!e.activa">{{ e.activa ? 'Activa' : 'Inactiva' }}</span></td>
           <td><div class="acciones" style="justify-content:flex-end">
             <button class="pequeno" (click)="administradores(e)">Administrador</button>
             <button class="pequeno" (click)="editar(e)">Editar</button></div></td></tr>
-      } @empty { <tr><td colspan="7" class="vacio">Aún no hay empresas</td></tr> }</tbody></table></div>
+      } @empty { <tr><td colspan="7" class="vacio">Aún no hay empresas</td></tr> }</tbody></table>
+      <app-paginador [total]="pagEmpresas.total()" [pagina]="pagEmpresas.pagina()" [porPagina]="pagEmpresas.porPagina()" unidad="empresas" (cambio)="pagEmpresas.ir($event)" /></div>
 
     <app-modal [titulo]="form()._id ? 'Editar empresa' : 'Nueva empresa'" [abierto]="abierto()" (cerrar)="abierto.set(false)" [ancho]="true">
       @let f = form();
@@ -94,6 +97,7 @@ export class AdminEmpresas {
   readonly empresas = signal<any[]>([]);
   readonly q = signal('');
   readonly empresasVisibles = computed(() => filtrar(this.empresas(), this.q()));
+  readonly pagEmpresas = new PaginaLocal<any>(() => this.empresasVisibles(), { reiniciarCon: () => this.q() });
   readonly abierto = signal(false);
   readonly form = signal<any>(empresaVacia());
   readonly empresaAdmins = signal<any>(null);

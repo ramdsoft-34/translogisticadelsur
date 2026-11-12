@@ -89,3 +89,29 @@ export async function listarPagina(Modelo, filtro, p, { orden, unico = false, se
   if (!items) items = await consulta(filtro, sort).skip(p.salto).limit(p.limite).lean();
   return { items, total: await total };
 }
+
+// ── Listas calculadas (datos combinados de varias colecciones o traídos de la app de conductores) ──
+// No se pueden paginar en la base, pero sí se envía solo la página: menos datos por la red y menos filas que dibujar.
+// El filtro de texto es el mismo del buscador de las tablas (frontend/src/app/shared/filtro.ts): todas las palabras,
+// sin tildes ni mayúsculas, en cualquier valor de la fila.
+const normal = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+function valores(x, nivel = 0) {
+  if (x === null || x === undefined) return '';
+  if (typeof x !== 'object') return String(x);
+  if (nivel > 2) return '';
+  return Object.values(x).map((v) => valores(v, nivel + 1)).join(' ');
+}
+export function filtrarTexto(lista, texto) {
+  const palabras = normal(texto).split(/\s+/).filter(Boolean).slice(0, 8);
+  if (!palabras.length) return lista;
+  return lista.filter((f) => { const t = normal(valores(f)); return palabras.every((w) => t.includes(w)); });
+}
+
+// Página de una lista ya calculada. Sin «pagina» en la petición devuelve null (la ruta responde como siempre).
+// El texto de búsqueda se toma de q.buscar para no chocar con filtros propios que ya usen «q».
+export function paginaDeLista(lista, q, opciones = {}, extra = {}) {
+  const p = paginacion(q, opciones);
+  if (!p.activa) return null;
+  const filtrada = q.buscar ? filtrarTexto(lista, String(q.buscar).slice(0, 100)) : lista;
+  return pagina(recortar(filtrada, p), filtrada.length, p, extra);
+}

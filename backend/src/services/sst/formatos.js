@@ -1,6 +1,7 @@
 // Formatos de la plataforma (SG-SST y PESV). Cada uno se ve en blanco, se diligencia, se guarda como
 // borrador o como versión final y sale en PDF con el membrete. Los campos «auto» se llenan con los
 // datos de la empresa. Las referencias normativas no se muestran hasta que el responsable las valide.
+import { listarPagina, pagina, recortar } from '../../utils/paginacion.js';
 import mongoose from 'mongoose';
 import { SstFormato } from '../../models/sst.js';
 import { siguiente } from '../../models/index.js';
@@ -127,6 +128,22 @@ export async function listarDiligenciados(empresaId, { codigo = '', q = '' } = {
   let l = (await SstFormato.find(f).sort({ updatedAt: -1 }).limit(500).lean()).map(presentar);
   if (q) { const t = q.toLowerCase(); l = l.filter((x) => x.numero.toLowerCase().includes(t) || JSON.stringify(x.datos).toLowerCase().includes(t)); }
   return l;
+}
+
+/**
+ * Página de formatos diligenciados. Sin texto la página sale de la base (con cursor y total solo en la primera);
+ * con texto se busca en el número y en los datos escritos del formato (hasta 2.000 recientes) y se envía solo la página.
+ */
+export async function paginaDiligenciados(empresaId, { codigo = '', q = '' } = {}, p) {
+  const f = { empresa: empresaId, ...(codigo ? { codigo } : {}) };
+  if (!q) {
+    const { items, total } = await listarPagina(SstFormato, f, p, { orden: { updatedAt: -1 } });
+    return pagina(items.map(presentar), total, p);
+  }
+  const t = q.toLowerCase();
+  const l = (await SstFormato.find(f).sort({ updatedAt: -1, _id: -1 }).limit(2000).lean()).map(presentar)
+    .filter((x) => x.numero.toLowerCase().includes(t) || JSON.stringify(x.datos).toLowerCase().includes(t));
+  return pagina(recortar(l, p), l.length, p);
 }
 
 async function cargar(empresaId, id, { conFirmas = false } = {}) {

@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { PaginaLocal } from '../shared/pagina-local';
 import { input, Component, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -24,7 +26,7 @@ type Pestana = 'rndc' | 'reglas' | 'correo' | 'whatsapp' | 'logo-empresa' | 'log
 
 @Component({
   selector: 'app-configuracion',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, VisorAuditoria, ConfigCorreo, ConfigWhatsapp, LogoEmpresa, LogoPrincipal, ReglasEmpresa, Autorizaciones, Confirmar, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, VisorAuditoria, ConfigCorreo, ConfigWhatsapp, LogoEmpresa, LogoPrincipal, ReglasEmpresa, Autorizaciones, Confirmar, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab"><div><h1>Configuración</h1><p class="sutil">{{ auth.usuario()?.empresa?.nombre }}</p></div></div>
     <div class="pestanas">
@@ -206,11 +208,12 @@ type Pestana = 'rndc' | 'reglas' | 'correo' | 'whatsapp' | 'logo-empresa' | 'log
           <button class="primario" (click)="nuevoUsuario()" style="margin-left:auto"><app-icono nombre="mas" />Nuevo usuario</button></div>
         <div class="tabla-caja"><table>
           <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Último acceso</th><th>Estado</th><th></th></tr></thead>
-          <tbody>@for (u of usuariosVisibles(); track u._id) {
+          <tbody>@for (u of pagUsuarios.items(); track u._id) {
             <tr><td>{{ u.nombre }}</td><td>{{ u.email }}</td><td>{{ rolNombre(u.rol) }}</td><td>{{ u.ultimoAcceso | fechaHora }}</td>
               <td><span class="chip" [class.ok]="u.activo">{{ u.activo ? 'Activo' : 'Inactivo' }}</span></td>
               <td><button class="pequeno" (click)="editarUsuario(u)">Editar</button></td></tr>
-          }</tbody></table></div>
+          }</tbody></table>
+          <app-paginador [total]="pagUsuarios.total()" [pagina]="pagUsuarios.pagina()" [porPagina]="pagUsuarios.porPagina()" unidad="usuarios" (cambio)="pagUsuarios.ir($event)" /></div>
         <div class="tarjeta" style="margin-top:16px"><h3>¿Qué puede hacer cada rol?</h3><ul class="sutil" style="margin:0;padding-left:18px">
           <li><strong>Administrador:</strong> todo lo de la empresa, usuarios y configuración. Hay uno solo por empresa.</li>
           <li><strong>Reportero de viajes:</strong> registra viajes y consulta conductores, vehículos y clientes.</li>
@@ -360,6 +363,7 @@ export class Configuracion {
   readonly rolUsu = signal('');
   readonly usuariosVisibles = computed(() => filtrar(this.usuarios().filter(u => !this.rolUsu() || u.rol === this.rolUsu())
     .map(u => ({ ...u, _rol: this.rolNombre(u.rol) })), this.qUsu()));
+  readonly pagUsuarios = new PaginaLocal<any>(() => this.usuariosVisibles(), { reiniciarCon: () => [this.qUsu(), this.rolUsu()].join('|') });
   readonly roles = signal<{ clave: string; nombre: string; asignable?: boolean }[]>([]);
   readonly archivoPlantilla = signal<File | null>(null);
   readonly resultadoPlantilla = signal<any>(null);

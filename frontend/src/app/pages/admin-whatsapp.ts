@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { PaginaLocal } from '../shared/pagina-local';
 import { Component, inject, signal } from '@angular/core';
 import { Modal } from '../shared/modal';
 import { FormsModule } from '@angular/forms';
@@ -8,7 +10,7 @@ import { CUERPO_PLANTILLA } from '../shared/config-whatsapp';
 // SuperAdmin: número de WhatsApp de Translogística, usado por las empresas sin número propio, y mensajes por empresa.
 @Component({
   selector: 'app-admin-whatsapp',
-  imports: [FormsModule, Modal],
+  imports: [FormsModule, Modal, Paginador],
   template: `
     <div class="pagina-cab"><div><h1>WhatsApp Business</h1>
       <p class="sutil">Cuenta y número de cada empresa, administrados por separado. Los datos de una empresa no afectan a las demás.</p></div></div>
@@ -16,12 +18,13 @@ import { CUERPO_PLANTILLA } from '../shared/config-whatsapp';
     <div class="tarjeta" style="margin-bottom:16px">
       <h2>Empresas</h2>
       <table class="tabla-movil"><thead><tr><th>Empresa</th><th>Número</th><th>Estado</th><th></th></tr></thead>
-        <tbody>@for (e of empresas(); track e._id) {
+        <tbody>@for (e of pagEmpresas.items(); track e._id) {
           <tr><td data-etiqueta="Empresa"><strong>{{ e.nombre }}</strong> <small class="sutil">NIT {{ e.nit }}{{ e.dv ? '-' + e.dv : '' }}</small></td>
             <td data-etiqueta="Número">{{ e.modo === 'propia' ? 'Propio' : 'Translogística' }}</td>
             <td data-etiqueta="Estado"><span class="chip" [class.ok]="e.activo">{{ e.activo ? 'Activo' : 'Sin activar' }}</span></td>
             <td class="celda-acciones"><button class="pequeno" (click)="abrirEmpresa(e)">Configurar</button></td></tr>
         } @empty { <tr><td colspan="4" class="vacio">Sin empresas</td></tr> }</tbody></table>
+        <app-paginador [total]="pagEmpresas.total()" [pagina]="pagEmpresas.pagina()" [porPagina]="pagEmpresas.porPagina()" unidad="empresas" (cambio)="pagEmpresas.ir($event)" />
     </div>
 
     <app-modal [titulo]="'WhatsApp · ' + (empresa()?.nombre || '')" [abierto]="!!empresa()" (cerrar)="empresa.set(null)" [ancho]="true">
@@ -99,9 +102,10 @@ import { CUERPO_PLANTILLA } from '../shared/config-whatsapp';
       <div class="barra-mes"><h2>Mensajes enviados por empresa</h2>
         <div class="campo"><label for="wp-mes">Mes</label><input id="wp-mes" type="month" [ngModel]="mes()" (ngModelChange)="cambiarMes($event)" /></div></div>
       <table class="tabla-movil"><thead><tr><th>Empresa</th><th>Número</th><th class="num">Mensajes</th></tr></thead>
-        <tbody>@for (f of consumo(); track f.empresa + f.cuenta) {
+        <tbody>@for (f of pagConsumo.items(); track f.empresa + f.cuenta) {
           <tr><td data-etiqueta="Empresa">{{ f.empresa }}</td><td data-etiqueta="Número">{{ f.cuenta === 'propia' ? 'Propio' : 'Translogística' }}</td><td class="num" data-etiqueta="Mensajes">{{ f.mensajes }}</td></tr>
         } @empty { <tr><td colspan="3" class="vacio">Sin mensajes enviados este mes.</td></tr> }</tbody></table>
+        <app-paginador [total]="pagConsumo.total()" [pagina]="pagConsumo.pagina()" [porPagina]="pagConsumo.porPagina()" unidad="empresas" (cambio)="pagConsumo.ir($event)" />
     </div>`,
   styles: [`.plantilla { background: var(--gris-1); border: 1px solid var(--gris-2); border-radius: 10px; padding: 12px 14px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; margin: 8px 0 0; }
     .barra-mes { display: flex; gap: 12px; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; margin-bottom: 10px; }
@@ -121,6 +125,8 @@ export class AdminWhatsapp {
   secreto = '';
 
   readonly empresas = signal<any[]>([]);
+  readonly pagEmpresas = new PaginaLocal<any>(() => this.empresas());
+  readonly pagConsumo = new PaginaLocal<any>(() => this.consumo());
   readonly empresa = signal<any>(null);
   readonly cfgEmpresa = signal<any>(null);
   readonly pruebaEmpresa = signal<any>(null);

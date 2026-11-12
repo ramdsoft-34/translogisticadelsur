@@ -9,7 +9,7 @@ import { Empresa, Viaje, Tarifa, Cliente, LiquidacionConductor, Prestamo, Cuenta
 import { autenticar, permitir, soloEmpresa, deEmpresa, ErrorHttp } from '../middleware/auth.js';
 import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
-import { parseFecha, fmtFecha, txt, normalizar } from '../utils/texto.js';
+import { parseFecha, fmtFecha, txt, normalizar, escaparRegex } from '../utils/texto.js';
 import { libroExcel, nuevoPdf, encabezadoPdf, tablaPdf, numerarPaginas, pdfABuffer } from '../services/reportes/comun.js';
 import { lineaLiquidacion, respaldosAuxiliar } from '../services/calculos.js';
 import { reglasDe } from '../services/gestion/reglas.js';
@@ -162,7 +162,7 @@ r.get('/prestamos', verLiq, async (req, res) => {
   if (pg.activa) {
     // Número, conductor, cédula, placa o concepto
     const texto = String(req.query.q || '').trim().slice(0, 60);
-    if (texto) { const re = new RegExp(texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); f.$or = [{ numero: re }, { conductorNombre: re }, { cedula: re }, { placa: re }, { concepto: re }]; }
+    if (texto) { const re = new RegExp(escaparRegex(texto), 'i'); f.$or = [{ numero: re }, { conductorNombre: re }, { cedula: re }, { placa: re }, { concepto: re }]; }
     const { items, total } = await listarPagina(Prestamo, f, pg, { orden: { createdAt: -1 } });
     return res.json(pagina(items.map(conResumen), total, pg));
   }
@@ -242,7 +242,20 @@ r.post('/contabilidad/asientos/:numero/anular', gestionar, async (req, res) => {
   await auditar(req, 'anular_asiento', { entidad: 'Asiento', entidadId: a._id, detalle: { numero: a.numero } });
   res.json(a);
 });
-r.get('/contabilidad/facturas', verLiq, async (req, res) => res.json(await FacturaCont.find(deEmpresa(req)).populate(pob(req.empresaId, 'cliente', 'nombre nit')).sort({ createdAt: -1 }).limit(300).lean()));
+r.get('/contabilidad/facturas', verLiq, async (req, res) => {
+  const p = paginacion(req.query, { porDefecto: 25, maximo: 100 });
+  if (!p.activa) return res.json(await FacturaCont.find(deEmpresa(req)).populate(pob(req.empresaId, 'cliente', 'nombre nit')).sort({ createdAt: -1 }).limit(300).lean());
+  // Por páginas desde la base (antes solo se veían las 300 más recientes). Búsqueda: número, estado, observaciones o cliente.
+  const f = deEmpresa(req);
+  const texto = String(req.query.buscar || '').trim().slice(0, 60);
+  if (texto) {
+    const re = new RegExp(escaparRegex(texto), 'i');
+    const clientes = await Cliente.find(deEmpresa(req, { nombre: re })).select('_id').limit(100).lean();
+    f.$or = [{ numero: re }, { estado: re }, { observaciones: re }, ...(clientes.length ? [{ cliente: { $in: clientes.map((c) => c._id) } }] : [])];
+  }
+  const { items, total } = await listarPagina(FacturaCont, f, p, { orden: { createdAt: -1 }, populate: pob(req.empresaId, 'cliente', 'nombre nit') });
+  res.json(pagina(items, total, p));
+});
 r.post('/contabilidad/facturas', gestionar, async (req, res) => {
   const d = z.object({ cliente: id, desde: z.string(), hasta: z.string(), retefuentePct: z.coerce.number().min(0).max(20).optional(),
     icaPct: z.coerce.number().min(0).max(5).default(0), permitirCruce: z.boolean().optional().default(false) }).parse(req.body);

@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { ListaServidor } from '../shared/lista-servidor';
 import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api, mensajeError } from '../core/api.service';
@@ -34,7 +36,7 @@ const ELEMENTOS_EPP = ['Casco', 'Botas de seguridad', 'Chaleco reflectivo', 'Gua
 // Colaboradores de SG-SST: un solo perfil por persona, enlazado a Conductores y terceros.
 @Component({
   selector: 'app-sst-colaboradores',
-  imports: [FormsModule, Icono, Modal, Confirmar, VisorPdf, FirmaPad, ...FORMATOS],
+  imports: [FormsModule, Icono, Modal, Confirmar, VisorPdf, FirmaPad, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab">
       <div><h1>Colaboradores</h1>
@@ -72,6 +74,7 @@ const ELEMENTOS_EPP = ['Casco', 'Botas de seguridad', 'Chaleco reflectivo', 'Gua
           }
         </tbody>
       </table>
+      <app-paginador [total]="colabs.total()" [pagina]="colabs.pagina()" [porPagina]="colabs.porPagina()" [cargando]="colabs.cambiando()" unidad="colaboradores" (cambio)="colabs.ir($event)" />
     </div>
 
     <!-- Perfil -->
@@ -289,8 +292,13 @@ export class SstColaboradores {
   readonly tiposExamen = Object.entries(TIPOS_EXAMEN);
   readonly conceptos = Object.entries(CONCEPTOS);
   readonly hoy = hoyIso();
-  readonly lista = signal<Fila[]>([]);
-  readonly cargando = signal(true);
+  // Colaboradores por páginas desde el servidor; la búsqueda y el tipo se conservan al cambiar de página
+  readonly colabs = new ListaServidor<Fila>({
+    pedir: (p) => this.api.get<any>('/sst/colaboradores', { q: this.q, tipo: this.tipo, ...p }),
+    alError: (e) => this.avisos.error(e),
+  });
+  readonly lista = this.colabs.items;
+  readonly cargando = this.colabs.cargando;
   readonly trabajando = signal(false);
   readonly perfil = signal<Perfil | null>(null);
   readonly pestana = signal<Pestana>('datos');
@@ -320,11 +328,8 @@ export class SstColaboradores {
 
   private eppVacio() { return { fecha: hoyIso(), motivo: 'entrega', proximaReposicion: '', elementos: [{ nombre: '', cantidad: 1 }], firma: '', como: 'aqui' as 'aqui' | 'app' | 'despues' }; }
 
-  async cargar() {
-    this.cargando.set(true);
-    try { this.lista.set(await this.api.get<Fila[]>('/sst/colaboradores', { q: this.q, tipo: this.tipo })); }
-    catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
-  }
+  // Filtros nuevos: primera página
+  cargar() { return this.colabs.recargar(); }
   buscarDiferido() { if (this.espera) clearTimeout(this.espera); this.espera = setTimeout(() => this.cargar(), 300); }
 
   async traer() {
@@ -356,7 +361,7 @@ export class SstColaboradores {
     catch { this.errorPlanillas.set('La empresa no usa la app de conductores o el conductor no la tiene.'); }
   }
 
-  cerrar() { this.perfil.set(null); this.cargar(); }
+  cerrar() { this.perfil.set(null); this.colabs.refrescar(); }
 
   private async accion(fn: () => Promise<Perfil>, ok?: string) {
     this.trabajando.set(true);

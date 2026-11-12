@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { ListaServidor } from '../shared/lista-servidor';
 import { Component, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -25,7 +27,7 @@ const CHIP: Record<Estado, string> = { programada: '', ejecutada: 'ok', atrasada
 // Programa anual de capacitaciones, inducción y reinducción, con la asistencia firmada y el PDF con membrete.
 @Component({
   selector: 'app-sst-capacitaciones',
-  imports: [FormsModule, Icono, Modal, Confirmar, VisorPdf, FirmaPad, ...FORMATOS],
+  imports: [FormsModule, Icono, Modal, Confirmar, VisorPdf, FirmaPad, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab">
       <div><h1>Capacitaciones</h1>
@@ -51,7 +53,7 @@ const CHIP: Record<Estado, string> = { programada: '', ejecutada: 'ok', atrasada
     <div class="tabla-caja"><table class="tabla-movil">
       <thead><tr><th>Fecha</th><th>Tema</th><th>Facilitador</th><th class="num">Asistentes</th><th>Estado</th><th class="celda-acciones"><span class="visualmente-oculto">Acciones</span></th></tr></thead>
       <tbody>
-        @for (k of programa()?.items ?? []; track k.id) {
+        @for (k of caps.items(); track k.id) {
           <tr>
             <td data-etiqueta="Fecha"><div class="celda-doble"><span>{{ k.fecha | dia }}</span><small>{{ k.horas }} h</small></div></td>
             <td data-etiqueta="Tema"><div class="celda-doble"><strong>{{ k.tema }}</strong><small>{{ EJES[k.eje] }}@if (k.dirigidoA) { · {{ k.dirigidoA }} }</small></div></td>
@@ -69,7 +71,8 @@ const CHIP: Record<Estado, string> = { programada: '', ejecutada: 'ok', atrasada
           @else { <tr><td colspan="6" class="vacio"><strong>Sin capacitaciones en {{ anio }}</strong>Use «Programar capacitación» para armar el programa del año.</td></tr> }
         }
       </tbody>
-    </table></div>
+    </table>
+    <app-paginador [total]="caps.total()" [pagina]="caps.pagina()" [porPagina]="caps.porPagina()" [cargando]="caps.cambiando()" unidad="capacitaciones" (cambio)="caps.ir($event)" /></div>
 
     <!-- Programar o editar -->
     <app-modal [titulo]="editando() ? 'Editar capacitación' : 'Programar capacitación'" [abierto]="formAbierto()" (cerrar)="formAbierto.set(false)">
@@ -168,8 +171,15 @@ export class SstCapacitaciones {
   readonly EJES = EJES; readonly CHIP = CHIP;
   readonly anios = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() + 1 - i);
   anio = new Date().getFullYear();
+  // Indicadores del año (los calcula el servidor sobre todas las sesiones) y las sesiones por páginas
   readonly programa = signal<Programa | null>(null);
-  readonly cargando = signal(true);
+  readonly caps = new ListaServidor<Capacitacion>({
+    pedir: (p) => this.api.get<any>('/sst/capacitaciones', { anio: String(this.anio), ...p }),
+    alCargar: (r) => this.programa.set({ anio: r.anio, indicadores: r.indicadores, items: [] } as Programa),
+    alError: (e) => this.avisos.error(e),
+    porPagina: 25,
+  });
+  readonly cargando = this.caps.cargando;
   readonly trabajando = signal(false);
   readonly formAbierto = signal(false);
   readonly editando = signal<Capacitacion | null>(null);
@@ -183,11 +193,9 @@ export class SstCapacitaciones {
 
   private vacio() { return { tema: '', fecha: hoyIso(), eje: 'sst', horas: 1, dirigidoA: '', facilitador: '', lugar: '', observaciones: '' }; }
 
-  async cargar() {
-    this.cargando.set(true);
-    try { this.programa.set(await this.api.get<Programa>('/sst/capacitaciones', { anio: String(this.anio) })); }
-    catch (e) { this.avisos.error(e); } finally { this.cargando.set(false); }
-  }
+  // Otro año: primera página. Al guardar, borrar o cerrar la asistencia: la misma página al día.
+  cargar() { return this.caps.recargar(); }
+  actualizar() { return this.caps.refrescar(); }
 
   abrirForm(k?: Capacitacion) {
     this.editando.set(k || null);
@@ -199,11 +207,11 @@ export class SstCapacitaciones {
     try {
       const e = this.editando();
       if (e) await this.api.put(`/sst/capacitaciones/${e.id}`, this.f); else await this.api.post('/sst/capacitaciones', this.f);
-      this.formAbierto.set(false); this.avisos.ok('Capacitación guardada.'); await this.cargar();
+      this.formAbierto.set(false); this.avisos.ok('Capacitación guardada.'); await this.actualizar();
     } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
   async eliminar(k: Capacitacion) {
-    try { await this.api.delete(`/sst/capacitaciones/${k.id}`); this.formAbierto.set(false); this.avisos.ok('Capacitación borrada.'); await this.cargar(); } catch (e) { this.avisos.error(e); }
+    try { await this.api.delete(`/sst/capacitaciones/${k.id}`); this.formAbierto.set(false); this.avisos.ok('Capacitación borrada.'); await this.actualizar(); } catch (e) { this.avisos.error(e); }
   }
 
   async abrirAsistencia(k: Capacitacion) {
@@ -213,7 +221,7 @@ export class SstCapacitaciones {
       try { this.colaboradores = await this.api.get<Colab[]>('/sst/colaboradores'); } catch (e) { this.avisos.error(e); }
     }
   }
-  cerrarAsistencia() { this.sel.set(null); this.cargar(); }
+  cerrarAsistencia() { this.sel.set(null); this.actualizar(); }
   colabsFiltrados(k: Capacitacion) {
     const ya = new Set(k.asistentes.map((a) => a.documento)); const t = this.qColab.trim().toLowerCase();
     return this.colaboradores.filter((c) => !ya.has(c.documento) && (!this.tColab || c.tipo === this.tColab) && (!t || c.nombre.toLowerCase().includes(t) || c.documento.includes(t))).slice(0, 100);

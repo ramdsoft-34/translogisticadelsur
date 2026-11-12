@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { PaginaLocal } from '../shared/pagina-local';
 import { Component, computed, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -16,7 +18,7 @@ const CATEGORIAS: [Categoria, string][] = [['', 'Todo'], ['sede', 'Sedes en cent
 // Datos que pueden causar rechazos del RNDC o un manifiesto incompleto, con corrección en lote.
 @Component({
   selector: 'app-revision',
-  imports: [FormsModule, Icono],
+  imports: [FormsModule, Icono, Paginador],
   template: `
     <div class="pagina-cab">
       <div><h1>Revisión de datos</h1>
@@ -54,7 +56,7 @@ const CATEGORIAS: [Categoria, string][] = [['', 'Todo'], ['sede', 'Sedes en cent
         <thead><tr><th><input type="checkbox" aria-label="Seleccionar todo" [checked]="todos()" (change)="alternarTodos()" /></th>
           <th>Tipo</th><th>Registro</th><th>Problema</th><th>Sugerencia</th></tr></thead>
         <tbody>
-          @for (x of visibles(); track x.categoria + x.id) {
+          @for (x of pagRevision.items(); track x.categoria + x.id) {
             <tr>
               <td data-etiqueta="Elegir"><input type="checkbox" [attr.aria-label]="'Seleccionar ' + x.referencia" [checked]="seleccion().has(clave(x))" (change)="alternar(x)" /></td>
               <td data-etiqueta="Tipo"><span class="chip sin-punto">{{ nombreCategoria(x.categoria) }}</span></td>
@@ -67,6 +69,7 @@ const CATEGORIAS: [Categoria, string][] = [['', 'Todo'], ['sede', 'Sedes en cent
           }
         </tbody>
       </table>
+      <app-paginador [total]="pagRevision.total()" [pagina]="pagRevision.pagina()" [porPagina]="pagRevision.porPagina()" unidad="pendientes" (cambio)="pagRevision.ir($event)" />
     </div>`,
   styles: [`
     .acciones-lote { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 12px; }
@@ -88,6 +91,8 @@ export class Revision {
   readonly texto = signal('');
   readonly seleccion = signal(new Set<string>());
   readonly visibles = computed(() => filtrar(this.items().filter(x => !this.categoria() || x.categoria === this.categoria()), this.texto()));
+  // Páginas en pantalla: la selección y la corrección en lote siguen sobre todo lo filtrado
+  readonly pagRevision = new PaginaLocal<any>(() => this.visibles(), { reiniciarCon: () => [this.categoria(), this.texto()].join('|') });
   readonly seleccionados = computed(() => this.items().filter(x => this.seleccion().has(this.clave(x))));
   readonly seleccionSedes = computed(() => this.seleccionados().filter(x => x.categoria === 'sede' && x.sugerencia));
   readonly todos = computed(() => this.visibles().length > 0 && this.visibles().every(x => this.seleccion().has(this.clave(x))));

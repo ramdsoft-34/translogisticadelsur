@@ -1,3 +1,5 @@
+import { Paginador } from './paginador';
+import { PaginaLocal } from './pagina-local';
 import { Component, computed, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -24,7 +26,7 @@ const TITULO: Record<Tipo, string> = { urbano: 'Urbanos', correria: 'Correrías'
 // Cada viaje se registra con el mismo proceso de «Registrar viaje» (repetidos, documentos vencidos, mes cerrado, tarifa).
 @Component({
   selector: 'app-cargues-bodega',
-  imports: [FormsModule, Modal, Icono, Moneda, BuscarTercero, FechaHoraPipe, PesosPipe],
+  imports: [FormsModule, Modal, Icono, Moneda, BuscarTercero, FechaHoraPipe, PesosPipe, Paginador],
   template: `
     <app-modal [titulo]="rev() ? 'Revisar cargues · ' + rev().cliente.nombre : 'Cargues de bodega'" [abierto]="abierto()" (cerrar)="salir()" [ancho]="true">
       @if (!rev()) {
@@ -91,7 +93,7 @@ const TITULO: Record<Tipo, string> = { urbano: 'Urbanos', correria: 'Correrías'
             <div class="tabla-caja"><table class="tabla-movil rev">
               <thead><tr><th class="col-sel"><input type="checkbox" aria-label="Elegir todos los que se pueden registrar" [checked]="todasElegidas()" (change)="elegirTodas($any($event.target).checked)" /></th>
                 <th>Vehículo</th><th>Destino y planilla</th><th>Valores</th><th>Documento y auxiliar</th><th>Estado</th></tr></thead>
-              <tbody>@for (f of visibles(); track f.item + f.n) {
+              <tbody>@for (f of pagFilas.items(); track f.item + f.n) {
                 <tr [class.apagada]="!!f.registrado">
                   <td class="col-sel" data-etiqueta="Registrar"><input type="checkbox" [checked]="f.elegida" [disabled]="!sePuede(f)" (change)="poner(f, { elegida: $any($event.target).checked })" [attr.aria-label]="'Registrar ' + f.placa" /></td>
                   <td data-etiqueta="Vehículo" class="col-veh">
@@ -140,7 +142,8 @@ const TITULO: Record<Tipo, string> = { urbano: 'Urbanos', correria: 'Correrías'
                   </td>
                 </tr>
               }</tbody>
-            </table></div>
+            </table>
+            <app-paginador [total]="pagFilas.total()" [pagina]="pagFilas.pagina()" [porPagina]="pagFilas.porPagina()" unidad="vehículos" (cambio)="pagFilas.ir($event)" /></div>
           }
         }
       }
@@ -200,6 +203,7 @@ export class CarguesBodega {
 
   readonly sinEnviar = computed(() => (this.resumen()?.clientes || []).filter((c: any) => c.activa && !c.reporte?.enviadoEn));
   readonly visibles = computed(() => this.filas().filter(f => f.tipo === this.tipo()));
+  readonly pagFilas = new PaginaLocal<Fila>(() => this.visibles(), { reiniciarCon: () => this.tipo() });
   readonly elegidas = computed(() => this.filas().filter(f => f.elegida && this.sePuede(f)));
 
   ngDoCheck() {

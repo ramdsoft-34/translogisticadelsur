@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { PaginaLocal } from '../shared/pagina-local';
 import { Component, inject, input, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -12,7 +14,7 @@ import { Confirmar } from '../shared/confirmar';
 // ── Cierre de mes ──
 @Component({
   selector: 'app-cierre-mes',
-  imports: [FormsModule, Icono, Confirmar, ...FORMATOS],
+  imports: [FormsModule, Icono, Confirmar, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab" [class.embebida]="embebido()"><div>@if (!embebido()) { <h1>Cierre de mes</h1> }
       <p class="sutil">Al cerrar un mes ya no se pueden registrar, modificar ni anular viajes, liquidaciones, préstamos ni asientos con fecha de ese mes.
@@ -45,20 +47,22 @@ import { Confirmar } from '../shared/confirmar';
         <h3 class="sub">Archivo guardado de {{ mes }}</h3>
         <div class="tabla-caja" style="box-shadow:none;max-height:260px;overflow:auto"><table>
           <thead><tr><th>Archivo</th><th class="num">Tamaño</th><th></th></tr></thead>
-          <tbody>@for (a of archivos(); track a.ruta) {
+          <tbody>@for (a of pagArchivos.items(); track a.ruta) {
             <tr><td>{{ a.ruta.split('/').slice(1).join(' / ') }}</td><td class="num">{{ (a.bytes / 1024) | miles }} KB</td>
               <td><button class="pequeno" (click)="bajar(a.ruta)">Descargar</button></td></tr>
-          }</tbody></table></div>
+          }</tbody></table>
+          <app-paginador [total]="pagArchivos.total()" [pagina]="pagArchivos.pagina()" [porPagina]="pagArchivos.porPagina()" unidad="archivos" (cambio)="pagArchivos.ir($event)" /></div>
       }
     </div>
     <div class="tarjeta"><h2>Meses cerrados</h2>
       <div class="tabla-caja" style="box-shadow:none"><table class="tabla-movil">
         <thead><tr><th>Mes</th><th>Cerrado el</th><th>Por</th><th class="num">Viajes</th><th></th></tr></thead>
-        <tbody>@for (c of cerrados(); track c.mes) {
+        <tbody>@for (c of pagCerrados.items(); track c.mes) {
           <tr><td data-etiqueta="Mes"><strong>{{ c.mes }}</strong></td><td data-etiqueta="Cerrado el">{{ c.fecha | fechaHora }}</td><td data-etiqueta="Por">{{ c.usuario?.nombre }}</td>
             <td data-etiqueta="Viajes" class="num">{{ c.resumen?.viajes }}</td>
             <td>@if (puedeCerrar) { <button class="pequeno" confirmar="Clic otra vez para reabrir" (confirmado)="reabrir(c.mes)">Reabrir</button> }</td></tr>
-        } @empty { <tr><td colspan="5" class="vacio">Ningún mes cerrado</td></tr> }</tbody></table></div>
+        } @empty { <tr><td colspan="5" class="vacio">Ningún mes cerrado</td></tr> }</tbody></table>
+        <app-paginador [total]="pagCerrados.total()" [pagina]="pagCerrados.pagina()" [porPagina]="pagCerrados.porPagina()" unidad="meses" (cambio)="pagCerrados.ir($event)" /></div>
     </div>`,
   styles: [`.sub { font-size: 14px; margin: 16px 0 8px; } .pagina-cab .acciones { display: flex; gap: 8px; }
     .resumen-mes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
@@ -77,6 +81,8 @@ export class CierreMes {
   readonly cerrados = signal<any[]>([]);
   readonly trabajando = signal(false);
   readonly archivos = signal<any[]>([]);
+  readonly pagArchivos = new PaginaLocal<any>(() => this.archivos());
+  readonly pagCerrados = new PaginaLocal<any>(() => this.cerrados());
   private enVivo = inject(EnVivo).al(['gestion', 'viajes', 'liquidaciones'], () => this.revisar());
   constructor() { this.revisar(); }
   async revisar() {

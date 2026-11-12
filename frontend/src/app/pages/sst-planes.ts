@@ -1,3 +1,5 @@
+import { Paginador } from '../shared/paginador';
+import { PaginaLocal } from '../shared/pagina-local';
 import { Component, HostListener, computed, inject, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -56,7 +58,7 @@ const sinTildes = (t: string) => String(t || '').normalize('NFD').replace(/[\u03
 // plan anual de trabajo con el calendario del Ministerio del Trabajo, la ARL, MinTransporte y la Supertransporte, y alertas.
 @Component({
   selector: 'app-sst-planes',
-  imports: [FormsModule, NgTemplateOutlet, Icono, Confirmar, ...FORMATOS],
+  imports: [FormsModule, NgTemplateOutlet, Icono, Confirmar, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab">
       <div><h1>Autoevaluación y planes</h1>
@@ -245,7 +247,8 @@ const sinTildes = (t: string) => String(t || '').normalize('NFD').replace(/[\u03
       <!-- ═════════════ Plan de mejora ═════════════ -->
       @case ('mejora') {
         <p class="sutil">Sale solo al cerrar cada autoevaluación: una acción por ítem que no cumple, con plazo según su peso (lo que más pesa, primero). Cuando el ítem cumple en la siguiente autoevaluación, la acción se cierra sola.</p>
-        <ng-container *ngTemplateOutlet="tablaActividades; context: { $implicit: mejora(), vacia: 'No hay acciones de mejora. Cierre una autoevaluación para generarlas.' }" />
+        <ng-container *ngTemplateOutlet="tablaActividades; context: { $implicit: pagMejora.items(), vacia: 'No hay acciones de mejora. Cierre una autoevaluación para generarlas.' }" />
+        <app-paginador [total]="pagMejora.total()" [pagina]="pagMejora.pagina()" [porPagina]="pagMejora.porPagina()" unidad="acciones" (cambio)="pagMejora.ir($event)" />
       }
 
       <!-- ═════════════ Plan anual ═════════════ -->
@@ -448,6 +451,8 @@ export class SstPlanes {
   readonly nueva = signal(false);
   readonly trabajando = signal(false);
   readonly mejora = signal<Actividad[]>([]);
+  // Acciones de mejora por páginas en pantalla (el conteo de abiertas sigue sobre todas)
+  readonly pagMejora = new PaginaLocal(() => this.mejora());
   readonly anual = signal<Actividad[]>([]);
   readonly resumenAnual = signal<{ total: number; hechas: number; vencidas: number; cumplimiento: number | null } | null>(null);
   readonly anio = signal(anioHoy());

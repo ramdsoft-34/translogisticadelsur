@@ -97,7 +97,7 @@ r.get('/historial', permitir(P.VIAJES_VER), async (req, res) => {
   const hasta = parseFecha(q.hasta);
   res.json(await st.historial(req.empresaId, { desde: parseFecha(q.desde), hasta: hasta ? new Date(hasta.getTime() + 86399999) : null,
     placa: q.placa, conductor: mongoose.isValidObjectId(q.conductor) ? q.conductor : null, modalidad: ['destino', 'clientes'].includes(q.modalidad) ? q.modalidad : '',
-    pagina: q.pagina, limite: q.limite }));
+    pagina: q.pagina, limite: q.limite, contar: q.contar === '1' }));
 });
 
 // Checklist preoperacional del día del conductor del viaje: ver (con la firma) y descargar en PDF

@@ -394,3 +394,41 @@ test('Autoevaluación y planes: 60 ítems, cierre con plan de mejora, puntaje en
   const otraR = await s.a.post(`/api/sst/autoevaluaciones/${idA}/cerrar`); const otra = otraR.body; assert.equal(otraR.status, 200, JSON.stringify(otra));
   assert.deepEqual(otra.plan, { creadas: 0, cerradas: 1 });
 });
+
+// ── Paginación de SG-SST y PESV ──────────────────────────────────────────────
+test('Paginación SG-SST y PESV: con «pagina» solo la página y su total, sin «pagina» la respuesta de siempre', async () => {
+  const anio = new Date().getFullYear();
+  const mes = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date()).slice(0, 7);
+  const casos = [
+    ['/api/sst/colaboradores', null], ['/api/sst/flota', null], ['/api/sst/archivos', null],
+    [`/api/sst/capacitaciones?anio=${anio}`, 'indicadores'], ['/api/sst/diligenciados', null],
+    ['/api/sst/incidentes', 'sinRevisar'], ['/api/sst/inspecciones', 'usaApp'],
+    [`/api/sst/actividades?anio=${anio}`, 'resumen'], [`/api/sst/planillas?periodo=${mes}`, 'indicadores'],
+  ];
+  for (const [url, extra] of casos) {
+    const sep = url.includes('?') ? '&' : '?';
+    const sin = await s.a.get(url);
+    // El simulador de la app de esta prueba no tiene planillas (se prueban en integral.test.js)
+    if (url.includes('planillas') && sin.status !== 200) continue;
+    assert.equal(sin.status, 200, `${url}: ${JSON.stringify(sin.body).slice(0, 200)}`);
+    const p = await s.a.get(`${url}${sep}pagina=1&limite=5`);
+    assert.equal(p.status, 200, `${url} con página: ${JSON.stringify(p.body).slice(0, 200)}`);
+    // Planillas sin la app de conductores responde como siempre (sin lista que paginar)
+    if (!Array.isArray(p.body.items) && url.includes('planillas')) continue;
+    assert.ok(Array.isArray(p.body.items) && typeof p.body.total === 'number', `${url}: página con total`);
+    assert.ok(p.body.items.length <= 5, url);
+    if (extra) assert.ok(extra in p.body, `${url} conserva «${extra}» con la página`);
+  }
+  // La búsqueda de la lista calculada (flota) se hace en el servidor
+  const flota = (await s.a.get('/api/sst/flota?pagina=1&limite=50&buscar=ABC123')).body;
+  assert.ok(flota.items.every((v) => v.placa === 'ABC123'));
+  assert.equal((await s.a.get('/api/sst/flota?pagina=1&limite=50&buscar=zzz-no-existe')).body.total, 0);
+  // Colaboradores: la página 2 no repite la 1
+  const c1 = (await s.a.get('/api/sst/colaboradores?pagina=1&limite=5')).body;
+  if (c1.total > 5) {
+    const c2 = (await s.a.get('/api/sst/colaboradores?pagina=2&limite=5')).body;
+    assert.ok(!c2.items.some((x) => c1.items.some((y) => y.id === x.id)));
+  }
+  // Otra empresa no ve nada de esta
+  assert.equal((await s.b.get('/api/sst/flota?pagina=1&limite=50&buscar=ABC123')).body.total, 0);
+});

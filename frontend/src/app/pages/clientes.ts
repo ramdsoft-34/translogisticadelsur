@@ -1,5 +1,7 @@
 import { Turno } from '../core/turno';
 import { ConfigBodega } from '../shared/config-bodega';
+import { Paginador } from '../shared/paginador';
+import { PaginaLocal } from '../shared/pagina-local';
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -37,7 +39,7 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
 
 @Component({
   selector: 'app-clientes',
-  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, Moneda, Confirmar, ListaBuscable, ...FORMATOS, ConfigBodega],
+  imports: [FormsModule, Modal, Icono, SelectorMunicipio, ImportarExcel, Moneda, Confirmar, ListaBuscable, ...FORMATOS, ConfigBodega, Paginador],
   template: `
     <div class="pagina-cab">
       <div><h1>Clientes y tarifas</h1><p class="sutil">Cada cliente es una empresa remitente con sus sedes; cada destino es la sede donde se descarga, con su tarifa, flete y anticipo.</p></div>
@@ -87,7 +89,7 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
                 @if (puedeTarifas) { <button class="primario pequeno" (click)="nuevaTarifa()"><app-icono nombre="mas" [tam]="15" />Nuevo destino</button> }
               </div>
               <table class="tabla-movil destinos"><thead><tr><th>Destino</th><th>Se descarga en</th><th class="num">Tarifa / flete</th><th class="num">Anticipo</th><th class="num">Auxiliar</th><th></th></tr></thead>
-                <tbody>@for (t of tarifasVisibles(); track t._id) {
+                <tbody>@for (t of pagTarifas.items(); track t._id) {
                   <tr [class.sutil]="!t.activo">
                     <td data-etiqueta="Destino"><strong>{{ t.destino }}</strong>@if (t.tipoCobro === 'unidad') { <span class="chip info">por unidad</span> }
                       @if (!t.activo) { <span class="chip">inactivo</span> }<small class="d-bloque sutil">Mpio. {{ t.codMunicipio || '—' }}</small></td>
@@ -104,6 +106,7 @@ const idCliente = (c: any) => c?.tipoId === 'N' ? digitos(c.nit) + digitos(c.dv)
                     <td class="celda-acciones">@if (puedeTarifas) { <div class="acciones acciones-fila"><button class="pequeno" (click)="editarTarifa(t)">Editar</button>
                       <button class="pequeno peligro" confirmar="¿Eliminar?" (confirmado)="eliminarTarifa(t)" [title]="'Eliminar el destino ' + t.destino">Eliminar</button></div> }</td></tr>
                 } @empty { <tr><td colspan="6" class="vacio">Sin destinos. Agregue los destinos habituales con su tarifa.</td></tr> }</tbody></table>
+                <app-paginador [total]="pagTarifas.total()" [pagina]="pagTarifas.pagina()" [porPagina]="pagTarifas.porPagina()" unidad="destinos" (cambio)="pagTarifas.ir($event)" />
             } @else if (pestana() === 'sedes') {
               <div class="barra-detalle">
                 <p class="sutil">Sedes de {{ c.razonSocial || c.nombre }} registradas como tercero ({{ numIdCliente() || idCli(c) }}). La de cargue va en el manifiesto como remitente.</p>
@@ -281,6 +284,8 @@ export class Clientes {
   readonly qTar = signal('');
   readonly clientesVisibles = computed(() => filtrar(this.clientes(), this.qCli()));
   readonly tarifasVisibles = computed(() => filtrar(this.tarifasSel(), this.qTar()));
+  // Destinos del cliente por páginas en pantalla (al buscar o cambiar de cliente vuelve a la primera)
+  readonly pagTarifas = new PaginaLocal<any>(() => this.tarifasVisibles(), { reiniciarCon: () => [this.qTar(), this.tarifasSel()[0]?.cliente?._id || this.tarifasSel()[0]?.cliente || ''].join('|') });
   readonly tarifasSel = computed(() => this.tarifas().filter(t => (t.cliente?._id || t.cliente) === this.sel()?._id));
   readonly abiertoCliente = signal(false);
   readonly importar = signal(false);

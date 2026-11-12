@@ -2,6 +2,7 @@
 // plan anual de trabajo con el calendario del Ministerio del Trabajo, la ARL, MinTransporte y la Supertransporte, y alertas.
 // Se monta dentro de /api/sst (routes/sst.js). Ver: sst.ver o sst.gestionar. Calificar, cerrar y editar: sst.gestionar.
 import { Router } from 'express';
+import { paginaDeLista } from '../utils/paginacion.js';
 import { z } from 'zod';
 import { Empresa } from '../models/index.js';
 import { autenticar, permitir, soloEmpresa, ErrorHttp } from '../middleware/auth.js';
@@ -94,7 +95,8 @@ const anioQ = z.object({ anio: z.coerce.number().int().min(2017).max(2100).optio
 r.get('/actividades', ver, async (req, res) => {
   const q = anioQ.parse({ anio: req.query.anio || undefined, origen: req.query.origen || undefined, estado: req.query.estado || undefined });
   const items = await planes.actividades(req.empresaId, q);
-  res.json({ items, resumen: planes.resumenPlan(items) });
+  const resumen = planes.resumenPlan(items);
+  res.json(paginaDeLista(items, req.query, { porDefecto: 25, maximo: 100 }, { resumen }) || { items, resumen });
 });
 const datosAct = z.object({
   titulo: z.string().trim().min(3, 'Escriba la actividad').max(300), detalle: txt(1000).optional(), responsable: txt(160).optional(),

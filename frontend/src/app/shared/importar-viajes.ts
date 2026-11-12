@@ -1,3 +1,5 @@
+import { Paginador } from './paginador';
+import { PaginaLocal } from './pagina-local';
 import { Component, computed, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
@@ -22,7 +24,7 @@ interface Fila {
 // Importar viajes desde Excel como si se hubieran registrado: revisar (sin guardar) → aprobar fila por fila → registrar.
 @Component({
   selector: 'app-importar-viajes',
-  imports: [FormsModule, Modal, Icono, BuscarTercero, DiaPipe, PesosPipe],
+  imports: [FormsModule, Modal, Icono, BuscarTercero, DiaPipe, PesosPipe, Paginador],
   template: `
     <app-modal titulo="Importar viajes desde Excel" [abierto]="abierto()" (cerrar)="cerrar.emit()" [ancho]="true">
       @if (!filas().length && !resultado()) {
@@ -64,7 +66,7 @@ interface Fila {
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th><input type="checkbox" aria-label="Marcar todas las que se pueden subir" [checked]="todasMarcadas()" (change)="marcarTodas($any($event.target).checked)" /></th>
             <th>Fila</th><th>Fecha</th><th>Placa</th><th>Conductor</th><th>Destino</th><th>Planilla</th><th class="num">Tarifa</th><th class="num">Flete conductor</th><th class="num">Anticipo</th><th class="num">Aux.</th><th>Documento</th><th>Revisión</th></tr></thead>
-          <tbody>@for (f of visibles(); track f.fila) {
+          <tbody>@for (f of pagFilas.items(); track f.fila) {
             <tr [class.apagada]="!f.incluir">
               <td data-etiqueta="Subir"><input type="checkbox" [checked]="f.incluir" [disabled]="!sePuede(f)" (change)="alternar(f, $any($event.target).checked)" [attr.aria-label]="'Subir la fila ' + f.fila" /></td>
               <td data-etiqueta="Fila">{{ f.fila }}</td>
@@ -103,7 +105,8 @@ interface Fila {
               </td>
             </tr>
           }</tbody>
-        </table></div>
+        </table>
+        <app-paginador [total]="pagFilas.total()" [pagina]="pagFilas.pagina()" [porPagina]="pagFilas.porPagina()" unidad="filas" (cambio)="pagFilas.ir($event)" /></div>
       }
 
       @if (resultado(); as r) {
@@ -160,6 +163,8 @@ export class ImportarViajes {
   auxPagado = true;
 
   readonly visibles = computed(() => (this.filtro() ? this.filas().filter(f => f.estado === this.filtro()) : this.filas()));
+  // Filas del Excel por páginas en pantalla (cada fila tiene campos editables: dibujar cientos a la vez es lento)
+  readonly pagFilas = new PaginaLocal<Fila>(() => this.visibles(), { reiniciarCon: () => this.filtro() });
   readonly elegidas = computed(() => this.filas().filter(f => f.incluir && this.sePuede(f)));
 
   async ngOnInit() {

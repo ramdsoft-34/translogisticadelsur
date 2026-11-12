@@ -11,12 +11,14 @@ const TAMANOS = [25, 50, 100];
     @if (total() > 0) {
       <nav class="paginador" [attr.aria-label]="'Páginas de ' + unidad()">
         <span class="resumen" aria-live="polite">Mostrando <strong>{{ desde() }}–{{ hasta() }}</strong> de <strong>{{ totalTexto() }}</strong> {{ unidad() }}</span>
-        @if (paginas() > 1 || total() > TAMANOS[0]) {
+        @if (paginas() > 1 || (tamanos().length > 1 && total() > tamanos()[0])) {
           <div class="controles">
-            <label class="tamano">Ver
-              <select [value]="porPagina()" (change)="cambiarTamano($any($event.target).value)" [disabled]="cargando()" aria-label="Registros por página">
-                @for (t of TAMANOS; track t) { <option [value]="t" [selected]="t === porPagina()">{{ t }}</option> }
-              </select></label>
+            @if (tamanos().length > 1) {
+              <label class="tamano">Ver
+                <select [value]="porPagina()" (change)="cambiarTamano($any($event.target).value)" [disabled]="cargando()" aria-label="Registros por página">
+                  @for (t of tamanos(); track t) { <option [value]="t" [selected]="t === porPagina()">{{ t }}</option> }
+                </select></label>
+            }
             @if (paginas() > 1) {
               <button type="button" class="pag flecha" (click)="ir(actual() - 1)" [disabled]="actual() <= 1 || cargando()" aria-label="Página anterior">‹</button>
               @for (n of numeros(); track $index) {
@@ -49,8 +51,9 @@ export class Paginador {
   readonly porPagina = input(50);
   readonly cargando = input(false);
   readonly unidad = input('registros');
+  // Tamaños de página que se ofrecen; con uno solo no se muestra el selector (p. ej. cuando el servidor fija el tamaño)
+  readonly tamanos = input<number[]>(TAMANOS);
   readonly cambio = output<CambioPagina>();
-  readonly TAMANOS = TAMANOS;
   private el = inject(ElementRef<HTMLElement>);
   private fmt = new Intl.NumberFormat('es-CO');
 

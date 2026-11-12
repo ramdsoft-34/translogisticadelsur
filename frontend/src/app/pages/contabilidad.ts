@@ -1,4 +1,7 @@
 import { Turno } from '../core/turno';
+import { Paginador } from '../shared/paginador';
+import { PaginaLocal } from '../shared/pagina-local';
+import { ListaServidor, conPausa } from '../shared/lista-servidor';
 import { Component, computed, inject, input, signal } from '@angular/core';
 import { EnVivo } from '../core/en-vivo.service';
 import { FormsModule } from '@angular/forms';
@@ -23,7 +26,7 @@ const INFORMES: [string, string][] = [['balance', 'Balance general'], ['resultad
 import { CierreMes } from './gestion-varios';
 @Component({
   selector: 'app-contabilidad',
-  imports: [FormsModule, Icono, MenuAcciones, Modal, Moneda, Confirmar, CierreMes, ...FORMATOS],
+  imports: [FormsModule, Icono, MenuAcciones, Modal, Moneda, Confirmar, CierreMes, ...FORMATOS, Paginador],
   template: `
     <div class="pagina-cab"><div><h1>Contabilidad</h1>
       <p class="sutil">Partida doble simplificada: facturas a clientes, cobros, pagos a conductores, gastos e informes. Información de apoyo; debe revisarla un contador.</p></div>
@@ -44,7 +47,7 @@ import { CierreMes } from './gestion-varios';
     <section class="barra" aria-label="Periodo">
       <div class="campo"><label for="c-d">Desde</label><input id="c-d" type="date" [(ngModel)]="desde" (change)="cargar()" /></div>
       <div class="campo"><label for="c-h">Hasta</label><input id="c-h" type="date" [(ngModel)]="hasta" (change)="cargar()" /></div>
-      <div class="campo crece"><label for="c-q">Buscar</label><input id="c-q" type="search" placeholder="Número, tercero, cuenta o concepto" [ngModel]="q()" (ngModelChange)="q.set($event)" /></div>
+      <div class="campo crece"><label for="c-q">Buscar</label><input id="c-q" type="search" placeholder="Número, tercero, cuenta o concepto" [ngModel]="q()" (ngModelChange)="q.set($event); buscarFacturas()" /></div>
     </section>
 
     @switch (pestana()) {
@@ -66,7 +69,7 @@ import { CierreMes } from './gestion-varios';
       @case ('diario') {
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th>Asiento</th><th>Fecha</th><th>Documento</th><th>Concepto</th><th>Cuenta</th><th class="num">Débito</th><th class="num">Crédito</th><th>Estado</th><th></th></tr></thead>
-          <tbody>@for (a of asientosVisibles(); track a._id) {
+          <tbody>@for (a of pagDiario.items(); track a._id) {
             @for (l of a.lineas; track $index; let i = $index) {
               <tr [class.anulado]="a.estado === 'ANULADO'">
                 <td data-etiqueta="Asiento">{{ i === 0 ? a.numero : '' }}</td><td data-etiqueta="Fecha">{{ i === 0 ? (a.fecha | dia) : '' }}</td>
@@ -78,12 +81,13 @@ import { CierreMes } from './gestion-varios';
                   <button class="pequeno peligro" confirmar="Clic otra vez para anular" (confirmado)="anularAsiento(a)">Anular</button> }</td>
               </tr>
             }
-          } @empty { <tr><td colspan="9" class="vacio">Sin asientos en el periodo</td></tr> }</tbody></table></div>
+          } @empty { <tr><td colspan="9" class="vacio">Sin asientos en el periodo</td></tr> }</tbody></table>
+          <app-paginador [total]="pagDiario.total()" [pagina]="pagDiario.pagina()" [porPagina]="pagDiario.porPagina()" unidad="asientos" (cambio)="pagDiario.ir($event)" /></div>
       }
       @case ('facturas') {
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th>Factura</th><th>Fecha</th><th>Cliente</th><th>Periodo</th><th class="num">Total</th><th class="num">Retenciones</th><th class="num">Neto</th><th class="num">Cobrado</th><th>Estado</th><th></th></tr></thead>
-          <tbody>@for (f of facturasVisibles(); track f._id) {
+          <tbody>@for (f of listaFact.items(); track f._id) {
             <tr><td data-etiqueta="Factura">{{ f.numero }}</td><td data-etiqueta="Fecha">{{ f.fecha | dia }}</td><td data-etiqueta="Cliente">{{ f.cliente?.nombre }}</td>
               <td data-etiqueta="Periodo">{{ f.desde | dia }} – {{ f.hasta | dia }} ({{ f.viajes }} viajes)</td><td data-etiqueta="Total" class="num">{{ f.total | pesos }}</td>
               <td data-etiqueta="Retenciones" class="num">{{ f.retefuente + f.ica | pesos }}</td><td data-etiqueta="Neto" class="num"><strong>{{ f.neto | pesos }}</strong></td>
@@ -93,17 +97,19 @@ import { CierreMes } from './gestion-varios';
                 <button class="pequeno primario" (click)="abrir('cobro', { factura: f.numero, valor: f.neto - f.cobrado })">Registrar cobro</button>
                 @if (!f.cobrado) { <button class="pequeno peligro" confirmar="Clic otra vez para anular" (confirmado)="anularFactura(f)">Anular</button> }
               }</div></td></tr>
-          } @empty { <tr><td colspan="10" class="vacio">Sin facturas</td></tr> }</tbody></table></div>
+          } @empty { <tr><td colspan="10" class="vacio">{{ listaFact.cargando() ? 'Cargando…' : 'Sin facturas' }}</td></tr> }</tbody></table>
+          <app-paginador [total]="listaFact.total()" [pagina]="listaFact.pagina()" [porPagina]="listaFact.porPagina()" [cargando]="listaFact.cambiando()" unidad="facturas" (cambio)="listaFact.ir($event)" /></div>
       }
       @case ('pagos') {
         <p class="sutil">Liquidaciones de conductores pendientes de pago (cuentas por pagar). Se liquidan en «Pago a conductores».</p>
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th>Liquidación</th><th>Fecha</th><th>Conductor</th><th>Placa</th><th class="num">Neto</th><th class="num">Pagado</th><th class="num">Saldo</th><th></th></tr></thead>
-          <tbody>@for (l of informe()?.datos || []; track l.numero) {
+          <tbody>@for (l of pagPagos.items(); track l.numero) {
             <tr><td data-etiqueta="Liquidación">{{ l.numero }}</td><td data-etiqueta="Fecha">{{ l.fecha | dia }}</td><td data-etiqueta="Conductor">{{ l.conductor }}</td><td data-etiqueta="Placa">{{ l.placa }}</td>
               <td data-etiqueta="Neto" class="num">{{ l.neto | pesos }}</td><td data-etiqueta="Pagado" class="num">{{ l.pagado | pesos }}</td><td data-etiqueta="Saldo" class="num"><strong>{{ l.saldo | pesos }}</strong></td>
               <td>@if (puedeGestionar) { <button class="pequeno primario" (click)="abrir('pago', { liquidacion: l.numero, valor: l.saldo })">Registrar pago</button> }</td></tr>
-          } @empty { <tr><td colspan="8" class="vacio">No hay pagos pendientes a conductores</td></tr> }</tbody></table></div>
+          } @empty { <tr><td colspan="8" class="vacio">No hay pagos pendientes a conductores</td></tr> }</tbody></table>
+          <app-paginador [total]="pagPagos.total()" [pagina]="pagPagos.pagina()" [porPagina]="pagPagos.porPagina()" unidad="liquidaciones" (cambio)="pagPagos.ir($event)" /></div>
       }
       @case ('informes') {
         <div class="segmentos" style="margin-bottom:12px">
@@ -122,9 +128,10 @@ import { CierreMes } from './gestion-varios';
       @case ('plan') {
         <div class="tabla-caja"><table class="tabla-movil">
           <thead><tr><th>Código</th><th>Cuenta</th><th>Tipo</th><th>Naturaleza</th></tr></thead>
-          <tbody>@for (c of cuentasVisibles(); track c._id) {
+          <tbody>@for (c of pagCuentas.items(); track c._id) {
             <tr><td data-etiqueta="Código">{{ c.codigo }}</td><td data-etiqueta="Cuenta">{{ c.nombre }}</td><td data-etiqueta="Tipo">{{ c.tipo }}</td><td data-etiqueta="Naturaleza">{{ c.naturaleza === 'D' ? 'Débito' : 'Crédito' }}</td></tr>
-          }</tbody></table></div>
+          }</tbody></table>
+          <app-paginador [total]="pagCuentas.total()" [pagina]="pagCuentas.pagina()" [porPagina]="pagCuentas.porPagina()" unidad="cuentas" (cambio)="pagCuentas.ir($event)" /></div>
         @if (puedeGestionar) { <button style="margin-top:10px" (click)="abrir('cuenta')"><app-icono nombre="mas" />Agregar cuenta</button> }
       }
       @case ('cierre') { <app-cierre-mes [embebido]="true" /> }
@@ -210,17 +217,26 @@ export class Contabilidad {
   desde = inicioMesIso(); hasta = hoyIso();
   readonly q = signal('');
   readonly asientos = signal<any[]>([]);
-  readonly facturas = signal<any[]>([]);
   readonly cuentas = signal<any[]>([]);
   readonly clientes = signal<any[]>([]);
   readonly informe = signal<any>(null);
   readonly tipoInforme = signal('balance');
   readonly form = signal<any>(null);
   readonly asientosVisibles = computed(() => filtrar<any>(this.asientos(), this.q()));
-  readonly facturasVisibles = computed(() => filtrar<any>(this.facturas(), this.q()));
   readonly cuentasVisibles = computed(() => filtrar<any>(this.cuentas(), this.q()));
   readonly cuentasGasto = computed(() => this.cuentas().filter(c => /^5/.test(c.codigo)));
   readonly filasInforme = computed(() => filtrar<any>(this.informe()?.filas || [], this.q()));
+  // Libro diario, cuentas por pagar y plan de cuentas: páginas en pantalla (al buscar se vuelve a la primera)
+  readonly pagDiario = new PaginaLocal(() => this.asientosVisibles(), { reiniciarCon: () => this.q() });
+  readonly pagCuentas = new PaginaLocal(() => this.cuentasVisibles(), { reiniciarCon: () => this.q() });
+  readonly pagPagos = new PaginaLocal<any>(() => filtrar<any>(this.informe()?.datos || [], this.q()), { reiniciarCon: () => this.q() });
+  // Facturas por páginas desde el servidor (antes solo las 300 más recientes); la búsqueda se hace allá
+  readonly listaFact = new ListaServidor<any>({
+    pedir: (p) => this.api.get<any>('/gestion/contabilidad/facturas', { buscar: this.q().trim(), ...p }),
+    alError: (e) => this.avisos.error(e),
+    porPagina: 25,
+  });
+  readonly buscarFacturas = conPausa(() => { if (this.pestana() === 'facturas') this.listaFact.recargar(); });
 
   // Cambios de otros usuarios: la pantalla se actualiza sola
   private enVivo = inject(EnVivo).al(['gestion', 'liquidaciones'], () => this.cargar());
@@ -234,7 +250,7 @@ export class Contabilidad {
     this.api.get<any[]>('/maestros/clientes').then(c => this.clientes.set(c)).catch(() => {});
     this.api.get<any>('/gestion/reglas').then(r => { this.retefuenteFactura = r.reglas.retefuenteFacturaPct; }).catch(() => {});
   }
-  ir(p: Pestana) { this.pestana.set(p); this.informe.set(null); this.cargar(); }
+  ir(p: Pestana) { this.pestana.set(p); this.informe.set(null); if (p === 'facturas') this.listaFact.limpiar(); this.cargar(); }
   private turno = new Turno();
   async cargar() {
     const vigente = this.turno.tomar();
@@ -243,7 +259,8 @@ export class Contabilidad {
     try {
       if (this.pestana() === 'resumen') await traer(this.resumen, '/gestion/contabilidad/resumen', per);
       if (this.pestana() === 'diario') await traer(this.asientos, '/gestion/contabilidad/asientos', per);
-      if (this.pestana() === 'facturas') await traer(this.facturas, '/gestion/contabilidad/facturas');
+      // Facturas: la misma página al día (al entrar a la pestaña empieza en la primera)
+      if (this.pestana() === 'facturas') await this.listaFact.refrescar();
       if (this.pestana() === 'pagos') await traer(this.informe, '/gestion/contabilidad/informes/cxp');
       if (this.pestana() === 'informes') await traer(this.informe, `/gestion/contabilidad/informes/${this.tipoInforme()}`, per);
       if (this.pestana() === 'plan') await traer(this.cuentas, '/gestion/contabilidad/cuentas');

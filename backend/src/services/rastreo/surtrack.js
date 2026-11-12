@@ -441,9 +441,10 @@ export async function historial(empresaId, f = {}) {
   if (f.modalidad) filtro['rastreo.modalidad'] = f.modalidad;
   const limite = Math.min(Math.max(Number(f.limite) || 50, 1), 200);
   const pagina = Math.max(Number(f.pagina) || 1, 1);
+  // El total solo en la primera página (o con contar); el orden termina en _id para no repetir viajes entre páginas
   const [total, viajes] = await Promise.all([
-    Viaje.countDocuments(filtro),
-    Viaje.find(filtro).sort({ 'rastreo.finalizado': -1, 'rastreo.activado': -1 }).skip((pagina - 1) * limite).limit(limite)
+    pagina === 1 || f.contar ? Viaje.countDocuments(filtro) : null,
+    Viaje.find(filtro).sort({ 'rastreo.finalizado': -1, 'rastreo.activado': -1, _id: -1 }).skip((pagina - 1) * limite).limit(limite)
       .select('numero fecha placa conductor conductorNombre destino estado cliente rastreo.activo rastreo.estado rastreo.origen rastreo.modalidad rastreo.activado rastreo.finalizado rastreo.codigoExterno rastreo.resumen rastreo.clientes rastreo.destino')
       .populate({ path: 'cliente', select: 'nombre', match: { empresa: empresaId } }).lean(),
   ]);

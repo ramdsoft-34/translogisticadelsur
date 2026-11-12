@@ -1,3 +1,5 @@
+import { Paginador } from './paginador';
+import { PaginaLocal } from './pagina-local';
 import { Component, inject, input, output, signal } from '@angular/core';
 import { Api } from '../core/api.service';
 import { Avisos } from '../core/avisos.service';
@@ -7,7 +9,7 @@ import { DiaPipe, FechaHoraPipe } from './formato';
 // Deshacer una importación de viajes: se borran los viajes de ese archivo como si no se hubieran subido, con copia en Excel.
 @Component({
   selector: 'app-deshacer-importacion',
-  imports: [Modal, DiaPipe, FechaHoraPipe],
+  imports: [Modal, DiaPipe, FechaHoraPipe, Paginador],
   template: `
     <app-modal titulo="Deshacer una importación de viajes" [abierto]="abierto()" (cerrar)="salir()" [ancho]="true">
       @if (hecho(); as h) {
@@ -29,14 +31,15 @@ import { DiaPipe, FechaHoraPipe } from './formato';
         <p class="sutil">Importaciones hechas desde «Importar datos → Viajes». Elija la que quiere deshacer.</p>
         @if (cargando()) { <p class="sutil">Cargando…</p> }
         <div class="tabla-caja"><table class="tabla-movil"><thead><tr><th>Subida</th><th>Archivo</th><th>Viajes</th><th>Siguen en la plataforma</th><th></th></tr></thead>
-          <tbody>@for (l of lotes(); track l._id) {
+          <tbody>@for (l of pagLotes.items(); track l._id) {
             <tr><td data-etiqueta="Subida">{{ l.fecha | fechaHora }}<br /><small class="sutil">{{ l.usuario }}</small></td>
               <td data-etiqueta="Archivo">{{ l.archivo || '—' }}</td>
               <td data-etiqueta="Viajes">{{ l.creados }} (N° {{ l.desde }} al {{ l.hasta }})</td>
               <td data-etiqueta="Siguen">{{ l.existentes }}</td>
               <td><button type="button" class="pequeno" [disabled]="!l.existentes" (click)="revisar(l._id)">Revisar</button></td></tr>
           } @empty { @if (!cargando()) { <tr><td colspan="5" class="vacio">No hay importaciones de viajes.</td></tr> } }</tbody>
-        </table></div>
+        </table>
+        <app-paginador [total]="pagLotes.total()" [pagina]="pagLotes.pagina()" [porPagina]="pagLotes.porPagina()" unidad="importaciones" (cambio)="pagLotes.ir($event)" /></div>
       }
       <ng-container pie>
         <button type="button" (click)="rev() && !hecho() ? volver() : salir()">{{ rev() && !hecho() ? 'Volver' : 'Cerrar' }}</button>
@@ -51,6 +54,7 @@ export class DeshacerImportacion {
   readonly abierto = input(false);
   readonly cerrar = output<void>();
   readonly lotes = signal<any[]>([]);
+  readonly pagLotes = new PaginaLocal<any>(() => this.lotes());
   readonly rev = signal<any>(null);
   readonly hecho = signal<any>(null);
   readonly cargando = signal(false);
