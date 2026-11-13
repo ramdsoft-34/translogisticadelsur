@@ -12,6 +12,7 @@ import { env } from '../config/env.js';
 import { auditar } from '../services/auditoria.js';
 import { cifrar, descifrar } from '../utils/cifrado.js';
 import { aprobarEnvios, cuentaPlataforma, descartarEnvios, firmaValida, plataformaLista, prepararEnvio, probarCuenta, procesarEnvio, registrarEstados, registrarEstadosPlataforma } from '../services/whatsappBusiness.js';
+import { aclararError } from '../services/erroresWhatsapp.js';
 
 const r = Router();
 const id = (v) => { if (!mongoose.isValidObjectId(v)) throw new ErrorHttp(400, 'Identificador inválido'); return v; };
@@ -122,7 +123,8 @@ r.get('/envios', operar, async (req, res) => {
   const f = deEmpresa(req);
   if (req.query.viajes) f.viaje = { $in: String(req.query.viajes).split(',').filter(x => mongoose.isValidObjectId(x)).slice(0, 1000) };
   if (req.query.estado) f.estado = String(req.query.estado);
-  res.json(await EnvioWhatsapp.find(f).sort({ createdAt: -1 }).limit(Math.min(Number(req.query.limite) || 300, 1000)).lean());
+  // Los errores guardados con el código de Meta se muestran explicados
+  res.json((await EnvioWhatsapp.find(f).sort({ createdAt: -1 }).limit(Math.min(Number(req.query.limite) || 300, 1000)).lean()).map((x) => ({ ...x, error: aclararError(x.error) })));
 });
 
 // Mensajes de WhatsApp de la empresa en un periodo: cada envío con su conductor, documento y horas
@@ -164,7 +166,7 @@ r.get('/mensajes', operar, async (req, res) => {
   else lista = await EnvioWhatsapp.find(f).sort({ updatedAt: -1, _id: -1 }).limit(3000).populate(poblar).lean();
   const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
   const mensajes = lista
-    .map(x => ({ _id: x._id, fecha: x.enviadoEn || x.updatedAt, tipo: x.tipo || 'manifiesto', documento: x.documento, estado: x.estado, error: x.error, telefono: x.telefono,
+    .map(x => ({ _id: x._id, fecha: x.enviadoEn || x.updatedAt, tipo: x.tipo || 'manifiesto', documento: x.documento, estado: x.estado, error: aclararError(x.error), telefono: x.telefono,
       origen: x.origen, cuenta: x.cuenta, intentos: x.intentos, enviadoEn: x.enviadoEn, entregadoEn: x.entregadoEn, leidoEn: x.leidoEn,
       viaje: x.viaje ? { _id: x.viaje._id, numero: x.viaje.numero, placa: x.viaje.placa, destino: x.viaje.destino } : null,
       conductor: x.conductor ? { nombre: nombreDe(x.conductor), numId: x.conductor.numId } : null,

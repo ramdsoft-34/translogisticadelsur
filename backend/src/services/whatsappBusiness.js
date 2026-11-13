@@ -10,6 +10,7 @@ import { datosManifiesto, manifiestoPdf, nombreArchivo } from './reportes/manifi
 import { soporteInterno } from './gestion/soporteInterno.js';
 import { resolverConductor } from './gestion/conductorViaje.js';
 import { soporteExpedido } from './documentos/expedidos.js';
+import { errorClaro } from './erroresWhatsapp.js';
 
 const urlGraph = () => (process.env.WHATSAPP_GRAPH_URL || 'https://graph.facebook.com/v23.0').replace(/\/$/, '');
 // Meta puede avisar en desorden: el estado nunca retrocede
@@ -47,7 +48,7 @@ async function llamarMeta(ruta, token, opciones = {}) {
   const cuerpo = await r.json().catch(() => ({}));
   if (!r.ok) {
     const e = cuerpo?.error || {};
-    throw new Error(`${e.code ? `${e.code}: ` : ''}${e.error_data?.details || e.message || `Meta respondió ${r.status}`}`.slice(0, 500));
+    throw new Error(errorClaro(e.code, e.error_data?.details || e.message || `Meta respondió ${r.status}`));
   }
   return cuerpo;
 }
@@ -194,7 +195,7 @@ async function aplicarEstado(empresaId, s) {
   if (!envio) return;
   if (s.status === 'failed') {
     const e = s.errors?.[0] || {};
-    await EnvioWhatsapp.updateOne({ empresa: empresaId, _id: envio._id }, { $set: { estado: 'error', error: `${e.code ? `${e.code}: ` : ''}${e.error_data?.details || e.title || 'Meta no pudo entregar el mensaje'}`.slice(0, 500) } });
+    await EnvioWhatsapp.updateOne({ empresa: empresaId, _id: envio._id }, { $set: { estado: 'error', error: errorClaro(e.code, e.error_data?.details || e.title || e.message || '') } });
     return;
   }
   const estado = ESTADO_META[s.status];
