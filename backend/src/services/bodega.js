@@ -304,9 +304,11 @@ export async function resumenDia(empresaId, fechaIso) {
   const ids = new Set(clientes.map((c) => String(c._id)));
   const extra = reportes.filter((x) => !ids.has(String(x.cliente))).map((x) => x.cliente);
   const otros = extra.length ? await Cliente.find({ empresa: empresaId, _id: { $in: extra } }).select('nombre bodega').lean() : [];
+  // Los viajes quitados de la revisión no cuentan (los registrados siempre)
+  const vigentes = (i) => Math.max(i.registrados.length, i.viajes - (Number(i.quitados) || 0));
   const cuenta = (rep, tipo) => {
-    const l = (rep?.items || []).filter((i) => i.tipo === tipo);
-    return { vehiculos: l.length, viajes: l.reduce((a, i) => a + i.viajes, 0), registrados: l.reduce((a, i) => a + Math.min(i.viajes, i.registrados.length), 0) };
+    const l = (rep?.items || []).filter((i) => i.tipo === tipo && vigentes(i) > 0);
+    return { vehiculos: l.length, viajes: l.reduce((a, i) => a + vigentes(i), 0), registrados: l.reduce((a, i) => a + Math.min(vigentes(i), i.registrados.length), 0) };
   };
   return { fecha: iso(fecha), fechaTexto: fechaTexto(fecha), clientes: [...clientes, ...otros].map((c) => {
     const rep = reportes.find((x) => String(x.cliente) === String(c._id));

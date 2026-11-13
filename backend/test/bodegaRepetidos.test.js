@@ -69,6 +69,9 @@ test('Quitar: sale de la revisión un viaje pendiente; lo registrado no se quita
   await assert.rejects(B.quitarViaje(empresa, rep._id, item), /no tiene viajes pendientes/);
   const registrado = rep.items.find((x) => x.placa === 'SPV505')._id;
   await assert.rejects(B.quitarViaje(empresa, rep._id, registrado), /los registrados no se quitan/);
+  // El resumen del día no cuenta los quitados: 1 registrado de 1 (SLF645 quitado)
+  const resumen = (await B.resumenDia(empresa, '2026-11-12')).clientes.find((c) => String(c._id) === String(cliente)).reporte.urbano;
+  assert.deepEqual([resumen.vehiculos, resumen.viajes, resumen.registrados], [1, 1, 1]);
   // Lo registrado se sigue mostrando todo el día
   assert.ok((await B.revision(empresa, rep._id)).filas.some((x) => x.placa === 'SPV505' && x.registrado));
 });
