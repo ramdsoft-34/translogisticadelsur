@@ -68,6 +68,9 @@ const RE_PLACA = /^[A-Z0-9]{5,6}$/;
                 <span class="placa">{{ c.placa }}</span>
                 <div class="quien"><strong>{{ c.conductorNombre || 'Conductor por confirmar' }}</strong>
                   <small>@if (c.registrado) { {{ c.quitado ? 'Revisado por la transportadora' : 'Ya registrado por la transportadora' }} } @else if (c.frecuente) { {{ c.cargues ? c.cargues + ' cargue' + (c.cargues === 1 ? '' : 's') + ' con ustedes' : 'Vehículo habitual' }} } @else { Placa agregada }</small></div>
+                @if (c.registrado) {
+                  <button type="button" class="otro-viaje" (click)="otroViaje(c)">+ Otro viaje</button>
+                }
                 @if (!c.registrado) {
                   <div class="sino" role="group" [attr.aria-label]="'¿' + c.placa + ' cargó?'">
                     <button type="button" class="si-b" [class.on]="c.cargo === true" [attr.aria-pressed]="c.cargo === true" (click)="marcar(c, true)">Sí</button>
@@ -176,6 +179,7 @@ const RE_PLACA = /^[A-Z0-9]{5,6}$/;
     .pasos { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; border: 1px solid var(--gris-2); border-radius: 10px; min-height: 44px; overflow: hidden; }
     .pasos button { border: 0; border-radius: 0; min-height: 44px; font-size: 20px; padding: 0; box-shadow: none; } .pasos output { text-align: center; font-weight: 750; font-size: 16px; }
     .check { display: flex; align-items: center; gap: 8px; font-size: 14.5px; min-height: 44px; } .check input { width: 22px; height: 22px; }
+    .otro-viaje { margin-left: auto; border: 1px solid var(--borde, #d9d9d9); background: #fff; border-radius: 999px; padding: 6px 12px; font-weight: 600; min-height: 36px; }
     .enlace { grid-column: 1 / -1; justify-self: start; border: 0; background: none; color: var(--primario-texto, #8a6100); text-decoration: underline; padding: 4px 0; min-height: 0; box-shadow: none; font-weight: 600; }
     .vacio { padding: 6px 2px 4px; }
     .otra { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; } .otra input { min-height: 48px; font-size: 16px; text-transform: uppercase; border-radius: 12px; }
@@ -308,11 +312,20 @@ export class BodegaPublica {
   agregar(p: string) {
     const placa = this.limpiar(p);
     if (!RE_PLACA.test(placa)) return;
-    const existe = this.visibles().find(c => c.placa === placa);
-    if (existe) { if (!existe.registrado) this.marcar(existe, true); }
+    const existe = this.visibles().find(c => c.placa === placa && !c.registrado);
+    const registrada = this.visibles().find(c => c.placa === placa && c.registrado);
+    if (existe) this.marcar(existe, true);
+    else if (registrada) this.otroViaje(registrada);
     else this.tarjetas.update(l => [...l, { clave: `${this.tipo()}|${placa}|${Date.now()}`, tipo: this.tipo(), placa, conductor: null, conductorNombre: '', cargues: 0, frecuente: false,
       cargo: true, destino: '', planilla: '', viajes: 1, auxiliar: 0, otro: true, conductorTexto: '', registrado: false }]);
     this.buscar.set(''); this.sugeridas.set([]);
+  }
+
+  // Un vehículo puede hacer varios viajes en el día: el registrado queda igual y se agrega otro (mismos valores u otros)
+  otroViaje(c: Tarjeta) {
+    const nueva: Tarjeta = { ...c, clave: `${c.tipo}|${c.placa}|${Date.now()}`, cargo: true, destino: '', planilla: '', viajes: 1, auxiliar: c.auxiliar,
+      registrado: false, quitado: false, frecuente: c.frecuente };
+    this.tarjetas.update(l => { const i = l.findIndex(x => x.clave === c.clave); const n = [...l]; n.splice(i + 1, 0, nueva); return n; });
   }
 
   async cambiarDia(c: 'hoy' | 'ayer') {
@@ -331,9 +344,9 @@ export class BodegaPublica {
     this.trabajando.set(true); this.errorEnvio.set('');
     try {
       for (const t of this.TIPOS) {
-        const items = this.tarjetas().filter(c => c.tipo === t && c.cargo).map(c => ({ placa: c.placa, destino: c.destino.trim(), planilla: c.planilla.trim(), viajes: c.viajes,
+        const items = this.tarjetas().filter(c => c.tipo === t && c.cargo && !c.registrado).map(c => ({ placa: c.placa, destino: c.destino.trim(), planilla: c.planilla.trim(), viajes: c.viajes,
           auxiliar: c.auxiliar, conductor: c.otro ? null : c.conductor, conductorTexto: c.otro ? c.conductorTexto.trim() : '' }));
-        await firstValueFrom(this.http.put(`${this.base}/reporte`, { cual: this.cual(), tipo: t, items }, this.cabeceras()));
+        await firstValueFrom(this.http.put(`${this.base}/reporte`, { cual: this.cual(), tipo: t, items, soloNuevos: true }, this.cabeceras()));
       }
       for (const c of this.tarjetas()) if (c.cargo === null) this.actualizar(c, { cargo: false });
       this.estado.set('listo');

@@ -73,17 +73,28 @@ test('Quitar: sale de la revisión un viaje pendiente; lo registrado no se quita
   assert.ok((await B.revision(empresa, rep._id)).filas.some((x) => x.placa === 'SPV505' && x.registrado));
 });
 
-test('El jefe de bodega no puede cambiar ni quitar lo registrado o quitado por la transportadora', async () => {
+test('El jefe no cambia lo registrado o quitado, y sí reporta más viajes de la misma placa en el día', async () => {
   const token = 'enlace-de-prueba-0123456789abc';
   await col('clientes').updateOne({ _id: cliente }, { $set: { 'bodega.jefes': [{ nombre: 'Willian Jossa', cedula: '1085123456', celular: '3176248158' }] } });
   await col('reportebodegas').updateOne({ _id: rep._id }, { $set: { tokenHash: crypto.createHash('sha256').update(token).digest('hex'), vence: new Date(Date.now() + 3600000) } });
   const { sesion } = await B.ingresar(token, '1085123456');
   const vistos = (await B.datosFormulario(token, sesion)).reporte.items;
   assert.ok(vistos.every((x) => x.registrado), 'los dos renglones le salen bloqueados');
-  // Intenta cambiar el destino y la planilla del registrado, borrar el quitado y agregar otro
-  const r = await B.guardarReporte(token, sesion, { tipo: 'urbano', items: [{ placa: 'SPV505', destino: 'Otro lado', planilla: '1', viajes: 1 }, { placa: 'TKK252', destino: 'Pasto', viajes: 1 }] });
-  const spv = r.items.filter((x) => x.placa === 'SPV505');
-  assert.deepEqual(spv.map((x) => [x.destino, x.planilla]), [['Sandona', '36913']], 'el registrado queda como estaba');
+  // Una página abierta desde antes reenvía lo registrado: no se duplica ni se cambia
+  let r = await B.guardarReporte(token, sesion, { tipo: 'urbano', items: [{ placa: 'SPV505', destino: 'Sandona', planilla: '36913', viajes: 1 }] });
+  assert.equal(r.items.filter((x) => x.placa === 'SPV505').length, 1);
   assert.ok(r.items.some((x) => x.placa === 'SLF645'), 'el quitado no lo puede borrar');
-  assert.ok(r.items.some((x) => x.placa === 'TKK252' && !x.registrado), 'lo nuevo sí lo agrega');
+  // Otro viaje de la misma placa más tarde, con los mismos valores, y otro con valores distintos: se agregan; lo registrado sigue igual
+  r = await B.guardarReporte(token, sesion, { tipo: 'urbano', soloNuevos: true, items: [{ placa: 'SPV505', destino: 'Sandona', planilla: '36913', viajes: 1 }, { placa: 'TKK252', destino: 'Pasto', viajes: 1 }] });
+  r = await B.guardarReporte(token, sesion, { tipo: 'urbano', soloNuevos: true, items: [{ placa: 'SPV505', destino: 'Sandona', planilla: '36913', viajes: 1 }, { placa: 'SPV505', destino: 'La Florida', planilla: '777', viajes: 2, auxiliar: 1 }] });
+  const spv = r.items.filter((x) => x.placa === 'SPV505');
+  assert.equal(spv.length, 3);
+  assert.equal(spv.filter((x) => x.registrado).length, 1);
+  assert.deepEqual(spv.filter((x) => x.registrado).map((x) => [x.destino, x.planilla]), [['Sandona', '36913']]);
+  assert.ok(!r.items.some((x) => x.placa === 'TKK252'), 'lo no registrado se reemplaza con lo que manda la página');
+  // En la revisión, el viaje nuevo de SPV505 no sale como repetido del que ya registró este mismo reporte
+  const rev = await B.revision(empresa, rep._id);
+  const nuevas = rev.filas.filter((x) => x.placa === 'SPV505' && !x.registrado);
+  assert.equal(nuevas.length, 3, '1 + 2 viajes nuevos');
+  assert.ok(nuevas.every((x) => !x.repetidos.some((t) => t.startsWith('N° 1266'))));
 });

@@ -258,7 +258,7 @@ export async function buscarPlacas(token, sesion, q) {
 }
 
 /** Guarda lo marcado en una pestaña. Los renglones ya registrados por la transportadora no se pueden cambiar ni quitar. */
-export async function guardarReporte(token, sesion, { cual = 'hoy', tipo, items = [] }) {
+export async function guardarReporte(token, sesion, { cual = 'hoy', tipo, items = [], soloNuevos = false }) {
   if (!['urbano', 'correria'].includes(tipo)) throw new ErrorHttp(400, 'Pestaña no válida');
   if (!Array.isArray(items) || items.length > 60) throw new ErrorHttp(400, 'Máximo 60 vehículos por pestaña');
   const { r, cliente, jefe, cedula } = await contexto(token, sesion);
@@ -280,9 +280,12 @@ export async function guardarReporte(token, sesion, { cual = 'hoy', tipo, items 
   }
   // Se conservan los renglones de la otra pestaña y los ya registrados de esta
   const fijos = rep.items.filter((i) => i.tipo !== tipo || i.registrados.length || (Number(i.quitados) || 0) > 0);
-  // Una placa ya registrada (o quitada) por la transportadora en esta pestaña no se vuelve a cambiar desde la página
-  const placasFijas = new Set(fijos.filter((i) => i.tipo === tipo).map((i) => i.placa));
-  rep.items = [...fijos, ...limpios.filter((i) => !placasFijas.has(i.placa))];
+  // Lo registrado (o quitado) por la transportadora no cambia. La página manda solo lo que no está registrado
+  // (soloNuevos): una placa puede hacer más viajes en el día, con los mismos valores o con otros, y se reportan
+  // a cualquier hora. Una página abierta desde antes manda también lo registrado: eso no se duplica.
+  const clave = (i) => `${i.placa}|${normalizar(i.destinoTexto)}`;
+  const fijosClave = new Set(fijos.filter((i) => i.tipo === tipo).map(clave));
+  rep.items = [...fijos, ...(soloNuevos ? limpios : limpios.filter((i) => !fijosClave.has(clave(i))))];
   rep.jefe = { nombre: jefe.nombre, cedula };
   rep.reportadoEn = new Date();
   await rep.save();

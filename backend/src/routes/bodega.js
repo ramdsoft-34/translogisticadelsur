@@ -34,7 +34,7 @@ publico.put('/:token/reporte', async (req, res) => {
   const d = z.object({ cual: z.enum(['hoy', 'ayer']), tipo: z.enum(['urbano', 'correria']), items: z.array(z.object({
     placa: z.string().max(10), destino: z.string().max(80), planilla: z.string().max(30).optional().default(''), viajes: z.coerce.number().min(1).max(5).optional().default(1),
     auxiliar: z.coerce.number().int().min(0).max(5).optional().default(0), conductor: z.string().max(30).nullable().optional(), conductorTexto: z.string().max(80).optional().default(''),
-  })).max(60) }).parse(req.body || {});
+  })).max(60), soloNuevos: z.boolean().optional().default(false) }).parse(req.body || {});
   res.json(await B.guardarReporte(req.params.token, sesion(req), d));
 });
 
