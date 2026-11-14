@@ -279,7 +279,10 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
           <label class="casilla sur-track"><input type="checkbox" name="rastrear" [ngModel]="rastrear()" (ngModelChange)="rastrear.set($event)" />Registrar este viaje en Sur Track (rastreo GPS)</label>
         }
         <label for="v-fecha">Fecha:</label>
-        <input id="v-fecha" type="date" class="corto" name="fecha" [(ngModel)]="f.fecha" (ngModelChange)="fechaFormulario($event)" [disabled]="bloqueado()" required />
+        <div>
+          <input id="v-fecha" type="date" class="corto" name="fecha" [(ngModel)]="f.fecha" (ngModelChange)="fechaFormulario($event)" [disabled]="bloqueado()" required aria-describedby="v-fecha-nota" />
+          <small id="v-fecha-nota" class="sutil" style="display:block; margin-top:4px; font-size:12px">Es la fecha del viaje y la que llevan la remesa y el manifiesto (expedición y citas), aunque se envíen al RNDC otro día.</small>
+        </div>
       </form>
       <!-- Botones debajo del formulario (no en el pie de la ventana) -->
       <div class="acciones-registro">
