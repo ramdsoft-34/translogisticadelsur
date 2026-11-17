@@ -696,6 +696,18 @@ export const Vehiculo = modelo('Vehiculo', vehiculoSchema);
 export const Viaje = modelo('Viaje', viajeSchema);
 export const Liquidacion = modelo('Liquidacion', liquidacionSchema);
 export const TransaccionRndc = modelo('TransaccionRndc', transaccionSchema);
+// Diagnóstico de la IA para un rechazo que las reglas no reconocen: uno por viaje y por huella de sus datos
+// (si los datos cambian, se vuelve a consultar). Se borra solo a los 90 días.
+const revisionIaSchema = new Schema({
+  viaje: { type: Schema.Types.ObjectId, ref: 'Viaje', required: true },
+  huella: str({ required: true }),
+  estado: { type: String, enum: ['pendiente', 'listo', 'error'], default: 'pendiente' },
+  modelo: str(), resultado: { type: Schema.Types.Mixed, default: null }, error: str(),
+}, { timestamps: true });
+revisionIaSchema.plugin(tenantPlugin);
+revisionIaSchema.index({ empresa: 1, viaje: 1, huella: 1 }, { unique: true });
+revisionIaSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 86400 });
+export const RevisionIaRndc = modelo('RevisionIaRndc', revisionIaSchema);
 export const Contador = modelo('Contador', contadorSchema);
 export const Auditoria = modelo('Auditoria', auditoriaSchema);
 export const PlantillaWhatsapp = modelo('PlantillaWhatsapp', plantillaWhatsappSchema);

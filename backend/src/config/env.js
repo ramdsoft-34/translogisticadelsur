@@ -43,6 +43,15 @@ export const env = {
     // Pausa adicional entre placas en la actualización masiva de vehículos (ms)
     pausaMasivaMs: entero(process.env.RNDC_PAUSA_MASIVA_MS, 1500),
   },
+  // Revisión de manifiestos con IA (solo para lo que las reglas no reconocen). Sin clave, la revisión usa solo reglas e historial.
+  gemini: {
+    clave: process.env.GEMINI_API_KEY || '',
+    modelo: process.env.GEMINI_MODELO || 'gemini-4-hydrogen',
+    url: (process.env.GEMINI_URL || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, ''),
+    maxDia: entero(process.env.GEMINI_MAX_DIA, 150),
+    pausaMs: entero(process.env.GEMINI_PAUSA_MS, 6000),
+    timeoutMs: entero(process.env.GEMINI_TIMEOUT_MS, 60000),
+  },
 };
 
 export function validarEnv() {

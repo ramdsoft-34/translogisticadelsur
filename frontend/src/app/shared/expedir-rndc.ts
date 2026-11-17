@@ -1,3 +1,4 @@
+import { RevisionRndcVista, RevisionRndc, CorreccionRndc } from './revision-rndc';
 import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api, mensajeError } from '../core/api.service';
@@ -21,7 +22,7 @@ const div8 = (c: any) => { const x = String(c ?? '').trim(); return /^\d{8}$/.te
 
 @Component({
   selector: 'app-expedir-rndc',
-  imports: [FormsModule, Modal, Icono, Moneda, SelectorMunicipio, BuscarTercero, Confirmar, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, Moneda, SelectorMunicipio, BuscarTercero, Confirmar, RevisionRndcVista, ...FORMATOS],
   template: `
     <app-modal [titulo]="(soloVer() ? 'Viaje N° ' : 'Expedir viaje N° ') + (viaje()?.numero || '')" [abierto]="!!viajeId()" (cerrar)="cerrar.emit()" [ancho]="true">
       @if (previa(); as p) {
@@ -45,6 +46,8 @@ const div8 = (c: any) => { const x = String(c ?? '').trim(); return /^\d{8}$/.te
             @if (ayudaError(e.mensaje); as ay) { <div class="que-hacer"><strong>Qué hacer:</strong> {{ ay }}</div> }
             @else { <small>Corrija los datos abajo (o el vehículo / las personas) y vuelva a enviar.</small> }
           </div>
+          <!-- Corrección guiada: cómo se resolvió antes este rechazo, el cambio exacto y, si nada lo explica, la IA -->
+          <app-revision-rndc [revision]="revision()" modo="rechazo" [ocupado]="trabajando()" (aplicar)="aplicarCorreccion($event)" />
         }
         @if (faltan().length || p.avisos.length) {
           <!-- Un solo bloque con lo que falta y lo que conviene revisar: abierto solo si falta algo obligatorio -->
@@ -651,10 +654,37 @@ export class ExpedirRndc {
       if (this.puedeValores) await this.cargarListas();
       this.previa.set(p);
       this.alinearLugares(p);
+      this.revision.set(null);
+      if (p.ultimoError) this.cargarRevision(id);
       // Abre la pestaña donde está el problema: rechazo de la remesa o del manifiesto, o datos de vehículo/personas
       const proceso = p.ultimoError?.proceso;
       this.pestana.set(proceso === 4 ? 'manifiesto' : proceso === 3 ? 'remesa' : this.maestrosPendientes() ? 'maestros' : p.remesaAceptada ? 'manifiesto' : 'remesa');
     } catch (e) { this.avisos.error(e); this.cerrar.emit(); }
+  }
+
+  // ── Corrección guiada después de un rechazo ──
+  readonly revision = signal<RevisionRndc | null>(null);
+  private async cargarRevision(id: string, intento = 0) {
+    try {
+      const r = await this.api.get<RevisionRndc>(`/rndc/viajes/${id}/revision`);
+      if (this.viajeId() !== id) return;
+      this.revision.set(r);
+      if (r.ia?.estado === 'pendiente' && intento < 6) setTimeout(() => this.viajeId() === id && this.cargarRevision(id, intento + 1), 8000);
+    } catch { /* es una ayuda: si falla, la ventana sigue igual */ }
+  }
+  async aplicarCorreccion(c: CorreccionRndc) {
+    const id = this.viajeId();
+    if (!id) return;
+    this.trabajando.set(true);
+    try {
+      this.revision.set(await this.api.post<RevisionRndc>(`/rndc/viajes/${id}/aplicar-correccion`, { documento: c.documento, variable: c.variable, valor: c.valor }));
+      const p = await this.api.get<any>(`/rndc/viajes/${id}/vista-previa`);
+      if (this.viajeId() !== id) return;
+      this.previa.set(p); this.alinearLugares(p);
+      if (c.variable === 'CODMUNICIPIODESTINOMANIFIESTO') this.form.update(f => ({ ...f, codDestinoManifiesto: c.valor }));
+      this.avisos.ok('Corrección aplicada. Revise y presione «Corregir y reenviar».');
+      this.actualizado.emit();
+    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 
   private datosCliente(v: any) {

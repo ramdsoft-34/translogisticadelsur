@@ -20,6 +20,7 @@ import { BuscarTercero } from '../shared/buscar-tercero';
 import { Auth } from '../core/auth.service';
 import { P } from '../core/modelos';
 import { leerArchivos } from '../shared/adjuntos';
+import { RevisionRndcVista, RevisionRndc, CorreccionRndc } from '../shared/revision-rndc';
 
 type Pestana = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'soporte' | 'correos' | 'historial';
 type PestanaViajes = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'soporte';
@@ -36,7 +37,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
 
 @Component({
   selector: 'app-manifiestos',
-  imports: [FormsModule, Modal, Icono, Moneda, Paginador, ExpedirRndc, SelectorMunicipio, BuscarTercero, Confirmar, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, Moneda, Paginador, ExpedirRndc, SelectorMunicipio, BuscarTercero, Confirmar, RevisionRndcVista, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>{{ titulo() }}</h1><p class="sutil">{{ descripcion() }}</p></div>
@@ -190,6 +191,19 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
       </table>
       <app-paginador [total]="listaCorreos.total()" [pagina]="listaCorreos.pagina()" [porPagina]="listaCorreos.porPagina()" [cargando]="listaCorreos.cambiando()" unidad="correos" (cambio)="listaCorreos.ir($event)" /></div>
     } @else if (pestana() !== 'historial') {
+      @if (pestana() === 'pendientes' && viajes().length) {
+        <!-- Revisión automática de la página: reglas del RNDC, historial de la empresa y, para rechazos desconocidos, IA -->
+        <div class="resumen-revision" role="status">
+          @if (revisando() && !resumenRevision().total) { <span class="sutil">Revisando los viajes antes de enviar…</span> }
+          @else if (resumenRevision().total) {
+            <strong>Revisión antes de enviar:</strong>
+            <span class="chip ok sin-punto">{{ resumenRevision().ok }} listo(s)</span>
+            @if (resumenRevision().alerta) { <span class="chip alerta sin-punto">{{ resumenRevision().alerta }} con avisos</span> }
+            @if (resumenRevision().error) { <span class="chip error sin-punto">{{ resumenRevision().error }} no pasaría(n) así</span> }
+            <span class="sutil">Nada se envía solo: revise cada viaje y presione «Expedir».</span>
+          }
+        </div>
+      }
       <div class="tabla-caja">
         <table class="tabla-movil">
           <thead><tr>
@@ -304,7 +318,12 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                   </div>
                 </td>
               </tr>
-              @if (mensajeError(v); as m) {
+              @if (pestana() === 'pendientes' && revisiones()[v._id]; as rv) {
+                @if (rv.hallazgos.length) {
+                  <tr class="fila-revision"><td colspan="10" style="padding-top:0">
+                    <app-revision-rndc [revision]="rv" [ocupado]="aplicando() === v._id" (aplicar)="aplicarCorreccion(v, $event)" /></td></tr>
+                }
+              } @else if (mensajeError(v); as m) {
                 <tr><td [attr.colspan]="pestana() === 'pendientes' ? 10 : 9" style="padding-top:0"><div class="mensaje error">Respuesta del RNDC · {{ m }}</div></td></tr>
               }
             } @empty {
@@ -546,6 +565,8 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     .resultado-lote { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
     .resultado-lote ul { margin: 4px 0 0; padding-left: 18px; }
     .secciones { display: flex; flex-direction: column; gap: 14px; }
+    .resumen-revision { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; min-height: 24px; }
+    .fila-revision td { border-top: 0; }
     .pendientes-correo { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; }
     .destinos { max-width: 240px; font-size: 13px; }
     .destinos summary { color: var(--gris-7); }
@@ -568,7 +589,7 @@ export class Manifiestos {
   readonly listaViajes = new ListaServidor<Viaje>({
     pedir: (p) => this.api.get<any>('/viajes', { ...FILTROS[this.pestana() as PestanaViajes], ...this.filtrosViajes(), historico: 0, ...this.filtroSoporte(), ...p }),
     items: (r) => r.viajes,
-    alCargar: (r) => this.cargarCorreos(r.viajes),
+    alCargar: (r) => { this.cargarCorreos(r.viajes); if (this.pestana() === 'pendientes') this.revisar(r.viajes); },
     alError: (e) => this.avisos.error(e),
   });
   // Envíos al RNDC: el texto se busca en el servidor (referencia, mensaje, radicado, usuario o proceso)
@@ -895,6 +916,39 @@ export class Manifiestos {
 
   entradas(o: Record<string, string> | undefined) { return Object.entries(o || {}); }
   chip(e: string) { return ({ aceptado: 'ok', rechazado: 'error', anulado: 'alerta' } as Record<string, string>)[e] || ''; }
+  // ── Revisión antes de enviar (pestaña «Por enviar») ──
+  readonly revisiones = signal<Record<string, RevisionRndc>>({});
+  readonly revisando = signal(false);
+  readonly aplicando = signal<string | null>(null);
+  private turnoRevision = 0;
+  readonly resumenRevision = computed(() => {
+    const r = this.revisiones(); const ids = this.viajes().map(v => v._id).filter(id => r[id]);
+    const n = (k: string) => ids.filter(id => r[id].nivel === k).length;
+    return { total: ids.length, ok: n('ok'), alerta: n('alerta'), error: n('error') };
+  });
+  private async revisar(viajes: Viaje[], intento = 0) {
+    const ids = viajes.map(v => v._id);
+    if (!ids.length) return;
+    const turno = intento ? this.turnoRevision : ++this.turnoRevision;
+    if (!intento) this.revisando.set(true);
+    try {
+      const r = await this.api.post<{ resultados: RevisionRndc[] }>('/rndc/revision', { viajes: ids });
+      if (turno !== this.turnoRevision || this.pestana() !== 'pendientes') return;
+      this.revisiones.update(m => ({ ...m, ...Object.fromEntries(r.resultados.map(x => [x.viaje, x])) }));
+      // La IA responde en segundo plano: se pregunta otra vez solo por los que siguen pendientes
+      const pendientes = viajes.filter(v => r.resultados.find(x => x.viaje === v._id)?.ia?.estado === 'pendiente');
+      if (pendientes.length && intento < 6) setTimeout(() => this.revisar(pendientes, intento + 1), 8000);
+    } catch { /* la revisión es una ayuda: si falla, la lista sigue igual */ }
+    finally { if (!intento && turno === this.turnoRevision) this.revisando.set(false); }
+  }
+  async aplicarCorreccion(v: Viaje, c: CorreccionRndc) {
+    this.aplicando.set(v._id);
+    try {
+      const r = await this.api.post<RevisionRndc>(`/rndc/viajes/${v._id}/aplicar-correccion`, { documento: c.documento, variable: c.variable, valor: c.valor });
+      this.revisiones.update(m => ({ ...m, [v._id]: r }));
+      this.avisos.ok(`Viaje N° ${v.numero}: corrección aplicada. Revise y presione «${this.mensajeError(v) ? 'Corregir y reenviar' : 'Expedir'}».`);
+    } catch (e) { this.avisos.error(e); } finally { this.aplicando.set(null); }
+  }
   mensajeError(v: Viaje) {
     if (v.manifiesto?.estado === 'rechazado') return `Manifiesto rechazado: ${v.manifiesto.mensaje}`;
     if (v.remesa?.estado === 'rechazado') return `Remesa rechazada: ${v.remesa.mensaje}`;

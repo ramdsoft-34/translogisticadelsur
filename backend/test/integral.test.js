@@ -9,6 +9,7 @@ process.env.JWT_SECRET = crypto.randomBytes(32).toString('hex');
 process.env.MONGODB_URI = process.env.MONGODB_URI_TEST || 'mongodb://127.0.0.1:27017/translogisticadelsur_test';
 process.env.RNDC_PERMITIR_PRODUCCION = 'false';
 process.env.RNDC_PERMITIR_PRUEBAS = 'false';
+process.env.GEMINI_API_KEY = '';   // la revisión con IA nunca sale a internet en las pruebas
 process.env.RNDC_LLAVE_MAESTRA = crypto.randomBytes(32).toString('base64');
 
 const { crearSimulador } = await import('../tools/rndcSimulador.js');
@@ -495,6 +496,42 @@ test('Manifiestos RNDC: revisar, corregir tras un rechazo y reenviar', async () 
   assert.equal((await s.manif.get(`/api/rndc/viajes/${s.viaje3}/vista-previa`)).body.ultimoError, null);
   // Con manifiesto aceptado ya no se editan sus datos aquí
   assert.equal((await s.manif.put(`/api/rndc/viajes/${s.viaje3}/datos`, { pesoKg: 1 })).status, 409);
+});
+
+test('Revisión «Por enviar»: detecta MAN092 antes de enviar, aplica la corrección y explica un rechazo', async () => {
+  const v = await s.reportero.post('/api/viajes', { fecha: '2026-06-17', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor, pesoKg: 3000 });
+  const id = v.body._id;
+  // Manifiesto forzado a «municipal o urbano» con origen y destino en municipios distintos
+  const aj = await s.manif.put(`/api/rndc/viajes/${id}/datos`, { ajustes: { manifiesto: { CODOPERACIONTRANSPORTE: 'U' } } });
+  assert.equal(aj.status, 200, JSON.stringify(aj.body));
+  assert.equal((await s.reportero.post('/api/rndc/revision', { viajes: [id] })).status, 403, 'solo quien opera el RNDC');
+  assert.equal((await s.manif.post('/api/rndc/revision', { viajes: ['x'] })).status, 400);
+  const r = await s.manif.post('/api/rndc/revision', { viajes: [id] });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.ia.activa, false);
+  const rev = r.body.resultados[0];
+  const h = rev.hallazgos.find(x => x.codigo === 'MAN092');
+  assert.equal(rev.nivel, 'error');
+  assert.ok(h, JSON.stringify(rev.hallazgos));
+  assert.deepEqual([h.correccion.documento, h.correccion.variable, h.correccion.valor, h.correccion.aplicable], ['manifiesto', 'CODOPERACIONTRANSPORTE', 'G', true]);
+  // Correcciones que no se aplican con un clic o con valores inválidos
+  assert.equal((await s.manif.post(`/api/rndc/viajes/${id}/aplicar-correccion`, { documento: 'manifiesto', variable: 'NUMPLACA', valor: 'ZZZ999' })).status, 400);
+  assert.equal((await s.manif.post(`/api/rndc/viajes/${id}/aplicar-correccion`, { documento: 'manifiesto', variable: 'CODOPERACIONTRANSPORTE', valor: 'Q' })).status, 400);
+  const ap = await s.manif.post(`/api/rndc/viajes/${id}/aplicar-correccion`, { documento: 'manifiesto', variable: 'CODOPERACIONTRANSPORTE', valor: 'G' });
+  assert.equal(ap.status, 200, JSON.stringify(ap.body));
+  assert.ok(!ap.body.hallazgos.some(x => x.codigo === 'MAN092'), 'ya no aparece');
+  const prev = (await s.manif.get(`/api/rndc/viajes/${id}/vista-previa`)).body;
+  assert.ok(prev.manifiesto.variables.some(([n, x]) => n === 'CODOPERACIONTRANSPORTE' && x === 'G'));
+  // Rechazo del RNDC: la revisión lo muestra con la respuesta real; sin clave de IA no consulta afuera
+  await s.manif.post(`/api/rndc/viajes/${id}/despachar`, { clave: 'rechaza-registros' });
+  const r2 = (await s.manif.get(`/api/rndc/viajes/${id}/revision`)).body;
+  assert.equal(r2.nivel, 'error');
+  assert.ok(r2.hallazgos[0].mensajeRndc, JSON.stringify(r2.hallazgos[0]));
+  assert.ok(r2.ia === null || r2.ia.motivo === 'sin_clave', JSON.stringify(r2.ia));
+  // Enviado y aceptado: ya no se aplican correcciones al manifiesto
+  const ok = await s.manif.post(`/api/rndc/viajes/${id}/despachar`, { clave: CLAVE_RNDC });
+  assert.equal(ok.body.manifiesto.estado, 'aceptado', JSON.stringify(ok.body));
+  assert.equal((await s.manif.post(`/api/rndc/viajes/${id}/aplicar-correccion`, { documento: 'manifiesto', variable: 'CODOPERACIONTRANSPORTE', valor: 'U' })).status, 409);
 });
 
 test('Viaje repetido: la misma placa el mismo día pide confirmación (428) y con ella se registra', async () => {

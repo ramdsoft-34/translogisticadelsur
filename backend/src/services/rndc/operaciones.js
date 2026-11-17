@@ -38,7 +38,11 @@ function credenciales(empresa, clave) {
 // Variables (NOMBRE → valor) del último envío aceptado de un proceso del viaje
 export async function variablesEnviadas(empresaId, viajeId, proceso) {
   const t = await TransaccionRndc.findOne({ empresa: empresaId, viaje: viajeId, tipo: 1, proceso, ok: true }).sort({ createdAt: -1 }).lean();
-  const cuerpo = t?.solicitud?.match(/<variables>([\s\S]*?)<\/variables>/i)?.[1];
+  return variablesDeSolicitud(t?.solicitud);
+}
+// Variables (NOMBRE → valor) del XML de una solicitud guardada
+export function variablesDeSolicitud(xml) {
+  const cuerpo = xml?.match(/<variables>([\s\S]*?)<\/variables>/i)?.[1];
   if (!cuerpo) return null;
   const des = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
   return Object.fromEntries([...cuerpo.matchAll(/<([A-Z0-9_]+)>([^<]*)<\/\1>/g)].map(m => [m[1], des(m[2])]));

@@ -24,6 +24,10 @@ import { verificarViaje, verificarConsecutivos, verificacionVigente } from '../s
 import * as claveRndc from '../services/rndc/claveGuardada.js';
 import { verificarTotp } from '../services/totp.js';
 import { descifrar } from '../utils/cifrado.js';
+import { revisarViaje, revisarViajes } from '../services/rndc/revision.js';
+import { disponibilidad as disponibilidadIa } from '../services/rndc/ia.js';
+import { esAplicable } from '../services/rndc/conocimiento.js';
+import { TIPOS_MANIFIESTO } from '../services/rndc/documentos.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -234,6 +238,42 @@ r.put('/config', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
 // ── Viajes ──────────────────────────────────────────────────────────────────
 r.get('/viajes/:id/vista-previa', operar, async (req, res) => {
   res.json(await op.vistaPrevia(req.empresaId, req.params.id));
+});
+
+// ── Revisión antes de enviar («Por enviar») y corrección guiada después de un rechazo ──
+// Reglas + historial de la empresa + IA solo para rechazos desconocidos. No envía ni cambia nada.
+const idsRevision = z.object({ viajes: z.array(z.string().refine(v => mongoose.isValidObjectId(v), 'identificador inválido')).min(1).max(60) });
+r.post('/revision', operar, async (req, res) => {
+  const { viajes } = idsRevision.parse(req.body);
+  res.json({ resultados: await revisarViajes(req.empresaId, [...new Set(viajes)]), ia: disponibilidadIa() });
+});
+r.get('/viajes/:id/revision', operar, async (req, res) => {
+  res.json({ ...(await revisarViaje(req.empresaId, req.params.id)), iaServicio: disponibilidadIa() });
+});
+const correccionRevision = z.object({
+  documento: z.enum(['remesa', 'manifiesto']),
+  variable: z.string().regex(/^[A-Z0-9]{2,40}$/),
+  valor: z.string().trim().min(1).max(20),
+});
+const VALOR_CORRECCION = {
+  CODOPERACIONTRANSPORTE: (x) => Object.keys(TIPOS_MANIFIESTO).includes(x),
+  CODMUNICIPIODESTINOMANIFIESTO: (x) => /^\d{8}$/.test(x),
+};
+r.post('/viajes/:id/aplicar-correccion', operar, async (req, res) => {
+  const d = correccionRevision.parse(req.body);
+  if (!esAplicable(d.documento, d.variable)) throw new ErrorHttp(400, 'Esa corrección no se aplica con un clic: corríjala en «Expedir»');
+  if (!(VALOR_CORRECCION[d.variable] || ((x) => /^[A-Za-z0-9-]{1,6}$/.test(x)))(d.valor)) throw new ErrorHttp(400, 'Valor no válido para esa corrección');
+  const v = await Viaje.findOne(deEmpresa(req, { _id: req.params.id }));
+  if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
+  if (!['registrado', 'remesa'].includes(v.estado)) throw new ErrorHttp(409, `El viaje ya está ${v.estado}`);
+  if (v[d.documento]?.estado === 'aceptado') throw new ErrorHttp(409, `La ${d.documento} ya fue aceptada: no se puede cambiar`);
+  const antes = { codDestinoManifiesto: v.codDestinoManifiesto, ajustes: v.ajustesRndc?.[d.documento] || {} };
+  if (d.variable === 'CODMUNICIPIODESTINOMANIFIESTO') v.codDestinoManifiesto = d.valor;
+  else v.set(`ajustesRndc.${d.documento}`, { ...(v.ajustesRndc?.[d.documento] || {}), [d.variable]: d.valor });
+  v.actualizadoPor = req.usuario._id;
+  await v.save();
+  await auditar(req, 'aplicar_correccion_rndc', { entidad: 'Viaje', entidadId: v._id, detalle: { numero: v.numero, documento: d.documento, variable: d.variable, valor: d.valor, antes } });
+  res.json(await revisarViaje(req.empresaId, v._id));
 });
 
 // Corrección de los datos del viaje antes de enviarlo (o después de un rechazo).
