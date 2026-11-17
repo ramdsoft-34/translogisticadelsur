@@ -56,9 +56,12 @@ test('reglas: MAN153 (general dentro del mismo municipio) propone «U»; Pasto �
 
 test('reglas: datos faltantes, maestros y avisos', () => {
   const h = hallazgosDeReglas(previa({ tipo: 'G', remesa: { variables: [], problemas: ['CANTIDADCARGADA: es obligatorio'] },
-    maestros: [{ rol: 'Vehículo', referencia: 'ABC123', estado: 'no_existe', faltantes: [] }, { rol: 'Conductor', referencia: 'X', estado: 'enviado', faltantes: [{ etiqueta: 'Celular' }] }],
+    maestros: [{ rol: 'Vehículo', referencia: 'ABC123', estado: 'no_existe', faltantes: [] }, { rol: 'Conductor', referencia: 'X', estado: 'sin_enviar', faltantes: [{ etiqueta: 'Celular' }] }],
     avisos: ['El SOAT del vehículo está vencido', 'El flete está en cero'], valores: { anticipoAjustado: true, anticipoRegistrado: 900000, anticipo: 800000 } }));
   assert.equal(h.filter((x) => x.nivel === 'error').length, 4);
+  // Vehículo ya registrado en el RNDC con datos incompletos en la plataforma: aviso, no bloquea
+  const r = hallazgosDeReglas(previa({ tipo: 'G', maestros: [{ rol: 'Vehículo', referencia: 'SOW033', estado: 'enviado', faltantes: [{ etiqueta: 'N° póliza SOAT' }] }] }));
+  assert.deepEqual(r.map((x) => x.nivel), ['alerta']);
   assert.equal(h.find((x) => /flete/.test(x.detalle)).nivel, 'alerta');
   assert.equal(h.find((x) => x.titulo === 'Anticipo ajustado').nivel, 'info');
 });
@@ -109,6 +112,13 @@ test('aprendizaje: avisa a un viaje parecido que conserva el valor rechazado, y 
   assert.equal(patronesQueAplican(casos, { manifiesto: man({ CODOPERACIONTRANSPORTE: 'G', NUMPLACA: 'OTR111' }) }, 'v9').filter((x) => x.codigo === 'MAN092').length, 0);
   // Otra ruta, otro vehículo y otro conductor: no se parece
   assert.equal(patronesQueAplican(casos, { manifiesto: man({ CODMUNICIPIOORIGENMANIFIESTO: '11001000', CODMUNICIPIODESTINOMANIFIESTO: '05001000', NUMPLACA: 'OTR111', NUMIDCONDUCTOR: '1', NUMIDTITULARMANIFIESTO: '1' }) }, 'v9').length, 0);
+  // Un reenvío con varios cambios (FOPAT y destino a la vez) no deja claro cuál lo arregló: no se sugiere a otros
+  const varios = casosDesdeTransacciones(
+    [{ viaje: 'v5', proceso: 4, mensaje: 'Error MAN275 FOPAT', solicitud: xml(man({ CODOPERACIONTRANSPORTE: 'G', RETENCIONFOPAT: '0' })), createdAt: T(0) }],
+    [{ viaje: 'v5', proceso: 4, solicitud: xml(man({ CODOPERACIONTRANSPORTE: 'G', RETENCIONFOPAT: '1500', CODMUNICIPIODESTINOMANIFIESTO: '86885000' })), createdAt: T(1) }]);
+  assert.equal(patronesQueAplican(varios, { manifiesto: man({ CODOPERACIONTRANSPORTE: 'G', RETENCIONFOPAT: '0' }) }, 'v9').length, 0);
+  // MAN354 (destino) solo se sugiere con el mismo destinatario y sede; el manifiesto solo no lo trae: no se sugiere
+  assert.equal(patronesQueAplican(casos, { manifiesto: man({ CODOPERACIONTRANSPORTE: 'G', NUMPLACA: 'XYZ987', CODMUNICIPIODESTINOMANIFIESTO: '86001000' }) }, 'v9').filter((x) => x.codigo === 'MAN354').length, 0);
   // El mismo viaje no se compara consigo mismo
   assert.equal(patronesQueAplican(casos, { manifiesto: man() }, 'v1').filter((x) => x.codigo === 'MAN092').length, 0);
 });

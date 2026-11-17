@@ -13,7 +13,15 @@ const IGNORAR = new Set(['NUMNITEMPRESATRANSPORTE', 'CONSECUTIVOREMESA', 'NUMMAN
   'FECHAEXPEDICIONMANIFIESTO', 'FECHAPAGOSALDOMANIFIESTO', 'FECHACITAPACTADACARGUE', 'FECHACITAPACTADADESCARGUE', 'OBSERVACIONES']);
 // Datos que identifican la ruta, el vehículo y las personas: sirven para decir que dos viajes se parecen
 const CONTEXTO = ['CODMUNICIPIOORIGENMANIFIESTO', 'CODMUNICIPIODESTINOMANIFIESTO', 'NUMPLACA', 'NUMIDCONDUCTOR', 'NUMIDTITULARMANIFIESTO', 'NUMIDDESTINATARIO', 'CODSEDEDESTINATARIO'];
-const MAX_CAMBIOS = 4;   // un reenvío con muchos cambios no deja claro cuál lo arregló
+const MAX_CAMBIOS = 4;
+// Para avisar a otro viaje, el cambio que arregló el rechazo debe ser el único del reenvío (si no, no se sabe cuál
+// lo arregló) y el otro viaje debe compartir los datos de los que depende ese cambio.
+const REQUIERE = {
+  CODOPERACIONTRANSPORTE: ['CODMUNICIPIOORIGENMANIFIESTO', 'CODMUNICIPIODESTINOMANIFIESTO'],
+  CODMUNICIPIODESTINOMANIFIESTO: ['NUMIDDESTINATARIO', 'CODSEDEDESTINATARIO'],
+  CODSEDEDESTINATARIO: ['NUMIDDESTINATARIO'],
+};
+export const esPersonal = (variable) => /^(NUMID|NUMPLACA|NOMID|PRIMERAPELLIDO|SEGUNDOAPELLIDO)/.test(variable);   // un reenvío con muchos cambios no deja claro cuál lo arregló
 export const documentoDe = (proceso) => (Number(proceso) === 3 ? 'remesa' : 'manifiesto');
 
 // Diferencias entre lo rechazado y lo aceptado
@@ -77,14 +85,16 @@ export function resueltoAntes(casos, codigo) {
 export function patronesQueAplican(casos, vars, viajeId) {
   const out = new Map();
   for (const c of casos) {
-    if (c.viaje === String(viajeId) || !c.cambios.length) continue;
+    if (c.viaje === String(viajeId) || c.cambios.length !== 1) continue;
     const actuales = vars[c.documento] || {};
     const todas = { ...(vars.remesa || {}), ...(vars.manifiesto || {}) };
     const coinciden = Object.entries(c.contexto).filter(([k, v]) => todas[k] && String(todas[k]) === String(v)).map(([k]) => k);
     for (const m of c.cambios) {
       if (!(m.variable in actuales) || String(actuales[m.variable] ?? '') !== m.antes || m.antes === m.despues) continue;
-      // El dato mismo identifica (la misma placa, el mismo conductor) o el viaje comparte al menos dos datos de contexto
-      const parecido = CONTEXTO.includes(m.variable) || coinciden.length >= 2;
+      // El dato mismo identifica (la misma placa, el mismo conductor); si no, el viaje comparte los datos de los que depende
+      const requeridos = REQUIERE[m.variable];
+      const parecido = requeridos ? requeridos.every((k) => c.contexto[k] && coinciden.includes(k))
+        : CONTEXTO.includes(m.variable) || coinciden.length >= 3;
       if (!parecido) continue;
       const k = `${c.codigo}|${c.documento}|${m.variable}|${m.antes}|${m.despues}`;
       const p = out.get(k) || { codigo: c.codigo, documento: c.documento, ...m, veces: 0, viajes: [], coinciden };

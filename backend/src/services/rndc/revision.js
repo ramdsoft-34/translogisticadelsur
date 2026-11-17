@@ -7,7 +7,7 @@
 import crypto from 'node:crypto';
 import { vistaPrevia } from './operaciones.js';
 import { CONOCIDOS, conocido, codigosDe, esAplicable } from './conocimiento.js';
-import { casosAprendidos, resueltoAntes, patronesQueAplican } from './aprendizaje.js';
+import { casosAprendidos, resueltoAntes, patronesQueAplican, esPersonal } from './aprendizaje.js';
 import { diagnostico } from './ia.js';
 
 export const NOMBRES = {
@@ -41,6 +41,8 @@ export function hallazgosDeReglas(p) {
   for (const x of p.manifiesto.problemas || []) if (!(p.remesa.problemas || []).includes(x)) add('error', 'Manifiesto: falta o está mal un dato', x);
   for (const m of p.maestros || []) {
     if (m.estado === 'no_existe') add('error', `${m.rol}: no está registrado`, `${m.referencia} no está en la plataforma. Regístrelo o tráigalo del RNDC antes de enviar.`);
+    // Ya registrado en el RNDC: lo que falte en la plataforma no impide el envío (solo un nuevo registro)
+    else if (m.faltantes?.length && m.estado === 'enviado') add('alerta', `${m.rol}: datos incompletos en la plataforma`, `${m.referencia}: falta ${m.faltantes.map((f) => f.etiqueta || f).join(', ')}. Ya está registrado en el RNDC, así que no impide enviar; complételo para cuando haya que actualizarlo.`);
     else if (m.faltantes?.length) add('error', `${m.rol}: faltan datos`, `${m.referencia}: ${m.faltantes.map((f) => f.etiqueta || f).join(', ')}.`);
     else if (m.estado === 'error') add('alerta', `${m.rol}: el RNDC lo rechazó al registrarlo`, `${m.referencia}: ${m.mensaje || 'revise sus datos'}`);
   }
@@ -89,14 +91,15 @@ export async function revisarViaje(empresaId, viajeId, { previa = null, conIa = 
     // Del historial: el cambio que más veces resolvió este código, si el viaje todavía tiene el valor rechazado
     for (const m of antes?.cambios || []) {
       const actual = vars[m.documento]?.[m.variable];
-      if (actual === undefined || String(actual) !== m.antes || correcciones.some((x) => x.variable === m.variable)) continue;
+      // Un documento o una placa de otro viaje no sirve como corrección para este
+      if (esPersonal(m.variable) || actual === undefined || String(actual) !== m.antes || correcciones.some((x) => x.variable === m.variable)) continue;
       correcciones.push({ ...correccionDe(m.documento, m.variable, m.despues, m.antes), fuente: 'historial', veces: m.veces, viajes: m.viajes });
       break;
     }
     hallazgos.unshift({
       nivel: 'error', fuente: c ? 'regla' : antes ? 'historial' : 'rndc', codigo: codigos[0] || c?.id || '',
       titulo: `El RNDC rechazó ${doc === 'remesa' ? 'la remesa' : 'el manifiesto'}${c ? `: ${c.titulo.toLowerCase()}` : ''}`,
-      detalle: c?.que || 'Este rechazo no está entre los conocidos.', mensajeRndc: e.mensaje,
+      detalle: c?.que || (antes ? 'No está entre los rechazos conocidos, pero ya le pasó antes a la empresa: abajo, cómo se resolvió.' : 'Este rechazo no está entre los conocidos.'), mensajeRndc: e.mensaje,
       historial: antes ? { codigo: antes.codigo, cambios: antes.cambios.map((m) => ({ ...m, texto: `${nombre(m.variable)}: ${legible(m.variable, m.antes)} → ${legible(m.variable, m.despues)}` })), sinCambios: antes.sinCambios, viajesSin: antes.viajesSin } : null,
       correcciones,
     });
