@@ -15,6 +15,7 @@ import { normalizar, soloDigitos, hoyColombia } from '../../utils/texto.js';
 import { valoresDesdeTarifa } from '../calculos.js';
 import { asegurarMesAbierto } from '../gestion/cierre.js';
 import { soporteInterno } from '../gestion/soporteInterno.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 // [título, campo, obligatoria, ayuda, otros títulos que se aceptan]
 export const COLUMNAS_VIAJES = [
@@ -99,7 +100,7 @@ function buscarTarifa(destino, tarifas) {
   return parecidas.length === 1 ? { tarifa: parecidas[0], exacta: false, opciones: parecidas } : { tarifa: null, opciones: parecidas };
 }
 
-const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
+const nombreDe = (t) => nombreCompleto(t);
 const dia = (f) => f.toISOString().slice(0, 10);
 
 /** Revisa el archivo y propone cada viaje. No guarda nada. */

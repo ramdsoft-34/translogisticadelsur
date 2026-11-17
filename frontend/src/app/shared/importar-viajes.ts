@@ -8,6 +8,7 @@ import { Modal } from './modal';
 import { Icono } from './icono';
 import { BuscarTercero } from './buscar-tercero';
 import { DiaPipe, PesosPipe } from './formato';
+import { nombreTercero } from '../core/modelos';
 
 // Una fila del archivo tal como la propone el servidor, más lo que el usuario decide aquí
 interface Fila {
@@ -208,7 +209,7 @@ export class ImportarViajes {
   }
   ponerConductor(f: Fila, id: string, t?: any) {
     if (!id) return;
-    const nombre = t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : f.opcionesConductor.find(o => o._id === id)?.nombre || '';
+    const nombre = t ? nombreTercero(t) : f.opcionesConductor.find(o => o._id === id)?.nombre || '';
     this.actualizar(f, { conductor: id, conductorNombre: nombre, avisos: [...f.avisos, `Conductor elegido a mano: ${nombre}`] });
   }
   ponerDestino(f: Fila, id: string) {

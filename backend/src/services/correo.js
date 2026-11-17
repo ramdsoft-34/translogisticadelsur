@@ -16,6 +16,7 @@ import { descifrar } from '../utils/cifrado.js';
 import { unirPdf } from './reportes/unirPdf.js';
 import { relacionCliente } from './reportes/relacion.js';
 import { txt } from '../utils/texto.js';
+import { nombreCompleto } from '../utils/nombres.js';
 
 const REINTENTO_AUTOMATICO_MS = 60 * 1000;
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -44,7 +45,7 @@ export const buzonPruebas = [];
 const titulo = (s) => txt(s).toLowerCase().replace(/(^|\s)\p{L}/gu, m => m.toUpperCase());
 const fechaLarga = (d) => { const f = new Date(d); return `${f.getUTCDate()} de ${MESES[f.getUTCMonth()]} de ${f.getUTCFullYear()}`; };
 const escaparHtml = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const nombre = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
+const nombre = (t) => nombreCompleto(t);
 
 export function datosCorreo(empresa, v) {
   const c = v.conductor || {};

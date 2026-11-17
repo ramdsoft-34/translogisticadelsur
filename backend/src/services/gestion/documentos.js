@@ -8,6 +8,7 @@ import { ErrorHttp } from '../../middleware/auth.js';
 import { reglasDe, REGLAS_BASE } from './reglas.js';
 import { verificarTotp } from '../totp.js';
 import { descifrar } from '../../utils/cifrado.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 export const DIAS_AVISO = REGLAS_BASE.diasAvisoDocumentos;
 const estado = (fecha, dias, hoy = new Date()) => {
@@ -29,7 +30,7 @@ export async function revisarDocumentos(empresaId, { conductor, placa }) {
   };
   if (conductor) {
     const t = await Tercero.findOne({ empresa: empresaId, _id: conductor }).select('nombres apellido1 licencia').lean();
-    if (t) revisar(`Licencia de ${[t.nombres, t.apellido1].filter(Boolean).join(' ')}`, t.licencia?.vence);
+    if (t) revisar(`Licencia de ${nombreCompleto(t)}`, t.licencia?.vence);
   }
   if (placa) {
     const v = await Vehiculo.findOne({ empresa: empresaId, placa }).select('soat venceTecnomecanica').lean();

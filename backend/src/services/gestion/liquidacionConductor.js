@@ -15,6 +15,7 @@ import { postear } from './contabilidad.js';
 import { asegurarMesAbierto } from './cierre.js';
 import { cuotaPendiente, pendienteTotal, descontar, revertirDescuentos } from './prestamos.js';
 import { REGLAS_BASE, reglasDe, destinoEn } from './reglas.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 export const esPasto = (destino) => /pasto/i.test(String(destino || ''));
 export const retefuente = (flete, reglas = REGLAS_BASE) => Math.round(flete * (Number(reglas.retefuenteConductorPct) || 0) / 100);
@@ -22,7 +23,7 @@ export const fopat = (flete, pbv, destino, reglas = REGLAS_BASE) => (Number(pbv)
   ? Math.round(flete * (Number(reglas.fopatPct) || 0) / 100) : 0);
 export const anticipoReconocido = (anticipo, flete, destino, reglas = REGLAS_BASE) =>
   (anticipo > 0 && anticipo >= flete && destinoEn(destino, reglas.ciudadesAnticipoCero) ? 0 : anticipo);
-const nombre = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : '');
+const nombre = (t) => (t ? nombreCompleto(t) : '');
 
 // Valores de una línea a partir de un viaje ya calculado (se exporta para las pruebas de aceptación)
 export function lineaConductor({ flete, auxiliar = 0, auxiliarPagado = false, anticipo = 0, pbv = null, destino = '' }, reglas = REGLAS_BASE) {

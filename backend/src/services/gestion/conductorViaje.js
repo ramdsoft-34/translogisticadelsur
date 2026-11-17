@@ -8,6 +8,7 @@
 import { Tercero, Vehiculo, Viaje } from '../../models/index.js';
 import { variablesEnviadas } from '../rndc/operaciones.js';
 import { normalizar, txt } from '../../utils/texto.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 const palabras = (s) => normalizar(s).split(' ').filter((p) => p.length > 1);
 
@@ -18,7 +19,7 @@ export function coincidePorNombre(nombre, candidatos) {
   const vistos = new Map();
   for (const t of candidatos) {
     if (!t?._id || vistos.has(String(t._id))) continue;
-    const completo = new Set(palabras([t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ')));
+    const completo = new Set(palabras(nombreCompleto(t)));
     if (buscadas.every((p) => completo.has(p))) vistos.set(String(t._id), t);
   }
   return vistos.size === 1 ? [...vistos.values()][0] : null;

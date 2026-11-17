@@ -11,8 +11,10 @@ import { P } from '../config/permisos.js';
 import { env } from '../config/env.js';
 import { auditar } from '../services/auditoria.js';
 import { cifrar, descifrar } from '../utils/cifrado.js';
-import { aprobarEnvios, cuentaPlataforma, descartarEnvios, firmaValida, plataformaLista, prepararEnvio, probarCuenta, procesarEnvio, registrarEstados, registrarEstadosPlataforma } from '../services/whatsappBusiness.js';
-import { aclararError } from '../services/erroresWhatsapp.js';
+import { aprobarEnvios, celularWhatsapp, cuentaPlataforma, descartarEnvios, firmaValida, plataformaLista, prepararEnvio, probarCuenta, procesarEnvio, registrarEstados, registrarEstadosPlataforma } from '../services/whatsappBusiness.js';
+import { aclararError, CAUSAS, causaDeTexto } from '../services/erroresWhatsapp.js';
+import { tienePermiso } from '../config/permisos.js';
+import { nombreCompleto } from '../utils/nombres.js';
 
 const r = Router();
 const id = (v) => { if (!mongoose.isValidObjectId(v)) throw new ErrorHttp(400, 'Identificador inválido'); return v; };
@@ -124,7 +126,8 @@ r.get('/envios', operar, async (req, res) => {
   if (req.query.viajes) f.viaje = { $in: String(req.query.viajes).split(',').filter(x => mongoose.isValidObjectId(x)).slice(0, 1000) };
   if (req.query.estado) f.estado = String(req.query.estado);
   // Los errores guardados con el código de Meta se muestran explicados
-  res.json((await EnvioWhatsapp.find(f).sort({ createdAt: -1 }).limit(Math.min(Number(req.query.limite) || 300, 1000)).lean()).map((x) => ({ ...x, error: aclararError(x.error) })));
+  res.json((await EnvioWhatsapp.find(f).sort({ createdAt: -1 }).limit(Math.min(Number(req.query.limite) || 300, 1000)).lean())
+    .map((x) => ({ ...x, error: aclararError(x.error), causa: x.estado === 'error' ? (x.causa || causaDeTexto(x.error)) : x.causa || '' })));
 });
 
 // Mensajes de WhatsApp de la empresa en un periodo: cada envío con su conductor, documento y horas
@@ -164,7 +167,7 @@ r.get('/mensajes', operar, async (req, res) => {
   let lista; let totalFiltrado = null;
   if (p.activa) ({ items: lista, total: totalFiltrado } = await listarPagina(EnvioWhatsapp, f, p, { orden: { updatedAt: -1 }, populate: poblar }));
   else lista = await EnvioWhatsapp.find(f).sort({ updatedAt: -1, _id: -1 }).limit(3000).populate(poblar).lean();
-  const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
+  const nombreDe = (t) => nombreCompleto(t);
   const mensajes = lista
     .map(x => ({ _id: x._id, fecha: x.enviadoEn || x.updatedAt, tipo: x.tipo || 'manifiesto', documento: x.documento, estado: x.estado, error: aclararError(x.error), telefono: x.telefono,
       origen: x.origen, cuenta: x.cuenta, intentos: x.intentos, enviadoEn: x.enviadoEn, entregadoEn: x.entregadoEn, leidoEn: x.leidoEn,
@@ -242,6 +245,86 @@ r.post('/envios/:id/reintentar', operar, async (req, res) => {
   if (!x) throw new ErrorHttp(409, 'Este envío no se puede reintentar');
   await auditar(req, 'reintentar_whatsapp', { entidad: 'EnvioWhatsapp', entidadId: req.params.id, detalle: { estado: x.estado } });
   res.json(x);
+});
+
+// ── Ventana de errores: qué pasó, cómo corregirlo y corrección directa ──
+// Se explica solo la causa que corresponde al error guardado; las correcciones posibles dependen de esa causa.
+async function diagnostico(req, envio) {
+  const causa = envio.estado === 'error' || envio.estado === 'descartado' ? (envio.causa || causaDeTexto(envio.error)) : '';
+  const v = envio.viaje ? await Viaje.findOne(deEmpresa(req, { _id: envio.viaje })).select('numero placa conductor conductorNombre manifiesto.numero soporteInterno.mc').lean() : null;
+  const idConductor = envio.conductor || v?.conductor;
+  const t = idConductor ? await Tercero.findOne(deEmpresa(req, { _id: idConductor })).select('tipoId numId nombres apellido1 apellido2 celular whatsappAutorizado whatsappFallo').lean() : null;
+  // Cómo se resolvió antes este mismo problema en la empresa
+  const resueltos = causa ? await EnvioWhatsapp.aggregate([
+    { $match: { empresa: new mongoose.Types.ObjectId(String(req.empresaId)), causa, 'solucion.accion': { $exists: true, $ne: '' }, estado: { $in: ['enviado', 'entregado', 'leido'] } } },
+    { $group: { _id: '$solucion.accion', veces: { $sum: 1 }, ultima: { $max: '$solucion.en' } } }, { $sort: { veces: -1 } }, { $limit: 3 },
+  ]) : [];
+  // Otros envíos con error del mismo conductor (para corregirlos todos de una vez)
+  const otros = t ? await EnvioWhatsapp.countDocuments(deEmpresa(req, { conductor: t._id, estado: 'error', _id: { $ne: envio._id } })) : 0;
+  return {
+    envio: { _id: envio._id, estado: envio.estado, error: aclararError(envio.error), causa, tipo: envio.tipo, documento: envio.documento, telefono: envio.telefono, intentos: envio.intentos, solucion: envio.solucion || null },
+    viaje: v ? { _id: v._id, numero: v.numero, placa: v.placa } : null,
+    explicacion: causa ? { id: causa, ...(CAUSAS[causa] || CAUSAS.meta) } : null,
+    conductor: t ? { _id: t._id, nombre: nombreCompleto(t), documento: `${t.tipoId} ${t.numId}`, celular: t.celular || '', celularValido: !!celularWhatsapp(t.celular),
+      whatsappAutorizado: !!t.whatsappAutorizado, whatsappFallo: t.whatsappFallo?.telefono ? t.whatsappFallo : null } : null,
+    resueltosAntes: resueltos.map((x) => ({ accion: x._id, veces: x.veces, ultima: x.ultima })),
+    otrosConError: otros,
+    puedeConfigurar: tienePermiso(req.usuario.rol, P.CONFIG_GESTIONAR),
+  };
+}
+r.get('/envios/:id/diagnostico', operar, async (req, res) => {
+  const e = await EnvioWhatsapp.findOne(deEmpresa(req, { _id: id(req.params.id) })).lean();
+  if (!e) throw new ErrorHttp(404, 'Envío no encontrado');
+  res.json(await diagnostico(req, e));
+});
+
+// Corrige desde la ventana (celular y/o autorización del conductor) y vuelve a enviar.
+// La autorización la confirma quien opera: queda en la auditoría con su usuario.
+const correccionEnvio = z.object({
+  celular: z.string().trim().max(20).optional(),
+  autorizado: z.literal(true).optional(),
+  reintentar: z.boolean().default(true),
+});
+r.post('/envios/:id/corregir', operar, async (req, res) => {
+  const d = correccionEnvio.parse(req.body);
+  const e = await EnvioWhatsapp.findOne(deEmpresa(req, { _id: id(req.params.id) })).lean();
+  if (!e) throw new ErrorHttp(404, 'Envío no encontrado');
+  if (e.tipo === 'bodega') throw new ErrorHttp(409, 'La solicitud al jefe de bodega se corrige desde Viajes → Cargues de bodega');
+  if (!['error', 'descartado'].includes(e.estado) && d.reintentar) throw new ErrorHttp(409, 'Este envío no tiene un error que corregir');
+  const v = e.viaje ? await Viaje.findOne(deEmpresa(req, { _id: e.viaje })).select('conductor').lean() : null;
+  const t = await Tercero.findOne(deEmpresa(req, { _id: e.conductor || v?.conductor }));
+  const acciones = [];
+  if ((d.celular !== undefined || d.autorizado) && !t) throw new ErrorHttp(409, 'El viaje no tiene conductor: elíjalo primero');
+  if (t) {
+    const antes = { celular: t.celular, whatsappAutorizado: t.whatsappAutorizado };
+    if (d.celular !== undefined) {
+      const diez = String(d.celular).replace(/\D/g, '').slice(-10);
+      if (!celularWhatsapp(diez)) throw new ErrorHttp(400, 'Escriba un celular colombiano de 10 dígitos que empiece por 3');
+      if (diez !== String(t.celular || '').replace(/\D/g, '').slice(-10)) { t.celular = diez; acciones.push('celular'); }
+      if (t.whatsappFallo?.telefono && t.whatsappFallo.telefono !== celularWhatsapp(diez)) t.whatsappFallo = undefined;
+    }
+    if (d.autorizado && !t.whatsappAutorizado) { t.whatsappAutorizado = true; acciones.push('autorizar'); }
+    if (acciones.length) {
+      await t.save();
+      await auditar(req, 'corregir_conductor_whatsapp', { entidad: 'Tercero', entidadId: t._id, detalle: { envio: e._id, acciones, antes, despues: { celular: t.celular, whatsappAutorizado: t.whatsappAutorizado } } });
+    }
+  }
+  let x = e;
+  if (d.reintentar) {
+    // Pasa a error para poder reintentar un descartado por error de datos (no uno reemplazado)
+    if (e.estado === 'descartado') {
+      if ((e.causa || causaDeTexto(e.error)) === 'no_vigente') throw new ErrorHttp(409, 'El documento ya no está vigente: envíe el nuevo desde su viaje');
+      await EnvioWhatsapp.updateOne(deEmpresa(req, { _id: e._id }), { $set: { estado: 'error' } });
+    }
+    x = await procesarEnvio(req.empresaId, e._id, { forzar: true });
+    if (!x) throw new ErrorHttp(409, 'Este envío no se puede reintentar');
+    acciones.push('reintentar');
+    if (['enviado', 'entregado', 'leido'].includes(x.estado)) {
+      await EnvioWhatsapp.updateOne(deEmpresa(req, { _id: e._id }), { $set: { solucion: { accion: acciones.filter((a) => a !== 'reintentar').join('+') || 'reintentar', detalle: e.causa || causaDeTexto(e.error), usuario: req.usuario._id, en: new Date() } } });
+    }
+    await auditar(req, 'reintentar_whatsapp', { entidad: 'EnvioWhatsapp', entidadId: e._id, detalle: { estado: x.estado, acciones } });
+  }
+  res.json(await diagnostico(req, await EnvioWhatsapp.findOne(deEmpresa(req, { _id: e._id })).lean()));
 });
 
 export default r;

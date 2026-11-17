@@ -26,6 +26,7 @@ import rutasRelacionesCobro from './relacionesCobro.js';
 import { avisarLiquidacion } from '../services/rastreo/surtrack.js';
 import { avisarDocumentosApp } from '../services/rastreo/documentosApp.js';
 import { prepararEnvio as prepararWhatsapp, descartarEnvios as descartarWhatsapp } from '../services/whatsappBusiness.js';
+import { nombreCompleto } from '../utils/nombres.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -407,7 +408,7 @@ r.post('/cierres/:mes/reabrir', admin, async (req, res) => {
 
 // ═════════════ Relaciones: pago a conductores y viajes por empresa ═════════════
 const verRep = permitir(P.REPORTES_VER, P.LIQUIDACION_VER);
-const nombreT = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : '');
+const nombreT = (t) => (t ? nombreCompleto(t) : '');
 async function viajesPeriodo(req, extra = {}) {
   const desde = fechaQ(req.query.desde, inicioMes()); const hasta = finDia(fechaQ(req.query.hasta, hoy()));
   const f = deEmpresa(req, { fecha: { $gte: desde, $lte: hasta }, estado: { $ne: 'anulado' }, ...extra });

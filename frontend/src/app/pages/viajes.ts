@@ -29,6 +29,7 @@ import { ChecklistConductor } from '../shared/checklist-conductor';
 import { RouterLink } from '@angular/router';
 import { HttpErrorResponse } from '@angular/common/http';
 import { AutorizacionAdmin } from '../core/autorizacion.service';
+import { nombreTercero } from '../core/modelos';
 
 interface Formulario {
   licencia?: string; conLicencia?: boolean; numeroManifiesto?: string; seguro?: boolean;
@@ -783,7 +784,7 @@ export class Viajes {
     this.form.update(f => ({ ...f, codOrigen: s.codMunicipio || '', remitente: { tipoId: s.tipoId || this.clienteSel()?.tipoId || 'N', numId: s.numId || this.numIdSedes, sede: String(s.sede.codigo) } }));
   }
   readonly sedesOtro = signal<any[]>([]);
-  readonly nombreOtro = computed(() => { const t = this.sedesOtro()[0]; return t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : ''; });
+  readonly nombreOtro = computed(() => { const t = this.sedesOtro()[0]; return t ? nombreTercero(t) : ''; });
   async buscarRemitente(texto: string) {
     const numId = digitosTxt(texto);
     this.form.update(f => ({ ...f, codOrigen: '', remitente: { tipoId: 'N', numId, sede: '' } }));

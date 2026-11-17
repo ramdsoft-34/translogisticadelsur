@@ -28,6 +28,7 @@ import { revisarViaje, revisarViajes } from '../services/rndc/revision.js';
 import { disponibilidad as disponibilidadIa } from '../services/rndc/ia.js';
 import { esAplicable } from '../services/rndc/conocimiento.js';
 import { TIPOS_MANIFIESTO } from '../services/rndc/documentos.js';
+import { nombreCompleto } from '../utils/nombres.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -375,7 +376,7 @@ r.put('/viajes/:id/datos', operar, async (req, res) => {
   corregirCliente(v, d);
   if (d.conductor) {
     const c = await Tercero.findOne(deEmpresa(req, { _id: d.conductor })).select('nombres apellido1 apellido2').lean();
-    d.conductorNombre = [c.nombres, c.apellido1, c.apellido2].filter(Boolean).join(' ');
+    d.conductorNombre = nombreCompleto(c);
   }
   // Al cambiar la placa, el titular vuelve a tomarse del vehículo (o el conductor)
   if (d.placa && d.placa !== v.placa && d.titular === undefined) d.titular = await titularDePlaca(req.empresaId, d.placa);

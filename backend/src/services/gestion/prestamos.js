@@ -4,6 +4,7 @@ import { Prestamo, Tercero, siguiente } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { postear } from './contabilidad.js';
 import { asegurarMesAbierto } from './cierre.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 const dia = (d) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 export const tasaQuincenal = (tasaMensualPct) => (1 + tasaMensualPct / 100) ** 0.5 - 1;
@@ -52,7 +53,7 @@ export async function crearPrestamo(empresaId, { conductor, placa = '', concepto
   const primera = primeraCuota ? new Date(primeraCuota) : siguienteQuincena(dia(new Date(fecha)));
   const plan = planCuotas(capital, tasaMensual, nCuotas, primera);
   const numero = `PR-${String(await siguiente(empresaId, 'prestamo')).padStart(4, '0')}`;
-  const nombre = [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ');
+  const nombre = nombreCompleto(t);
   const p = await Prestamo.create({ empresa: empresaId, numero, fecha, conductor: t._id, cedula: t.numId, conductorNombre: nombre, placa,
     concepto, capital, tasaMensual, nCuotas, valorCuota: plan.valorCuota, primeraCuota: primera, cuotas: plan.cuotas, observacion, creadoPor: usuario });
   // Desembolso: préstamos a conductores contra bancos

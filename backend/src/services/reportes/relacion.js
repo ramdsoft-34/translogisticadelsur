@@ -5,8 +5,9 @@ import { ErrorHttp } from '../../middleware/auth.js';
 import { fmtFecha } from '../../utils/texto.js';
 import { lineaLiquidacion, respaldosAuxiliar, NO_FACTURAR } from '../calculos.js';
 import { nuevoPdf, encabezadoPdf, tablaPdf, numerarPaginas, pdfABuffer, libroExcel } from './comun.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
-const nombreT = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : '');
+const nombreT = (t) => (t ? nombreCompleto(t) : '');
 const $ = (n) => Math.round(Number(n) || 0);
 
 export async function relacionCliente(empresaId, clienteId, desde, hasta) {

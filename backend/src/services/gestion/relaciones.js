@@ -13,6 +13,7 @@ import { txt, soloDigitos, quitarTildes, fmtFecha } from '../../utils/texto.js';
 import { lineaLiquidacion, respaldosAuxiliar, NO_FACTURAR } from '../calculos.js';
 import { saludo } from '../whatsapp.js';
 import { pdfGuardado } from '../documentos/guardados.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const DIA = 864e5;
@@ -24,7 +25,7 @@ const anotarEnviado = (rel) => { rel.enviado = { version: rel.version || 1, titu
 const nuevoToken = () => crypto.randomBytes(12).toString('base64url');
 const $ = (n) => Math.round(Number(n) || 0);
 const pesos = (n) => `$ ${$(n).toLocaleString('es-CO')}`;
-const nombreT = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : '');
+const nombreT = (t) => (t ? nombreCompleto(t) : '');
 // Celular colombiano para wa.me: 3001234567 → 573001234567 ('' si no es un celular válido)
 export function numeroWhatsapp(celular) {
   const d = soloDigitos(celular);

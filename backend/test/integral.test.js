@@ -534,6 +534,42 @@ test('Revisión «Por enviar»: detecta MAN092 antes de enviar, aplica la correc
   assert.equal((await s.manif.post(`/api/rndc/viajes/${id}/aplicar-correccion`, { documento: 'manifiesto', variable: 'CODOPERACIONTRANSPORTE', valor: 'U' })).status, 409);
 });
 
+test('Duplicados: detecta la misma persona con la cédula mal digitada, une sin perder relaciones y corrige nombres', async () => {
+  const crear = (numId, extra = {}) => s.adminA.post('/api/maestros/terceros', { tipoId: 'C', numId, nombres: 'LUISA FERNANDA', apellido1: 'ORTIZ', apellido2: 'BRAVO', roles: ['conductor'], direccion: 'Calle 5', codMunicipio: '52001000', ...extra });
+  const bueno = (await crear('1085278424', { celular: '3001112233' })).body;
+  const malo = (await crear('1085278442', { telefono: '7210000' })).body;   // dos dígitos intercambiados
+  assert.ok(bueno._id && malo._id, JSON.stringify(malo));
+  const otra = (await s.adminA.post('/api/maestros/terceros', { tipoId: 'C', numId: '55001234', nombres: 'MAYRA ORTIZ BRAVO', apellido1: 'ORTIZ', apellido2: 'BRAVO', direccion: 'Calle 6', codMunicipio: '52001000' })).body;
+  const v = await s.reportero.post('/api/viajes', { fecha: '2026-06-18', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'XYZ987', conductor: malo._id });
+  assert.equal(v.status, 201, JSON.stringify(v.body));
+  const d = (await s.adminA.get('/api/maestros/duplicados')).body;
+  const g = d.terceros.find(x => x.registros.some(r => r._id === malo._id));
+  assert.ok(g, 'encuentra el par');
+  assert.deepEqual([g.motivo, g.certeza], ['mismo_nombre', 'alta']);
+  assert.equal(g.registros.find(r => r._id === malo._id).relaciones.viajes, 1, 'cuenta sus viajes');
+  assert.ok(d.nombresConApellidos.some(x => x._id === otra._id && x.sugerido === 'MAYRA'), 'nombres con los apellidos repetidos');
+  assert.equal((await s.adminB.get('/api/maestros/duplicados')).body.terceros.length, 0, 'otra empresa no ve estos registros');
+  // Unir: solo el administrador y con confirmación
+  assert.equal((await s.manif.post('/api/maestros/duplicados/unir', { conservar: bueno._id, quitar: [malo._id], confirmar: true })).status, 403);
+  assert.equal((await s.adminA.post('/api/maestros/duplicados/unir', { conservar: bueno._id, quitar: [malo._id] })).status, 400, 'sin confirmar no une');
+  assert.equal((await s.adminA.post('/api/maestros/duplicados/unir', { conservar: bueno._id, quitar: [otra._id], confirmar: true })).status, 409, 'personas distintas no se unen');
+  const u = await s.adminA.post('/api/maestros/duplicados/unir', { conservar: bueno._id, quitar: [malo._id], confirmar: true });
+  assert.equal(u.status, 200, JSON.stringify(u.body));
+  assert.equal(u.body.movidos['viajes (conductor)'], 1);
+  const vj = (await s.manif.get(`/api/viajes/${v.body._id}`)).body;
+  assert.equal(String(vj.conductor?._id || vj.conductor), bueno._id, 'el viaje queda con el registro conservado');
+  const conservado = (await s.adminA.get(`/api/maestros/terceros?q=1085278424`)).body;
+  const lista = conservado.items || conservado;
+  assert.equal(lista[0].telefono, '7210000', 'completa los datos que le faltaban');
+  assert.equal(((await s.adminA.get(`/api/maestros/terceros?q=1085278442`)).body.items || []).length, 0, 'el unido queda archivado y no sale en la lista');
+  assert.ok(!(await s.adminA.get('/api/maestros/duplicados')).body.terceros.some(x => x.registros.some(r => r._id === malo._id)));
+  // Corregir nombres con apellidos repetidos: solo con confirmación
+  assert.equal((await s.adminA.post('/api/maestros/nombres/corregir', { ids: [otra._id] })).status, 400);
+  const c = (await s.adminA.post('/api/maestros/nombres/corregir', { ids: [otra._id], confirmar: true })).body;
+  assert.deepEqual(c.corregidos.map(x => x.despues), ['MAYRA']);
+  await s.manif.del(`/api/viajes/${v.body._id}`);
+});
+
 test('Viaje repetido: la misma placa el mismo día pide confirmación (428) y con ella se registra', async () => {
   const cuerpo = { fecha: '2026-12-01', cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor };
   const a = await s.reportero.post('/api/viajes', { ...cuerpo, confirmarRepetido: false });
@@ -954,13 +990,23 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     assert.match(ap.resultados[0].error, /no ha autorizado/);
     assert.equal(llamadas.length, antes);
 
-    // Autorizado: sube el PDF y envía la plantilla con los datos del viaje
-    const aut = await s.adminA.put(`/api/maestros/terceros/${s.conductor}`, { whatsappAutorizado: true });
-    assert.equal(aut.status, 200, JSON.stringify(aut.body));
+    // Ventana de errores: explica solo la causa que corresponde, corrige desde ahí y reenvía
     const envio = (await lista())[0];
-    const re = (await s.manif.post(`/api/whatsapp/envios/${envio._id}/reintentar`, {})).body;
-    assert.equal(re.estado, 'enviado', JSON.stringify(re));
-    assert.equal(re.telefono, '573001234567');
+    assert.equal(envio.causa, 'sin_autorizacion');
+    const dg = (await s.manif.get(`/api/whatsapp/envios/${envio._id}/diagnostico`)).body;
+    assert.equal(dg.explicacion.id, 'sin_autorizacion');
+    assert.ok(dg.explicacion.acciones.includes('autorizar'));
+    assert.ok(!dg.explicacion.acciones.includes('config'), 'no propone soluciones que no corresponden');
+    assert.deepEqual([dg.conductor.whatsappAutorizado, dg.conductor.celularValido], [false, true]);
+    assert.equal((await s.reportero.get(`/api/whatsapp/envios/${envio._id}/diagnostico`)).status, 403);
+    assert.equal((await s.manif.post(`/api/whatsapp/envios/${envio._id}/corregir`, { celular: '12345' })).status, 400, 'celular inválido');
+    assert.equal(llamadas.length, antes);
+    // Autorizado desde la ventana: sube el PDF y envía la plantilla con los datos del viaje
+    const cr = (await s.manif.post(`/api/whatsapp/envios/${envio._id}/corregir`, { autorizado: true })).body;
+    assert.equal(cr.envio.estado, 'enviado', JSON.stringify(cr));
+    assert.equal(cr.envio.telefono, '573001234567');
+    assert.equal(cr.envio.solucion.accion, 'autorizar', 'queda guardada la solución');
+    assert.equal(cr.conductor.whatsappAutorizado, true);
     const media = llamadas.find(x => x.ruta.endsWith('/media'));
     assert.equal(media.auth, 'Bearer token-secreto');
     assert.ok(media.cuerpo.includes('%PDF'), 'adjunta el PDF real del manifiesto');
@@ -989,6 +1035,27 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     assert.equal((await lista())[0].estado, 'leido');
     await avisar(aviso('delivered'), firmar(aviso('delivered')));
     assert.equal((await lista())[0].estado, 'leido', 'el estado no retrocede');
+
+    // Meta no pudo entregar (131026): queda la causa, se recuerda el celular y no se le insiste solo
+    const fallo = JSON.stringify({ entry: [{ changes: [{ value: { statuses: [{ id: 'wamid.prueba1', status: 'failed', timestamp: '1793900050',
+      errors: [{ code: 131026, title: 'Message undeliverable' }] }] } }] }] });
+    assert.equal((await avisar(fallo, firmar(fallo))).status, 200);
+    const fl = (await lista())[0];
+    assert.deepEqual([fl.estado, fl.causa], ['error', 'no_entregado']);
+    const dgf = (await s.manif.get(`/api/whatsapp/envios/${fl._id}/diagnostico`)).body;
+    assert.equal(dgf.conductor.whatsappFallo.telefono, '573001234567');
+    const llamadasAntes = llamadas.length;
+    const sinInsistir = (await s.manif.post(`/api/whatsapp/envios/${fl._id}/reintentar`, {})).body;
+    assert.deepEqual([sinInsistir.estado, sinInsistir.causa], ['error', 'no_entregado']);
+    assert.match(sinInsistir.error, /ya no pudo entregar/);
+    assert.equal(llamadas.length, llamadasAntes, 'no se vuelve a llamar a Meta por un celular que ya falló');
+    // Reintentar a propósito desde la ventana sí envía; al entregarse se olvida el fallo
+    const forzado = (await s.manif.post(`/api/whatsapp/envios/${fl._id}/corregir`, {})).body;
+    assert.equal(forzado.envio.estado, 'enviado', JSON.stringify(forzado.envio));
+    const idNuevo = `wamid.prueba${llamadas.filter(x => x.ruta.endsWith('/messages')).length}`;
+    const entregado = JSON.stringify({ entry: [{ changes: [{ value: { statuses: [{ id: idNuevo, status: 'delivered', timestamp: '1793900060' }] } }] }] });
+    await avisar(entregado, firmar(entregado));
+    assert.equal((await s.manif.get(`/api/whatsapp/envios/${fl._id}/diagnostico`)).body.conductor.whatsappFallo, null);
 
     // Alguien le escribe al número: se guarda para leerlo y no se le responde nada
     const recibido = (id, texto) => JSON.stringify({ entry: [{ changes: [{ value: { metadata: { phone_number_id: '99' },
@@ -1024,7 +1091,7 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
 
     // Mensajes de WhatsApp: lista del periodo con totales; otra empresa no los ve
     const msj = (await s.manif.get('/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31')).body;
-    assert.ok(msj.totales.enviados >= 2 && msj.totales.leidos >= 1, JSON.stringify(msj.totales));
+    assert.ok(msj.totales.enviados >= 2 && msj.totales.entregados + msj.totales.leidos >= 1, JSON.stringify(msj.totales));   // el primero se reenvió tras el fallo 131026
     const mSoporte = msj.mensajes.find(x => x.documento === porAprobarS.documento);
     assert.equal(mSoporte.tipo, 'soporte');
     assert.equal(mSoporte.viaje.placa, 'ABC123');

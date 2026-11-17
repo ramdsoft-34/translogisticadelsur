@@ -12,6 +12,7 @@ import { Vehiculo, Tercero, Empresa } from '../../models/index.js';
 import { env } from '../../config/env.js';
 import { actualizarVehiculo, actualizarTercero } from './operaciones.js';
 import { auditar } from '../auditoria.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 export const TAM_LOTE = 30;
 const REINTENTOS = [5000, 15000];          // esperas ante fallas de conexión
@@ -135,7 +136,7 @@ async function documentosTerceros(empresaId, solo) {
   const vistos = new Map();
   for (const t of ts) {
     const k = `${t.tipoId}|${t.numId}`;
-    const nombre = [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') || t.razonSocial || '';
+    const nombre = nombreCompleto(t) || t.razonSocial || '';
     if (!vistos.has(k)) vistos.set(k, { tipoId: t.tipoId, numId: t.numId, etiqueta: `${t.tipoId} ${t.numId} · ${nombre}` });
   }
   return [...vistos.values()];

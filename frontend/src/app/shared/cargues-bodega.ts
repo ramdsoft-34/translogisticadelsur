@@ -14,6 +14,7 @@ import { Moneda } from './moneda';
 import { BuscarTercero } from './buscar-tercero';
 import { FechaHoraPipe, PesosPipe } from './formato';
 import { hoyIso } from './formato';
+import { nombreTercero } from '../core/modelos';
 
 type Tipo = 'urbano' | 'correria';
 interface Fila {
@@ -230,7 +231,7 @@ export class CarguesBodega {
   todasElegidas() { const l = this.visibles().filter(f => this.sePuede(f)); return !!l.length && l.every(f => f.elegida); }
   elegirTodas(v: boolean) { const ids = new Set(this.visibles().filter(f => this.sePuede(f)).map(f => f.item + f.n)); this.filas.update(l => l.map(f => (ids.has(f.item + f.n) ? { ...f, elegida: v } : f))); }
   poner(f: Fila, cambios: Partial<Fila>) { this.filas.update(l => l.map(x => (x.item === f.item && x.n === f.n ? { ...x, estadoEnvio: undefined, error: undefined, ...cambios } : x))); }
-  ponerConductor(f: Fila, t: any) { if (t?._id) this.poner(f, { conductor: t._id, conductorNombre: [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') }); }
+  ponerConductor(f: Fila, t: any) { if (t?._id) this.poner(f, { conductor: t._id, conductorNombre: nombreTercero(t) }); }
   ponerDestino(f: Fila, id: string) {
     const d = this.destinosDe(f.tipo).find((x: any) => x._id === id);
     this.poner(f, d ? { tarifaRef: d._id, destino: d.destino, tarifa: d.tarifa, flete: d.flete, anticipo: d.anticipo } : { tarifaRef: null, destino: '' });

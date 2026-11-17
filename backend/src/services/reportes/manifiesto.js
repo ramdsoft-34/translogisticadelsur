@@ -22,6 +22,7 @@ import { lugarRndc } from '../../utils/lugares.js';
 
 export { lugarRndc };
 import { cargarViaje, variablesEnviadas as enviadas } from '../rndc/operaciones.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 const recurso = (r) => fileURLToPath(new URL(`../../assets/${r}`, import.meta.url));
 const PLANTILLA = JSON.parse(fs.readFileSync(recurso('manifiesto-rndc.json'), 'utf8'));
@@ -31,7 +32,7 @@ const LOGO_SUPERTRANSPORTE = recurso('logos/supertransporte.jpg');
 // ── Textos como los escribe el RNDC ─────────────────────────────────────────
 const sinTildes = (s) => quitarTildes(s).toUpperCase();
 const dd = (n) => String(n).padStart(2, '0');
-const nombre = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].map(txt).filter(Boolean).join(' ') : '');
+const nombre = (t) => (t ? nombreCompleto(t) : '');
 // Fecha AAAA/MM/DD desde Date o desde "DD/MM/AAAA" (como va en el XML)
 export function fechaRndc(d) {
   if (!d) return '';
@@ -94,7 +95,8 @@ export async function tercero(empresaId, tipoId, numId, sede, preferido) {
   if (preferido && txt(preferido.numId) === txt(numId) && (!sede || txt(preferido.sede?.codigo) === txt(sede))) return preferido;
   const f = { empresa: empresaId, numId: txt(numId), ...(tipoId ? { tipoId } : {}), ...(sede ? { 'sede.codigo': txt(sede) } : {}) };
   const l = await Tercero.find(f).lean();
-  l.sort((a, b) => (Number(a.sede?.codigo) || 0) - (Number(b.sede?.codigo) || 0));
+  // Primero el registro vigente (no uno repetido ya unido a otro) y la sede de menor código
+  l.sort((a, b) => (a.unidoA ? 1 : 0) - (b.unidoA ? 1 : 0) || (Number(a.sede?.codigo) || 0) - (Number(b.sede?.codigo) || 0));
   return l[0] || null;
 }
 

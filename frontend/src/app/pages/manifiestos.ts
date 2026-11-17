@@ -21,6 +21,7 @@ import { Auth } from '../core/auth.service';
 import { P } from '../core/modelos';
 import { leerArchivos } from '../shared/adjuntos';
 import { RevisionRndcVista, RevisionRndc, CorreccionRndc } from '../shared/revision-rndc';
+import { ErrorWhatsapp } from '../shared/error-whatsapp';
 
 type Pestana = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'soporte' | 'correos' | 'historial';
 type PestanaViajes = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'soporte';
@@ -37,7 +38,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
 
 @Component({
   selector: 'app-manifiestos',
-  imports: [FormsModule, Modal, Icono, Moneda, Paginador, ExpedirRndc, SelectorMunicipio, BuscarTercero, Confirmar, RevisionRndcVista, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, Moneda, Paginador, ExpedirRndc, SelectorMunicipio, BuscarTercero, Confirmar, RevisionRndcVista, ErrorWhatsapp, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>{{ titulo() }}</h1><p class="sutil">{{ descripcion() }}</p></div>
@@ -222,7 +223,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                 <td data-etiqueta="Manifiesto">@if ($any(v).soporteInterno?.mc) { {{ $any(v).soporteInterno.mc }}<br /><span class="chip" [class]="chipSoporte($any(v))">{{ textoSoporte($any(v)) }}</span>
                   @if ($any(v).soporteInterno.estado === 'anulado' && $any(v).soporteInterno.anulado?.motivo) { <br /><span class="sutil" [title]="$any(v).soporteInterno.anulado.motivo">{{ $any(v).soporteInterno.anulado.motivo }}</span> }
                   @else { <br /><span class="sutil">Cód. {{ $any(v).soporteInterno.codigo }}</span> } }
-                  @if (whatsappDe(v._id); as w) { <span class="chip" style="display:block;width:fit-content;margin-top:4px" [class]="claseWhatsapp(w.estado)" [title]="w.error || ('WhatsApp al conductor ' + (w.telefono || ''))">WhatsApp: {{ textoWhatsapp(w.estado) }}</span> }</td>
+                  @if (whatsappDe(v._id); as w) {
+                    @if (w.estado === 'error') { <button type="button" class="chip-boton" style="display:block;margin-top:4px" (click)="verErrorWhatsapp([w._id])" [title]="'Ver qué pasó y corregirlo: ' + (w.error || '')"><span class="chip error">WhatsApp: error · ver</span></button> }
+                    @else { <span class="chip" style="display:block;width:fit-content;margin-top:4px" [class]="claseWhatsapp(w.estado)" [title]="w.error || ('WhatsApp al conductor ' + (w.telefono || ''))">WhatsApp: {{ textoWhatsapp(w.estado) }}</span> } }</td>
                 } @else {
                 <td data-etiqueta="Remesa">@if (v.remesa.numero) { {{ v.remesa.numero }}<br /><span class="chip" [class]="chip(v.remesa.estado)">{{ v.remesa.estado || 'sin enviar' }}</span> }</td>
                 <td data-etiqueta="Manifiesto">@if (v.manifiesto.numero) { {{ v.manifiesto.numero }}<br /><span class="chip" [class]="chip(v.manifiesto.estado)">{{ v.manifiesto.estado || 'sin enviar' }}</span> }
@@ -230,7 +233,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                 }
                 @if (conCorreo()) {
                   <td data-etiqueta="Correo">@if (resumenCorreo(v._id); as rc) { <button type="button" class="chip-boton" (click)="verCorreos(v)" [title]="rc.titulo"><span class="chip" [class]="rc.clase">{{ rc.texto }}</span></button> }
-                    @if (whatsappDe(v._id); as w) { <span class="chip" style="display:block;width:fit-content;margin-top:4px" [class]="claseWhatsapp(w.estado)" [title]="w.error || ('WhatsApp al conductor ' + (w.telefono || ''))">WhatsApp: {{ textoWhatsapp(w.estado) }}</span> }
+                    @if (whatsappDe(v._id); as w) {
+                    @if (w.estado === 'error') { <button type="button" class="chip-boton" style="display:block;margin-top:4px" (click)="verErrorWhatsapp([w._id])" [title]="'Ver qué pasó y corregirlo: ' + (w.error || '')"><span class="chip error">WhatsApp: error · ver</span></button> }
+                    @else { <span class="chip" style="display:block;width:fit-content;margin-top:4px" [class]="claseWhatsapp(w.estado)" [title]="w.error || ('WhatsApp al conductor ' + (w.telefono || ''))">WhatsApp: {{ textoWhatsapp(w.estado) }}</span> } }
                     @else { <button type="button" class="pequeno texto" (click)="verCorreos(v)">Sin envío</button> }</td>
                 }
                 <td class="celda-acciones">
@@ -456,6 +461,8 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
 
     <!-- Expedición: revisar, corregir y enviar -->
     <app-expedir-rndc [viajeId]="expedir()" [soloVer]="soloVer()" (cerrar)="expedir.set(null)" (actualizado)="cargar()" />
+    <!-- Errores de WhatsApp: qué pasó, cómo corregirlo y corrección ahí mismo -->
+    <app-error-whatsapp [envios]="erroresWhatsapp()" (cerrar)="erroresWhatsapp.set([])" (corregido)="cargarCorreos(viajes())" />
 
     <!-- Ver PDF del manifiesto o de la remesa -->
     <app-modal [titulo]="pdfVisto()?.titulo || ''" [abierto]="!!pdfVisto()" (cerrar)="cerrarPdf()" [ancho]="true">
@@ -757,7 +764,7 @@ export class Manifiestos {
   textoCorreo(e: string) { return ESTADO_CORREO[e]?.[0] || e; }
   claseCorreo(e: string) { return ESTADO_CORREO[e]?.[1] || ''; }
 
-  private async cargarCorreos(lista: Viaje[]) {
+  async cargarCorreos(lista: Viaje[]) {
     if (!lista.length) return;
     // En Soporte interno solo hay WhatsApp (los correos de soportes son manuales)
     if (this.pestana() !== 'soporte') {
@@ -788,13 +795,18 @@ export class Manifiestos {
     try { await fn(); this.seleccion.set(new Set()); await this.cargarCorreos(this.viajes()); }
     catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
+  // Envíos con error que se muestran en la ventana de corrección (uno por uno)
+  readonly erroresWhatsapp = signal<string[]>([]);
+  verErrorWhatsapp(ids: string[]) { this.erroresWhatsapp.set(ids.filter(Boolean)); }
   aprobarWhatsapp(viajes: string[]) {
     return this.tareaWhatsapp(async () => {
       const r = await this.api.post<any>('/whatsapp/aprobar', { viajes });
       const fallos = r.resultados.filter((x: any) => x.estado === 'error');
       if (!r.aprobados) this.avisos.mostrar('Los viajes elegidos no tienen WhatsApp por aprobar', 'info');
-      else if (fallos.length) this.avisos.mostrar(`${fallos.length} de ${r.aprobados} no se envió: ${fallos[0].error}`, 'error', 9000);
-      else this.avisos.ok(`${r.aprobados} documento(s) enviados por WhatsApp`);
+      else if (fallos.length) {
+        this.avisos.mostrar(`${r.aprobados - fallos.length} de ${r.aprobados} enviados; ${fallos.length} con error`, 'error');
+        this.verErrorWhatsapp(fallos.map((x: any) => x.id));
+      } else this.avisos.ok(`${r.aprobados} documento(s) enviados por WhatsApp`);
     });
   }
   descartarWhatsapp(viajes: string[]) {
@@ -806,7 +818,7 @@ export class Manifiestos {
   enviarWhatsapp(v: Viaje) {
     return this.tareaWhatsapp(async () => {
       const r = await this.api.post<any>(`/whatsapp/viajes/${v._id}/enviar`, {});
-      if (r?.estado === 'error') this.avisos.mostrar(`No se envió: ${r.error}`, 'error', 9000);
+      if (r?.estado === 'error') this.verErrorWhatsapp([r._id]);
       else this.avisos.ok(this.pestana() === 'soporte' ? 'Soporte interno enviado por WhatsApp' : 'Manifiesto enviado por WhatsApp');
     });
   }

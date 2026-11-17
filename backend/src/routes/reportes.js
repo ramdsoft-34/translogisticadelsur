@@ -12,11 +12,12 @@ import { parseFecha, fmtFecha, fmtMiles } from '../utils/texto.js';
 import { auditar, verificarCadena } from '../services/auditoria.js';
 import { filtroAuditoria, excelAuditoria } from '../services/reportes/auditoriaExport.js';
 import { saldoViaje, utilidadViaje } from '../services/calculos.js';
+import { nombreCompleto } from '../utils/nombres.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
 
-const nombre = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : '');
+const nombre = (t) => (t ? nombreCompleto(t) : '');
 const enviarArchivo = (res, buffer, archivo, tipo) => {
   res.setHeader('Content-Type', tipo);
   res.setHeader('Content-Disposition', `attachment; filename="${archivo.replace(/[^\w.-]/g, '_')}"`);

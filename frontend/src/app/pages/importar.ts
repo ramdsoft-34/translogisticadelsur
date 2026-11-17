@@ -14,6 +14,7 @@ import { Auth } from '../core/auth.service';
 import { P } from '../core/modelos';
 import { Icono } from '../shared/icono';
 import { ImportarExcel } from '../shared/importar-excel';
+import { nombreTercero } from '../core/modelos';
 
 type Tipo = 'terceros' | 'vehiculos' | 'tarifas';
 
@@ -168,7 +169,7 @@ export class Importar {
   async ponerConductor(p: any) {
     const t = this.elegidos()[p._id];
     if (!t?._id) return;
-    if (!confirm(`¿El conductor del viaje ${p.numero} (${p.placa}) es ${[t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ')}?`)) return;
+    if (!confirm(`¿El conductor del viaje ${p.numero} (${p.placa}) es ${nombreTercero(t)}?`)) return;
     try {
       await this.api.post(`/importaciones/completar-viajes/${p._id}/conductor`, { conductor: t._id });
       const s = new Set(this.hechos()); s.add(p._id); this.hechos.set(s);

@@ -14,6 +14,7 @@ import { Cliente, Tarifa, Tercero, Vehiculo, Viaje, Liquidacion, EnvioCorreo } f
 import { normalizar, soloDigitos, nombrePropio } from '../../utils/texto.js';
 import { leerLibro, filas, txt, entero, num } from './excel.js';
 import { importarPlantillaViajes } from './plantilla.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 const placaKey = (p) => txt(p).replace(/[\s-]/g, '').toUpperCase();
 const cedula = (v) => { const s = entero(v).replace(/[.\s,]/g, ''); return s === '0' ? '' : s; };
@@ -117,7 +118,7 @@ export async function sincronizarMaestros(empresaId, buffer, { aplicar = false, 
   const t = repartir(sobranTarifas, d => tarifasUsadas.has(String(d._id)));
   const v = repartir(sobranVehiculos, d => placasUsadas.has(d.placa));
   const p = repartir(sobranTerceros, d => tercerosUsados.has(String(d._id)));
-  const nombreT = (d) => `${[d.nombres, d.apellido1].filter(Boolean).join(' ')} (${d.tipoId} ${d.numId})`;
+  const nombreT = (d) => `${nombreCompleto(d)} (${d.tipoId} ${d.numId})`;
   plan.eliminar = { clientes: c.borrar.map(d => d.nombre), tarifas: t.borrar.map(d => d.destino), vehiculos: v.borrar.map(d => d.placa), terceros: p.borrar.map(nombreT) };
   plan.desactivar = { clientes: c.desactivar.map(d => d.nombre), tarifas: t.desactivar.map(d => d.destino), vehiculos: v.desactivar.map(d => d.placa), terceros: p.desactivar.map(nombreT) };
   if (aplicar) {

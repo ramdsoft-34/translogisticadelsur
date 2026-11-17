@@ -39,7 +39,7 @@ export function textoVence(fecha, ahora = new Date()) {
   return `Vence en ${d} días`;
 }
 
-export const nombreTercero = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ').trim() : '');
+export { nombreCompleto as nombreTercero } from '../../utils/nombres.js';
 
 /** Fecha que no puede estar en el futuro (último mantenimiento, examen hecho, entrega de EPP…). */
 export function noFutura(fecha, ahora = new Date()) {

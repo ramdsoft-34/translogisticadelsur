@@ -10,7 +10,10 @@ import { datosManifiesto, manifiestoPdf, nombreArchivo } from './reportes/manifi
 import { soporteInterno } from './gestion/soporteInterno.js';
 import { resolverConductor } from './gestion/conductorViaje.js';
 import { soporteExpedido } from './documentos/expedidos.js';
-import { errorClaro } from './erroresWhatsapp.js';
+import { errorClaro, causaDeCodigo } from './erroresWhatsapp.js';
+
+// Error de un envío con su causa (para explicar y corregir en la ventana de errores)
+class ErrorEnvio extends Error { constructor(mensaje, causa) { super(mensaje); this.causa = causa; } }
 
 const urlGraph = () => (process.env.WHATSAPP_GRAPH_URL || 'https://graph.facebook.com/v23.0').replace(/\/$/, '');
 // Meta puede avisar en desorden: el estado nunca retrocede
@@ -48,7 +51,9 @@ async function llamarMeta(ruta, token, opciones = {}) {
   const cuerpo = await r.json().catch(() => ({}));
   if (!r.ok) {
     const e = cuerpo?.error || {};
-    throw new Error(errorClaro(e.code, e.error_data?.details || e.message || `Meta respondió ${r.status}`));
+    const err = new Error(errorClaro(e.code, e.error_data?.details || e.message || `Meta respondió ${r.status}`));
+    err.codigoMeta = e.code;
+    throw err;
   }
   return cuerpo;
 }
@@ -105,23 +110,28 @@ function documentoVigente(v) {
 }
 
 // Envía un manifiesto (o soporte interno) ya aprobado. Se revisa de nuevo: pudo anularse o cambiar el conductor mientras esperaba.
-export async function procesarEnvio(empresaId, envioId) {
+export async function procesarEnvio(empresaId, envioId, { forzar = false } = {}) {
   const r = await EnvioWhatsapp.findOneAndUpdate({ empresa: empresaId, _id: envioId, tipo: { $ne: 'bodega' }, estado: { $in: ['pendiente', 'error'] } },
-    { $set: { estado: 'enviando', error: '' }, $inc: { intentos: 1 } }, { new: true }).lean();
+    { $set: { estado: 'enviando', error: '', causa: '' }, $inc: { intentos: 1 } }, { new: true }).lean();
   if (!r) return null;
   const terminar = async (set) => (await EnvioWhatsapp.findOneAndUpdate({ empresa: empresaId, _id: envioId }, { $set: set }, { new: true }).lean());
   try {
     const v = await Viaje.findOne({ empresa: empresaId, _id: r.viaje }).select('conductor conductorNombre placa manifiesto soporteInterno').lean();
     const doc = documentoVigente(v);
     if (!doc || doc.documento !== r.documento) {
-      return await terminar({ estado: 'descartado', error: `${r.tipo === 'soporte' ? 'El soporte interno' : 'El manifiesto'} ya no está vigente: no se envió` });
+      return await terminar({ estado: 'descartado', causa: 'no_vigente', error: `${r.tipo === 'soporte' ? 'El soporte interno' : 'El manifiesto'} ya no está vigente: no se envió` });
     }
     const idConductor = await resolverConductor(empresaId, v);
-    const conductor = idConductor && await Tercero.findOne({ empresa: empresaId, _id: idConductor }).select('nombres celular whatsappAutorizado').lean();
-    if (!conductor) throw new Error(v.conductorNombre ? `No se encontró a «${v.conductorNombre}» en Conductores y terceros: edite el viaje y elija el conductor` : 'El viaje no tiene conductor');
-    if (!conductor.whatsappAutorizado) throw new Error('El conductor no ha autorizado recibir mensajes por WhatsApp (Conductores y terceros)');
+    const conductor = idConductor && await Tercero.findOne({ empresa: empresaId, _id: idConductor }).select('nombres celular whatsappAutorizado whatsappFallo').lean();
+    if (!conductor) throw new ErrorEnvio(v.conductorNombre ? `No se encontró a «${v.conductorNombre}» en Conductores y terceros: edite el viaje y elija el conductor` : 'El viaje no tiene conductor', 'sin_conductor');
+    if (!conductor.whatsappAutorizado) throw new ErrorEnvio('El conductor no ha autorizado recibir mensajes por WhatsApp (Conductores y terceros)', 'sin_autorizacion');
     const para = celularWhatsapp(conductor.celular);
-    if (!para) throw new Error('El conductor no tiene un celular válido de 10 dígitos (Conductores y terceros)');
+    if (!para) throw new ErrorEnvio('El conductor no tiene un celular válido de 10 dígitos (Conductores y terceros)', 'celular_invalido');
+    // Ese mismo celular ya falló por no tener WhatsApp activo: no se vuelve a intentar solo (Meta lo rechazaría igual)
+    if (!forzar && conductor.whatsappFallo?.telefono === para) {
+      const dia = new Date(conductor.whatsappFallo.en || Date.now()).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' });
+      throw new ErrorEnvio(`WhatsApp ya no pudo entregar a ${para} el ${dia} (sin WhatsApp activo o términos sin aceptar). Confirme el número con el conductor y reintente`, 'no_entregado');
+    }
     const { empresa, cuenta, token, tipo } = await cuentaWhatsapp(empresaId);
     let d, pdf, nombre;
     if (doc.tipo === 'soporte') {
@@ -136,9 +146,9 @@ export async function procesarEnvio(empresaId, envioId) {
     const mediaId = await subirPdf(cuenta, token, pdf, nombre);
     const res = await llamarMeta(`${cuenta.phoneNumberId}/messages`, token, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(mensajePlantilla(cuenta, para, mediaId, nombre, d, conductor, empresa)) });
-    return await terminar({ estado: 'enviado', tipo: doc.tipo, cuenta: tipo, conductor: conductor._id, telefono: para, idMensaje: res.messages?.[0]?.id || '', enviadoEn: new Date(), error: '' });
+    return await terminar({ estado: 'enviado', tipo: doc.tipo, cuenta: tipo, conductor: conductor._id, telefono: para, idMensaje: res.messages?.[0]?.id || '', enviadoEn: new Date(), error: '', causa: '' });
   } catch (e) {
-    return await terminar({ estado: 'error', error: String(e.message).slice(0, 500) });
+    return await terminar({ estado: 'error', error: String(e.message).slice(0, 500), causa: e.causa || (e.codigoMeta ? causaDeCodigo(e.codigoMeta) : 'meta') });
   }
 }
 
@@ -168,7 +178,7 @@ export async function aprobarEnvios(empresaId, viajes, usuario) {
   const resultados = [];
   for (const id of ids) {
     const x = await procesarEnvio(empresaId, id);
-    if (x) resultados.push({ viaje: x.viaje, estado: x.estado, error: x.error });
+    if (x) resultados.push({ id: x._id, viaje: x.viaje, estado: x.estado, error: x.error, causa: x.causa });
   }
   return { aprobados: ids.length, resultados };
 }
@@ -191,12 +201,19 @@ export function firmaValida(cuerpo, firma, secreto) {
 const estadosDe = (datos) => (datos?.entry || []).flatMap(x => x.changes || []).flatMap(c => c.value?.statuses || []);
 
 async function aplicarEstado(empresaId, s) {
-  const envio = await EnvioWhatsapp.findOne({ empresa: empresaId, idMensaje: String(s.id || '') }).select('estado').lean();
+  const envio = await EnvioWhatsapp.findOne({ empresa: empresaId, idMensaje: String(s.id || '') }).select('estado conductor telefono').lean();
   if (!envio) return;
   if (s.status === 'failed') {
     const e = s.errors?.[0] || {};
-    await EnvioWhatsapp.updateOne({ empresa: empresaId, _id: envio._id }, { $set: { estado: 'error', error: errorClaro(e.code, e.error_data?.details || e.title || e.message || '') } });
+    const causa = causaDeCodigo(e.code);
+    await EnvioWhatsapp.updateOne({ empresa: empresaId, _id: envio._id }, { $set: { estado: 'error', causa, error: errorClaro(e.code, e.error_data?.details || e.title || e.message || '') } });
+    if (causa === 'no_entregado' && envio.conductor && envio.telefono) {
+      await Tercero.updateOne({ empresa: empresaId, _id: envio.conductor }, { $set: { whatsappFallo: { telefono: envio.telefono, codigo: Number(e.code) || 0, en: new Date() } } });
+    }
     return;
+  }
+  if (['delivered', 'read'].includes(s.status) && envio.conductor && envio.telefono) {
+    await Tercero.updateOne({ empresa: empresaId, _id: envio.conductor, 'whatsappFallo.telefono': envio.telefono }, { $unset: { whatsappFallo: 1 } });
   }
   const estado = ESTADO_META[s.status];
   if (!estado || (ORDEN[estado] || 0) <= (ORDEN[envio.estado] || 0)) return;

@@ -10,9 +10,10 @@ import { lugarRndc } from '../../utils/lugares.js';
 import { idCliente } from '../rndc/documentos.js';
 import { fopat, retefuente } from './liquidacionConductor.js';
 import { reglasDe } from './reglas.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 const NUMERO_INICIAL = 100000;          // la plantilla empezó en MC100000
-const nombre = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : '');
+const nombre = (t) => (t ? nombreCompleto(t) : '');
 const aaaa = (d) => { const f = new Date(d); return `${f.getUTCFullYear()}/${String(f.getUTCMonth() + 1).padStart(2, '0')}/${String(f.getUTCDate()).padStart(2, '0')}`; };
 
 export const codigoVerificacion = (texto) => crypto.createHash('sha256').update(texto).digest('hex').slice(0, 16).toUpperCase();

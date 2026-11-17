@@ -23,6 +23,7 @@ import * as rastreo from '../services/rastreo/surtrack.js';
 import { asegurarSoporte } from '../services/gestion/soporteInterno.js';
 import { exigirNoFacturado, bloqueadosPorRelacion } from '../services/gestion/relaciones.js';
 import { datosSeguro, limiteSeguro } from '../services/gestion/seguros.js';
+import { nombreCompleto } from '../utils/nombres.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -93,7 +94,7 @@ const POBLAR = (req) => [
   pob(req.empresaId, 'titular', 'nombres apellido1 apellido2 numId tipoId'),
 ];
 
-const nombreTercero = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : '');
+const nombreTercero = (t) => (t ? nombreCompleto(t) : '');
 function presentar(v) {
   return { ...v, conductorNombre: nombreTercero(v.conductor) || v.conductorNombre || '', titularNombre: nombreTercero(v.titular),
     saldo: saldoViaje(v), utilidad: utilidadViaje(v), auxiliarPagado: auxiliarYaPagado(v) };

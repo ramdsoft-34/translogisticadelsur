@@ -27,6 +27,7 @@
 // (La API de WhatsApp Business exige cuenta de Meta, plantillas aprobadas y
 // tokens; no se implementa sin esas credenciales.)
 import { enColombia, fmtFecha, normalizar, soloDigitos, txt } from '../utils/texto.js';
+import { nombreCompleto as nombreDeTercero, nombresSinApellidos } from '../utils/nombres.js';
 
 export const cop = (n) => `$ ${Math.round(Number(n) || 0).toLocaleString('es-CO')}`;
 
@@ -36,9 +37,9 @@ const capital = (p) => (p ? p.charAt(0).toLocaleUpperCase('es') + p.slice(1).toL
 export function nombreCorto(conductor, nombreCompleto = '') {
   const primera = (s) => txt(s).split(/\s+/)[0] || '';
   let partes;
-  if (txt(conductor?.nombres) && txt(conductor?.apellido1)) partes = [primera(conductor.nombres), txt(conductor.apellido1), txt(conductor.apellido2)];
+  if (txt(conductor?.nombres) && txt(conductor?.apellido1)) partes = [primera(nombresSinApellidos(conductor.nombres, conductor.apellido1, conductor.apellido2)), txt(conductor.apellido1), txt(conductor.apellido2)];
   else {
-    const p = txt(nombreCompleto || [conductor?.nombres, conductor?.apellido1, conductor?.apellido2].filter(Boolean).join(' ')).split(/\s+/).filter(Boolean);
+    const p = txt(nombreCompleto || nombreDeTercero(conductor)).split(/\s+/).filter(Boolean);
     partes = p.length >= 4 ? [p[0], ...p.slice(-2)] : p;
   }
   return partes.join(' ').split(/\s+/).filter(Boolean).map(capital).join(' ');

@@ -4,6 +4,7 @@ import { Tercero, Vehiculo } from '../../models/index.js';
 import { SstColaborador, SstVehiculo } from '../../models/sst.js';
 import { estadoVence, nombreTercero, textoVence } from './comun.js';
 import { estadoActividad, kilometrajeVigente } from './flota.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 const DIA = 86400000;
 
@@ -16,7 +17,7 @@ export async function documentosPorVencer(empresaId, limite) {
       .select('placa soat venceTecnomecanica').lean(),
   ]);
   const alertas = [];
-  for (const x of terceros) alertas.push({ tipo: 'Licencia', referencia: `${x.nombres} ${x.apellido1}`.trim(), vence: x.licencia.vence,
+  for (const x of terceros) alertas.push({ tipo: 'Licencia', referencia: nombreCompleto(x), vence: x.licencia.vence,
     nombre: nombreTercero(x), documento: x.numId, detalle: x.licencia.categoria ? `Categoría ${x.licencia.categoria}` : '' });
   for (const v of vehiculos) {
     if (v.soat?.vence && v.soat.vence <= limite) alertas.push({ tipo: 'SOAT', referencia: v.placa, vence: v.soat.vence, placa: v.placa, detalle: v.soat.numero ? `Póliza ${v.soat.numero}` : '' });

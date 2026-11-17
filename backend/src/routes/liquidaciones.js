@@ -11,11 +11,12 @@ import { P } from '../config/permisos.js';
 import { auditar } from '../services/auditoria.js';
 import { lineaLiquidacion, totalesLiquidacion, respaldosAuxiliar, NO_FACTURAR } from '../services/calculos.js';
 import { parseFecha, fmtFecha, escaparRegex } from '../utils/texto.js';
+import { nombreCompleto } from '../utils/nombres.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
 
-const nombre = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : '');
+const nombre = (t) => (t ? nombreCompleto(t) : '');
 const periodo = z.object({
   cliente: z.string().refine(v => mongoose.isValidObjectId(v), 'cliente inválido'),
   desde: z.string().transform(parseFecha).refine(Boolean, 'fecha inválida'),

@@ -6,6 +6,7 @@
 import { env } from '../../config/env.js';
 import { Empresa, Viaje, Vehiculo, Tercero, Cliente, RecorridoRastreo, LiquidacionConductor } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 const CONFIG = { cooespatrans: () => env.surTrack, app: () => env.surTrackApp };
 /** Llamada al backend de la app nueva (planillas, avisos, versión). */
@@ -516,7 +517,7 @@ export async function invitarApp(empresaId, terceroId, correo) {
   const email = String(correo || t.correo || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ErrorHttp(400, 'Escriba el correo del conductor');
   const empresa = await Empresa.findById(empresaId).select('nombre').lean();
-  const nombre = [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ').trim();
+  const nombre = nombreCompleto(t);
   const r = await llamar('/conductores/invitar', { metodo: 'POST', servidor: 'app', cuerpo: {
     empresaId: String(empresaId), empresaNombre: empresa?.nombre || 'Empresa', terceroId: String(t._id),
     cedula: digitos(t.numId), nombre: nombre.length >= 3 ? nombre : `Conductor ${digitos(t.numId)}`, email } });

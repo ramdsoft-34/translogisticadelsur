@@ -15,6 +15,9 @@ import { variablesTercero, variablesVehiculo, huella, idCliente } from '../servi
 import { documentosPorVencer } from '../services/sst/vencimientos.js';
 import { reglasDe, pesoPorTamano } from '../services/gestion/reglas.js';
 import { sincronizarDestinoViajes } from '../services/gestion/sincronizarDestino.js';
+import { nombreCompleto } from '../utils/nombres.js';
+import { alCambiarTercero, alCambiarVehiculo } from '../services/sincronizarMaestros.js';
+import { buscarDuplicados, unirTerceros, corregirNombres } from '../services/duplicados.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -191,7 +194,8 @@ function exigirDatosVehiculo(d) {
 // ── Terceros ────────────────────────────────────────────────────────────────
 
 r.get('/terceros', ver, async (req, res) => {
-  const filtro = deEmpresa(req);
+  // Los repetidos ya unidos a otro registro no se listan
+  const filtro = deEmpresa(req, { unidoA: null });
   if (req.query.rol) filtro.roles = req.query.rol;
   if (req.query.activos === '1') filtro.activo = true;
   if (req.query.activos === '0') filtro.activo = false;
@@ -269,6 +273,24 @@ r.post('/vehiculos/vista-rndc', ver, async (req, res) => {
   res.json({ proceso: 12, variables: variablesVehiculo(await Empresa.findById(req.empresaId).lean(), d) });
 });
 
+// ── Registros repetidos ──
+// Detección (solo lectura) y unión confirmada por el administrador. Nada se borra: los unidos quedan archivados.
+r.get('/duplicados', editar, async (req, res) => res.json(await buscarDuplicados(req.empresaId)));
+const unionTerceros = z.object({ conservar: z.string().refine(v => mongoose.isValidObjectId(v)), quitar: z.array(z.string().refine(v => mongoose.isValidObjectId(v))).min(1).max(10), confirmar: z.literal(true) });
+r.post('/duplicados/unir', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const d = unionTerceros.parse(req.body);
+  const x = await unirTerceros(req.empresaId, d.conservar, d.quitar, req.usuario._id);
+  await auditar(req, 'unir_terceros', { entidad: 'Tercero', entidadId: x.conservado._id, detalle: x });
+  res.json(x);
+});
+const idsNombres = z.object({ ids: z.array(z.string().refine(v => mongoose.isValidObjectId(v))).min(1).max(500), confirmar: z.literal(true) });
+r.post('/nombres/corregir', permitir(P.CONFIG_GESTIONAR), async (req, res) => {
+  const d = idsNombres.parse(req.body);
+  const corregidos = await corregirNombres(req.empresaId, d.ids);
+  await auditar(req, 'corregir_nombres_terceros', { detalle: { cantidad: corregidos.length, corregidos } });
+  res.json({ corregidos });
+});
+
 r.post('/terceros', editar, async (req, res) => {
   const d = terceroSchema.parse(req.body);
   exigirDatosTercero(d);
@@ -284,7 +306,9 @@ r.put('/terceros/:id', editar, async (req, res) => {
   x.set(d);
   await estadoSincronizacion(req, x, variablesTercero);
   await x.save();
-  await auditar(req, 'editar_tercero', { entidad: 'Tercero', entidadId: x._id, detalle: { numId: x.numId, cambios: cambios(antes, x.toObject(), Object.keys(req.body)) } });
+  // Lo que otros módulos guardan como texto (nombre, cédula) queda igual al registro
+  const sincronizados = await alCambiarTercero(req.empresaId, antes, x.toObject());
+  await auditar(req, 'editar_tercero', { entidad: 'Tercero', entidadId: x._id, detalle: { numId: x.numId, cambios: cambios(antes, x.toObject(), Object.keys(req.body)), sincronizados } });
   res.json(x.toJSON());
 });
 
@@ -328,7 +352,8 @@ r.put('/vehiculos/:id', editar, async (req, res) => {
   x.set(d);
   await estadoSincronizacion(req, x, variablesVehiculo);
   await x.save();
-  await auditar(req, 'editar_vehiculo', { entidad: 'Vehiculo', entidadId: x._id, detalle: { placa: x.placa, cambios: cambios(antes, x.toObject(), Object.keys(req.body)) } });
+  const sincronizados = await alCambiarVehiculo(req.empresaId, antes, x.toObject());
+  await auditar(req, 'editar_vehiculo', { entidad: 'Vehiculo', entidadId: x._id, detalle: { placa: x.placa, cambios: cambios(antes, x.toObject(), Object.keys(req.body)), sincronizados } });
   res.json(x);
 });
 
@@ -340,7 +365,7 @@ r.get('/alertas', ver, async (req, res) => {
 });
 
 // ── Revisión de datos: lo que puede causar rechazos del RNDC o un manifiesto incompleto ──
-const nombreT = (t) => [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ');
+const nombreT = (t) => nombreCompleto(t);
 r.get('/revision', ver, async (req, res) => {
   const dias = Number((await reglasDe(req.empresaId)).diasAvisoDocumentos) || 10;
   const pronto = new Date(Date.now() + dias * 86400000);

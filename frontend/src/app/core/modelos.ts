@@ -48,4 +48,17 @@ export const TIPOS_ID: Record<string, string> = {
   C: 'Cédula de ciudadanía', N: 'NIT', P: 'Pasaporte', E: 'Cédula de extranjería', T: 'Tarjeta de identidad', U: 'NUIP',
 };
 
-export const nombreTercero = (t: any) => (t ? [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ') : '');
+// Nombre completo sin repetir los apellidos que algunos registros traen también dentro de «nombres»
+// («NARVAEZ GALLARDO HENRY ARMANDO» + «NARVAEZ GALLARDO» → «HENRY ARMANDO NARVAEZ GALLARDO»). Igual que backend/src/utils/nombres.js.
+const limpioNombre = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
+const claveNombre = (s: string) => limpioNombre(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+export function nombresSinApellidos(nombres: unknown, apellido1: unknown, apellido2: unknown) {
+  const n = limpioNombre(nombres).split(' ').filter(Boolean);
+  const ap = [apellido1, apellido2].map(limpioNombre).filter(Boolean).join(' ').split(' ').filter(Boolean);
+  if (!ap.length || n.length <= ap.length) return limpioNombre(nombres);
+  const igual = (desde: number) => ap.every((w, i) => claveNombre(n[desde + i]) === claveNombre(w));
+  if (igual(0)) return n.slice(ap.length).join(' ');
+  if (igual(n.length - ap.length)) return n.slice(0, n.length - ap.length).join(' ');
+  return limpioNombre(nombres);
+}
+export const nombreTercero = (t: any) => (t ? [nombresSinApellidos(t.nombres, t.apellido1, t.apellido2), limpioNombre(t.apellido1), limpioNombre(t.apellido2)].filter(Boolean).join(' ') : '');

@@ -16,6 +16,7 @@ import { propuestaViaje, CONSOLIDADA_VARIOS_PUNTOS } from '../rndc/tiemposCumpli
 import { txt, quitarTildes, soloDigitos, fmtMiles } from '../../utils/texto.js';
 import { pdfABuffer } from './comun.js';
 import { campo, fechaRndc, lugar, tercero, NATURALEZA_RNDC, DUENO_POLIZA_RNDC } from './manifiesto.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 const recurso = (r) => fileURLToPath(new URL(`../../assets/${r}`, import.meta.url));
 const PLANTILLA = JSON.parse(fs.readFileSync(recurso('remesa-rndc.json'), 'utf8'));
@@ -23,7 +24,7 @@ const LOGO_TRANSPORTE = recurso('logos/transporte.jpg');
 const LOGO_SUPERTRANSPORTE = recurso('logos/supertransporte.jpg');
 
 const sinTildes = (s) => quitarTildes(s).toUpperCase();
-const nombre = (t) => (t ? [t.nombres, t.apellido1, t.apellido2].map(txt).filter(Boolean).join(' ') : '');
+const nombre = (t) => (t ? nombreCompleto(t) : '');
 
 export const OPERACION_REMESA = { G: 'General', P: 'Mercancía Consolidada', C: 'Contenedor Cargado', V: 'Contenedor Vacío' };
 export const CONSOLIDACION = { R: 'Recolección en varios puntos', D: 'Distribución a varios puntos', A: 'Recolección y distribución', N: 'Un cargue y un descargue' };

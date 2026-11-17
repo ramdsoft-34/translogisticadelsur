@@ -16,6 +16,8 @@ import {
 } from './documentos.js';
 import { TIPOS_ID_CONDUCTOR, MOTIVOS_REEMPLAZO } from './catalogos.js';
 import { txt, hoyColombia, normalizar, escaparRegex, soloDigitos } from '../../utils/texto.js';
+import { nombreCompleto } from '../../utils/nombres.js';
+import { alCambiarTercero } from '../sincronizarMaestros.js';
 
 const BLOQUEO_MS = 3 * 60 * 1000;
 const PROBLEMA_CANTIDAD = 'Cantidad cargada: escriba el peso de la carga en kg (el RNDC no acepta cero ni vacío)';
@@ -236,7 +238,7 @@ export function comoTitular(doc) {
   return { ...doc, licencia: {}, roles: (doc.roles || []).filter(r => r !== 'conductor') };
 }
 
-const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
+const nombreDe = (t) => nombreCompleto(t);
 function estadoMaestro(empresa, tipo, rol, doc) {
   if (!doc) return null;
   const importado = doc.rndc?.estado === 'enviado' && /^Importado/i.test(doc.rndc?.mensaje || '');
@@ -268,7 +270,7 @@ async function descripciones(empresaId, vars) {
     if (/^CODMUNICIPIO/.test(k) && val) { const mu = await Municipio.findOne({ codigo: val }).select('nombre departamento').lean(); if (mu) out[k] = `${mu.nombre} (${mu.departamento || ''})`; }
     if (/^NUMID(REMITENTE|DESTINATARIO|PROPIETARIO|TITULARMANIFIESTO|CONDUCTOR)$/.test(k) && val) {
       const t = await Tercero.findOne({ empresa: empresaId, numId: val }).select('nombres apellido1 apellido2 razonSocial').lean();
-      if (t) out[k] = t.razonSocial || [t.nombres, t.apellido1, t.apellido2].filter(Boolean).join(' ');
+      if (t) out[k] = t.razonSocial || nombreCompleto(t);
     }
   }
   return out;
@@ -793,6 +795,7 @@ export async function traerTercero(empresaId, clave, usuarioId, { tipoId, numId,
     // Las personas son únicas por documento (la sede solo distingue a las empresas con NIT)
     const existente = await Tercero.findOne(tipoId === 'N' ? { empresa: empresaId, tipoId, numId, 'sede.codigo': datos.sede.codigo } : { empresa: empresaId, tipoId: { $ne: 'N' }, numId });
     const doc = existente || new Tercero({ empresa: empresaId, tipoId, numId, roles: [] });
+    const previo = existente ? existente.toObject() : null;
     // El RNDC devuelve «0» cuando no hay licencia; una empresa (NIT) nunca es conductor
     if (/^0*$/.test(datos.licencia.numero)) datos.licencia.numero = '';
     doc.set(datos);
@@ -800,7 +803,8 @@ export async function traerTercero(empresaId, clave, usuarioId, { tipoId, numId,
     doc.roles = [...new Set([...(doc.roles || []), ...roles, ...(conLicencia ? ['conductor'] : [])])].filter(r => tipoId !== 'N' || r !== 'conductor');
     doc.rndc = { estado: 'enviado', fecha: new Date(), verificadoEn: new Date(), hash: huella(variablesTercero(empresa, doc.toObject())), radicado: '', mensaje: 'Datos traídos del RNDC' };
     await doc.save({ validateBeforeSave: true });
-    guardados.push({ id: doc._id, nuevo: !existente, nombre: [datos.nombres, datos.apellido1, datos.apellido2].filter(Boolean).join(' '), sede: datos.sede.codigo });
+    await alCambiarTercero(empresaId, previo, doc.toObject());
+    guardados.push({ id: doc._id, nuevo: !existente, nombre: nombreCompleto(datos), sede: datos.sede.codigo });
   }
   return { ok: true, guardados };
 }

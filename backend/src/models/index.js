@@ -4,6 +4,7 @@
 import mongoose from 'mongoose';
 import { tenantPlugin } from './tenantPlugin.js';
 import { ROLES } from '../config/permisos.js';
+import { nombreCompleto } from '../utils/nombres.js';
 
 const { Schema } = mongoose;
 const modelo = (n, s) => mongoose.models[n] || mongoose.model(n, s);
@@ -252,6 +253,8 @@ const terceroSchema = new Schema({
   sede: { codigo: str(), nombre: str() },
   telefono: str(), celular: str(), direccion: str(), codMunicipio: str(),
   whatsappAutorizado: { type: Boolean, default: false },   // autorizó recibir sus manifiestos por WhatsApp
+  // Último celular al que WhatsApp no pudo entregar (Meta 131026): no se le insiste hasta corregirlo o reintentarlo a propósito
+  whatsappFallo: { telefono: str(), codigo: Number, en: fecha },
   correo: str({ lowercase: true }),
   licencia: { categoria: str(), numero: str(), vence: fecha },
   fechaNacimiento: fecha,
@@ -260,6 +263,8 @@ const terceroSchema = new Schema({
   banco: { entidad: str(), tipoCuenta: str(), cuenta: str() },
   roles: { type: [String], default: [] },
   activo: { type: Boolean, default: true },
+  // Registro repetido que se unió a otro (queda archivado: no sale en listas, pero lo radicado lo sigue encontrando)
+  unidoA: { type: Schema.Types.ObjectId, ref: 'Tercero', default: null }, unidoEn: fecha,
   rndc: { type: sincronizacion, default: () => ({}) },
 }, { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } });
 terceroSchema.plugin(tenantPlugin);
@@ -274,7 +279,7 @@ terceroSchema.pre('save', async function () {
   if (otro) { const e = new Error(`Ya existe una persona con el documento ${this.numId}`); e.status = 409; throw e; }
 });
 terceroSchema.virtual('nombreCompleto').get(function () {
-  return [this.nombres, this.apellido1, this.apellido2].filter(Boolean).join(' ');
+  return nombreCompleto(this);
 });
 terceroSchema.virtual('edad').get(function () { return edad(this.fechaNacimiento); });
 
@@ -489,6 +494,9 @@ const envioWhatsappSchema = new Schema({
   estado: { type: String, enum: ['por_aprobar', 'pendiente', 'enviando', 'enviado', 'entregado', 'leido', 'error', 'descartado'], default: 'por_aprobar' },
   intentos: { type: Number, default: 0 },
   idMensaje: str(), error: str(),
+  causa: str(),                             // código estable del error (ver services/erroresWhatsapp.js CAUSAS)
+  // Cómo se corrigió desde la ventana de errores (para reconocer el problema y su solución la próxima vez)
+  solucion: { accion: str(), detalle: str(), usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null }, en: fecha },
   aprobadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null }, aprobadoEn: fecha,
   enviadoEn: fecha, entregadoEn: fecha, leidoEn: fecha,
   origen: { type: String, enum: ['automatico', 'manual'], default: 'automatico' },
@@ -696,6 +704,15 @@ export const Vehiculo = modelo('Vehiculo', vehiculoSchema);
 export const Viaje = modelo('Viaje', viajeSchema);
 export const Liquidacion = modelo('Liquidacion', liquidacionSchema);
 export const TransaccionRndc = modelo('TransaccionRndc', transaccionSchema);
+// Unión de registros repetidos (conductores y terceros): qué se conservó, qué se unió, sus datos antes y lo que se movió
+const unionMaestroSchema = new Schema({
+  tipo: { type: String, enum: ['tercero'], required: true },
+  conservado: { type: Schema.Types.ObjectId, required: true }, unidos: { type: [Schema.Types.ObjectId], default: [] },
+  usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },
+  antes: { type: Schema.Types.Mixed, default: null }, movidos: { type: Schema.Types.Mixed, default: {} },
+}, { timestamps: true });
+unionMaestroSchema.plugin(tenantPlugin);
+export const UnionMaestro = modelo('UnionMaestro', unionMaestroSchema);
 // Diagnóstico de la IA para un rechazo que las reglas no reconocen: uno por viaje y por huella de sus datos
 // (si los datos cambian, se vuelve a consultar). Se borra solo a los 90 días.
 const revisionIaSchema = new Schema({

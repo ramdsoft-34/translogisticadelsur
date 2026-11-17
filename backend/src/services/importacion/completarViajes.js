@@ -11,9 +11,10 @@ import { Tarifa, Tercero, TransaccionRndc, Vehiculo, Viaje } from '../../models/
 import { variablesEnviadas } from '../rndc/operaciones.js';
 import { bloqueadosPorRelacion } from '../gestion/relaciones.js';
 import { normalizar, txt } from '../../utils/texto.js';
+import { nombreCompleto } from '../../utils/nombres.js';
 
 const palabras = (s) => normalizar(s).split(' ').filter((p) => p.length > 1);
-const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
+const nombreDe = (t) => nombreCompleto(t);
 
 function distancia(a, b) {
   if (Math.abs(a.length - b.length) > 1) return 2;

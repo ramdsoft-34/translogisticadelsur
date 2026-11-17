@@ -18,6 +18,7 @@ import { publicar } from './eventos.js';
 import { celularWhatsapp, enviarPlantillaEnlace } from './whatsappBusiness.js';
 import { buscarPorNombre } from './importacion/completarViajes.js';
 import { valoresDesdeTarifa } from './calculos.js';
+import { nombreCompleto } from '../utils/nombres.js';
 
 export const PLANTILLA_BODEGA = 'cargues_bodega';
 const DIA = 86400000;
@@ -26,7 +27,7 @@ const MAX_FALLIDOS = 5;
 const RE_PLACA = /^[A-Z]{3}[0-9]{2}[A-Z0-9]$|^[A-Z0-9]{5,6}$/;
 const huella = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 const iso = (d) => new Date(d).toISOString().slice(0, 10);
-const nombreDe = (t) => [t?.nombres, t?.apellido1, t?.apellido2].filter(Boolean).join(' ');
+const nombreDe = (t) => nombreCompleto(t);
 const primerNombre = (n) => txt(n).split(/\s+/)[0] || '';
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 const FECHA_LARGA = new Intl.DateTimeFormat('es-CO', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });

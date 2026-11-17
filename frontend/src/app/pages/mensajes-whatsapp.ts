@@ -7,7 +7,7 @@ import { Avisos } from '../core/avisos.service';
 import { EnVivo } from '../core/en-vivo.service';
 import { FORMATOS, hoyIso, inicioMesIso } from '../shared/formato';
 import { Icono } from '../shared/icono';
-import { Confirmar } from '../shared/confirmar';
+import { ErrorWhatsapp } from '../shared/error-whatsapp';
 
 // Mensajes de WhatsApp al conductor (manifiesto o soporte interno): qué salió, a quién y si llegó o lo leyó.
 // Los estados los avisa Meta por el webhook, sin costo adicional.
@@ -18,7 +18,7 @@ const ESTADOS: Record<string, [string, string]> = {
 
 @Component({
   selector: 'app-mensajes-whatsapp',
-  imports: [FormsModule, Icono, Confirmar, Paginador, ...FORMATOS],
+  imports: [FormsModule, Icono, Paginador, ErrorWhatsapp, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Mensajes de WhatsApp</h1>
       <p class="sutil">Manifiestos y soportes internos que se mandaron a enviar al WhatsApp de los conductores, y las solicitudes de cargues a los jefes de bodega: cuándo salieron, si llegaron al celular y si los leyeron. Los que aún no se han enviado no aparecen aquí.</p></div></div>
@@ -79,7 +79,7 @@ const ESTADOS: Record<string, [string, string]> = {
             <td data-etiqueta="Leído">{{ m.leidoEn ? (m.leidoEn | fechaHora) : '—' }}</td>
             <td class="celda-acciones">
               @if (m.estado === 'error' && m.tipo !== 'bodega') {
-                <button class="pequeno" confirmar="Clic otra vez para reenviar" (confirmado)="reintentar(m)" [disabled]="trabajando()"><app-icono nombre="enviar" [tam]="15" />Reintentar</button>
+                <button class="pequeno" (click)="errores.set([m._id])" [disabled]="trabajando()" title="Ver qué pasó, corregirlo y reenviar"><app-icono nombre="enviar" [tam]="15" />Ver y corregir</button>
               }
             </td>
           </tr>
@@ -89,6 +89,7 @@ const ESTADOS: Record<string, [string, string]> = {
       </tbody>
     </table>
     <app-paginador [total]="listaE.total()" [pagina]="listaE.pagina()" [porPagina]="listaE.porPagina()" [cargando]="listaE.cambiando()" unidad="mensajes" (cambio)="listaE.ir($event)" /></div>
+    <app-error-whatsapp [envios]="errores()" (cerrar)="errores.set([])" (corregido)="actualizar()" />
     <p class="sutil" style="margin-top:10px">Si el conductor desactivó la confirmación de lectura en WhatsApp, el mensaje queda en «Entregado» aunque lo haya visto.</p>
     }`,
   styles: [`
@@ -155,13 +156,6 @@ export class MensajesWhatsapp {
   clase(e: string) { return ESTADOS[e]?.[1] || ''; }
   celular(t: string) { const d = String(t || ''); return d.startsWith('57') && d.length === 12 ? `${d.slice(2, 5)} ${d.slice(5, 8)} ${d.slice(8)}` : d; }
 
-  async reintentar(m: any) {
-    this.trabajando.set(true);
-    try {
-      const r = await this.api.post<any>(`/whatsapp/envios/${m._id}/reintentar`, {});
-      if (r?.estado === 'error') this.avisos.mostrar(`No se envió: ${r.error}`, 'error', 9000);
-      else this.avisos.ok('Mensaje reenviado por WhatsApp');
-      await this.actualizar();
-    } catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
-  }
+  // Errores de envío: la ventana explica la causa y permite corregir y reenviar
+  readonly errores = signal<string[]>([]);
 }

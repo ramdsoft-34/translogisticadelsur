@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Auth } from '../core/auth.service';
+import { DuplicadosTerceros } from '../shared/duplicados-terceros';
 import { Avisos } from '../core/avisos.service';
 import { RndcClave } from '../core/rndc-clave.service';
 import { P, TIPOS_ID, nombreTercero } from '../core/modelos';
@@ -44,7 +45,7 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
 
 @Component({
   selector: 'app-terceros',
-  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, Paginador, VistaRndc, CuentaAppConductor, ...FORMATOS],
+  imports: [FormsModule, Modal, Icono, MenuAcciones, SelectorMunicipio, ImportarExcel, TraerRndc, ActualizarVehiculos, Paginador, VistaRndc, CuentaAppConductor, DuplicadosTerceros, ...FORMATOS],
   template: `
     <div class="pagina-cab">
       <div><h1>Conductores y terceros</h1><p class="sutil">Conductores, titulares, propietarios, tenedores y destinatarios que se registran en el RNDC.</p></div>
@@ -54,12 +55,14 @@ const placasDe = (t: string) => [...new Set(String(t || '').toUpperCase().split(
             @if (puedeConsultar) { <button (click)="actualizar.set(true)"><app-icono nombre="reloj" />Actualizar desde el RNDC<small>Confirma los datos con el RNDC, uno, por lotes o todos</small></button> }
             @if (puedeRndc) { <button (click)="traer.set(true)"><app-icono nombre="buscar" />Traer del RNDC<small>Crea en la plataforma terceros que ya existen en el RNDC</small></button> }
             <button (click)="importar.set(true)"><app-icono nombre="descargar" />Importar Excel<small>Carga masiva desde una plantilla</small></button>
+            <button (click)="repetidos.set(true)"><app-icono nombre="buscar" />Revisar repetidos<small>Personas con la cédula mal digitada o el nombre con apellidos repetidos</small></button>
           </app-menu-acciones>
           <button class="primario" (click)="nuevo()"><app-icono nombre="mas" />{{ textoNuevo() }}</button>
         }
       </div>
     </div>
     <app-importar-excel tipo="terceros" titulo="conductores y terceros" [abierto]="importar()" (cerrar)="importar.set(false)" (importado)="cargar()" />
+    <app-duplicados-terceros [abierto]="repetidos()" [puedeUnir]="puedeUnir" (cerrar)="repetidos.set(false)" (unido)="cargar()" />
     <app-actualizar-vehiculos tipo="terceros" [abierto]="actualizar()" (cerrar)="actualizar.set(false); refrescarLista()" (actualizados)="refrescarLista()" />
     <app-traer-rndc tipo="terceros" [abierto]="traer()" (cerrar)="traer.set(false)" (traidos)="cargar()" />
     <app-cuenta-app-conductor #cuentaApp />
@@ -249,6 +252,9 @@ export class Terceros {
   private avisos = inject(Avisos);
   private clave = inject(RndcClave);
   readonly puedeEditar = this.auth.tiene(P.MAESTROS_EDITAR);
+  // Unir registros repetidos y corregir nombres: solo el administrador
+  readonly puedeUnir = this.auth.tiene(P.CONFIG_GESTIONAR);
+  readonly repetidos = signal(false);
   readonly puedeRndc = this.auth.tiene(P.RNDC_OPERAR);
   readonly puedeConsultar = this.auth.tiene(P.RNDC_OPERAR) || this.auth.tiene(P.RNDC_CONSULTAR);
   readonly roles = ROLES;
