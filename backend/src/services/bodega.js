@@ -362,7 +362,7 @@ export async function revision(empresaId, reporteId) {
     }
   }
   const viajesRegistrados = registradosIds.size ? await Viaje.find({ empresa: empresaId, _id: { $in: [...registradosIds] } })
-    .select('numero destino planilla tarifa flete anticipo conductorNombre conAuxiliar diasAuxiliar auxiliarPagado requiereManifiesto').lean() : [];
+    .select('numero destino planilla tarifa flete anticipo conductorNombre conAuxiliar diasAuxiliar cobroManual auxiliarPagado requiereManifiesto').lean() : [];
   const numeros = Object.fromEntries(viajesRegistrados.map((v) => [String(v._id), v.numero]));
   // Los registrados muestran lo que quedó guardado en el viaje (no lo sugerido por la tarifa)
   const porViaje = new Map(viajesRegistrados.map((v) => [String(v._id), v]));

@@ -97,6 +97,18 @@ r.delete('/relaciones-cobro/:id', gestionar, async (req, res) => {
   res.json(x);
 });
 
+// Editar un viaje desde la vista previa (todo menos el manifiesto)
+r.get('/relaciones-cobro/viaje/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => res.json(await R.datosEdicion(req.empresaId, id.parse(req.params.id))));
+const valorManual = z.union([z.coerce.number().min(0).max(100000000), z.null()]).optional();
+r.put('/relaciones-cobro/viaje/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
+  const d = z.object({ fecha: z.string().optional(), conductor: id.optional(), placa: z.string().trim().toUpperCase().transform(v => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^[A-Z0-9]{5,6}$/, 'placa inválida')).optional(),
+    planilla: z.string().trim().max(30).optional(), tarifaRef: id.optional(), conAuxiliar: z.boolean().optional(),
+    diasAuxiliar: z.coerce.number().int().min(0).max(5, 'el auxiliar va de 1 a 5 días').optional(), tarifaManual: valorManual, auxiliarManual: valorManual }).parse(req.body || {});
+  const x = await R.editarViaje(req.empresaId, id.parse(req.params.id), { ...d, fecha: d.fecha ? fecha(d.fecha) : undefined });
+  await auditar(req, 'viaje_editar_desde_relacion', { entidad: 'Viaje', entidadId: req.params.id, detalle: x });
+  res.json(x);
+});
+
 // Corregir la fecha de un viaje desde la revisión (p. ej. 23/11 → 23/10)
 r.put('/relaciones-cobro/viaje/:id/fecha', permitir(P.VIAJES_REGISTRAR), async (req, res) => {
   const d = z.object({ fecha: z.string() }).parse(req.body || {});

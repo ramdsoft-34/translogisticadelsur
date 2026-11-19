@@ -6,11 +6,11 @@
 // Lo enviado no se reemplaza: el PDF y el Excel se guardan al enviarse o facturarse (versión de la relación) y desde ahí se
 // sirven. Si una relación enviada se vuelve a guardar con cambios, sube de versión y vuelve a borrador (hay que reenviarla).
 import crypto from 'node:crypto';
-import { Empresa, Cliente, Viaje, Vehiculo, Tarifa, RelacionCliente, Usuario, siguiente, pob } from '../../models/index.js';
+import { Empresa, Cliente, Viaje, Vehiculo, Tercero, Tarifa, RelacionCliente, Usuario, siguiente, pob } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { env } from '../../config/env.js';
 import { txt, soloDigitos, quitarTildes, fmtFecha } from '../../utils/texto.js';
-import { lineaLiquidacion, respaldosAuxiliar, NO_FACTURAR } from '../calculos.js';
+import { lineaLiquidacion, respaldosAuxiliar, valoresDesdeTarifa, NO_FACTURAR } from '../calculos.js';
 import { saludo } from '../whatsapp.js';
 import { pdfGuardado } from '../documentos/guardados.js';
 import { nombreCompleto } from '../../utils/nombres.js';
@@ -213,7 +213,7 @@ async function viajesDelPeriodo(empresaId, { cliente, desde, hasta, grupo = '', 
   if (!cli) throw new ErrorHttp(404, 'Empresa (cliente) no encontrada');
   const [viajes, tarifas] = await Promise.all([
     Viaje.find({ empresa: empresaId, cliente, fecha: { $gte: desde, $lte: hasta }, estado: { $ne: 'anulado' }, observaciones: { $not: NO_FACTURAR } })
-      .select('numero fecha placa conductor conductorNombre destino codDestino planilla manifiesto soporteInterno cantidad conAuxiliar diasAuxiliar tarifa flete anticipo tarifaRef createdAt registroMasivo facturaCont')
+      .select('numero fecha placa conductor conductorNombre destino codDestino planilla manifiesto soporteInterno cantidad conAuxiliar diasAuxiliar cobroManual tarifa flete anticipo tarifaRef createdAt registroMasivo facturaCont')
       .populate(pob(empresaId, 'conductor', 'nombres apellido1 apellido2')).lean(),
     Tarifa.find({ empresa: empresaId, cliente }).lean(),
   ]);
@@ -474,3 +474,66 @@ export async function corregirFecha(empresaId, viajeId, fecha) {
 }
 
 
+
+// ── Editar un viaje desde la vista previa de la relación ──
+// Se corrige todo lo que sale en la relación menos el manifiesto (que es del RNDC y no se toca): conductor, placa, fecha,
+// planilla, destino (tarifa), auxiliar y los valores de tarifa y auxiliar (escritos a mano reemplazan los del destino).
+export async function datosEdicion(empresaId, viajeId) {
+  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId })
+    .select('numero fecha placa conductor conductorNombre cliente tarifaRef destino planilla manifiesto soporteInterno conAuxiliar diasAuxiliar tarifa flete cantidad cobroManual anticipo').lean();
+  if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
+  const [tarifas, conductores, vehiculos, cli] = await Promise.all([
+    Tarifa.find({ empresa: empresaId, cliente: v.cliente }).select('destino tarifaCliente tarifaAuxiliar grupoRelacion').sort({ destino: 1 }).lean(),
+    Tercero.find({ empresa: empresaId, roles: 'conductor', unidoA: null }).select('nombres apellido1 apellido2 numId').sort({ nombres: 1, apellido1: 1 }).lean(),
+    Vehiculo.find({ empresa: empresaId }).select('placa').sort({ placa: 1 }).lean(),
+    Cliente.findOne({ empresa: empresaId, _id: v.cliente }).lean(),
+  ]);
+  const t = tarifas.find(x => String(x._id) === String(v.tarifaRef));
+  const l = lineaLiquidacion(v, t, { respaldo: respaldosAuxiliar(tarifas).get(String(v.cliente)), cliente: cli });
+  return {
+    viaje: { _id: String(v._id), numero: v.numero, fecha: v.fecha, placa: v.placa, conductor: v.conductor ? String(v.conductor) : '', conductorNombre: v.conductorNombre || '',
+      tarifaRef: v.tarifaRef ? String(v.tarifaRef) : '', destino: v.destino, planilla: txt(v.planilla), manifiesto: documentoViaje(v),
+      conAuxiliar: !!v.conAuxiliar, diasAuxiliar: Number(v.diasAuxiliar) || 0,
+      tarifa: $(l.totalTarifa), auxiliar: $(l.totalAuxiliar), tarifaManual: v.cobroManual?.tarifa != null, auxiliarManual: v.cobroManual?.auxiliar != null },
+    tarifas: tarifas.map(x => ({ _id: String(x._id), destino: x.destino, tarifa: $(x.tarifaCliente), auxiliar: $(x.tarifaAuxiliar) })),
+    conductores: conductores.map(x => ({ _id: String(x._id), nombre: nombreT(x), numId: x.numId })),
+    placas: vehiculos.map(x => x.placa),
+  };
+}
+
+export async function editarViaje(empresaId, viajeId, d) {
+  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId });
+  if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
+  await exigirNoFacturado(empresaId, [v._id]);
+  const { asegurarMesAbierto } = await import('./cierre.js');
+  await asegurarMesAbierto(empresaId, v.fecha, ...(d.fecha ? [d.fecha] : []));
+  const antes = { fecha: v.fecha, placa: v.placa, conductor: v.conductorNombre, destino: v.destino, planilla: v.planilla, conAuxiliar: v.conAuxiliar,
+    diasAuxiliar: v.diasAuxiliar, cobroManual: { ...(v.cobroManual?.toObject?.() || v.cobroManual || {}) } };
+  const cambiaConductor = (d.conductor && d.conductor !== String(v.conductor || '')) || (d.placa && d.placa !== v.placa);
+  if (cambiaConductor && v.liquidacionConductor) throw new ErrorHttp(409, 'El viaje ya está liquidado al conductor: anule esa liquidación para cambiar el conductor o la placa');
+  if (d.placa && d.placa !== v.placa) {
+    if (!(await Vehiculo.exists({ empresa: empresaId, placa: d.placa }))) throw new ErrorHttp(400, `La placa ${d.placa} no está registrada en Vehículos`);
+    const { titularDePlaca } = await import('../../routes/viajes.js');
+    v.placa = d.placa; v.titular = await titularDePlaca(empresaId, d.placa);
+  }
+  if (d.conductor && d.conductor !== String(v.conductor || '')) {
+    const c = await Tercero.findOne({ empresa: empresaId, _id: d.conductor }).select('nombres apellido1 apellido2').lean();
+    if (!c) throw new ErrorHttp(400, 'Conductor no encontrado');
+    v.conductor = c._id; v.conductorNombre = nombreT(c);
+  }
+  if (d.fecha) v.fecha = d.fecha;
+  if (d.planilla !== undefined) v.planilla = d.planilla;
+  if (d.tarifaRef && d.tarifaRef !== String(v.tarifaRef || '')) {
+    const t = await Tarifa.findOne({ empresa: empresaId, _id: d.tarifaRef, cliente: v.cliente }).lean();
+    if (!t) throw new ErrorHttp(400, 'Ese destino no es de esta empresa');
+    const s = valoresDesdeTarifa(t);
+    v.tarifaRef = t._id; v.destino = t.destino; v.codDestino = s.codDestino; v.tarifa = s.tarifa;
+    if (!v.liquidacionConductor) v.flete = s.flete;
+  }
+  if (d.conAuxiliar !== undefined) { v.conAuxiliar = d.conAuxiliar; v.diasAuxiliar = d.conAuxiliar ? Math.max(1, d.diasAuxiliar || 1) : 0; }
+  if (d.tarifaManual !== undefined) v.set('cobroManual.tarifa', d.tarifaManual);
+  if (d.auxiliarManual !== undefined) v.set('cobroManual.auxiliar', d.auxiliarManual);
+  await v.save();
+  return { numero: v.numero, antes, despues: { fecha: v.fecha, placa: v.placa, conductor: v.conductorNombre, destino: v.destino, planilla: v.planilla,
+    conAuxiliar: v.conAuxiliar, diasAuxiliar: v.diasAuxiliar, cobroManual: { tarifa: v.cobroManual?.tarifa ?? null, auxiliar: v.cobroManual?.auxiliar ?? null } } };
+}

@@ -190,7 +190,7 @@ r.get('/siguiente-numero', permitir(P.VIAJES_VER), async (req, res) => res.json(
 
 // Auxiliar pagado, retefuente y FOPAT de todos los viajes del filtro (mismas reglas de la liquidación del conductor)
 async function sumasConductor(req, filtro) {
-  const viajes = await Viaje.find(filtro).select('flete anticipo destino placa cliente tarifaRef conAuxiliar diasAuxiliar cantidad').limit(20000).lean();
+  const viajes = await Viaje.find(filtro).select('flete anticipo destino placa cliente tarifaRef conAuxiliar diasAuxiliar cobroManual cantidad').limit(20000).lean();
   if (!viajes.length) return { auxiliar: 0, retefuente: 0, fopat: 0 };
   const [reglas, tarifas, vehiculos] = await Promise.all([reglasDe(req.empresaId),
     Tarifa.find(deEmpresa(req, { cliente: { $in: [...new Set(viajes.map(v => String(v.cliente)))] } })).lean(),

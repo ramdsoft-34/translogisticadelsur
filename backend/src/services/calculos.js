@@ -75,11 +75,13 @@ export function lineaLiquidacion(viaje, tarifa, { respaldo = null, cliente = nul
   const auxPago = aux ? valorAux('auxiliarPagado') : 0;
   const politica = cliente?.politicaAuxiliar || 'registrado';
 
-  const totalTarifa = porUnidad ? tarifaUnit * cantidad : tarifaUnit;
+  const manual = viaje.cobroManual || {};
+  const totalTarifa = manual.tarifa != null ? num(manual.tarifa) : porUnidad ? tarifaUnit * cantidad : tarifaUnit;
   const unidadesAux = num(viaje.diasAuxiliar) > 0 ? num(viaje.diasAuxiliar) : cantidad;
   let totalAuxiliar = auxCobro * unidadesAux;
   if (politica === 'sin' || politica === 'incluido') totalAuxiliar = 0;
   if (politica === 'sin_anticipo') totalAuxiliar = num(viaje.anticipo) > 0 ? 0 : num(cliente?.valorAuxiliarSinAnticipo ?? 30000);
+  if (manual.auxiliar != null) totalAuxiliar = num(manual.auxiliar);
   const totalCobrado = totalTarifa + totalAuxiliar;
   const totalFlete = porUnidad ? fleteUnit * cantidad : fleteUnit;
   const totalAuxiliarPagado = auxPago * unidadesAux;

@@ -6,6 +6,7 @@ import { Auth } from '../core/auth.service';
 import { Avisos } from '../core/avisos.service';
 import { P } from '../core/modelos';
 import { FORMATOS } from './formato';
+import { Modal } from './modal';
 import { rangoPeriodo } from './exportar-viajes';
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -28,7 +29,7 @@ function periodos(hoy = new Date()) {
 // (un bloque por conductor y placa, la franja después del último viaje y un solo total) → guardar con número.
 @Component({
   selector: 'app-relacion-generar',
-  imports: [FormsModule, UpperCasePipe, ...FORMATOS],
+  imports: [FormsModule, UpperCasePipe, Modal, ...FORMATOS],
   template: `
     <section class="tarjeta filtros">
       <div class="campo"><label for="rg-cli">Empresa</label>
@@ -77,14 +78,14 @@ function periodos(hoy = new Date()) {
         @if (r.existente) {
           <p class="nota">Ya existe la relación <strong>{{ r.existente.numero }}</strong> de este periodo ({{ r.existente.estado }}). Al guardar se actualiza con los viajes de hoy.@if (r.existente.estado === 'enviada') { Como ya se envió, si cambia queda como una versión nueva para reenviar; lo enviado se conserva. }</p>
         }
-        <p class="sutil" style="margin:12px 0 6px">Vista previa con el formato del Excel</p>
+        <p class="sutil" style="margin:12px 0 6px">Vista previa con el formato del Excel@if (puedeRegistrar) { · haga clic en un viaje para corregirlo }</p>
         <div class="tabla-caja">
           <table class="rel">
             @for (g of r.grupos; track g.conductor + g.placa) {
               <tr class="cab"><th>N°</th><th>Nombre</th><th>Placa</th><th>Fecha</th><th>Planilla</th><th>Manifiesto</th><th>Destino</th><th>Días aux.</th>
                 <th class="num">Tarifa</th><th class="num">Auxiliar</th><th class="num">Total</th></tr>
               @for (x of g.filas; track x._id) {
-                <tr><td>{{ x.n }}</td><td>{{ x.conductor }}</td><td>{{ x.placa }}</td><td>{{ x.fecha | dia }}</td><td>{{ x.planilla }}</td><td>{{ x.manifiesto }}</td>
+                <tr [class.editable]="puedeRegistrar" (click)="abrirEdicion(x)" [title]="puedeRegistrar ? 'Clic para editar este viaje' : ''"><td>{{ x.n }}</td><td>{{ x.conductor }}</td><td>{{ x.placa }}</td><td>{{ x.fecha | dia }}</td><td>{{ x.planilla }}</td><td>{{ x.manifiesto }}</td>
                   <td>{{ x.destino }}</td><td class="c">{{ x.diasAux ?? 'Bodega' }}</td><td class="num">{{ x.tarifa | pesos }}</td><td class="num">{{ x.auxiliar | pesos }}</td><td class="num">{{ x.total | pesos }}</td></tr>
               }
               <tr class="franja"><td colspan="11">{{ g.conductor | uppercase }} · PLACA {{ g.placa }} · {{ g.filas.length }} viaje(s)</td></tr>
@@ -101,7 +102,42 @@ function periodos(hoy = new Date()) {
             {{ r.existente ? 'Actualizar relación ' + r.existente.numero : 'Guardar relación' }}</button> }
         </div>
       </section>
-    }`,
+    }
+
+    <app-modal [titulo]="ed() ? 'Editar viaje N° ' + ed().viaje.numero : 'Editar viaje'" [abierto]="!!ed()" (cerrar)="ed.set(null)">
+      @if (ed(); as e) {
+        <p class="sutil">Manifiesto: <strong>{{ e.viaje.manifiesto || '—' }}</strong> (no se cambia aquí). Los cambios quedan guardados en el viaje.</p>
+        <div class="rejilla">
+          <label class="campo"><span class="etiqueta">Fecha</span><input type="date" [(ngModel)]="fe.fecha" /></label>
+          <label class="campo"><span class="etiqueta">Planilla</span><input [(ngModel)]="fe.planilla" maxlength="30" /></label>
+          <label class="campo ancho"><span class="etiqueta">Conductor</span>
+            <select [(ngModel)]="fe.conductor">@if (!fe.conductor) { <option value="">(sin conductor)</option> }
+              @for (c of e.conductores; track c._id) { <option [value]="c._id">{{ c.nombre }} · {{ c.numId }}</option> }</select></label>
+          <label class="campo"><span class="etiqueta">Placa</span>
+            <select [(ngModel)]="fe.placa">@if (!e.placas.includes(fe.placa)) { <option [value]="fe.placa">{{ fe.placa }} (no está en Vehículos)</option> }
+              @for (p of e.placas; track p) { <option [value]="p">{{ p }}</option> }</select></label>
+          <label class="campo"><span class="etiqueta">Días aux.</span>
+            <select [(ngModel)]="fe.dias"><option [ngValue]="0">Bodega (sin auxiliar)</option>
+              @for (n of [1, 2, 3, 4, 5]; track n) { <option [ngValue]="n">{{ n }}</option> }</select></label>
+          <label class="campo ancho"><span class="etiqueta">Destino</span>
+            <select [(ngModel)]="fe.tarifaRef">@if (!fe.tarifaRef) { <option value="">{{ e.viaje.destino }} (sin tarifa)</option> }
+              @for (t of e.tarifas; track t._id) { <option [value]="t._id">{{ t.destino }} · {{ t.tarifa | pesos }}</option> }</select></label>
+          <label class="campo"><span class="etiqueta">Tarifa</span><input type="number" min="0" step="1000" [(ngModel)]="fe.tarifa" /></label>
+          <label class="campo"><span class="etiqueta">Auxiliar</span><input type="number" min="0" step="1000" [(ngModel)]="fe.auxiliar" /></label>
+        </div>
+        @if (fe.tarifaRef !== e.viaje.tarifaRef || fe.dias !== diasDe(e.viaje)) {
+          <p class="nota">Al cambiar el destino o los días, la tarifa y el auxiliar se toman del destino, salvo que usted escriba otro valor.</p>
+        }
+        @if (e.viaje.tarifaManual || e.viaje.auxiliarManual) {
+          <p class="nota">Este viaje tiene valores escritos a mano. <button type="button" class="pequeno" (click)="fe.tarifa = null; fe.auxiliar = null; fe.restaurar = true">Volver a los del destino</button></p>
+        }
+        <div class="pie">
+          <strong>Total: {{ (+(fe.tarifa ?? 0) + +(fe.auxiliar ?? 0)) | pesos }}</strong>
+          <span><button type="button" (click)="ed.set(null)">Cancelar</button>
+            <button type="button" class="primario" (click)="guardarEdicion()" [disabled]="ocupado()">{{ ocupado() ? 'Guardando…' : 'Guardar cambios' }}</button></span>
+        </div>
+      }
+    </app-modal>`,
   styles: [`
     .tarjeta { background: var(--gris-0, #fff); border: 1px solid var(--gris-2); border-radius: var(--radio-l, 14px); padding: 14px 16px; margin-bottom: 14px; }
     .filtros { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; } .filtros .campo { margin: 0; }
@@ -118,6 +154,9 @@ function periodos(hoy = new Date()) {
     table.rel tr.franja td { background: var(--tinta); color: var(--gris-0); font-weight: 700; } table.rel tr.total td { font-size: 13.5px; }
     table.rel .num { text-align: right; } table.rel .c { text-align: center; } table.rel .der { text-align: right; }
     .pie { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-top: 12px; flex-wrap: wrap; }
+    tr.editable { cursor: pointer; } tr.editable:hover td { background: var(--ambar-claro, #fff6e5); }
+    .rejilla { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 12px; } .rejilla .campo { margin: 0; } .rejilla .ancho { grid-column: span 2; }
+    @media (max-width: 700px) { .rejilla { grid-template-columns: 1fr; } .rejilla .ancho { grid-column: auto; } }
     .nota { background: var(--info-claro); border-radius: 10px; padding: 8px 12px; margin: 12px 0 0; }
     @media (max-width: 800px) { .cifras { grid-template-columns: repeat(2, 1fr); } }
   `],
@@ -146,6 +185,45 @@ export class RelacionGenerar {
     this.ocupado.set(true);
     try { const r = await this.api.post<any>('/gestion/relaciones-cobro/previa', this.f); this.d.set(r); this.titulo = r.titulo; }
     catch (e) { this.avisos.error(e); } finally { this.ocupado.set(false); }
+  }
+  // ── Editar un viaje de la vista previa (todo menos el manifiesto) ──
+  readonly ed = signal<any>(null);
+  fe: any = {};
+  diasDe(v: any) { return v.conAuxiliar ? (v.diasAuxiliar || 1) : 0; }
+  async abrirEdicion(x: any) {
+    if (!this.puedeRegistrar || this.ocupado()) return;
+    try {
+      const e = await this.api.get<any>(`/gestion/relaciones-cobro/viaje/${x._id}`);
+      const v = e.viaje;
+      this.fe = { fecha: String(v.fecha).slice(0, 10), planilla: v.planilla, conductor: v.conductor, placa: v.placa, dias: this.diasDe(v), tarifaRef: v.tarifaRef,
+        tarifa: v.tarifa, auxiliar: v.auxiliar, restaurar: false };
+      this.ed.set(e);
+    } catch (err) { this.avisos.error(err); }
+  }
+  async guardarEdicion() {
+    const e = this.ed(); const v = e.viaje; const f = this.fe;
+    const cuerpo: any = {};
+    if (f.fecha && f.fecha !== String(v.fecha).slice(0, 10)) cuerpo.fecha = f.fecha;
+    if ((f.planilla || '') !== (v.planilla || '')) cuerpo.planilla = f.planilla || '';
+    if (f.conductor && f.conductor !== v.conductor) cuerpo.conductor = f.conductor;
+    if (f.placa && f.placa !== v.placa) cuerpo.placa = f.placa;
+    if (f.tarifaRef && f.tarifaRef !== v.tarifaRef) cuerpo.tarifaRef = f.tarifaRef;
+    if (f.dias !== this.diasDe(v)) { cuerpo.conAuxiliar = f.dias > 0; cuerpo.diasAuxiliar = f.dias; }
+    // Un valor distinto del que mostraba queda escrito a mano; «Volver a los del destino» lo borra
+    if (f.restaurar) { cuerpo.tarifaManual = null; cuerpo.auxiliarManual = null; }
+    else {
+      if (f.tarifa !== null && f.tarifa !== '' && +f.tarifa !== v.tarifa) cuerpo.tarifaManual = +f.tarifa;
+      if (f.auxiliar !== null && f.auxiliar !== '' && +f.auxiliar !== v.auxiliar) cuerpo.auxiliarManual = +f.auxiliar;
+    }
+    if (!Object.keys(cuerpo).length) { this.ed.set(null); return; }
+    this.ocupado.set(true);
+    try {
+      await this.api.put<any>(`/gestion/relaciones-cobro/viaje/${v._id}`, cuerpo);
+      this.avisos.ok(`Viaje N° ${v.numero} guardado`);
+      this.ed.set(null);
+    } catch (err) { this.avisos.error(err); this.ocupado.set(false); return; }
+    this.ocupado.set(false);
+    await this.previa();
   }
   async corregirFecha(a: any) {
     this.ocupado.set(true);

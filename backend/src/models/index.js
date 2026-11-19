@@ -346,6 +346,8 @@ const viajeSchema = new Schema({
   tarifa: { type: Number, default: 0, min: 0 },
   flete: { type: Number, default: 0, min: 0 },
   anticipo: { type: Number, default: 0, min: 0 },
+  // Valores escritos a mano desde la relación de cobro: reemplazan la tarifa y el auxiliar del destino (null = los del destino)
+  cobroManual: { tarifa: { type: Number, default: null, min: 0 }, auxiliar: { type: Number, default: null, min: 0 } },
   observaciones: str({ maxlength: 500 }),
   // registrado → remesa (remesa aceptada) → manifestado → cumplido | anulado
   estado: { type: String, enum: ['registrado', 'remesa', 'manifestado', 'cumplido', 'anulado'], default: 'registrado' },
