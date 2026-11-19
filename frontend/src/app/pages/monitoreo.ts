@@ -325,7 +325,10 @@ const duracion = (desde: string | Date | null | undefined) => {
     .latido.cargando { background: #e0ad00; }
     @keyframes latido { 0% { box-shadow: 0 0 0 0 rgba(31,157,85,.5); } 70% { box-shadow: 0 0 0 9px rgba(31,157,85,0); } 100% { box-shadow: 0 0 0 0 rgba(31,157,85,0); } }
     @media (prefers-reduced-motion: reduce) { .latido { animation: none; } }
-    .dato strong { font-size: 16px; margin-right: 3px; font-variant-numeric: tabular-nums; }
+    .dato { display: inline-flex; align-items: baseline; gap: 4px; }
+    .dato strong { font-size: 16px; font-variant-numeric: tabular-nums; display: inline; }
+    /* Mapa base un poco más claro: los vehículos y las rutas resaltan */
+    :host ::ng-deep .mapa-suave { filter: saturate(.75) brightness(1.04); }
     .dato.verde strong { color: #1f9d55; }
     button.dato { border: 0; background: #fde8e8; color: #b42318; border-radius: 999px; padding: 3px 10px; height: auto; font-weight: 600; }
     .sutil-claro { color: #6b7280; font-size: 12px; }
@@ -344,7 +347,7 @@ const duracion = (desde: string | Date | null | undefined) => {
     .buscar { margin: 0 12px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-radius: 12px; background: #f1f4f8; color: #6b7280; }
     .buscar input { border: 0; background: transparent; box-shadow: none; flex: 1; height: 40px; padding: 0; min-width: 0; color: #111827; }
     .buscar input:focus { outline: none; }
-    .filtros { display: flex; gap: 6px; overflow-x: auto; padding: 10px 12px; scrollbar-width: none; }
+    .filtros { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; }
     .filtros::-webkit-scrollbar { display: none; }
     .filtros button { flex: none; height: 32px; min-height: 0; padding: 0 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600; border: 1px solid #e5e7eb; background: #fff; color: #374151; display: inline-flex; align-items: center; gap: 6px; }
     .filtros button b { font-variant-numeric: tabular-nums; color: #6b7280; }
@@ -541,7 +544,7 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
     this.base?.remove();
     this.base = this.satelite()
       ? L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Imágenes © Esri' })
-      : L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 20, subdomains: 'abcd', attribution: '© OpenStreetMap · © CARTO' });
+      : L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap', className: 'mapa-suave' });
     this.base.addTo(this.mapa);
     this.base.bringToBack();
   }
