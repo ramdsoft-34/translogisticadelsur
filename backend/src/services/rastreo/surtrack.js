@@ -326,7 +326,10 @@ export async function enVivo(empresaId) {
       cliente: v.cliente?.nombre || '', estadoViaje: v.estado, estado, origen: v.rastreo.origen, codigoExterno: v.rastreo.codigoExterno,
       activado: v.rastreo.activado, ultima, alertas, aceptado: ext?.fechaAceptacion || null,
       modalidad: v.rastreo.modalidad || 'destino', puntoDestino: v.rastreo.modalidad !== 'clientes' && v.rastreo.destino?.lat ? v.rastreo.destino : null,
-      clientes: (v.rastreo.clientes || []).length, entregados });
+      clientes: (v.rastreo.clientes || []).length, entregados,
+      // Navegación en la app de conductores: a dónde va ahora y cuánto le falta (null si no está navegando)
+      navegacion: estado !== 'llego' && p?.navegacion ? { destino: p.navegacion.destino || '', distancia: Math.round(p.navegacion.distanciaRestante || 0),
+        duracion: Math.round(p.navegacion.duracionRestante || 0), llegada: p.navegacion.llegadaEstimada || null, actualizado: p.navegacion.actualizado || null } : null });
   }
   // Rastreos de Cooespatrans con señal reciente que aún no están enlazados a un viaje de esta empresa
   const enlazados = new Set(viajes.filter(v => servidorDe(v.rastreo) === 'cooespatrans').map(v => v.rastreo.externoId));

@@ -143,12 +143,14 @@ const duracion = (desde: string | Date | null | undefined) => {
                   <span class="f-centro">
                     <span class="f-conductor">{{ v.conductor }}</span>
                     <span class="f-destino">→ {{ v.modalidad === 'clientes' ? (v.entregados + '/' + v.clientes + ' entregas') : v.destino }}</span>
+                    @if (v.navegacion; as n) { <span class="f-nav" title="Navegando con la app de conductores">Va a {{ n.destino }} · llega {{ horaCorta(n.llegada) }}</span> }
                     @if (v.alertas.length) { <span class="f-alertas">@for (a of v.alertas; track a) { <span>{{ a }}</span> }</span> }
                   </span>
                   <span class="f-der">
                     @if (v.ultima) { <span class="vel"><strong>{{ v.ultima.velocidad }}</strong><small>km/h</small></span><small class="hace">{{ hace(v.ultima.hora) }}</small> }
                     @else { <small class="hace">sin posición</small> }
-                    @if (faltan(v) !== null) { <small class="faltan">faltan {{ faltan(v) }} km</small> }
+                    @if (v.navegacion) { <small class="faltan">faltan {{ kmTexto(v.navegacion.distancia) }}</small> }
+                    @else if (faltan(v) !== null) { <small class="faltan">faltan {{ faltan(v) }} km</small> }
                   </span>
                 </button>
               } @empty {
@@ -189,6 +191,13 @@ const duracion = (desde: string | Date | null | undefined) => {
               <div><strong>{{ r.resumen.km }}</strong><span>km recorridos</span></div>
             </div>
 
+            @if (vivoElegido()?.navegacion; as n) {
+              <div class="nav-vh">
+                <span class="dv-et">NAVEGANDO A</span>
+                <strong>{{ n.destino }}</strong>
+                <div class="nav-cifras"><span><b>{{ horaCorta(n.llegada) }}</b> llega</span><span><b>{{ kmTexto(n.distancia) }}</b> por carretera</span><span><b>{{ minTexto(n.duracion) }}</b> de camino</span></div>
+              </div>
+            }
             <div class="destino-vh">
               <span class="dv-et">{{ r.modalidad === 'clientes' ? 'ENTREGAS' : 'DESTINO' }}</span>
               <strong>{{ r.modalidad === 'clientes' ? entregadosDe(r) + ' de ' + r.clientes.length + ' clientes' : (r.destino?.nombre || r.viaje.destino) }}</strong>
@@ -314,7 +323,7 @@ const duracion = (desde: string | Date | null | undefined) => {
     .punto { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
 
     /* ── Torre de control: el mapa ocupa todo y los paneles flotan encima ── */
-    .torre { position: relative; height: calc(100dvh - 190px); min-height: 560px; border-radius: 18px; overflow: hidden; border: 1px solid var(--gris-2); background: #e9edf2; }
+    .torre { position: relative; isolation: isolate; z-index: 0; height: calc(100dvh - 190px); min-height: 560px; border-radius: 18px; overflow: hidden; border: 1px solid var(--gris-2); background: #e9edf2; }
     .mapa { position: absolute; inset: 0; z-index: 0; }
     .resumen, .controles, .flota, .detalle-vh { position: absolute; z-index: 600; }
     .vidrio, .resumen, .flota, .detalle-vh, .ctl { background: rgba(255,255,255,.94); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
@@ -390,6 +399,10 @@ const duracion = (desde: string | Date | null | undefined) => {
     .destino-vh { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: #f1f4f8; }
     .dv-et { font-size: 10.5px; font-weight: 800; letter-spacing: .1em; color: #6b7280; }
     .destino-vh strong { font-size: 16px; } .destino-vh small { color: #4b5563; font-size: 12px; }
+    .f-nav { display: block; font-size: 12px; color: #1a73e8; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .nav-vh { background: #e8f0fe; border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; color: #0b3d91; }
+    .nav-vh .dv-et { color: #1a73e8; } .nav-vh strong { display: block; font-size: 16px; margin: 2px 0 6px; }
+    .nav-cifras { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; } .nav-cifras b { font-size: 15px; }
     .mo-barra { height: 8px; border-radius: 999px; background: #dfe4ea; overflow: hidden; } .mo-barra span { display: block; height: 100%; background: var(--c); border-radius: inherit; }
     .mini { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .mini div { padding: 10px 12px; border-radius: 12px; border: 1px solid #e5e7eb; display: flex; flex-direction: column; }
@@ -574,6 +587,11 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
     if (f === null || !(r.resumen?.km >= 0)) return null;
     return Math.max(0, Math.min(100, Math.round(100 * r.resumen.km / Math.max(0.1, r.resumen.km + f))));
   }
+
+  // Navegación en la app del conductor: hora de llegada, distancia por carretera y minutos
+  horaCorta(f: any): string { return f ? new Date(f).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit' }) : '—'; }
+  kmTexto(m: number): string { return m >= 1000 ? `${(m / 1000).toLocaleString('es-CO', { maximumFractionDigits: 1 })} km` : `${Math.round(m)} m`; }
+  minTexto(s: number): string { const m = Math.max(1, Math.round(s / 60)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; }
 
   faltan(v: any): number | null {
     if (!v?.ultima || !v.puntoDestino || v.puntoDestino.lat === undefined || v.puntoDestino.lat === null || v.estado === 'llego') return null;
