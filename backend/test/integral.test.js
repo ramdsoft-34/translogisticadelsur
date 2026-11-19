@@ -1705,6 +1705,16 @@ test('Rastreo: modalidad solo destino (ruta sugerida) y con clientes (Excel, ent
   limpiarCache();
   const vivo = (await adm.get('/api/rastreo/en-vivo')).body.viajes.find(x => x._id === v1._id);
   assert.equal(vivo.modalidad, 'destino'); assert.equal(vivo.puntoDestino.nombre, 'Ipiales'); assert.equal(vivo.destino, 'Ipiales');
+  // Exceso de velocidad que llegó tarde (sin señal): se avisa y queda una sola vez en el registro de seguimiento
+  surTrack.activos = [{ viajeId: ext1, lat: 1.21, lng: -77.28, velocidad: 8, velocidadMaxReciente: 26.4, rumbo: 0, hora: new Date().toISOString() }];
+  limpiarCache();
+  const conExceso = (await adm.get('/api/rastreo/en-vivo')).body.viajes.find(x => x._id === v1._id);
+  assert.ok(conExceso.alertas.includes('Exceso de velocidad: 95 km/h'), JSON.stringify(conExceso.alertas));
+  limpiarCache(); await adm.get('/api/rastreo/en-vivo');
+  const evs = (await adm.get(`/api/rastreo/viajes/${v1._id}/recorrido`)).body.eventos.filter(e => e.tipo === 'exceso');
+  assert.equal(evs.length, 1, 'el exceso se registra una vez'); assert.match(evs[0].detalle, /95 km\/h \(límite 80/);
+  surTrack.activos = [{ viajeId: ext1, lat: 1.21, lng: -77.28, velocidad: 10, rumbo: 0, hora: new Date().toISOString() }];
+  limpiarCache();
   const r1 = (await adm.get(`/api/rastreo/viajes/${v1._id}/recorrido`)).body;
   assert.equal(r1.ruta.length, 3, 'ruta sugerida al destino'); assert.ok(r1.eventos.some(e => e.tipo === 'inicio'));
   // Con clientes: plantilla, importar Excel, activar y ver las entregas del conductor
@@ -1727,6 +1737,9 @@ test('Rastreo: modalidad solo destino (ruta sugerida) y con clientes (Excel, ent
   assert.equal(a2.body.destino?.nombre || '', '', 'con clientes no se guarda destino');
   const st2 = surTrack.viajes.get(a2.body.externoId);
   assert.equal(st2.clientesSt.length, 2, 'los clientes llegan a Sur Track');
+  // Clientes con solo la dirección: se ubican solos en el mapa (sin pedir coordenadas); a Cooespatrans no se le manda nada nuevo
+  assert.ok(a2.body.clientes.every(c => c.lat === 0.83 && c.ubicacion === 'direccion'), JSON.stringify(a2.body.clientes));
+  assert.ok(st2.clientesSt.every(c => c.lat === undefined), 'Cooespatrans recibe lo mismo de antes');
   // Agregar un cliente antes de que el conductor acepte (reemplaza, no duplica)
   const p2 = await adm.put(`/api/rastreo/viajes/${v2._id}/paradas`, { modalidad: 'clientes', clientes: [...imp.body.clientes, { nombre: 'Tienda Tres', direccion: 'Cl 9' }] });
   assert.equal(p2.status, 200); assert.equal(st2.clientesSt.length, 3); assert.equal(p2.body.clientes.length, 3);

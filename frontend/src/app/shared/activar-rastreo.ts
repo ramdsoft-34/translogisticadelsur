@@ -9,7 +9,8 @@ import { Moneda } from './moneda';
 import { FORMATOS } from './formato';
 
 type Modalidad = 'destino' | 'clientes';
-interface ClienteParada { nombre: string; direccion: string; ciudad: string; telefono: string; documento: string; factura: string; valor: number | null; lat?: number | null; lng?: number | null; estadoEntrega?: string }
+interface ClienteParada { nombre: string; direccion: string; ciudad: string; telefono: string; documento: string; factura: string; valor: number | null; lat?: number | null; lng?: number | null; estadoEntrega?: string;
+  ubicacion?: '' | 'direccion' | 'mapa'; buscando?: boolean; sinResultado?: boolean }
 const vacioCliente = (): ClienteParada => ({ nombre: '', direccion: '', ciudad: '', telefono: '', documento: '', factura: '', valor: null });
 const PASTO: L.LatLngTuple = [1.2136, -77.2811];
 
@@ -62,20 +63,35 @@ const PASTO: L.LatLngTuple = [1.2136, -77.2811];
             <div class="campo"><label for="ar-cv">Valor a recibir</label><div class="moneda"><input id="ar-cv" moneda name="cv" [(ngModel)]="nuevo.valor" /></div></div>
             <div class="campo"><span class="etiqueta">&nbsp;</span><button type="submit" [disabled]="!nuevo.nombre.trim()"><app-icono nombre="mas" [tam]="16" />Agregar</button></div>
           </form>
+          @if (marcando() !== null) {
+            <p class="marcando" role="status"><app-icono nombre="ubicacion" [tam]="16" />Toque en el mapa el lugar de <strong>{{ clientes()[marcando()!]?.nombre }}</strong>
+              <button type="button" class="texto pequeno" (click)="marcando.set(null)">Cancelar</button></p>
+          }
+          <div #mapaClientes class="mapa-destino" [class.apuntando]="marcando() !== null" role="application" aria-label="Mapa de los clientes"></div>
+          <p class="sutil nota">Cada cliente se ubica solo con su dirección y ciudad. Si el punto no quedó bien, arrástrelo o use «Marcar en el mapa».</p>
           <div class="tabla-caja">
             <table class="tabla-movil">
-              <thead><tr><th>#</th><th>Nombre</th><th>Dirección</th><th>Ciudad</th><th>Teléfono</th><th>Factura</th><th class="num">Valor</th><th></th></tr></thead>
+              <thead><tr><th>#</th><th>Nombre</th><th>Dirección</th><th>Ubicación</th><th>Teléfono</th><th>Factura</th><th class="num">Valor</th><th></th></tr></thead>
               <tbody>
                 @for (c of clientes(); track $index; let i = $index) {
-                  <tr><td data-etiqueta="#" class="sutil">{{ i + 1 }}</td><td data-etiqueta="Nombre"><strong>{{ c.nombre }}</strong></td><td data-etiqueta="Dirección">{{ c.direccion || '—' }}</td>
-                    <td data-etiqueta="Ciudad">{{ c.ciudad || '—' }}</td><td data-etiqueta="Teléfono">{{ c.telefono || '—' }}</td><td data-etiqueta="Factura">{{ c.factura || 'Automática' }}</td>
+                  <tr><td data-etiqueta="#" class="sutil">{{ i + 1 }}</td><td data-etiqueta="Nombre"><strong>{{ c.nombre }}</strong></td>
+                    <td data-etiqueta="Dirección">{{ c.direccion || '—' }}<small class="sutil d-bloque">{{ c.ciudad }}</small></td>
+                    <td data-etiqueta="Ubicación">
+                      @if (c.buscando) { <span class="chip sin-punto">Buscando…</span> }
+                      @else if (c.lat !== undefined && c.lat !== null) { <span class="chip ok sin-punto">{{ c.ubicacion === 'mapa' ? 'Marcado en el mapa' : 'Ubicado por dirección' }}</span> }
+                      @else { <span class="chip alerta sin-punto">{{ c.sinResultado ? 'No se encontró' : 'Sin ubicar' }}</span> }
+                      <span class="d-bloque acciones-ubicacion">
+                        <button type="button" class="texto pequeno" (click)="marcarEnMapa(i)">Marcar en el mapa</button>
+                        @if ((c.direccion || c.ciudad) && c.ubicacion !== 'direccion') { <button type="button" class="texto pequeno" (click)="ubicar(i)" [disabled]="c.buscando">Buscar dirección</button> }
+                      </span></td>
+                    <td data-etiqueta="Teléfono">{{ c.telefono || '—' }}</td><td data-etiqueta="Factura">{{ c.factura || 'Automática' }}</td>
                     <td data-etiqueta="Valor" class="num">{{ c.valor ? (c.valor | pesos) : '—' }}</td>
                     <td><button type="button" class="texto peligro pequeno" (click)="quitar(i)" [attr.aria-label]="'Quitar ' + c.nombre">Quitar</button></td></tr>
                 } @empty { <tr><td colspan="8" class="vacio">Agregue clientes uno a uno o importe un Excel (columnas: Nombre, Dirección, Ciudad, Teléfono, Factura, Valor).</td></tr> }
               </tbody>
             </table>
           </div>
-          <p class="sutil nota">Sur Track arma la ruta de entrega con las direcciones, como al crear un viaje en Cooespatrans. Puede cambiar los clientes hasta que el conductor acepte el viaje.</p>
+          <p class="sutil nota">El conductor ve los clientes en el mapa y navega a cada uno. Puede cambiarlos hasta que acepte el viaje.</p>
         }
       }
       <ng-container pie>
@@ -98,6 +114,9 @@ const PASTO: L.LatLngTuple = [1.2136, -77.2811];
     .mapa-destino { height: 300px; margin-top: 10px; border-radius: var(--radio); border: 1px solid var(--gris-2); }
     .nota { font-size: 12.5px; margin: 8px 0 0; }
     .acciones-clientes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; } .derecha { margin-left: auto; }
+    .marcando { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; padding: 8px 10px; border-radius: 10px; background: var(--primario-claro); border: 1px solid var(--primario-borde); font-size: 13px; }
+    .apuntando { cursor: crosshair; outline: 2px solid var(--primario-borde); }
+    .acciones-ubicacion { display: flex; flex-wrap: wrap; gap: 0 8px; margin-top: 2px; } .d-bloque { display: block; }
     .nuevo-cliente { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 10px; padding: 10px; background: var(--gris-1); border-radius: var(--radio); }
     @media (max-width: 560px) { .tarjetas { grid-template-columns: 1fr; } .buscar-destino { flex-direction: column; align-items: stretch; } }
   `],
@@ -122,6 +141,10 @@ export class ActivarRastreo {
   nuevo: ClienteParada = vacioCliente();
 
   private contenedor = viewChild<ElementRef<HTMLDivElement>>('mapa');
+  private contClientes = viewChild<ElementRef<HTMLDivElement>>('mapaClientes');
+  private mapaCli: L.Map | null = null;
+  private capaCli: L.LayerGroup | null = null;
+  readonly marcando = signal<number | null>(null);
   private mapa: L.Map | null = null;
   private marcador: L.Marker | null = null;
 
@@ -136,16 +159,83 @@ export class ActivarRastreo {
     this.clientes.set((rastreo?.clientes || []).map((c: any) => ({ ...vacioCliente(), ...c })));
     this.resultados.set([]); this.nuevo = vacioCliente();
     this.abierto.set(true);
+    this.marcando.set(null);
     if (this.modalidad() === 'destino') {
       this.iniciarMapa();
       if (this.destino().lat === undefined && this.textoDestino) this.buscarDestino(true);
-    }
+    } else { this.iniciarMapaClientes(); this.ubicarPendientes(); }
   }
-  cerrar() { this.abierto.set(false); this.mapa?.remove(); this.mapa = null; this.marcador = null; }
+  cerrar() { this.abierto.set(false); this.quitarMapas(); }
+  private quitarMapas() { this.mapa?.remove(); this.mapa = null; this.marcador = null; this.mapaCli?.remove(); this.mapaCli = null; this.capaCli = null; }
 
   cambiarModalidad(m: Modalidad) {
     this.modalidad.set(m);
-    if (m === 'destino') this.iniciarMapa(); else { this.mapa?.remove(); this.mapa = null; this.marcador = null; }
+    this.quitarMapas();
+    if (m === 'destino') this.iniciarMapa(); else this.iniciarMapaClientes();
+  }
+
+  // ── Clientes en el mapa: se ubican solos con la dirección; se pueden arrastrar o marcar a mano ──
+  private iniciarMapaClientes() {
+    setTimeout(() => {
+      const el = this.contClientes()?.nativeElement;
+      if (!el || this.mapaCli) return;
+      this.mapaCli = L.map(el).setView(PASTO, 8);
+      setTimeout(() => this.mapaCli?.invalidateSize(), 250);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(this.mapaCli);
+      this.capaCli = L.layerGroup().addTo(this.mapaCli);
+      this.mapaCli.on('click', (e: L.LeafletMouseEvent) => {
+        const i = this.marcando();
+        if (i === null) return;
+        this.ponerPunto(i, e.latlng.lat, e.latlng.lng, 'mapa');
+        this.marcando.set(null);
+      });
+      this.pintarClientes(true);
+    }, 50);
+  }
+  private ponerPunto(i: number, lat: number, lng: number, ubicacion: 'direccion' | 'mapa') {
+    this.clientes.update(l => l.map((c, j) => (j === i ? { ...c, lat, lng, ubicacion, buscando: false, sinResultado: false } : c)));
+    this.pintarClientes(false);
+  }
+  private pintarClientes(encuadrar: boolean) {
+    if (!this.mapaCli || !this.capaCli) return;
+    this.capaCli.clearLayers();
+    const pts: L.LatLngTuple[] = [];
+    this.clientes().forEach((c, i) => {
+      if (c.lat === undefined || c.lat === null || c.lng === undefined || c.lng === null) return;
+      const pos: L.LatLngTuple = [c.lat, c.lng]; pts.push(pos);
+      const color = c.ubicacion === 'mapa' ? '#3b82f6' : '#1f9d55';
+      const icono = L.divIcon({ className: '', iconSize: [26, 26], iconAnchor: [13, 13],
+        html: '<div style="width:26px;height:26px;border-radius:50%;background:' + color + ';color:#fff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:grid;place-items:center;font:700 11px system-ui">' + (i + 1) + '</div>' });
+      L.marker(pos, { icon: icono, draggable: true, title: c.nombre }).bindTooltip((i + 1) + '. ' + c.nombre)
+        .on('dragend', (ev) => { const p = (ev.target as L.Marker).getLatLng(); this.ponerPunto(i, p.lat, p.lng, 'mapa'); })
+        .addTo(this.capaCli!);
+    });
+    if (encuadrar && pts.length === 1) this.mapaCli.setView(pts[0], 14);
+    else if (encuadrar && pts.length > 1) this.mapaCli.fitBounds(L.latLngBounds(pts), { padding: [30, 30] });
+  }
+  marcarEnMapa(i: number) {
+    this.marcando.set(i);
+    this.contClientes()?.nativeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  // Busca la dirección de un cliente (dirección + ciudad); el servidor respeta el límite de una búsqueda por segundo
+  async ubicar(i: number) {
+    const c = this.clientes()[i];
+    const texto = [c?.direccion, c?.ciudad].filter(Boolean).join(', ');
+    if (!c || texto.length < 4) return;
+    this.clientes.update(l => l.map((x, j) => (j === i ? { ...x, buscando: true } : x)));
+    try {
+      const r = await this.api.get<any[]>('/rastreo/geocodificar', { q: texto + ', Colombia' });
+      if (r[0]) this.ponerPunto(i, r[0].lat, r[0].lng, 'direccion');
+      else this.clientes.update(l => l.map((x, j) => (j === i ? { ...x, buscando: false, sinResultado: true } : x)));
+    } catch { this.clientes.update(l => l.map((x, j) => (j === i ? { ...x, buscando: false, sinResultado: true } : x))); }
+    if (this.clientes().filter(x => x.lat !== undefined && x.lat !== null).length <= 2) this.pintarClientes(true);
+  }
+  private async ubicarPendientes() {
+    for (let i = 0; i < this.clientes().length; i++) {
+      const c = this.clientes()[i];
+      if ((c.lat === undefined || c.lat === null) && !c.sinResultado && (c.direccion || c.ciudad)) await this.ubicar(i);
+    }
+    this.pintarClientes(true);
   }
 
   private iniciarMapa() {
@@ -198,8 +288,9 @@ export class ActivarRastreo {
     this.clientes.update(l => [...l, { ...this.nuevo, nombre: this.nuevo.nombre.trim() }]);
     this.nuevo = vacioCliente();
     setTimeout(() => document.getElementById('ar-cn')?.focus(), 20);
+    this.ubicar(this.clientes().length - 1);
   }
-  quitar(i: number) { this.clientes.update(l => l.filter((_, j) => j !== i)); }
+  quitar(i: number) { this.clientes.update(l => l.filter((_, j) => j !== i)); this.marcando.set(null); this.pintarClientes(false); }
 
   async importar(ev: Event) {
     const input = ev.target as HTMLInputElement;
@@ -210,7 +301,8 @@ export class ActivarRastreo {
     try {
       const r = await this.api.subir<any>('/rastreo/clientes/importar', archivo);
       this.clientes.update(l => [...l, ...r.clientes.map((c: any) => ({ ...vacioCliente(), ...c }))]);
-      this.avisos.ok(`${r.clientes.length} cliente(s) importados${r.omitidas ? ` · ${r.omitidas} fila(s) vacías omitidas` : ''}`);
+      this.avisos.ok(`${r.clientes.length} cliente(s) importados${r.omitidas ? ` · ${r.omitidas} fila(s) vacías omitidas` : ''}. Se están ubicando en el mapa con sus direcciones.`);
+      this.ubicarPendientes();
     } catch (e) { this.avisos.error(e); }
     finally { this.importando.set(false); }
   }
@@ -218,7 +310,9 @@ export class ActivarRastreo {
 
   async guardar() {
     const v = this.viaje();
-    const cuerpo = this.modalidad() === 'clientes' ? { modalidad: 'clientes', clientes: this.clientes() } : { modalidad: 'destino', destino: this.destino(), clientes: [] };
+    const cuerpo = this.modalidad() === 'clientes'
+      ? { modalidad: 'clientes', clientes: this.clientes().map(({ buscando, sinResultado, ...c }) => c) }
+      : { modalidad: 'destino', destino: this.destino(), clientes: [] };
     this.guardando.set(true);
     try {
       const r = this.editando() ? await this.api.put<any>(`/rastreo/viajes/${v._id}/paradas`, cuerpo) : await this.api.post<any>(`/rastreo/viajes/${v._id}/activar`, cuerpo);

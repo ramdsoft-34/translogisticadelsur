@@ -124,6 +124,7 @@ export function normalizarParadas(opciones = {}, viaje) {
   const clientes = modalidad === 'clientes' ? (opciones.clientes || []).slice(0, 200).map(c => ({
     nombre: t(c.nombre, 120), direccion: t(c.direccion), ciudad: t(c.ciudad, 80), telefono: t(c.telefono, 30), documento: t(c.documento, 20),
     factura: t(c.factura, 40), valor: Math.max(0, Number(c.valor) || 0), lat: num(c.lat), lng: num(c.lng),
+    ubicacion: num(c.lat) !== undefined && num(c.lng) !== undefined ? (c.ubicacion === 'mapa' ? 'mapa' : 'direccion') : '',
     estadoEntrega: 'pendiente', valorRecibido: 0 })).filter(c => c.nombre) : [];
   if (modalidad === 'clientes' && !clientes.length) throw new ErrorHttp(400, 'Agregue al menos un cliente');
   // Con clientes las paradas son los clientes: no se guarda destino
@@ -131,13 +132,32 @@ export function normalizarParadas(opciones = {}, viaje) {
     destino: modalidad === 'clientes' ? { nombre: '', lat: undefined, lng: undefined } : { nombre: t(destino.nombre || viaje?.destino, 120), lat: num(destino.lat), lng: num(destino.lng) } };
 }
 
-// Cuerpo para Sur Track: clientes (la ruta la arma Cooespatrans) o la ruta sugerida hasta el destino
-async function paradasParaSurTrack(paradas) {
+// Clientes con dirección y sin punto en el mapa: se ubican solos con la dirección (OpenStreetMap). Máximo 25 por envío
+// (una búsqueda por segundo); los demás quedan con la dirección para «Navegar».
+const MAX_UBICAR = 25;
+async function ubicarClientes(paradas) {
+  let n = 0;
+  for (const c of paradas.clientes) {
+    if (Number.isFinite(c.lat) && Number.isFinite(c.lng)) continue;
+    const texto = [c.direccion, c.ciudad].filter(Boolean).join(', ');
+    if (texto.length < 4 || n >= MAX_UBICAR) continue;
+    n += 1;
+    const g = await geocodificar(`${texto}, Colombia`).catch(() => []);
+    if (g[0]) { c.lat = g[0].lat; c.lng = g[0].lng; c.ubicacion = 'direccion'; }
+  }
+  return paradas;
+}
+
+// Cuerpo para Sur Track: los clientes con su ubicación, o el destino (solo la app nueva lo usa: a Cooespatrans no se le manda nada nuevo)
+async function paradasParaSurTrack(paradas, { appNueva = false } = {}) {
   if (paradas.modalidad === 'clientes') {
     return { clientes: paradas.clientes.map((c, i) => ({ nombre: c.nombre, direccion: [c.direccion, c.ciudad].filter(Boolean).join(', '), ciudad: c.ciudad,
-      telefono: c.telefono, documento: c.documento, factura: c.factura, valor: c.valor, referencia: String(i) })) };
+      telefono: c.telefono, documento: c.documento, factura: c.factura, valor: c.valor, referencia: String(i),
+      ...(appNueva && Number.isFinite(c.lat) && Number.isFinite(c.lng) ? { lat: c.lat, lng: c.lng } : {}) })) };
   }
-  return { clientes: [], rutaSugerida: null };
+  const d = paradas.destino || {};
+  return { clientes: [], rutaSugerida: null,
+    ...(appNueva ? { destino: { nombre: d.nombre || '', ...(Number.isFinite(d.lat) && Number.isFinite(d.lng) ? { lat: d.lat, lng: d.lng } : {}) } } : {}) };
 }
 
 export async function activar(empresaId, viajeId, usuarioId, opciones = {}) {
@@ -155,18 +175,18 @@ export async function activar(empresaId, viajeId, usuarioId, opciones = {}) {
     v.conductor ? Tercero.findOne({ empresa: empresaId, _id: v.conductor }).select('numId').lean() : null,
     Cliente.findOne({ empresa: empresaId, _id: v.cliente }).select('nombre').lean(),
   ]);
-  const cuerpo = {
+  if (paradas.modalidad === 'clientes') await ubicarClientes(paradas);
+  const base = {
     referencia: `tls:${empresaId}:${v._id}`, codigo: v.manifiesto?.numero || `V-${v.numero}`, placa: v.placa, cedula: cond?.numId || '',
     valorFlete: Math.max(1, Number(v.flete) || 0), anticipo: Number(v.anticipo) || 0, empresa: cli?.nombre || '',
-    ...(await paradasParaSurTrack(paradas)),
   };
   // Conductor con la app nueva activada → servidor nuevo. Si no tiene cuenta, sigue con la app anterior.
   let servidor = 'cooespatrans'; let r = null;
-  if (configuradoServidor('app') && cuerpo.cedula) {
-    try { r = await llamar('/viajes', { metodo: 'POST', cuerpo, servidor: 'app' }); servidor = 'app'; }
+  if (configuradoServidor('app') && base.cedula) {
+    try { r = await llamar('/viajes', { metodo: 'POST', cuerpo: { ...base, ...(await paradasParaSurTrack(paradas, { appNueva: true })) }, servidor: 'app' }); servidor = 'app'; }
     catch (e) { if (e.codigo !== 'sin_conductor' || !configuradoServidor('cooespatrans')) throw e; }
   }
-  r ??= await llamar('/viajes', { metodo: 'POST', cuerpo });
+  r ??= await llamar('/viajes', { metodo: 'POST', cuerpo: { ...base, ...(await paradasParaSurTrack(paradas)) } });
   (r.clientes || []).forEach(x => { const c = paradas.clientes[Number(x.referencia)]; if (c) c.externoId = x.clienteId; });
   v.rastreo = { activo: true, estado: 'esperando', origen: 'translogistica', servidor: servidor === 'app' ? 'app' : '', externoId: r.viajeId, codigoExterno: r.codigo,
     activado: new Date(), activadoPor: usuarioId, finalizado: null, error: '', ...paradas,
@@ -183,8 +203,10 @@ export async function actualizarParadas(empresaId, viajeId, opciones) {
   const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId });
   if (!v?.rastreo?.activo) throw new ErrorHttp(404, 'Este viaje no tiene rastreo activo');
   const paradas = normalizarParadas(opciones, v);
+  if (paradas.modalidad === 'clientes') await ubicarClientes(paradas);
   if (v.rastreo.origen === 'translogistica') {
-    const r = await llamar(`/viajes/${v.rastreo.externoId}/clientes`, { metodo: 'PUT', cuerpo: await paradasParaSurTrack(paradas), servidor: servidorDe(v.rastreo) });
+    const servidor = servidorDe(v.rastreo);
+    const r = await llamar(`/viajes/${v.rastreo.externoId}/clientes`, { metodo: 'PUT', cuerpo: await paradasParaSurTrack(paradas, { appNueva: servidor === 'app' }), servidor });
     (r.clientes || []).forEach(x => { const c = paradas.clientes[Number(x.referencia)]; if (c) c.externoId = x.clienteId; });
   } else if (paradas.modalidad === 'clientes') {
     throw new ErrorHttp(409, 'Este rastreo viene de Cooespatrans: sus clientes se manejan allá');
@@ -277,11 +299,18 @@ export async function enVivo(empresaId) {
     else if (ext?.estado === 'aceptado') estado = 'sin_senal';
     else estado = 'esperando';
     const ultima = p ? { lat: p.lat, lng: p.lng, velocidad: kmh(p.velocidad), rumbo: p.rumbo, hora: p.hora } : v.rastreo.ultima?.lat ? v.rastreo.ultima : null;
+    // Exceso de velocidad en lo recibido en los últimos 15 min (aunque haya pasado sin señal y llegado después)
+    const limite = conf.velocidadMaxima || 80;
+    const maxReciente = Math.max(p ? kmh(p.velocidadMaxReciente || 0) : 0, ultima && estado === 'en_ruta' ? ultima.velocidad : 0);
+    const exceso = maxReciente > limite;
+    const ultimoExceso = [...(v.rastreo.eventos || [])].reverse().find(e => e.tipo === 'exceso');
+    const registrarExceso = exceso && (!ultimoExceso || Date.now() - new Date(ultimoExceso.fecha) > 15 * 60000);
     const entregados = (v.rastreo.clientes || []).filter(c => c.estadoEntrega && c.estadoEntrega !== 'pendiente').length;
     // Se guarda la última posición y el estado en el viaje (sirve de respaldo si Sur Track no responde)
     const guardado = estado === 'llego' ? 'finalizado' : estado;
-    if (p || guardado !== v.rastreo.estado) {
+    if (p || guardado !== v.rastreo.estado || registrarExceso) {
       const nuevos = [];
+      if (registrarExceso) nuevos.push(evento('exceso', `${maxReciente} km/h (límite ${limite} km/h)`));
       if (guardado !== v.rastreo.estado) {
         if (v.rastreo.estado === 'esperando' && guardado !== 'esperando') nuevos.push(evento('inicio', 'El conductor inició el viaje en Sur Track'));
         if (['sin_senal', 'detenido', 'finalizado'].includes(guardado)) nuevos.push(evento(guardado, guardado === 'finalizado' ? 'Viaje completado en Sur Track' : ''));
@@ -292,7 +321,7 @@ export async function enVivo(empresaId) {
     }
     const alertas = [];
     if (estado === 'sin_senal') alertas.push('Sin señal');
-    if (ultima && ultima.velocidad > (conf.velocidadMaxima || 80) && estado === 'en_ruta') alertas.push(`Exceso de velocidad: ${ultima.velocidad} km/h`);
+    if (exceso) alertas.push(`Exceso de velocidad: ${maxReciente} km/h`);
     salida.push({ _id: v._id, numero: v.numero, fecha: v.fecha, placa: v.placa, conductor: v.conductorNombre, destino: v.destino,
       cliente: v.cliente?.nombre || '', estadoViaje: v.estado, estado, origen: v.rastreo.origen, codigoExterno: v.rastreo.codigoExterno,
       activado: v.rastreo.activado, ultima, alertas, aceptado: ext?.fechaAceptacion || null,
@@ -320,9 +349,9 @@ export async function recorrido(empresaId, viajeId) {
     const puntos = (g?.puntos || []).map(([lat, lng, velocidad, t]) => ({ lat, lng, velocidad, hora: new Date(t) }));
     return { viaje: datosViaje(v), estadoExterno: 'completado', ultima: null, puntos, clientes: v.rastreo.clientes || [],
       ruta: (g?.ruta || []).map(([lat, lng]) => ({ lat, lng })), destino: v.rastreo.modalidad !== 'clientes' && v.rastreo.destino?.lat ? v.rastreo.destino : null,
-      resumen: v.rastreo.resumen?.puntos !== undefined ? v.rastreo.resumen : resumenDe(puntos), eventos: v.rastreo.eventos || [], modalidad: v.rastreo.modalidad || 'destino' };
+      resumen: v.rastreo.resumen?.puntos !== undefined ? v.rastreo.resumen : resumenDe(puntos, (await Empresa.findById(empresaId).select('rastreo.velocidadMaxima').lean())?.rastreo?.velocidadMaxima || 80), eventos: v.rastreo.eventos || [], modalidad: v.rastreo.modalidad || 'destino' };
   }
-  await exigirHabilitado(empresaId);
+  const conf = await exigirHabilitado(empresaId);
   const servidor = servidorDe(v.rastreo);
   const r = await enCache(`rec:${servidor}:${v.rastreo.externoId}`, 10000, () => llamar(`/rastreo/${encodeURIComponent(v.rastreo.externoId)}`, { servidor }));
   const puntos = r.puntos.map(p => ({ ...p, velocidad: kmh(p.velocidad) }));
@@ -336,18 +365,24 @@ export async function recorrido(empresaId, viajeId) {
     if (desde) ruta = (await rutaSugerida([desde, destino]).catch(() => null))?.coordenadas || ruta;
   }
   return { viaje: datosViaje(v), estadoExterno: r.viaje.estado, ultima, puntos, clientes, ruta, destino,
-    resumen: resumenDe(puntos), eventos: v.rastreo.eventos || [], modalidad: v.rastreo.modalidad || 'destino' };
+    resumen: resumenDe(puntos, conf.velocidadMaxima || 80), eventos: v.rastreo.eventos || [], modalidad: v.rastreo.modalidad || 'destino' };
 }
 
 const datosViaje = (v) => ({ numero: v.numero, fecha: v.fecha, placa: v.placa, conductor: v.conductorNombre, destino: v.destino,
   codigoExterno: v.rastreo.codigoExterno, estado: v.estado, rastreo: v.rastreo.estado, activado: v.rastreo.activado, finalizado: v.rastreo.finalizado });
 
 // Kilómetros recorridos (Haversine) y velocidad máxima
-function resumenDe(puntos) {
-  let km = 0;
-  for (let i = 1; i < puntos.length; i++) if (!puntos[i].nuevoSegmento) km += distanciaKm(puntos[i - 1], puntos[i]);
+// Resumen del recorrido: km, velocidad máxima y tramos con exceso de velocidad (puntos seguidos por encima del límite)
+function resumenDe(puntos, limite = 80) {
+  let km = 0; let excesos = 0; let enExceso = false;
+  for (let i = 0; i < puntos.length; i++) {
+    if (i > 0 && !puntos[i].nuevoSegmento) km += distanciaKm(puntos[i - 1], puntos[i]);
+    const rapido = (puntos[i].velocidad || 0) > limite;
+    if (rapido && !enExceso) excesos += 1;
+    enExceso = rapido;
+  }
   return { km: Math.round(km * 10) / 10, velocidadMaxima: Math.max(0, ...puntos.map(p => p.velocidad || 0)), puntos: puntos.length,
-    inicio: puntos[0]?.hora || null, fin: puntos[puntos.length - 1]?.hora || null };
+    inicio: puntos[0]?.hora || null, fin: puntos[puntos.length - 1]?.hora || null, excesos, limiteVelocidad: limite };
 }
 
 // Estado de entrega que marca el conductor en Sur Track → clientes del viaje (y su registro de seguimiento)
@@ -399,7 +434,7 @@ async function guardarRecorrido(empresaId, v) {
   await RecorridoRastreo.updateOne({ empresa: empresaId, viaje: v._id }, { $set: {
     puntos: puntos.map(p => [p.lat, p.lng, p.velocidad, new Date(p.hora).getTime()]),
     ruta: (r.ruta?.coordenadas || []).map(c => [c.lat, c.lng]) } }, { upsert: true });
-  v.rastreo.resumen = resumenDe(puntos);
+  v.rastreo.resumen = resumenDe(puntos, (await Empresa.findById(empresaId).select('rastreo.velocidadMaxima').lean())?.rastreo?.velocidadMaxima || 80);
 }
 
 // ── Mapas: ruta sugerida (OSRM del servidor) y búsqueda de direcciones (Nominatim de OpenStreetMap) ──

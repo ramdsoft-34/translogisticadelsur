@@ -386,12 +386,13 @@ const viajeSchema = new Schema({
     destino: { nombre: str(), lat: Number, lng: Number },
     clientes: { type: [{ _id: false, nombre: str(), direccion: str(), ciudad: str(), telefono: str(), documento: str(), factura: str(),
       valor: { type: Number, default: 0 }, lat: Number, lng: Number, externoId: str(),
+      ubicacion: str(),   // cómo se ubicó: 'direccion' (búsqueda automática) o 'mapa' (punto marcado a mano)
       estadoEntrega: str({ default: 'pendiente' }), valorRecibido: { type: Number, default: 0 }, fechaEntrega: fecha,
       // Dónde y cómo se hizo la entrega (lo registra el conductor en Sur Track)
       entrega: { lat: Number, lng: Number, aproximada: Boolean, observacion: String, fotos: [String], conductor: String } }], default: [] },
     // Registro de seguimiento (historial de monitoreo) y resumen al terminar
     eventos: { type: [{ _id: false, fecha: Date, tipo: String, detalle: String }], default: [] },
-    resumen: { km: Number, velocidadMaxima: Number, puntos: Number, inicio: Date, fin: Date },
+    resumen: { km: Number, velocidadMaxima: Number, puntos: Number, inicio: Date, fin: Date, excesos: Number, limiteVelocidad: Number },
   },
   // Números escritos a mano para el próximo envío (p. ej. tras un DUPLICADO del RNDC)
   numerosManuales: { remesa: str({ uppercase: true }), manifiesto: str({ uppercase: true }) },
