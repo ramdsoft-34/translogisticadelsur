@@ -17,7 +17,9 @@
     "@angular/forms": "^21.2.0",
     "@angular/platform-browser": "^21.2.0",
     "@angular/router": "^21.2.0",
+    "@maplibre/maplibre-gl-leaflet": "0.1.4",
     "leaflet": "^1.9.4",
+    "maplibre-gl": "5.24.0",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },

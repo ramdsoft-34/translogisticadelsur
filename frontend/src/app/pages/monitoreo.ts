@@ -468,7 +468,7 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
   readonly seguir = signal(false);
   readonly panelFlota = signal(true);
   readonly satelite = signal(false);
-  private base: L.TileLayer | null = null;
+  private base: L.Layer | null = null;
   readonly recorrido = signal<any>(null);
   readonly conteo = computed(() => (this.datos()?.viajes || []).reduce((a: any, v: any) => { a[v.estado] = (a[v.estado] || 0) + 1; return a; }, {}));
   readonly totalAlertas = computed(() => (this.datos()?.viajes || []).reduce((a: number, v: any) => a + v.alertas.length, 0));
@@ -537,17 +537,32 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
     finally { this.cargando.set(false); }
   }
 
-  // Mapa base: claro y limpio (los vehículos resaltan) o satélite
-  private ponerBase() {
+  // Mapa base: claro y limpio (OpenFreeMap Positron, vectorial, gratis y sin clave: los vehículos resaltan) o satélite.
+  // Si el mapa vectorial no carga (navegador sin WebGL), queda OpenStreetMap.
+  private async ponerBase() {
     if (!this.mapa) return;
-    this.base?.remove();
-    this.base = this.satelite()
+    const sat = this.satelite();
+    const capa: any = sat
       ? L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Imágenes © Esri' })
-      : L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap', className: 'mapa-suave' });
-    this.base.addTo(this.mapa);
-    this.base.bringToBack();
+      : await this.capaClara();
+    if (!this.mapa || sat !== this.satelite()) return;   // cambió mientras cargaba
+    this.base?.remove();
+    this.base = capa;
+    capa.addTo(this.mapa);
+    capa.bringToBack?.();
   }
   cambiarBase() { this.satelite.set(!this.satelite()); this.ponerBase(); }
+  private async capaClara(): Promise<L.Layer> {
+    try {
+      const gl = document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl');
+      if (!gl) throw new Error('sin WebGL');
+      const { maplibreGL } = await import('@maplibre/maplibre-gl-leaflet');
+      return maplibreGL({ style: 'https://tiles.openfreemap.org/styles/positron',
+        attribution: '<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' } as any) as any;
+    } catch {
+      return L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap', className: 'mapa-suave' });
+    }
+  }
   verAlertas() { this.panelFlota.set(true); this.filtroEstado.set('alertas'); }
   // Avance hacia el destino: lo recorrido frente a lo que falta (en línea recta); con clientes, las entregas hechas
   progreso(r: any): number | null {
