@@ -45,10 +45,6 @@ const duracion = (desde: string | Date | null | undefined) => {
       <div><h1>Monitoreo</h1>
         <p class="sutil">Viajes rastreados con Sur Track en tiempo real.</p></div>
       <div class="acciones">
-        @if (estado()?.habilitado && pestana() === 'vivo') {
-          <span class="vivo" aria-live="polite"><span class="latido" [class.cargando]="cargando()"></span>{{ actualizado() ? 'En vivo · ' + hace(actualizado()) : 'Conectando…' }}</span>
-          <button (click)="cargar()" [disabled]="cargando()"><app-icono nombre="reloj" [tam]="16" />Actualizar</button>
-        }
         @if (puedeConfigurar) { <a class="boton" routerLink="/configuracion" [queryParams]="{ tab: 'rastreo' }"><app-icono nombre="ajustes" [tam]="16" />Configurar</a> }
       </div>
     </div>
@@ -98,127 +94,145 @@ const duracion = (desde: string | Date | null | undefined) => {
         @else { <p class="sutil">Pida al administrador de su empresa que lo active.</p> }
       </div>
     } @else if (estado()) {
-      <!-- Filtros por estado: cada cifra filtra la lista (otra vez para quitar el filtro) -->
-      <div class="cifras" role="group" aria-label="Filtrar por estado">
-        <button type="button" class="cifra" [class.activo]="!filtroEstado()" (click)="filtroEstado.set('')"><span>Todos</span><strong>{{ datos()?.viajes?.length || 0 }}</strong></button>
-        @for (c of CONTADORES; track c.v) {
-          <button type="button" class="cifra" [class.activo]="filtroEstado() === c.v" [attr.aria-pressed]="filtroEstado() === c.v" (click)="filtroEstado.set(filtroEstado() === c.v ? '' : c.v)">
-            <span class="punto" [style.background]="COLORES[c.v]"></span><span>{{ c.t }}</span><strong>{{ conteo()[c.v] || 0 }}</strong></button>
-        }
-        <button type="button" class="cifra alertas" [class.hay]="totalAlertas() > 0" [class.activo]="filtroEstado() === 'alertas'" [attr.aria-pressed]="filtroEstado() === 'alertas'"
-          (click)="filtroEstado.set(filtroEstado() === 'alertas' ? '' : 'alertas')"><app-icono nombre="alerta" [tam]="16" /><span>Con alertas</span><strong>{{ conAlertas() }}</strong></button>
-      </div>
+      <div class="torre" [class.con-detalle]="!!recorrido()" [class.flota-cerrada]="!panelFlota()">
+        <div #mapa class="mapa" role="application" aria-label="Mapa de la flota"></div>
 
-      <div class="monitor" [class.con-panel]="!!recorrido()">
-        <aside class="lista" aria-label="Viajes rastreados">
-          <div class="campo buscar"><label for="mo-q" class="oculto">Buscar</label>
-            <input id="mo-q" type="search" placeholder="Buscar placa, conductor, cliente o N°" [ngModel]="q()" (ngModelChange)="q.set($event)" /></div>
-          @for (v of visibles(); track v._id) {
-            <button type="button" class="viaje" [class.elegido]="elegido() === v._id" [style.--color]="COLORES[v.estado] || '#9ca3af'" (click)="elegir(v._id)"
-              [attr.aria-label]="v.placa + ', ' + textoEstado(v.estado) + ', ' + v.conductor">
-              <span class="v-cab"><span class="placa">{{ v.placa }}</span>
-                <span class="estado"><span class="punto" [style.background]="COLORES[v.estado] || '#9ca3af'"></span>{{ textoEstado(v.estado) }}</span>
-                <small class="sutil derecha">N° {{ v.numero }}</small></span>
-              <span class="v-conductor">{{ v.conductor }}</span>
-              <span class="v-ruta"><app-icono nombre="ubicacion" [tam]="14" />{{ v.cliente }} → {{ v.modalidad === 'clientes' ? v.clientes + ' cliente(s)' : v.destino }}</span>
-              @if (v.modalidad === 'clientes' && v.clientes) {
-                <span class="progreso" role="progressbar" [attr.aria-valuenow]="v.entregados" [attr.aria-valuemax]="v.clientes" [attr.aria-label]="'Entregas ' + v.entregados + ' de ' + v.clientes">
-                  <span [style.width.%]="100 * v.entregados / v.clientes"></span></span>
-                <span class="v-metricas"><strong>{{ v.entregados }}/{{ v.clientes }}</strong> entregas</span>
+        <!-- Resumen arriba, al centro: lo que pasa en un vistazo -->
+        <div class="resumen" aria-live="polite">
+          <span class="en-vivo"><span class="latido" [class.cargando]="cargando()"></span>EN VIVO</span>
+          <span class="dato"><strong>{{ datos()?.viajes?.length || 0 }}</strong> vehículos</span>
+          <span class="dato verde"><strong>{{ conteo()['en_ruta'] || 0 }}</strong> en ruta</span>
+          @if (conAlertas()) { <button type="button" class="dato rojo" (click)="verAlertas()"><strong>{{ conAlertas() }}</strong> con alertas</button> }
+          <span class="sutil-claro">{{ actualizado() ? hace(actualizado()) : 'conectando…' }}</span>
+        </div>
+
+        <!-- Controles del mapa -->
+        <div class="controles">
+          <button type="button" class="ctl" (click)="verTodos()" title="Ver toda la flota" aria-label="Ver toda la flota"><app-icono nombre="lista" [tam]="17" /></button>
+          <button type="button" class="ctl" [class.activo]="satelite()" (click)="cambiarBase()" [attr.aria-pressed]="satelite()" title="Vista satélite"><app-icono nombre="sol" [tam]="17" /></button>
+          <button type="button" class="ctl" (click)="cargar()" [disabled]="cargando()" title="Actualizar ahora" aria-label="Actualizar ahora"><app-icono nombre="reloj" [tam]="17" /></button>
+        </div>
+
+        <!-- Flota (izquierda) -->
+        <aside class="flota" aria-label="Flota en seguimiento">
+          <header class="flota-cab">
+            <div><h2>Flota</h2><small>{{ visibles().length }} de {{ datos()?.viajes?.length || 0 }}</small></div>
+            <button type="button" class="ctl" (click)="panelFlota.set(!panelFlota())" [attr.aria-label]="panelFlota() ? 'Ocultar la lista' : 'Mostrar la lista'">
+              <app-icono [nombre]="panelFlota() ? 'x' : 'menu'" [tam]="16" /></button>
+          </header>
+          @if (panelFlota()) {
+            <div class="buscar"><app-icono nombre="buscar" [tam]="16" />
+              <input type="search" placeholder="Placa, conductor, cliente o N°" [ngModel]="q()" (ngModelChange)="q.set($event)" aria-label="Buscar en la flota" /></div>
+            <div class="filtros" role="group" aria-label="Filtrar por estado">
+              <button type="button" [class.activo]="!filtroEstado()" (click)="filtroEstado.set('')">Todos</button>
+              @for (c of CONTADORES; track c.v) {
+                <button type="button" [class.activo]="filtroEstado() === c.v" [attr.aria-pressed]="filtroEstado() === c.v" (click)="filtroEstado.set(filtroEstado() === c.v ? '' : c.v)">
+                  <span class="punto" [style.background]="COLORES[c.v]"></span>{{ c.t }} <b>{{ conteo()[c.v] || 0 }}</b></button>
               }
-              <span class="v-metricas">
-                @if (v.ultima) {
-                  <span><strong>{{ v.ultima.velocidad }}</strong> km/h</span>
-                  @if (faltan(v); as f) { <span>Faltan <strong>~{{ f }}</strong> km</span> }
-                  <span class="sutil">{{ hace(v.ultima.hora) }}</span>
-                } @else { <span class="sutil">Esperando la primera posición</span> }
-              </span>
-              @if (v.alertas.length) { <span class="v-alertas">@for (a of v.alertas; track a) { <span class="chip error sin-punto">{{ a }}</span> }</span> }
-            </button>
-          } @empty {
-            <div class="vacio-lista">
-              <app-icono nombre="camion" [tam]="28" />
-              <p>{{ datos()?.viajes?.length ? 'Ningún viaje con este filtro.' : 'No hay viajes con rastreo activo.' }}</p>
-              @if (!datos()?.viajes?.length) { <small class="sutil">Actívelo al registrar el viaje o desde su ficha en Viajes.</small> }
+              <button type="button" class="f-alerta" [class.activo]="filtroEstado() === 'alertas'" (click)="filtroEstado.set(filtroEstado() === 'alertas' ? '' : 'alertas')">
+                <app-icono nombre="alerta" [tam]="13" />Alertas <b>{{ conAlertas() }}</b></button>
             </div>
-          }
-
-          @if (datos()?.externos?.length) {
-            <h3 class="sub">Rastreos iniciados en Cooespatrans</h3>
-            <p class="sutil nota">Están en Sur Track pero aún no se enlazan a un viaje de Translogística.</p>
-            @for (x of datos()!.externos; track x.externoId) {
-              <div class="viaje externo">
-                <span class="v-cab">@if (x.placa) { <span class="placa">{{ x.placa }}</span> } @else { <span class="chip sin-punto">Sin placa</span> }<small class="sutil">{{ x.codigo }}</small>
-                  <small class="sutil derecha">{{ hace(x.ultima?.hora) }}</small></span>
-                <span class="v-conductor">{{ x.conductor }}</span>
-                @if (puedeRegistrar) { <button type="button" class="pequeno" (click)="abrirEnlace(x)">Enlazar a un viaje</button> }
-              </div>
-            }
+            <div class="lista">
+              @for (v of visibles(); track v._id) {
+                <button type="button" class="fila" [class.elegida]="elegido() === v._id" [style.--c]="COLORES[v.estado] || '#9ca3af'" (click)="elegir(v._id)"
+                  [attr.aria-label]="v.placa + ', ' + textoEstado(v.estado) + ', ' + v.conductor">
+                  <span class="f-izq">
+                    <span class="placa-grande">{{ v.placa }}</span>
+                    <span class="f-estado">{{ textoEstado(v.estado) }}</span>
+                  </span>
+                  <span class="f-centro">
+                    <span class="f-conductor">{{ v.conductor }}</span>
+                    <span class="f-destino">→ {{ v.modalidad === 'clientes' ? (v.entregados + '/' + v.clientes + ' entregas') : v.destino }}</span>
+                    @if (v.alertas.length) { <span class="f-alertas">@for (a of v.alertas; track a) { <span>{{ a }}</span> }</span> }
+                  </span>
+                  <span class="f-der">
+                    @if (v.ultima) { <span class="vel"><strong>{{ v.ultima.velocidad }}</strong><small>km/h</small></span><small class="hace">{{ hace(v.ultima.hora) }}</small> }
+                    @else { <small class="hace">sin posición</small> }
+                    @if (faltan(v) !== null) { <small class="faltan">faltan {{ faltan(v) }} km</small> }
+                  </span>
+                </button>
+              } @empty {
+                <div class="vacio-flota"><app-icono nombre="camion" [tam]="30" />
+                  <p>{{ datos()?.viajes?.length ? 'Ningún vehículo con este filtro' : 'No hay viajes con rastreo activo' }}</p>
+                  @if (!datos()?.viajes?.length) { <small>Actívelo al registrar el viaje o desde su ficha en Viajes.</small> }
+                </div>
+              }
+              @if (datos()?.externos?.length) {
+                <h3 class="seccion">Iniciados en Cooespatrans</h3>
+                @for (x of datos()!.externos; track x.externoId) {
+                  <div class="fila externa">
+                    <span class="f-izq"><span class="placa-grande">{{ x.placa || '—' }}</span><span class="f-estado">{{ x.codigo }}</span></span>
+                    <span class="f-centro"><span class="f-conductor">{{ x.conductor }}</span><span class="f-destino">{{ hace(x.ultima?.hora) }}</span></span>
+                    @if (puedeRegistrar) { <button type="button" class="pequeno" (click)="abrirEnlace(x)">Enlazar</button> }
+                  </div>
+                }
+              }
+            </div>
           }
         </aside>
 
-        <section class="mapa-caja">
-          <div #mapa class="mapa" role="application" aria-label="Mapa de vehículos"></div>
-          <div class="mapa-botones">
-            <button type="button" class="pequeno" (click)="verTodos()" title="Ver todos los vehículos"><app-icono nombre="lista" [tam]="15" />Ver todos</button>
-            @if (elegido()) { <button type="button" class="pequeno" [class.primario]="seguir()" [attr.aria-pressed]="seguir()" (click)="seguir.set(!seguir())" title="Mantener el vehículo en el centro"><app-icono nombre="ubicacion" [tam]="15" />{{ seguir() ? 'Siguiendo' : 'Seguir' }}</button> }
-          </div>
-          <div class="leyenda" aria-label="Leyenda del mapa">
-            @for (c of CONTADORES; track c.v) { <span><span class="punto" [style.background]="COLORES[c.v]"></span>{{ c.t }}</span> }
-            @if (recorrido()) { <span><span class="raya amarilla"></span>Recorrido</span><span><span class="raya roja"></span>Exceso de velocidad</span><span><span class="raya azul"></span>Ruta sugerida</span> }
-          </div>
-        </section>
-
+        <!-- Vehículo elegido (derecha) -->
         @if (recorrido(); as r) {
-          <aside class="panel" aria-label="Detalle del viaje elegido">
+          <aside class="detalle-vh" aria-label="Vehículo elegido" [style.--c]="COLORES[vivoElegido()?.estado] || '#9ca3af'">
             <header>
-              <div><span class="placa">{{ r.viaje.placa }}</span> <span class="chip sin-punto" [class]="claseEstado(vivoElegido()?.estado || '')">{{ textoEstado(vivoElegido()?.estado || '') }}</span>
-                <h2>Viaje N° {{ r.viaje.numero }}</h2>
-                <p class="sutil">{{ r.viaje.conductor }}</p></div>
-              <button type="button" class="texto" (click)="cerrarRecorrido()" aria-label="Cerrar el detalle"><app-icono nombre="x" [tam]="18" /></button>
+              <div class="dv-titulo">
+                <span class="placa-grande">{{ r.viaje.placa }}</span>
+                <span class="dv-estado"><span class="punto" [style.background]="COLORES[vivoElegido()?.estado] || '#9ca3af'"></span>{{ textoEstado(vivoElegido()?.estado || '') }}</span>
+              </div>
+              <button type="button" class="ctl" (click)="cerrarRecorrido()" aria-label="Cerrar"><app-icono nombre="x" [tam]="16" /></button>
             </header>
-            <p class="ruta"><app-icono nombre="ubicacion" [tam]="15" />{{ r.modalidad === 'clientes' ? r.clientes.length + ' cliente(s) de entrega' : (r.destino?.nombre || r.viaje.destino) }}</p>
+            <p class="dv-sub">Viaje N° {{ r.viaje.numero }} · {{ r.viaje.conductor }}</p>
 
-            <div class="kpis">
-              <div><span>Velocidad</span><strong>{{ vivoElegido()?.ultima ? vivoElegido().ultima.velocidad + ' km/h' : '—' }}</strong></div>
-              <div><span>Vel. máxima</span><strong [class.rojo]="r.resumen.excesos > 0">{{ r.resumen.velocidadMaxima }} km/h</strong></div>
-              <div><span>Recorrido</span><strong>{{ r.resumen.km }} km</strong></div>
-              @if (vivoElegido() && faltan(vivoElegido()); as f) { <div><span>Faltan aprox.</span><strong>{{ f }} km</strong></div> }
+            <div class="velocimetro">
+              <div><strong>{{ vivoElegido()?.ultima?.velocidad ?? '—' }}</strong><span>km/h ahora</span></div>
+              <div><strong [class.rojo]="r.resumen.excesos > 0">{{ r.resumen.velocidadMaxima }}</strong><span>km/h máx.</span></div>
+              <div><strong>{{ r.resumen.km }}</strong><span>km recorridos</span></div>
+            </div>
+
+            <div class="destino-vh">
+              <span class="dv-et">{{ r.modalidad === 'clientes' ? 'ENTREGAS' : 'DESTINO' }}</span>
+              <strong>{{ r.modalidad === 'clientes' ? entregadosDe(r) + ' de ' + r.clientes.length + ' clientes' : (r.destino?.nombre || r.viaje.destino) }}</strong>
+              @if (progreso(r); as pr) {
+                <div class="barra" role="progressbar" [attr.aria-valuenow]="pr" aria-valuemin="0" aria-valuemax="100"><span [style.width.%]="pr"></span></div>
+                <small>{{ pr }} % · {{ r.modalidad === 'clientes' ? 'entregado' : 'faltan ' + faltan(vivoElegido()) + ' km en línea recta' }}</small>
+              }
+            </div>
+
+            <div class="mini">
               <div><span>Última señal</span><strong>{{ vivoElegido()?.ultima ? hace(vivoElegido().ultima.hora) : '—' }}</strong></div>
               <div><span>En ruta hace</span><strong>{{ duracion(r.resumen.inicio) }}</strong></div>
             </div>
 
             @if ((vivoElegido()?.alertas?.length || 0) > 0 || r.resumen.excesos > 0) {
-              <div class="alertas-panel" role="alert">
+              <div class="alerta-vh" role="alert">
                 @for (a of vivoElegido()?.alertas || []; track a) { <p><app-icono nombre="alerta" [tam]="15" />{{ a }}</p> }
-                @if (r.resumen.excesos > 0) { <p><app-icono nombre="alerta" [tam]="15" />{{ r.resumen.excesos }} tramo(s) por encima de {{ r.resumen.limiteVelocidad || 80 }} km/h (en rojo en el mapa)</p> }
+                @if (r.resumen.excesos > 0) { <p><app-icono nombre="alerta" [tam]="15" />{{ r.resumen.excesos }} tramo(s) sobre {{ r.resumen.limiteVelocidad || 80 }} km/h · en rojo en el mapa</p> }
               </div>
             }
 
             @if (r.clientes?.length) {
-              <h3 class="sub">Entregas {{ entregadosDe(r) }}/{{ r.clientes.length }}</h3>
-              <ul class="lista-clientes">
+              <h3 class="seccion">Clientes</h3>
+              <ul class="clientes-vh">
                 @for (c of r.clientes; track $index; let i = $index) {
                   <li><span class="num-entrega" [style.background]="colorEntrega(c.estadoEntrega)">{{ i + 1 }}</span>
-                    <span class="crece">{{ c.nombre }}<small class="sutil d-bloque">{{ c.fechaEntrega && c.estadoEntrega !== 'pendiente' ? (c.fechaEntrega | fechaHora) + ' · ' + (c.valorRecibido | pesos) : c.direccion }}</small></span>
+                    <span class="crece">{{ c.nombre }}<small>{{ c.fechaEntrega && c.estadoEntrega !== 'pendiente' ? (c.fechaEntrega | fechaHora) : c.direccion }}</small></span>
                     <span class="chip sin-punto" [class]="claseEntrega(c.estadoEntrega)">{{ textoEntrega(c.estadoEntrega) }}</span>
-                    @if (c.entrega?.lat !== undefined && c.entrega?.lat !== null) { <button type="button" class="texto pequeno" (click)="verEntrega(c, i)" [attr.aria-label]="'Ver en el mapa la entrega de ' + c.nombre"><app-icono nombre="ubicacion" [tam]="15" /></button> }</li>
+                    @if (c.entrega?.lat !== undefined && c.entrega?.lat !== null) { <button type="button" class="ctl" (click)="verEntrega(c, i)" [attr.aria-label]="'Ver en el mapa la entrega de ' + c.nombre"><app-icono nombre="ubicacion" [tam]="14" /></button> }</li>
                 }
               </ul>
             }
 
-            <h3 class="sub">Lo último</h3>
-            <ol class="eventos">
-              @for (e of ultimosEventos(r); track $index) { <li [class.malo]="['exceso', 'sin_senal'].includes(e.tipo)"><strong>{{ textoEvento(e.tipo) }}</strong> · <span class="sutil">{{ hace(e.fecha) }}</span>@if (e.detalle) { <small class="d-bloque">{{ e.detalle }}</small> }</li> }
-              @empty { <li class="sutil">Sin registros todavía</li> }
+            <h3 class="seccion">Actividad</h3>
+            <ol class="actividad">
+              @for (e of ultimosEventos(r); track $index) { <li [class.malo]="['exceso', 'sin_senal'].includes(e.tipo)"><strong>{{ textoEvento(e.tipo) }}</strong><small>{{ hace(e.fecha) }}{{ e.detalle ? ' · ' + e.detalle : '' }}</small></li> }
+              @empty { <li><small>Sin actividad todavía</small></li> }
             </ol>
 
-            <div class="panel-acciones">
-              <button type="button" class="pequeno" (click)="verDetalle({ _id: elegido() })">Seguimiento completo</button>
-              <button type="button" class="pequeno" (click)="checklist().abrir(elegido()!)">Checklist</button>
-              @if (puedeRegistrar) {
-                <button type="button" class="peligro pequeno" confirmar="Clic otra vez para terminar el rastreo" (confirmado)="finalizar(elegido()!)">Terminar rastreo</button>
-              }
+            <div class="dv-acciones">
+              <button type="button" [class.primario]="!seguir()" (click)="seguir.set(!seguir())" [attr.aria-pressed]="seguir()"><app-icono nombre="ubicacion" [tam]="15" />{{ seguir() ? 'Siguiendo' : 'Seguir' }}</button>
+              <button type="button" (click)="verDetalle({ _id: elegido() })">Seguimiento</button>
+              <button type="button" (click)="checklist().abrir(elegido()!)">Checklist</button>
+              @if (puedeRegistrar) { <button type="button" class="peligro" confirmar="Clic otra vez para terminar el rastreo" (confirmado)="finalizar(elegido()!)">Terminar</button> }
             </div>
           </aside>
         }
@@ -293,83 +307,117 @@ const duracion = (desde: string | Date | null | undefined) => {
       </ng-container>
     </app-modal>`,
   styles: [`
+    :host { display: block; }
     .acciones { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-    .vivo { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--gris-6); }
-    .latido { width: 9px; height: 9px; border-radius: 50%; background: #1f9d55; box-shadow: 0 0 0 0 rgba(31,157,85,.5); animation: latido 2s infinite; }
-    .latido.cargando { background: var(--primario-borde); }
-    @keyframes latido { 0% { box-shadow: 0 0 0 0 rgba(31,157,85,.45); } 70% { box-shadow: 0 0 0 8px rgba(31,157,85,0); } 100% { box-shadow: 0 0 0 0 rgba(31,157,85,0); } }
-    @media (prefers-reduced-motion: reduce) { .latido { animation: none; } }
     .vacio-grande { text-align: center; padding: 40px 20px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
     .vacio-grande h2 { margin: 6px 0 0; font-size: 18px; }
-    .cifras { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-    .cifra { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid var(--gris-2); border-radius: 999px; background: var(--gris-0); height: auto; min-height: 40px; }
-    .cifra strong { font-size: 16px; font-variant-numeric: tabular-nums; }
-    .cifra.activo { border-color: var(--primario-borde); background: var(--primario-claro); box-shadow: 0 0 0 1px var(--primario-borde); }
-    .cifra.alertas.hay { border-color: var(--rojo); color: var(--rojo); }
-    .cifra.alertas.hay.activo { background: rgba(214,57,57,.08); }
-    .punto { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+    .punto { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
 
-    /* Lista · mapa · panel: el panel ocupa su propia columna y no tapa el mapa */
-    .monitor { display: grid; grid-template-columns: minmax(290px, 360px) minmax(0, 1fr); gap: 12px; height: calc(100dvh - 250px); min-height: 520px; }
-    .monitor.con-panel { grid-template-columns: minmax(290px, 340px) minmax(0, 1fr) minmax(320px, 380px); }
-    .lista { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding: 2px 4px 2px 2px; min-width: 0; }
-    .lista > * { flex-shrink: 0; }
-    .buscar { position: sticky; top: 0; z-index: 1; background: var(--fondo, var(--gris-1)); padding-bottom: 4px; }
-    .buscar input { width: 100%; }
-    .viaje { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 5px; text-align: left; padding: 12px 12px 12px 16px;
-      border: 1px solid var(--gris-2); border-radius: 14px; background: var(--gris-0); height: auto; white-space: normal; font-weight: 400; overflow: hidden;
-      transition: border-color .15s, box-shadow .15s, transform .15s; }
-    .viaje::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--color); }
-    .viaje:hover { border-color: var(--gris-4); }
-    .viaje.elegido { border-color: var(--primario-borde); box-shadow: 0 0 0 2px var(--primario-borde); }
-    .viaje.externo { cursor: default; background: var(--gris-1); }
-    .v-cab { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; } .derecha { margin-left: auto; }
-    .estado { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 650; }
-    .v-conductor { font-weight: 650; font-size: 14px; }
-    .v-ruta { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--gris-6); }
-    .v-metricas { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--gris-6); }
-    .v-metricas strong { color: var(--texto, inherit); font-variant-numeric: tabular-nums; }
-    .v-alertas { display: flex; flex-wrap: wrap; gap: 4px; }
-    .progreso { height: 6px; border-radius: 999px; background: var(--gris-15, var(--gris-2)); overflow: hidden; }
-    .progreso span { display: block; height: 100%; background: #1f9d55; border-radius: inherit; }
-    .vacio-lista { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; padding: 28px 12px; color: var(--gris-6); }
-    .vacio-lista p { margin: 4px 0 0; font-weight: 600; }
+    /* ── Torre de control: el mapa ocupa todo y los paneles flotan encima ── */
+    .torre { position: relative; height: calc(100dvh - 190px); min-height: 560px; border-radius: 18px; overflow: hidden; border: 1px solid var(--gris-2); background: #e9edf2; }
+    .mapa { position: absolute; inset: 0; z-index: 0; }
+    .resumen, .controles, .flota, .detalle-vh { position: absolute; z-index: 600; }
+    .vidrio, .resumen, .flota, .detalle-vh, .ctl { background: rgba(255,255,255,.94); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+    .resumen { top: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 8px 16px; border-radius: 999px;
+      box-shadow: 0 6px 24px rgba(15,23,42,.14); font-size: 13px; white-space: nowrap; color: #1f2937; }
+    .en-vivo { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; font-size: 11px; letter-spacing: .08em; color: #1f9d55; }
+    .latido { width: 9px; height: 9px; border-radius: 50%; background: #1f9d55; animation: latido 2s infinite; }
+    .latido.cargando { background: #e0ad00; }
+    @keyframes latido { 0% { box-shadow: 0 0 0 0 rgba(31,157,85,.5); } 70% { box-shadow: 0 0 0 9px rgba(31,157,85,0); } 100% { box-shadow: 0 0 0 0 rgba(31,157,85,0); } }
+    @media (prefers-reduced-motion: reduce) { .latido { animation: none; } }
+    .dato strong { font-size: 16px; margin-right: 3px; font-variant-numeric: tabular-nums; }
+    .dato.verde strong { color: #1f9d55; }
+    button.dato { border: 0; background: #fde8e8; color: #b42318; border-radius: 999px; padding: 3px 10px; height: auto; font-weight: 600; }
+    .sutil-claro { color: #6b7280; font-size: 12px; }
 
-    .mapa-caja { position: relative; border: 1px solid var(--gris-2); border-radius: 14px; overflow: hidden; min-height: 360px; }
-    .mapa { position: absolute; inset: 0; }
-    .mapa-botones { position: absolute; z-index: 500; top: 10px; right: 10px; display: flex; gap: 6px; }
-    .mapa-botones button { box-shadow: var(--sombra-menu); }
-    .leyenda { position: absolute; z-index: 500; left: 10px; bottom: 10px; display: flex; flex-wrap: wrap; gap: 4px 10px; max-width: calc(100% - 20px);
-      background: color-mix(in srgb, var(--gris-0) 92%, transparent); border: 1px solid var(--gris-2); border-radius: 10px; padding: 6px 10px; font-size: 11.5px; }
-    .leyenda > span { display: inline-flex; align-items: center; gap: 5px; }
-    .raya { width: 16px; height: 4px; border-radius: 2px; display: inline-block; } .raya.amarilla { background: #e0ad00; } .raya.roja { background: #d63939; }
-    .raya.azul { background: repeating-linear-gradient(90deg, #3b82f6 0 4px, transparent 4px 7px); }
+    .controles { top: 14px; right: 14px; display: flex; flex-direction: column; gap: 6px; }
+    .torre.con-detalle .controles { right: 410px; }
+    .ctl { width: 38px; height: 38px; min-height: 0; padding: 0; display: grid; place-items: center; border-radius: 12px; border: 1px solid rgba(0,0,0,.08);
+      box-shadow: 0 2px 10px rgba(15,23,42,.12); color: #1f2937; }
+    .ctl.activo { background: #111827; color: #fff; }
 
-    .panel { overflow-y: auto; border: 1px solid var(--gris-2); border-radius: 14px; background: var(--gris-0); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-    .panel header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-    .panel h2 { margin: 6px 0 0; font-size: 18px; } .panel header p { margin: 2px 0 0; }
-    .ruta { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
-    .kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-    .kpis div { background: var(--gris-1); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; min-width: 0; }
-    .kpis span { font-size: 11.5px; color: var(--gris-6); } .kpis strong { font-size: 15px; font-variant-numeric: tabular-nums; }
-    .rojo { color: var(--rojo); }
-    .alertas-panel { border: 1px solid var(--rojo); background: rgba(214,57,57,.06); color: var(--rojo); border-radius: 10px; padding: 8px 10px; }
-    .alertas-panel p { display: flex; align-items: center; gap: 6px; margin: 2px 0; font-size: 13px; font-weight: 600; }
-    .panel-acciones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 6px; }
+    /* Flota */
+    .flota { top: 14px; left: 14px; bottom: 14px; width: 370px; display: flex; flex-direction: column; border-radius: 18px; box-shadow: 0 10px 30px rgba(15,23,42,.18); overflow: hidden; color: #111827; }
+    .torre.flota-cerrada .flota { bottom: auto; width: auto; }
+    .flota-cab { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 12px 8px 16px; }
+    .flota-cab h2 { margin: 0; font-size: 17px; } .flota-cab small { color: #6b7280; }
+    .buscar { margin: 0 12px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-radius: 12px; background: #f1f4f8; color: #6b7280; }
+    .buscar input { border: 0; background: transparent; box-shadow: none; flex: 1; height: 40px; padding: 0; min-width: 0; color: #111827; }
+    .buscar input:focus { outline: none; }
+    .filtros { display: flex; gap: 6px; overflow-x: auto; padding: 10px 12px; scrollbar-width: none; }
+    .filtros::-webkit-scrollbar { display: none; }
+    .filtros button { flex: none; height: 32px; min-height: 0; padding: 0 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600; border: 1px solid #e5e7eb; background: #fff; color: #374151; display: inline-flex; align-items: center; gap: 6px; }
+    .filtros button b { font-variant-numeric: tabular-nums; color: #6b7280; }
+    .filtros button.activo { background: #111827; border-color: #111827; color: #fff; } .filtros button.activo b { color: #d1d5db; }
+    .filtros .f-alerta { color: #b42318; }
+    .lista { flex: 1; overflow-y: auto; padding: 2px 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .fila { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; text-align: left; width: 100%;
+      padding: 11px 12px 11px 15px; border-radius: 14px; border: 1px solid transparent; background: #fff; height: auto; font-weight: 400; white-space: normal;
+      box-shadow: 0 1px 2px rgba(15,23,42,.06); transition: transform .12s, box-shadow .12s; color: #111827; }
+    .fila::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 4px; border-radius: 0 4px 4px 0; background: var(--c); }
+    .fila:hover { box-shadow: 0 4px 14px rgba(15,23,42,.12); }
+    .fila.elegida { border-color: var(--c); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 35%, transparent); }
+    .fila.externa { grid-template-columns: auto minmax(0, 1fr) auto; background: #f8fafc; }
+    .f-izq { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+    .placa-grande { font: 800 14px/1 system-ui; letter-spacing: .06em; background: #f5c400; color: #111; padding: 6px 8px; border-radius: 7px; border: 1.5px solid #111; }
+    .f-estado { font-size: 11.5px; font-weight: 700; color: var(--c); }
+    .f-centro { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .f-conductor { font-weight: 650; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .f-destino { font-size: 12.5px; color: #4b5563; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .f-alertas { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+    .f-alertas span { font-size: 11px; font-weight: 700; color: #b42318; background: #fde8e8; padding: 2px 7px; border-radius: 999px; }
+    .f-der { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+    .vel strong { font-size: 20px; font-variant-numeric: tabular-nums; } .vel small { font-size: 10.5px; color: #6b7280; margin-left: 2px; }
+    .hace, .faltan { font-size: 11px; color: #6b7280; white-space: nowrap; }
+    .faltan { color: #1f6feb; font-weight: 600; }
+    .vacio-flota { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; padding: 34px 16px; color: #6b7280; }
+    .vacio-flota p { margin: 6px 0 0; font-weight: 650; color: #374151; }
+    .seccion { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #6b7280; margin: 10px 4px 2px; }
 
-    .sub { font-size: 12px; margin: 6px 0 0; text-transform: uppercase; letter-spacing: .05em; color: var(--gris-6); }
+    /* Vehículo elegido */
+    .detalle-vh { top: 14px; right: 14px; bottom: 14px; width: 380px; overflow-y: auto; border-radius: 18px; box-shadow: 0 10px 30px rgba(15,23,42,.18); padding: 14px 16px 16px; color: #111827;
+      display: flex; flex-direction: column; gap: 12px; border-top: 5px solid var(--c); }
+    .detalle-vh header { display: flex; justify-content: space-between; align-items: flex-start; }
+    .dv-titulo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .dv-estado { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; color: var(--c); }
+    .dv-sub { margin: -4px 0 0; color: #4b5563; font-size: 13px; }
+    .velocimetro { display: grid; grid-template-columns: repeat(3, 1fr); background: #111827; color: #fff; border-radius: 14px; padding: 12px 8px; text-align: center; }
+    .velocimetro div { display: flex; flex-direction: column; } .velocimetro div + div { border-left: 1px solid rgba(255,255,255,.12); }
+    .velocimetro strong { font-size: 24px; font-variant-numeric: tabular-nums; line-height: 1.1; } .velocimetro span { font-size: 11px; color: #9ca3af; }
+    .velocimetro .rojo { color: #ff6b6b; }
+    .destino-vh { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: #f1f4f8; }
+    .dv-et { font-size: 10.5px; font-weight: 800; letter-spacing: .1em; color: #6b7280; }
+    .destino-vh strong { font-size: 16px; } .destino-vh small { color: #4b5563; font-size: 12px; }
+    .barra { height: 8px; border-radius: 999px; background: #dfe4ea; overflow: hidden; } .barra span { display: block; height: 100%; background: var(--c); border-radius: inherit; }
+    .mini { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .mini div { padding: 10px 12px; border-radius: 12px; border: 1px solid #e5e7eb; display: flex; flex-direction: column; }
+    .mini span { font-size: 11px; color: #6b7280; } .mini strong { font-size: 14px; }
+    .alerta-vh { background: #fde8e8; color: #b42318; border-radius: 12px; padding: 8px 12px; }
+    .alerta-vh p { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-weight: 650; font-size: 13px; }
+    .clientes-vh { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .clientes-vh li { display: flex; align-items: center; gap: 8px; font-size: 13px; } .clientes-vh small { display: block; color: #6b7280; font-size: 11.5px; }
+    .crece { flex: 1; min-width: 0; }
+    .num-entrega { flex: none; width: 24px; height: 24px; border-radius: 50%; color: #fff; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+    .actividad { list-style: none; margin: 0; padding: 0 0 0 4px; border-left: 2px solid #e5e7eb; }
+    .actividad li { position: relative; padding: 0 0 10px 14px; font-size: 13px; display: flex; flex-direction: column; }
+    .actividad li::before { content: ''; position: absolute; left: -7px; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: #f5c400; border: 2px solid #fff; }
+    .actividad li.malo::before { background: #d63939; } .actividad li.malo strong { color: #b42318; }
+    .actividad small { color: #6b7280; font-size: 11.5px; }
+    .dv-acciones { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: auto; }
+    .dv-acciones button { height: 38px; min-height: 0; font-size: 13px; }
+
+    /* Seguimiento completo (ventana) */
+    .detalle { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; }
+    .mapa-detalle { height: 420px; border: 1px solid var(--gris-2); border-radius: var(--radio); }
     .nota { margin: 0 0 4px; font-size: 12.5px; }
-    .oculto { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .sub { font-size: 12px; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .05em; color: var(--gris-6); }
     .lista-clientes { list-style: none; padding: 0; margin: 4px 0; display: flex; flex-direction: column; gap: 6px; }
-    .lista-clientes li { display: flex; align-items: center; gap: 8px; font-size: 13px; } .crece { flex: 1; min-width: 0; }
+    .lista-clientes li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
     .lista-clientes li.entrega-detalle { align-items: flex-start; padding-bottom: 8px; border-bottom: 1px solid var(--gris-15); }
-    .num-entrega { flex: none; width: 22px; height: 22px; border-radius: 50%; color: #fff; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
     .enlace-mapa { padding: 2px 0; height: auto; gap: 4px; }
     .fotos { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
     .fotos img { width: 54px; height: 54px; object-fit: cover; border-radius: 6px; border: 1px solid var(--gris-2); }
     .d-bloque { display: block; }
-    .detalle { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; }
-    .mapa-detalle { height: 400px; border: 1px solid var(--gris-2); border-radius: var(--radio); }
     .eventos { list-style: none; padding: 0; margin: 0; border-left: 2px solid var(--gris-2); }
     .eventos li { position: relative; padding: 0 0 10px 14px; font-size: 13px; }
     .eventos li::before { content: ''; position: absolute; left: -6px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--primario-borde); }
@@ -377,18 +425,21 @@ const duracion = (desde: string | Date | null | undefined) => {
     .datos-detalle { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin: 0 0 12px; font-size: 13px; }
     .datos-detalle span { color: var(--gris-5); font-size: 12px; display: block; }
     .opcion-viaje { padding: 8px 0; border-bottom: 1px solid var(--gris-15); }
-    @media (max-width: 1280px) {
-      .monitor.con-panel { grid-template-columns: minmax(280px, 330px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: auto; }
-      .monitor.con-panel .lista { grid-row: 1 / span 2; max-height: calc(100dvh - 250px); }
-      .monitor.con-panel .mapa-caja { min-height: 52dvh; }
-      .monitor.con-panel .panel { grid-column: 2; }
+
+    /* Pantallas medianas: el detalle baja y la flota se angosta */
+    @media (max-width: 1200px) {
+      .flota { width: 320px; }
+      .detalle-vh { width: 340px; } .torre.con-detalle .controles { right: 370px; }
+      .resumen { left: auto; right: 64px; transform: none; } .torre.con-detalle .resumen { display: none; }
     }
-    @media (max-width: 900px) {
-      .monitor, .monitor.con-panel { display: flex; flex-direction: column; height: auto; }
-      .mapa-caja { order: -1; min-height: 55dvh; }
-      .panel { order: 0; } .lista { order: 1; max-height: none; overflow: visible; }
-      .monitor.con-panel .lista { max-height: none; }
-      .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /* Celular y tabletas: mapa arriba y los paneles debajo, sin flotar */
+    @media (max-width: 860px) {
+      .torre { height: auto; min-height: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; display: flex; flex-direction: column; gap: 10px; }
+      .mapa { position: relative; height: 52dvh; border-radius: 16px; overflow: hidden; border: 1px solid var(--gris-2); }
+      .resumen { position: static; transform: none; order: -1; justify-content: space-between; flex-wrap: wrap; white-space: normal; box-shadow: none; border: 1px solid var(--gris-2); }
+      .controles { top: calc(52dvh - 140px); right: 10px; } .torre.con-detalle .controles { right: 10px; }
+      .flota, .detalle-vh { position: static; width: auto; box-shadow: none; border: 1px solid var(--gris-2); }
+      .detalle-vh { order: 1; } .flota { order: 2; } .lista { max-height: none; overflow: visible; }
       .detalle { grid-template-columns: 1fr; }
     }
   `],
@@ -413,6 +464,9 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
   readonly filtroEstado = signal('');
   readonly elegido = signal<string | null>(null);
   readonly seguir = signal(false);
+  readonly panelFlota = signal(true);
+  readonly satelite = signal(false);
+  private base: L.TileLayer | null = null;
   readonly recorrido = signal<any>(null);
   readonly conteo = computed(() => (this.datos()?.viajes || []).reduce((a: any, v: any) => { a[v.estado] = (a[v.estado] || 0) + 1; return a; }, {}));
   readonly totalAlertas = computed(() => (this.datos()?.viajes || []).reduce((a: number, v: any) => a + v.alertas.length, 0));
@@ -456,7 +510,8 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
     this.observador?.disconnect();
     this.observador = new ResizeObserver(() => this.mapa?.invalidateSize());
     this.observador.observe(el);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(this.mapa);
+    this.mapa.zoomControl.setPosition('bottomright');
+    this.ponerBase();
     this.mapa.on('dragstart', () => this.seguir.set(false));
     this.cargar();
   }
@@ -480,6 +535,26 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
     finally { this.cargando.set(false); }
   }
 
+  // Mapa base: claro y limpio (los vehículos resaltan) o satélite
+  private ponerBase() {
+    if (!this.mapa) return;
+    this.base?.remove();
+    this.base = this.satelite()
+      ? L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Imágenes © Esri' })
+      : L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 20, subdomains: 'abcd', attribution: '© OpenStreetMap · © CARTO' });
+    this.base.addTo(this.mapa);
+    this.base.bringToBack();
+  }
+  cambiarBase() { this.satelite.set(!this.satelite()); this.ponerBase(); }
+  verAlertas() { this.panelFlota.set(true); this.filtroEstado.set('alertas'); }
+  // Avance hacia el destino: lo recorrido frente a lo que falta (en línea recta); con clientes, las entregas hechas
+  progreso(r: any): number | null {
+    if (r.modalidad === 'clientes') return r.clientes?.length ? Math.round(100 * this.entregadosDe(r) / r.clientes.length) : null;
+    const f = this.faltan(this.vivoElegido());
+    if (f === null || !(r.resumen?.km >= 0)) return null;
+    return Math.max(0, Math.min(100, Math.round(100 * r.resumen.km / Math.max(0.1, r.resumen.km + f))));
+  }
+
   faltan(v: any): number | null {
     if (!v?.ultima || !v.puntoDestino || v.puntoDestino.lat === undefined || v.puntoDestino.lat === null || v.estado === 'llego') return null;
     const km = kmEntre(v.ultima, v.puntoDestino);
@@ -491,9 +566,10 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
     const tam = elegido ? 28 : 22;
     const flecha = v.ultima && v.estado === 'en_ruta' ? `<span style="position:absolute;inset:-8px;transform:rotate(${v.ultima.rumbo || 0}deg)"><span style="position:absolute;left:50%;top:0;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:8px solid ${color}"></span></span>` : '';
     const alerta = v.alertas?.length ? `<span style="position:absolute;right:-5px;top:-5px;width:12px;height:12px;border-radius:50%;background:#d63939;border:2px solid #fff"></span>` : '';
-    return L.divIcon({ className: '', iconSize: [110, 44], iconAnchor: [tam / 2, tam / 2],
-      html: `<div style="position:relative;width:${tam}px;height:${tam}px">${flecha}<span style="position:absolute;inset:0;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45)"></span>${alerta}</div>`
-        + `<div style="margin-top:3px;display:inline-block;background:${elegido ? color : '#111'};color:#fff;font:700 11px/1.7 system-ui;padding:0 7px;border-radius:6px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.3)">${this.esc(v.placa)}</div>` });
+    return L.divIcon({ className: '', iconSize: [120, 48], iconAnchor: [tam / 2, tam / 2],
+      html: `<div style="position:relative;width:${tam}px;height:${tam}px">${flecha}<span style="position:absolute;inset:0;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45)"></span>${alerta}</div>`
+        + `<div style="margin-top:4px;display:inline-flex;align-items:center;gap:5px;background:#fff;color:#111;font:800 11.5px/1 system-ui;letter-spacing:.04em;padding:5px 8px;border-radius:8px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.25);border:2px solid ${elegido ? color : '#fff'}">`
+        + `<span style="width:8px;height:8px;border-radius:50%;background:${color}"></span>${this.esc(v.placa)}${v.ultima && v.estado === 'en_ruta' ? `<span style="font-weight:600;color:#555">${v.ultima.velocidad} km/h</span>` : ''}</div>` });
   }
 
   private pintar(viajes: any[]) {
