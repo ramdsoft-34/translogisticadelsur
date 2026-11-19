@@ -6,7 +6,7 @@
 // Lo enviado no se reemplaza: el PDF y el Excel se guardan al enviarse o facturarse (versión de la relación) y desde ahí se
 // sirven. Si una relación enviada se vuelve a guardar con cambios, sube de versión y vuelve a borrador (hay que reenviarla).
 import crypto from 'node:crypto';
-import { Empresa, Cliente, Viaje, Tarifa, RelacionCliente, Usuario, siguiente, pob } from '../../models/index.js';
+import { Empresa, Cliente, Viaje, Vehiculo, Tarifa, RelacionCliente, Usuario, siguiente, pob } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
 import { env } from '../../config/env.js';
 import { txt, soloDigitos, quitarTildes, fmtFecha } from '../../utils/texto.js';
@@ -132,11 +132,33 @@ export function nombresParecidos(a, b) {
   const lim = Math.max(x.length, y.length) >= 10 ? 2 : 1;
   return distancia(x, y) <= lim;
 }
+// Placa registrada más parecida a una que no existe («SVP505» → «SPV505»): letras cambiadas de lugar o un carácter distinto
+export function placaParecida(placa, registradas) {
+  const p = String(placa || '').toUpperCase();
+  const orden = (s) => [...s].sort().join('');
+  let mejor = '', min = 3;
+  for (const r of registradas) {
+    if (r === p || r.length !== p.length) continue;
+    const d = orden(r) === orden(p) ? 1 : distancia(r, p);
+    if (d < min) { min = d; mejor = r; }
+  }
+  return min <= 1 ? mejor : '';
+}
 
 // Avisos antes de generar. filas: las de la relación. sospechosas: viajes de la empresa con fecha posterior al periodo
 // que se registraron antes de esa fecha (¿la fecha quedó mal?). enOtras: viaje → número de otra relación.
-export function revisar({ filas, desde, hasta, sospechosas = [], enOtras = new Map() }) {
+export function revisar({ filas, desde, hasta, sospechosas = [], enOtras = new Map(), placas = null }) {
   const avisos = [];
+  // Placas que no están en Vehículos (mal escritas): separan al conductor en dos bloques y no cruzan con sus otros viajes
+  if (placas) {
+    const malas = new Map();
+    for (const f of filas) if (f.placa && !placas.has(f.placa)) malas.set(f.placa, (malas.get(f.placa) || 0) + 1);
+    for (const [p, n] of malas) {
+      const sug = placaParecida(p, placas);
+      avisos.push({ tipo: 'placa', nivel: 'aviso', placa: p,
+        texto: `La placa ${p} (${n} viaje${n === 1 ? '' : 's'}) no está en Vehículos${sug ? `: ¿es ${sug}?` : '.'} Corrija la placa del viaje en Viajes para que quede junto a los demás viajes del conductor.` });
+    }
+  }
   for (const v of sospechosas) {
     const f = new Date(v.fecha); const sug = new Date(Date.UTC(f.getUTCFullYear(), f.getUTCMonth() - 1, f.getUTCDate()));
     const dentro = sug >= new Date(desde) && sug <= new Date(hasta);
@@ -144,11 +166,15 @@ export function revisar({ filas, desde, hasta, sospechosas = [], enOtras = new M
       texto: `${v.placa} tiene un viaje con fecha ${fmtFecha(v.fecha)}, después del periodo, registrado el ${fmtFecha(v.createdAt)}${dentro ? ` (¿era ${fmtFecha(sug)}?)` : ''}. No entra en la relación.`,
       sugerencia: dentro ? sug.toISOString().slice(0, 10) : '' });
   }
+  // El registro masivo carga viajes de días pasados a propósito: no se avisa uno por uno, solo se cuenta
+  const masivos = filas.filter(f => f.masivo).length;
+  if (masivos) avisos.push({ tipo: 'masivo', nivel: 'info',
+    texto: `${masivos} viaje(s) se cargaron con el registro masivo: ya están en Viajes y entran en esta relación.` });
   for (const f of filas) {
-    if (f.reportado && (new Date(f.reportado) - new Date(f.fecha)) / DIA > DIAS_REPORTE_TARDE + 1) {
+    if (!f.masivo && f.reportado && (new Date(f.reportado) - new Date(f.fecha)) / DIA > DIAS_REPORTE_TARDE + 1) {
       const dias = Math.floor((new Date(f.reportado) - new Date(f.fecha)) / DIA);
       avisos.push({ tipo: 'tarde', nivel: 'aviso', viaje: f._id, placa: f.placa,
-        texto: `${f.placa} · ${fmtFecha(f.fecha)} se reportó en la plataforma el ${fmtFecha(f.reportado)}, ${dias} días después del viaje. Confirme que es real.` });
+        texto: `${f.placa} · ${fmtFecha(f.fecha)} se reportó en la plataforma el ${fmtFecha(f.reportado)}, ${dias} días después del viaje. Es solo un aviso: si el viaje no se hizo, anúlelo en Viajes.` });
     }
   }
   // Mismo vehículo, mismo día y mismo destino dos veces
@@ -207,12 +233,13 @@ async function viajesDelPeriodo(empresaId, { cliente, desde, hasta, grupo = '', 
       planilla: txt(v.planilla), manifiesto: documentoViaje(v), destino: v.destino, diasAux: v.conAuxiliar ? (Number(v.diasAuxiliar) || l.cantidad) : null,
       tarifa: $(l.totalTarifa), auxiliar: $(l.totalAuxiliar), total: $(l.totalCobrado), reportado: v.createdAt || null,
       origen: v.manifiesto?.estado === 'aceptado' ? 'RNDC' : v.registroMasivo ? 'Registro masivo' : v.soporteInterno?.mc ? 'Soporte interno' : 'Registrado',
-      sinTarifa: l.sinTarifa, municipioDistinto: !!(t?.codMunicipio && v.codDestino && soloDigitos(t.codMunicipio) !== soloDigitos(v.codDestino)) };
+      masivo: !!v.registroMasivo, sinTarifa: l.sinTarifa, municipioDistinto: !!(t?.codMunicipio && v.codDestino && soloDigitos(t.codMunicipio) !== soloDigitos(v.codDestino)) };
   });
   // Fechas sospechosas: viajes con fecha hasta 45 días después del periodo, registrados antes de esa fecha
   const sospechosas = await Viaje.find({ empresa: empresaId, cliente, estado: { $ne: 'anulado' }, fecha: { $gt: hasta, $lte: new Date(new Date(hasta).getTime() + 45 * DIA) } })
     .select('placa fecha createdAt').lean();
-  return { cliente: cli, filas, enOtras, sospechosas: sospechosas.filter(v => v.createdAt && new Date(v.fecha) - new Date(v.createdAt) > 2 * DIA) };
+  const placas = new Set((await Vehiculo.find({ empresa: empresaId }).select('placa').lean()).map(x => x.placa));
+  return { cliente: cli, filas, enOtras, placas, sospechosas: sospechosas.filter(v => v.createdAt && new Date(v.fecha) - new Date(v.createdAt) > 2 * DIA) };
 }
 
 // Vista previa: grupos, totales, revisión y título (no guarda nada)
@@ -224,7 +251,7 @@ export async function armar(empresaId, { cliente, desde, hasta, grupo = '', rela
   const totales = totalesDe(d.filas);
   const existente = await RelacionCliente.findOne({ empresa: empresaId, cliente, desde, hasta, grupo: txt(grupo) }).select('numero estado').lean();
   return { cliente: { _id: d.cliente._id, nombre: d.cliente.nombre }, desde, hasta, grupo: txt(grupo), titulo: tituloRelacion(d.cliente.nombre, desde, hasta, grupo),
-    grupos, totales, revision: revisar({ filas: d.filas, desde, hasta, sospechosas: d.sospechosas, enOtras: d.enOtras }), existente };
+    grupos, totales, revision: revisar({ filas: d.filas, desde, hasta, sospechosas: d.sospechosas, enOtras: d.enOtras, placas: d.placas }), existente };
 }
 
 // Grupos de relación que tiene la empresa en sus tarifas (para el selector)

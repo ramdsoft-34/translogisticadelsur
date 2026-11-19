@@ -66,3 +66,21 @@ test('Mensaje de WhatsApp con el enlace de la relación', () => {
   assert.match(t, /\*Total:\* \$ 38\.161\.000/);
   assert.match(t, /\/r\/k9X2mQ7aLp4vT1zB\n\nGracias\. COOESPATRANS$/);
 });
+
+test('placa mal escrita: se sugiere la registrada parecida', () => {
+  assert.equal(R.placaParecida('SVP505', ['SPV505', 'TJT296']), 'SPV505');
+  assert.equal(R.placaParecida('SPV506', ['SPV505']), 'SPV505');
+  assert.equal(R.placaParecida('ABC123', ['SPV505']), '');
+});
+
+test('revisión: registro masivo sin avisos de reporte tardío y placa que no existe', () => {
+  const d = (s) => new Date(`${s}T00:00:00Z`);
+  const filas = [
+    { _id: 'a', numero: 1, fecha: d('2026-11-04'), conductor: 'ALEX', placa: 'SVP505', destino: 'Pasto', reportado: d('2026-11-19'), masivo: true },
+    { _id: 'b', numero: 2, fecha: d('2026-11-05'), conductor: 'ALEX', placa: 'SPV505', destino: 'Sandona', reportado: d('2026-11-05') },
+  ];
+  const a = R.revisar({ filas, desde: d('2026-11-01'), hasta: d('2026-11-15'), placas: new Set(['SPV505']) });
+  assert.ok(!a.some(x => x.tipo === 'tarde'));
+  assert.match(a.find(x => x.tipo === 'masivo').texto, /1 viaje\(s\) se cargaron con el registro masivo/);
+  assert.match(a.find(x => x.tipo === 'placa').texto, /SVP505.*¿es SPV505\?/);
+});

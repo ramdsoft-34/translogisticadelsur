@@ -535,6 +535,12 @@ async function diasMasivo(req, d) {
   if (!desde || !hasta || hasta < desde) throw new ErrorHttp(400, 'Rango de fechas inválido');
   if ((hasta - desde) / 86400000 > 92) throw new ErrorHttp(400, 'El rango máximo es de 93 días');
   const placa = d.placa.toUpperCase().replace(/[\s-]/g, '');
+  // La placa debe estar en Vehículos: una mal escrita separa al conductor en la relación y no ve los días que ya tienen viaje
+  if (!(await Vehiculo.exists(deEmpresa(req, { placa })))) {
+    const { placaParecida } = await import('../services/gestion/relaciones.js');
+    const sug = placaParecida(placa, (await Vehiculo.find(deEmpresa(req, {})).select('placa').lean()).map(x => x.placa));
+    throw new ErrorHttp(400, `La placa ${placa} no está registrada en Vehículos${sug ? `. ¿Quiso decir ${sug}?` : '. Regístrela primero o revise cómo la escribió.'}`);
+  }
   const existentes = new Set((await Viaje.find(deEmpresa(req, { placa, fecha: { $gte: desde, $lte: finDia(hasta) }, estado: { $ne: 'anulado' } })).select('fecha').lean())
     .map(v => new Date(v.fecha).toISOString().slice(0, 10)));
   const { festivo } = await import('../utils/festivos.js');
