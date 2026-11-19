@@ -19,6 +19,8 @@ cambios=$(git diff --name-only "$antes" "$despues")
 if echo "$cambios" | grep -q '^frontend/' || [ "${1:-}" = "--todo" ]; then
   tar czf "$RESPALDOS/frontend-$F.tgz" -C frontend dist
   cd frontend
+  # Paquetes nuevos del frontend (el lock se arma en Windows: se instala sin reescribirlo)
+  if echo "$cambios" | grep -q '^frontend/package'; then npm install --no-save --no-audit --no-fund --silent; fi
   rm -rf dist-nuevo
   npx ng build --output-path dist-nuevo/frontend > /tmp/ng-build.log 2>&1 || { tail -30 /tmp/ng-build.log; exit 1; }
   # Archivos de versiones anteriores (14 días) para las páginas que ya estaban abiertas

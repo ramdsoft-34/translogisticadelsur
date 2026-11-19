@@ -550,6 +550,9 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
     this.base = capa;
     capa.addTo(this.mapa);
     capa.bringToBack?.();
+    // El mapa vectorial no se dibuja solo la primera vez: al terminar de cargar se ajusta al tamaño y a la vista
+    const gm = capa.getMaplibreMap?.();
+    gm?.once('load', () => { gm.resize(); capa._update?.(); gm.triggerRepaint(); });
   }
   cambiarBase() { this.satelite.set(!this.satelite()); this.ponerBase(); }
   private async capaClara(): Promise<L.Layer> {
