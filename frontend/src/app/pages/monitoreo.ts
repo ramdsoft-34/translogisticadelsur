@@ -100,9 +100,9 @@ const duracion = (desde: string | Date | null | undefined) => {
         <!-- Resumen arriba, al centro: lo que pasa en un vistazo -->
         <div class="resumen" aria-live="polite">
           <span class="en-vivo"><span class="latido" [class.cargando]="cargando()"></span>EN VIVO</span>
-          <span class="dato"><strong>{{ datos()?.viajes?.length || 0 }}</strong> vehículos</span>
-          <span class="dato verde"><strong>{{ conteo()['en_ruta'] || 0 }}</strong> en ruta</span>
-          @if (conAlertas()) { <button type="button" class="dato rojo" (click)="verAlertas()"><strong>{{ conAlertas() }}</strong> con alertas</button> }
+          <span class="mo-dato"><strong>{{ datos()?.viajes?.length || 0 }}</strong> vehículos</span>
+          <span class="mo-dato verde"><strong>{{ conteo()['en_ruta'] || 0 }}</strong> en ruta</span>
+          @if (conAlertas()) { <button type="button" class="mo-dato rojo" (click)="verAlertas()"><strong>{{ conAlertas() }}</strong> con alertas</button> }
           <span class="sutil-claro">{{ actualizado() ? hace(actualizado()) : 'conectando…' }}</span>
         </div>
 
@@ -123,7 +123,7 @@ const duracion = (desde: string | Date | null | undefined) => {
           @if (panelFlota()) {
             <div class="buscar"><app-icono nombre="buscar" [tam]="16" />
               <input type="search" placeholder="Placa, conductor, cliente o N°" [ngModel]="q()" (ngModelChange)="q.set($event)" aria-label="Buscar en la flota" /></div>
-            <div class="filtros" role="group" aria-label="Filtrar por estado">
+            <div class="mo-filtros" role="group" aria-label="Filtrar por estado">
               <button type="button" [class.activo]="!filtroEstado()" (click)="filtroEstado.set('')">Todos</button>
               @for (c of CONTADORES; track c.v) {
                 <button type="button" [class.activo]="filtroEstado() === c.v" [attr.aria-pressed]="filtroEstado() === c.v" (click)="filtroEstado.set(filtroEstado() === c.v ? '' : c.v)">
@@ -193,7 +193,7 @@ const duracion = (desde: string | Date | null | undefined) => {
               <span class="dv-et">{{ r.modalidad === 'clientes' ? 'ENTREGAS' : 'DESTINO' }}</span>
               <strong>{{ r.modalidad === 'clientes' ? entregadosDe(r) + ' de ' + r.clientes.length + ' clientes' : (r.destino?.nombre || r.viaje.destino) }}</strong>
               @if (progreso(r); as pr) {
-                <div class="barra" role="progressbar" [attr.aria-valuenow]="pr" aria-valuemin="0" aria-valuemax="100"><span [style.width.%]="pr"></span></div>
+                <div class="mo-barra" role="progressbar" [attr.aria-valuenow]="pr" aria-valuemin="0" aria-valuemax="100"><span [style.width.%]="pr"></span></div>
                 <small>{{ pr }} % · {{ r.modalidad === 'clientes' ? 'entregado' : 'faltan ' + faltan(vivoElegido()) + ' km en línea recta' }}</small>
               }
             </div>
@@ -247,7 +247,7 @@ const duracion = (desde: string | Date | null | undefined) => {
             <p class="sutil nota">Amarillo: recorrido real · Rojo: exceso de velocidad · Punteado: ruta {{ d.modalidad === 'clientes' ? 'de entrega · Círculos numerados: lugar de cada entrega' : 'sugerida · Marcador rojo: destino' }}.</p>
           </div>
           <div>
-            <div class="datos-detalle">
+            <div class="mo-datos-detalle">
               <div><span>Vehículo</span><strong class="placa">{{ d.viaje.placa }}</strong></div>
               <div><span>Conductor</span>{{ d.viaje.conductor }}</div>
               <div><span>Fecha del viaje</span>{{ d.viaje.fecha | dia }}</div>
@@ -325,12 +325,12 @@ const duracion = (desde: string | Date | null | undefined) => {
     .latido.cargando { background: #e0ad00; }
     @keyframes latido { 0% { box-shadow: 0 0 0 0 rgba(31,157,85,.5); } 70% { box-shadow: 0 0 0 9px rgba(31,157,85,0); } 100% { box-shadow: 0 0 0 0 rgba(31,157,85,0); } }
     @media (prefers-reduced-motion: reduce) { .latido { animation: none; } }
-    .dato { display: inline-flex; align-items: baseline; gap: 4px; }
-    .dato strong { font-size: 16px; font-variant-numeric: tabular-nums; display: inline; }
+    .mo-dato { display: inline-flex; align-items: baseline; gap: 4px; }
+    .mo-dato strong { font-size: 16px; font-variant-numeric: tabular-nums; display: inline; }
     /* Mapa base un poco más claro: los vehículos y las rutas resaltan */
     :host ::ng-deep .mapa-suave { filter: saturate(.75) brightness(1.04); }
-    .dato.verde strong { color: #1f9d55; }
-    button.dato { border: 0; background: #fde8e8; color: #b42318; border-radius: 999px; padding: 3px 10px; height: auto; font-weight: 600; }
+    .mo-dato.verde strong { color: #1f9d55; }
+    button.mo-dato { border: 0; background: #fde8e8; color: #b42318; border-radius: 999px; padding: 3px 10px; height: auto; font-weight: 600; }
     .sutil-claro { color: #6b7280; font-size: 12px; }
 
     .controles { top: 14px; right: 14px; display: flex; flex-direction: column; gap: 6px; }
@@ -347,12 +347,11 @@ const duracion = (desde: string | Date | null | undefined) => {
     .buscar { margin: 0 12px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-radius: 12px; background: #f1f4f8; color: #6b7280; }
     .buscar input { border: 0; background: transparent; box-shadow: none; flex: 1; height: 40px; padding: 0; min-width: 0; color: #111827; }
     .buscar input:focus { outline: none; }
-    .filtros { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; }
-    .filtros::-webkit-scrollbar { display: none; }
-    .filtros button { flex: none; height: 32px; min-height: 0; padding: 0 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600; border: 1px solid #e5e7eb; background: #fff; color: #374151; display: inline-flex; align-items: center; gap: 6px; }
-    .filtros button b { font-variant-numeric: tabular-nums; color: #6b7280; }
-    .filtros button.activo { background: #111827; border-color: #111827; color: #fff; } .filtros button.activo b { color: #d1d5db; }
-    .filtros .f-alerta { color: #b42318; }
+    .mo-filtros { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; }
+    .mo-filtros button { flex: none; height: 32px; min-height: 0; padding: 0 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600; border: 1px solid #e5e7eb; background: #fff; color: #374151; display: inline-flex; align-items: center; gap: 6px; }
+    .mo-filtros button b { font-variant-numeric: tabular-nums; color: #6b7280; }
+    .mo-filtros button.activo { background: #111827; border-color: #111827; color: #fff; } .mo-filtros button.activo b { color: #d1d5db; }
+    .mo-filtros .f-alerta { color: #b42318; }
     .lista { flex: 1; overflow-y: auto; padding: 2px 10px 12px; display: flex; flex-direction: column; gap: 6px; }
     .fila { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; text-align: left; width: 100%;
       padding: 11px 12px 11px 15px; border-radius: 14px; border: 1px solid transparent; background: #fff; height: auto; font-weight: 400; white-space: normal;
@@ -391,7 +390,7 @@ const duracion = (desde: string | Date | null | undefined) => {
     .destino-vh { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: #f1f4f8; }
     .dv-et { font-size: 10.5px; font-weight: 800; letter-spacing: .1em; color: #6b7280; }
     .destino-vh strong { font-size: 16px; } .destino-vh small { color: #4b5563; font-size: 12px; }
-    .barra { height: 8px; border-radius: 999px; background: #dfe4ea; overflow: hidden; } .barra span { display: block; height: 100%; background: var(--c); border-radius: inherit; }
+    .mo-barra { height: 8px; border-radius: 999px; background: #dfe4ea; overflow: hidden; } .mo-barra span { display: block; height: 100%; background: var(--c); border-radius: inherit; }
     .mini { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .mini div { padding: 10px 12px; border-radius: 12px; border: 1px solid #e5e7eb; display: flex; flex-direction: column; }
     .mini span { font-size: 11px; color: #6b7280; } .mini strong { font-size: 14px; }
