@@ -253,7 +253,7 @@ const duracion = (desde: string | Date | null | undefined) => {
         <div class="detalle">
           <div>
             <div #mapaDetalle class="mapa-detalle" role="application" aria-label="Recorrido del viaje"></div>
-            <p class="sutil nota">Amarillo: recorrido real · Rojo: exceso de velocidad · Punteado: ruta {{ d.modalidad === 'clientes' ? 'de entrega · Círculos numerados: lugar de cada entrega' : 'sugerida · Marcador rojo: destino' }}.</p>
+            <p class="sutil nota">Amarillo: recorrido real · Naranja: tráfico lento · Rojo: exceso de velocidad · Círculo morado: parada (minutos) · Punteado: ruta {{ d.modalidad === 'clientes' ? 'de entrega · Círculos numerados: lugar de cada entrega' : 'sugerida · Marcador rojo: destino' }}.</p>
           </div>
           <div>
             <div class="mo-datos-detalle">
@@ -265,6 +265,8 @@ const duracion = (desde: string | Date | null | undefined) => {
               <div><span>Rastreo</span>{{ d.viaje.activado | fechaHora }}{{ d.viaje.finalizado ? ' → ' : '' }}{{ d.viaje.finalizado ? (d.viaje.finalizado | fechaHora) : '' }}</div>
               <div><span>Sur Track</span>{{ d.viaje.codigoExterno }}</div>
               <div><span>Recorrido</span><strong>{{ d.resumen.km }} km</strong></div>
+              @if (d.paradas?.length) { <div><span>Paradas</span>{{ d.paradas.length }} · {{ d.resumen.minutosParados }} min en total</div> }
+              @if (d.lentos?.length) { <div><span>Tráfico lento</span>{{ d.resumen.minutosLentos }} min</div> }
               <div><span>Velocidad máxima</span>{{ d.resumen.velocidadMaxima }} km/h{{ d.resumen.excesos ? ' · ' + d.resumen.excesos + ' exceso(s)' : '' }}</div>
             </div>
             @if (d.clientes?.length) {
@@ -286,6 +288,13 @@ const duracion = (desde: string | Date | null | undefined) => {
                     </span>
                     <span class="chip sin-punto" [class]="claseEntrega(c.estadoEntrega)">{{ textoEntrega(c.estadoEntrega) }}</span></li>
                 }
+              </ul>
+            }
+            @if (d.paradas?.length || d.lentos?.length) {
+              <h3 class="sub">Paradas y tráfico</h3>
+              <ul class="lista-paradas">
+                @for (pa of d.paradas; track $index) { <li><span class="pp">{{ pa.minutos }}'</span>Parada de {{ pa.minutos }} min · {{ hora(pa.desde) }} a {{ hora(pa.hasta) }}@if (pa.cliente) { · <strong>{{ pa.cliente }}</strong> }</li> }
+                @for (l of d.lentos; track $index) { <li><span class="pl"></span>Tráfico lento {{ l.minutos }} min ({{ l.km }} km) · {{ hora(l.desde) }} a {{ hora(l.hasta) }}</li> }
               </ul>
             }
             <h3 class="sub">Registro de seguimiento</h3>
@@ -399,6 +408,10 @@ const duracion = (desde: string | Date | null | undefined) => {
     .destino-vh { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: #f1f4f8; }
     .dv-et { font-size: 10.5px; font-weight: 800; letter-spacing: .1em; color: #6b7280; }
     .destino-vh strong { font-size: 16px; } .destino-vh small { color: #4b5563; font-size: 12px; }
+    .lista-paradas { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; font-size: 13px; }
+    .lista-paradas li { display: flex; align-items: center; gap: 8px; }
+    .lista-paradas .pp { width: 24px; height: 24px; flex: none; border-radius: 50%; background: #7c3aed; color: #fff; font: 800 9px system-ui; display: grid; place-items: center; }
+    .lista-paradas .pl { width: 24px; height: 6px; flex: none; border-radius: 3px; background: #f97316; }
     .f-nav { display: block; font-size: 12px; color: #1a73e8; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .nav-vh { background: #e8f0fe; border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; color: #0b3d91; }
     .nav-vh .dv-et { color: #1a73e8; } .nav-vh strong { display: block; font-size: 16px; margin: 2px 0 6px; }
@@ -589,6 +602,7 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
   }
 
   // Navegación en la app del conductor: hora de llegada, distancia por carretera y minutos
+  hora(f: any): string { return f ? new Date(f).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit' }) : ''; }
   horaCorta(f: any): string { return f ? new Date(f).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit' }) : '—'; }
   kmTexto(m: number): string { return m >= 1000 ? `${(m / 1000).toLocaleString('es-CO', { maximumFractionDigits: 1 })} km` : `${Math.round(m)} m`; }
   minTexto(s: number): string { const m = Math.max(1, Math.round(s / 60)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; }
@@ -667,6 +681,22 @@ export class Monitoreo implements AfterViewInit, OnDestroy {
     const cerrar = () => { if (tramo.length > 1) capas.push(L.polyline(tramo, { color: '#d63939', weight: 6, opacity: .95 }).bindTooltip('Exceso de velocidad').addTo(m)); tramo = []; };
     for (const p of pts) { if ((p.velocidad || 0) > limite) tramo.push([p.lat, p.lng]); else cerrar(); }
     cerrar();
+    // Tráfico lento (trancón) en naranja, con su duración
+    let lento: L.LatLngTuple[] = []; let k = 0;
+    const cerrarLento = () => {
+      if (lento.length > 1) { const l = r.lentos?.[k++]; capas.push(L.polyline(lento, { color: '#f97316', weight: 6, opacity: .95 })
+        .bindTooltip(l ? `Tráfico lento · ${l.minutos} min · ${l.km} km` : 'Tráfico lento').addTo(m)); }
+      lento = [];
+    };
+    pts.forEach((p, i) => { if (p.lento) { if (!lento.length && i > 0) lento.push([pts[i - 1].lat, pts[i - 1].lng]); lento.push([p.lat, p.lng]); } else cerrarLento(); });
+    cerrarLento();
+    // Paradas: donde el vehículo se quedó (el conductor a pie en un local, entregando…) con cuánto tiempo
+    for (const pa of r.paradas || []) {
+      const icono = L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15],
+        html: `<div style="width:30px;height:30px;border-radius:50%;background:#7c3aed;color:#fff;border:3px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45);display:grid;place-items:center;font:800 10px system-ui">${pa.minutos}'</div>` });
+      capas.push(L.marker([pa.lat, pa.lng], { icon: icono, title: 'Parada', zIndexOffset: 500 })
+        .bindTooltip(`Parada · ${pa.minutos} min · ${this.hora(pa.desde)} a ${this.hora(pa.hasta)}${pa.cliente ? ' · ' + this.esc(pa.cliente) : ''}`).addTo(m));
+    }
     capas.push(L.circleMarker([pts[0].lat, pts[0].lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#111', fillOpacity: 1 }).bindTooltip('Inicio').addTo(m));
     return linea;
   }

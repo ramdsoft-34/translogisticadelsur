@@ -3,6 +3,7 @@
 //  - 'app': el servidor de la app nueva, para conductores que ya activaron su cuenta.
 //  - 'cooespatrans': el de la app anterior, para los demás (hasta mayo de 2027).
 // Cada viaje guarda en rastreo.servidor a cuál se envió. El viaje de Translogística es la única fuente.
+import { analizarRecorrido } from './analisis.js';
 import { env } from '../../config/env.js';
 import { Empresa, Viaje, Vehiculo, Tercero, Cliente, RecorridoRastreo, LiquidacionConductor } from '../../models/index.js';
 import { ErrorHttp } from '../../middleware/auth.js';
@@ -350,9 +351,10 @@ export async function recorrido(empresaId, viajeId) {
   if (!v.rastreo.activo) {
     const g = await RecorridoRastreo.findOne({ empresa: empresaId, viaje: v._id }).lean();
     const puntos = (g?.puntos || []).map(([lat, lng, velocidad, t]) => ({ lat, lng, velocidad, hora: new Date(t) }));
-    return { viaje: datosViaje(v), estadoExterno: 'completado', ultima: null, puntos, clientes: v.rastreo.clientes || [],
+    const limite = (await Empresa.findById(empresaId).select('rastreo.velocidadMaxima').lean())?.rastreo?.velocidadMaxima || 80;
+    return { viaje: datosViaje(v), estadoExterno: 'completado', ultima: null, ...analizado(puntos, v.rastreo.clientes || [], limite), clientes: v.rastreo.clientes || [],
       ruta: (g?.ruta || []).map(([lat, lng]) => ({ lat, lng })), destino: v.rastreo.modalidad !== 'clientes' && v.rastreo.destino?.lat ? v.rastreo.destino : null,
-      resumen: v.rastreo.resumen?.puntos !== undefined ? v.rastreo.resumen : resumenDe(puntos, (await Empresa.findById(empresaId).select('rastreo.velocidadMaxima').lean())?.rastreo?.velocidadMaxima || 80), eventos: v.rastreo.eventos || [], modalidad: v.rastreo.modalidad || 'destino' };
+      eventos: v.rastreo.eventos || [], modalidad: v.rastreo.modalidad || 'destino' };
   }
   const conf = await exigirHabilitado(empresaId);
   const servidor = servidorDe(v.rastreo);
@@ -367,12 +369,22 @@ export async function recorrido(empresaId, viajeId) {
     const desde = ultima || puntos[puntos.length - 1] || null;
     if (desde) ruta = (await rutaSugerida([desde, destino]).catch(() => null))?.coordenadas || ruta;
   }
-  return { viaje: datosViaje(v), estadoExterno: r.viaje.estado, ultima, puntos, clientes, ruta, destino,
-    resumen: resumenDe(puntos, conf.velocidadMaxima || 80), eventos: v.rastreo.eventos || [], modalidad: v.rastreo.modalidad || 'destino' };
+  return { viaje: datosViaje(v), estadoExterno: r.viaje.estado, ultima, ...analizado(puntos, clientes, conf.velocidadMaxima || 80), clientes, ruta, destino,
+    eventos: v.rastreo.eventos || [], modalidad: v.rastreo.modalidad || 'destino' };
 }
 
 const datosViaje = (v) => ({ numero: v.numero, fecha: v.fecha, placa: v.placa, conductor: v.conductorNombre, destino: v.destino,
   codigoExterno: v.rastreo.codigoExterno, estado: v.estado, rastreo: v.rastreo.estado, activado: v.rastreo.activado, finalizado: v.rastreo.finalizado });
+
+// Recorrido como lo hizo el vehículo: las vueltas a pie en un local pasan a ser paradas (sin sumar km) y los trancones
+// se marcan como tráfico lento. La velocidad máxima y los excesos salen de los puntos originales.
+function analizado(puntos, clientes, limite) {
+  const a = analizarRecorrido(puntos, { clientes });
+  const original = resumenDe(puntos, limite);
+  return { puntos: a.puntos, paradas: a.paradas, lentos: a.lentos,
+    resumen: { ...original, km: a.km, paradas: a.paradas.length, minutosParados: a.paradas.reduce((s, p) => s + p.minutos, 0),
+      minutosLentos: a.lentos.reduce((s, l) => s + l.minutos, 0) } };
+}
 
 // Kilómetros recorridos (Haversine) y velocidad máxima
 // Resumen del recorrido: km, velocidad máxima y tramos con exceso de velocidad (puntos seguidos por encima del límite)
@@ -437,7 +449,7 @@ async function guardarRecorrido(empresaId, v) {
   await RecorridoRastreo.updateOne({ empresa: empresaId, viaje: v._id }, { $set: {
     puntos: puntos.map(p => [p.lat, p.lng, p.velocidad, new Date(p.hora).getTime()]),
     ruta: (r.ruta?.coordenadas || []).map(c => [c.lat, c.lng]) } }, { upsert: true });
-  v.rastreo.resumen = resumenDe(puntos, (await Empresa.findById(empresaId).select('rastreo.velocidadMaxima').lean())?.rastreo?.velocidadMaxima || 80);
+  v.rastreo.resumen = analizado(puntos, v.rastreo.clientes || [], (await Empresa.findById(empresaId).select('rastreo.velocidadMaxima').lean())?.rastreo?.velocidadMaxima || 80).resumen;
 }
 
 // ── Mapas: ruta sugerida (OSRM del servidor) y búsqueda de direcciones (Nominatim de OpenStreetMap) ──

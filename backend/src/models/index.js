@@ -394,7 +394,7 @@ const viajeSchema = new Schema({
       entrega: { lat: Number, lng: Number, aproximada: Boolean, observacion: String, fotos: [String], conductor: String } }], default: [] },
     // Registro de seguimiento (historial de monitoreo) y resumen al terminar
     eventos: { type: [{ _id: false, fecha: Date, tipo: String, detalle: String }], default: [] },
-    resumen: { km: Number, velocidadMaxima: Number, puntos: Number, inicio: Date, fin: Date, excesos: Number, limiteVelocidad: Number },
+    resumen: { km: Number, velocidadMaxima: Number, puntos: Number, inicio: Date, fin: Date, excesos: Number, limiteVelocidad: Number, paradas: Number, minutosParados: Number, minutosLentos: Number },
   },
   // Números escritos a mano para el próximo envío (p. ej. tras un DUPLICADO del RNDC)
   numerosManuales: { remesa: str({ uppercase: true }), manifiesto: str({ uppercase: true }) },
