@@ -17,7 +17,7 @@ const MOTIVOS_IA: Record<string, string> = {
   limite: 'La IA llegó a su límite de consultas por ahora; se intentará de nuevo en unos minutos.',
   tope_diario: 'Se alcanzó el tope diario de consultas a la IA; mañana vuelve a estar disponible.',
   clave: 'La clave de la IA no es válida.',
-  no_responde: 'La IA no responde en este momento; se intentará de nuevo en unos minutos.',
+  no_responde: 'La IA gratuita de Google está saturada o tardó demasiado; se intentará de nuevo en unos minutos. Mientras tanto, guíese por la explicación de arriba.',
 };
 
 // Resultado de la revisión de un viaje antes de enviarlo al RNDC (o de su último rechazo).
@@ -28,7 +28,9 @@ const MOTIVOS_IA: Record<string, string> = {
   selector: 'app-revision-rndc',
   template: `
     @let r = revision();
-    @if (r && visibles().length || iaVisible()) {
+    @if (modo() === 'lista' && r && !visibles().length && !iaVisible()) {
+      <span class="chip ok listo" title="Las reglas del RNDC y el historial de la empresa no encuentran nada por corregir">Listo para enviar</span>
+    } @else if (r && visibles().length || iaVisible()) {
       <details class="rev" [class.lista]="modo() === 'lista'" [open]="modo() === 'rechazo' || r?.nivel === 'error'">
         <summary>
           @if (modo() === 'lista') {
@@ -99,6 +101,7 @@ const MOTIVOS_IA: Record<string, string> = {
     .rev li.ia { border-left-color: var(--azul, #2f6fb5); }
     .rev p { margin: 3px 0; }
     .tit { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+    .listo { display: inline-block; margin: 2px 0; }
     .fuente { font-size: 11.5px; color: var(--gris-5); text-transform: uppercase; letter-spacing: .03em; }
     .corr { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 4px; }
   `],
@@ -113,16 +116,17 @@ export class RevisionRndcVista {
   // En «rechazo» solo el hallazgo del rechazo y solo si trae historial o una corrección
   readonly visibles = computed(() => {
     const h = this.revision()?.hallazgos || [];
-    if (this.modo() === 'lista') return h;
+    // En la lista solo lo que pide hacer algo; lo informativo (p. ej. datos incompletos que no impiden enviar) no se muestra
+    if (this.modo() === 'lista') return h.filter((x) => x.nivel !== 'info');
     return h.filter((x) => x.mensajeRndc && (x.historial?.cambios?.length || x.historial?.sinCambios || this.correcciones(x).length));
   });
   readonly iaVisible = computed(() => { const ia = this.revision()?.ia; return !!ia && !(ia.estado === 'no_disponible' && ia.motivo === 'sin_clave'); });
   readonly etiqueta = computed(() => {
     const h = this.revision()?.hallazgos || [];
     const n = (x: string) => h.filter((y) => y.nivel === x).length;
-    if (this.revision()?.nivel === 'error') return n('error') === 1 ? 'No pasaría: 1 problema' : `No pasaría: ${n('error')} problemas`;
-    if (this.revision()?.nivel === 'alerta') return n('alerta') === 1 ? '1 aviso' : `${n('alerta')} avisos`;
-    return 'Revisado';
+    if (this.revision()?.nivel === 'error') return n('error') === 1 ? '1 por corregir' : `${n('error')} por corregir`;
+    if (this.revision()?.nivel === 'alerta') return n('alerta') === 1 ? '1 por revisar' : `${n('alerta')} por revisar`;
+    return 'Listo para enviar';
   });
 
   correcciones(h: HallazgoRndc) { return h.correccion ? [h.correccion] : h.correcciones || []; }

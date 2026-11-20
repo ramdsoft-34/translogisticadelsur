@@ -18,6 +18,7 @@ import { TIPOS_ID_CONDUCTOR, MOTIVOS_REEMPLAZO } from './catalogos.js';
 import { txt, hoyColombia, normalizar, escaparRegex, soloDigitos } from '../../utils/texto.js';
 import { nombreCompleto } from '../../utils/nombres.js';
 import { alCambiarTercero } from '../sincronizarMaestros.js';
+import { mensajeClaro } from './conocimiento.js';
 
 const BLOQUEO_MS = 3 * 60 * 1000;
 const PROBLEMA_CANTIDAD = 'Cantidad cargada: escriba el peso de la carga en kg (el RNDC no acepta cero ni vacío)';
@@ -305,7 +306,7 @@ export async function vistaPrevia(empresaId, viajeId) {
     remesaAceptada,
     // Respuesta textual del RNDC en el último rechazo (para corregir y reenviar)
     ultimoError: ultimo && !(v.manifiesto?.estado === 'aceptado')
-      ? { proceso: ultimo.proceso, mensaje: ultimo.mensaje, fecha: ultimo.createdAt, referencia: ultimo.referencia } : null,
+      ? { proceso: ultimo.proceso, mensaje: mensajeClaro(ultimo.mensaje), fecha: ultimo.createdAt, referencia: ultimo.referencia } : null,
     avisos: [...avisosViaje(v, vehiculo), ...(revDestino.aviso ? [revDestino.aviso] : []),
       ...(v.remitenteRndc && !v.remitenteRndc.registrado && v.remesa?.estado !== 'aceptado' ? [`El remitente ${v.remitenteRndc.numId} sede ${v.remitenteRndc.sede || '(sin sede)'} no está en la plataforma: verifíquelo o traiga sus sedes del RNDC antes de enviar`] : [])],
     // Quién carga (remitente) y en qué municipio: el origen del manifiesto

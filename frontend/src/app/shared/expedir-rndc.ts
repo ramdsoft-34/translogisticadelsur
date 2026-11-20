@@ -669,7 +669,8 @@ export class ExpedirRndc {
       const r = await this.api.get<RevisionRndc>(`/rndc/viajes/${id}/revision`);
       if (this.viajeId() !== id) return;
       this.revision.set(r);
-      if (r.ia?.estado === 'pendiente' && intento < 6) setTimeout(() => this.viajeId() === id && this.cargarRevision(id, intento + 1), 8000);
+      if (r.ia?.estado === 'pendiente' && intento < 15) setTimeout(() => this.viajeId() === id && this.cargarRevision(id, intento + 1), 8000);
+      else if (r.ia?.estado === 'pendiente') this.revision.set({ ...r, ia: { estado: 'no_disponible', motivo: 'no_responde' } });
     } catch { /* es una ayuda: si falla, la ventana sigue igual */ }
   }
   async aplicarCorreccion(c: CorreccionRndc) {
@@ -736,7 +737,7 @@ export class ExpedirRndc {
     if (/MAN153|municipios de Origen y Destino diferentes/i.test(t)) return 'Con el tipo «General» el origen y el destino deben ser municipios distintos. Si el viaje sale y llega al mismo municipio, cambie el «Tipo de manifiesto» (Características generales, abajo) a «Viaje municipal o urbano» si todo es dentro del municipio, o a «Viaje de ida y regreso» si va y vuelve; luego «Corregir y reenviar».';
     if (/MAN092/i.test(t)) return 'El manifiesto salió como «Viaje municipal o urbano» (U), pero el origen y el destino son municipios distintos, y el RNDC no lo acepta. Cambie el «Tipo de manifiesto» (Características generales, abajo) a «General» y presione «Corregir y reenviar». Para que no vuelva a pasar, en Clientes y tarifas cambie la operación de ese destino de «U» a «G».';
     if (/MAN078|omisiones en (el registro|la matr)/i.test(t)) return 'La placa tiene omisiones en su matrícula inicial ante el Ministerio y el RNDC no deja expedirle manifiestos hasta que el propietario lo aclare con el grupo de Reposición Vehicular del Ministerio de Transporte. Mientras tanto: cambie el vehículo en «Vehículo y personas» y reenvíe (la remesa aceptada se conserva), o anule la remesa si el viaje no se hará.';
-    if (/Paso\d+ Expidiendo/i.test(t)) return 'Es una falla interna del RNDC al procesar el documento, no un error de sus datos. Presione «Corregir y reenviar»: antes de enviar se verifica en el RNDC que no haya quedado registrado, así no se duplica.';
+    if (/Paso\d+ Expidiendo|Access violation|Falla del servidor del RNDC|SOAP-ENV:Fault|Respuesta vac[ií]a del RNDC/i.test(t)) return 'Es una falla interna del RNDC al procesar el documento, no un error de sus datos. Presione «Corregir y reenviar»: antes de enviar se verifica en el RNDC que no haya quedado registrado, así no se duplica.';
     if (/MAN130|titular no existe/i.test(t)) return 'El titular no está registrado en el RNDC. Use «Registrar de nuevo» junto al TITULAR (arriba) o cambie el titular en «Viaje» y presione «Corregir y reenviar».';
     if (/conductor.*no existe|MAN12\d/i.test(t)) return 'El conductor no está registrado en el RNDC. Use «Registrar de nuevo» junto al CONDUCTOR o elija otro conductor y reenvíe.';
     if (/MAN353|municipio origen/i.test(t)) return 'El origen del manifiesto debe ser el municipio de la remesa (el de la sede del remitente). La plataforma ya lo toma así: presione «Corregir y reenviar».';

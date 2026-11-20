@@ -199,8 +199,8 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
           @else if (resumenRevision().total) {
             <strong>Revisión antes de enviar:</strong>
             <span class="chip ok sin-punto">{{ resumenRevision().ok }} listo(s)</span>
-            @if (resumenRevision().alerta) { <span class="chip alerta sin-punto">{{ resumenRevision().alerta }} con avisos</span> }
-            @if (resumenRevision().error) { <span class="chip error sin-punto">{{ resumenRevision().error }} no pasaría(n) así</span> }
+            @if (resumenRevision().alerta) { <span class="chip alerta sin-punto">{{ resumenRevision().alerta }} por revisar</span> }
+            @if (resumenRevision().error) { <span class="chip error sin-punto">{{ resumenRevision().error }} por corregir</span> }
             <span class="sutil">Nada se envía solo: revise cada viaje y presione «Expedir».</span>
           }
         </div>
@@ -324,10 +324,8 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                 </td>
               </tr>
               @if (pestana() === 'pendientes' && revisiones()[v._id]; as rv) {
-                @if (rv.hallazgos.length) {
-                  <tr class="fila-revision"><td colspan="10" style="padding-top:0">
-                    <app-revision-rndc [revision]="rv" [ocupado]="aplicando() === v._id" (aplicar)="aplicarCorreccion(v, $event)" /></td></tr>
-                }
+                <tr class="fila-revision"><td colspan="10" style="padding-top:0">
+                  <app-revision-rndc [revision]="rv" [ocupado]="aplicando() === v._id" (aplicar)="aplicarCorreccion(v, $event)" /></td></tr>
               } @else if (mensajeError(v); as m) {
                 <tr><td [attr.colspan]="pestana() === 'pendientes' ? 10 : 9" style="padding-top:0"><div class="mensaje error">Respuesta del RNDC · {{ m }}</div></td></tr>
               }
@@ -949,7 +947,9 @@ export class Manifiestos {
       this.revisiones.update(m => ({ ...m, ...Object.fromEntries(r.resultados.map(x => [x.viaje, x])) }));
       // La IA responde en segundo plano: se pregunta otra vez solo por los que siguen pendientes
       const pendientes = viajes.filter(v => r.resultados.find(x => x.viaje === v._id)?.ia?.estado === 'pendiente');
-      if (pendientes.length && intento < 6) setTimeout(() => this.revisar(pendientes, intento + 1), 8000);
+      if (pendientes.length && intento < 15) setTimeout(() => this.revisar(pendientes, intento + 1), 8000);
+      // Pasados unos dos minutos sin respuesta, se dice que la IA no respondió (no se queda «revisando»)
+      else if (pendientes.length) this.revisiones.update(m => ({ ...m, ...Object.fromEntries(pendientes.map(v => [v._id, { ...m[v._id], ia: { estado: 'no_disponible' as const, motivo: 'no_responde' } }])) }));
     } catch { /* la revisión es una ayuda: si falla, la lista sigue igual */ }
     finally { if (!intento && turno === this.turnoRevision) this.revisando.set(false); }
   }

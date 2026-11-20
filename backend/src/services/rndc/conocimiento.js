@@ -33,8 +33,10 @@ export const CONOCIDOS = [
     } },
   { id: 'MAN078', patron: /MAN078|omisiones en (el registro|la matr)/i, titulo: 'Placa con omisiones en la matrícula',
     que: 'La placa tiene omisiones en su matrícula inicial ante el Ministerio y el RNDC no le deja expedir manifiestos hasta que el propietario lo aclare con Reposición Vehicular del Ministerio de Transporte. Mientras tanto, cambie el vehículo del viaje (la remesa aceptada se conserva) o anule la remesa si el viaje no se hará.' },
-  { id: 'PASO', patron: /Paso\d+ Expidiendo/i, titulo: 'Falla interna del RNDC',
-    que: 'Es una falla interna del RNDC, no un error de sus datos. Vuelva a enviar: antes se verifica en el RNDC que no haya quedado registrado, así no se duplica.' },
+  // Falla del servidor del RNDC (Access violation, respuesta vacía, «PasoN Expidiendo»): no es un error de los datos
+  { id: 'FALLA_RNDC', patron: /Paso\d+ Expidiendo|Access violation|SOAP-ENV:Fault|faultstring|Respuesta vac[ií]a del RNDC|no respondi[oó]|tiempo de espera|ETIMEDOUT|ECONNRESET|socket hang up/i,
+    titulo: 'Falla interna del RNDC',
+    que: 'Es una falla del servidor del RNDC, no un error de sus datos. Presione «Corregir y reenviar»: antes se verifica en el RNDC que no haya quedado registrado, así no se duplica.' },
   { id: 'MAN130', patron: /MAN130|titular no existe/i, titulo: 'Titular no registrado en el RNDC',
     que: 'El titular del manifiesto no está registrado en el RNDC. Regístrelo («Registrar de nuevo» junto al titular) o cambie el titular del viaje.' },
   { id: 'CONDUCTOR', patron: /conductor.*no existe|MAN12\d/i, titulo: 'Conductor no registrado en el RNDC',
@@ -60,6 +62,14 @@ export const CONOCIDOS = [
   { id: 'CLAVE', patron: /contrase|clave|password|autentic|usuario (no |inv|o |y )/i, titulo: 'Contraseña del RNDC',
     que: 'La contraseña del RNDC no es correcta. Vuelva a enviar y escríbala de nuevo.' },
 ];
+
+// Mensaje del RNDC en palabras: de un error SOAP (XML) queda solo el texto de la falla
+export function mensajeClaro(mensaje) {
+  const m = String(mensaje || '');
+  const falla = /<faultstring>([\s\S]*?)<\/faultstring>/i.exec(m)?.[1];
+  if (falla) return `Falla del servidor del RNDC: ${falla.trim()}`.slice(0, 300);
+  return m.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600);
+}
 
 export const conocido = (mensaje) => CONOCIDOS.find((c) => c.patron.test(String(mensaje || ''))) || null;
 

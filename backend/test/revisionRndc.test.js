@@ -1,8 +1,8 @@
 // Revisión de manifiestos antes de enviar: reglas, aprendizaje del historial y respuesta de la IA (sin base de datos ni red)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { codigosDe, conocido, esAplicable } from '../src/services/rndc/conocimiento.js';
-import { casosDesdeTransacciones, resueltoAntes, patronesQueAplican, diferencias } from '../src/services/rndc/aprendizaje.js';
+import { codigosDe, conocido, esAplicable, mensajeClaro } from '../src/services/rndc/conocimiento.js';
+import { casosDesdeTransacciones, resueltoAntes, patronesQueAplican, diferencias, marcarContradichos } from '../src/services/rndc/aprendizaje.js';
 import { anonimizar, validarRespuesta, textoDe } from '../src/services/rndc/ia.js';
 import { hallazgosDeReglas, nivelDe, huellaRevision } from '../src/services/rndc/revision.js';
 
@@ -61,7 +61,8 @@ test('reglas: datos faltantes, maestros y avisos', () => {
   assert.equal(h.filter((x) => x.nivel === 'error').length, 4);
   // Vehículo ya registrado en el RNDC con datos incompletos en la plataforma: aviso, no bloquea
   const r = hallazgosDeReglas(previa({ tipo: 'G', maestros: [{ rol: 'Vehículo', referencia: 'SOW033', estado: 'enviado', faltantes: [{ etiqueta: 'N° póliza SOAT' }] }] }));
-  assert.deepEqual(r.map((x) => x.nivel), ['alerta']);
+  assert.deepEqual(r.map((x) => x.nivel), ['info']);
+  assert.equal(nivelDe(r), 'ok', 'lo que no impide enviar no quita el «listo»');
   assert.equal(h.find((x) => /flete/.test(x.detalle)).nivel, 'alerta');
   assert.equal(h.find((x) => x.titulo === 'Anticipo ajustado').nivel, 'info');
 });
@@ -156,4 +157,27 @@ test('IA: texto de la respuesta de la API de Interactions', () => {
   assert.equal(textoDe({ output_text: '{"a":1}' }), '{"a":1}');
   assert.equal(textoDe({ steps: [{ type: 'thought', content: [] }, { type: 'model_output', content: [{ type: 'text', text: '{"b":2}' }] }] }), '{"b":2}');
   assert.equal(textoDe({}), '');
+});
+
+test('aprende de lo aceptado: si el RNDC aceptó después el mismo valor, el aviso se descarta', () => {
+  // Rechazo MAN353 en el viaje v7 «arreglado» cambiando el origen de Cujacal (52001033) a Pasto (52001001)
+  const f = [{ viaje: 'v7', proceso: 4, mensaje: 'Error MAN353 municipio origen', solicitud: xml(man({ CODOPERACIONTRANSPORTE: 'G', CODMUNICIPIOORIGENMANIFIESTO: '52001033' })), createdAt: T(0) }];
+  const a = [{ viaje: 'v7', proceso: 4, solicitud: xml(man({ CODOPERACIONTRANSPORTE: 'G', CODMUNICIPIOORIGENMANIFIESTO: '52001001' })), createdAt: T(1) }];
+  const viaje = { manifiesto: man({ CODOPERACIONTRANSPORTE: 'G', CODMUNICIPIOORIGENMANIFIESTO: '52001033' }) };
+  const casos = casosDesdeTransacciones(f, a);
+  assert.equal(patronesQueAplican(casos, viaje, 'v9').length, 1, 'sin más información, avisa');
+  // Después el RNDC aceptó otro viaje saliendo de Cujacal: el origen no era el problema
+  marcarContradichos(casos, [{ proceso: 4, createdAt: T(30), solicitud: xml(man({ CODOPERACIONTRANSPORTE: 'G', CODMUNICIPIOORIGENMANIFIESTO: '52001033', NUMPLACA: 'QQQ111' })) }]);
+  assert.equal(patronesQueAplican(casos, viaje, 'v9').length, 0, 'ya no avisa');
+  assert.equal(resueltoAntes(casos, 'MAN353').cambios.length, 0, 'ni lo propone como corrección');
+  // Un aceptado anterior al arreglo no lo contradice
+  const casos2 = marcarContradichos(casosDesdeTransacciones(f, a), [{ proceso: 4, createdAt: T(-5), solicitud: xml(man({ CODMUNICIPIOORIGENMANIFIESTO: '52001033' })) }]);
+  assert.equal(patronesQueAplican(casos2, viaje, 'v9').length, 1);
+});
+
+test('falla interna del RNDC: se reconoce, se muestra legible y no consulta la IA', () => {
+  const soap = '<?xml version="1.0"?><SOAP-ENV:Envelope><SOAP-ENV:Body><SOAP-ENV:Fault><faultcode>SOAP-ENV:Server</faultcode><faultstring>Access violation at address 00000000008202AF in module wsSvr008svr.exe</faultstring></SOAP-ENV:Fault></SOAP-ENV:Body></SOAP-ENV:Envelope>';
+  assert.equal(mensajeClaro(soap), 'Falla del servidor del RNDC: Access violation at address 00000000008202AF in module wsSvr008svr.exe');
+  for (const m of [soap, mensajeClaro(soap), 'Respuesta vacía del RNDC', 'Paso3 Expidiendo Manifiesto']) assert.equal(conocido(m)?.id, 'FALLA_RNDC', m);
+  assert.equal(conocido('Error MAN354 municipio destino').id, 'MAN354', 'los códigos reales no se confunden');
 });

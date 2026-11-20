@@ -65,14 +65,38 @@ export function casosDesdeTransacciones(fallidas, aceptadas) {
   return casos;
 }
 
+// Aprender de lo aceptado: si después de un rechazo el RNDC aceptó documentos con el mismo valor que «causó» el
+// rechazo, ese valor no era el problema (fue otra cosa, o una falla del RNDC). El cambio queda «contradicho» y no se avisa.
+// aceptadas: [{ proceso, createdAt, solicitud }] posteriores; se marca en cada cambio `contradicho: true`.
+export function marcarContradichos(casos, aceptadas) {
+  const buscados = new Set(casos.flatMap((c) => c.cambios.map((m) => `${c.proceso}|${m.variable}`)));
+  if (!buscados.size) return casos;
+  const ultimo = new Map();   // «proceso|VARIABLE=valor» → fecha más reciente en que el RNDC lo aceptó
+  for (const a of aceptadas) {
+    const vars = variablesDeSolicitud(a.solicitud);
+    if (!vars) continue;
+    for (const [k, v] of Object.entries(vars)) {
+      if (!buscados.has(`${a.proceso}|${k}`)) continue;
+      const clave = `${a.proceso}|${k}=${String(v).trim()}`;
+      const f = new Date(a.createdAt).getTime();
+      if (!(ultimo.get(clave) >= f)) ultimo.set(clave, f);
+    }
+  }
+  for (const c of casos) for (const m of c.cambios) {
+    m.contradicho = (ultimo.get(`${c.proceso}|${m.variable}=${m.antes}`) || 0) > new Date(c.fecha).getTime();
+  }
+  return casos;
+}
+
 // Cómo se resolvió antes un código: cambios agrupados, del más repetido al menos
 export function resueltoAntes(casos, codigo) {
   const grupos = new Map(); let sinCambios = 0; const viajesSin = [];
   for (const c of casos.filter((x) => x.codigo === codigo)) {
     if (!c.cambios.length) { sinCambios++; viajesSin.push(c.numero ?? c.viaje); continue; }
     for (const m of c.cambios) {
+      if (m.contradicho) continue;
       const k = `${c.documento}|${m.variable}|${m.antes}|${m.despues}`;
-      const g = grupos.get(k) || { documento: c.documento, ...m, veces: 0, viajes: [] };
+      const g = grupos.get(k) || { documento: c.documento, variable: m.variable, antes: m.antes, despues: m.despues, veces: 0, viajes: [] };
       g.veces++; if (g.viajes.length < 5) g.viajes.push(c.numero ?? c.viaje);
       grupos.set(k, g);
     }
@@ -90,14 +114,14 @@ export function patronesQueAplican(casos, vars, viajeId) {
     const todas = { ...(vars.remesa || {}), ...(vars.manifiesto || {}) };
     const coinciden = Object.entries(c.contexto).filter(([k, v]) => todas[k] && String(todas[k]) === String(v)).map(([k]) => k);
     for (const m of c.cambios) {
-      if (!(m.variable in actuales) || String(actuales[m.variable] ?? '') !== m.antes || m.antes === m.despues) continue;
+      if (m.contradicho || !(m.variable in actuales) || String(actuales[m.variable] ?? '') !== m.antes || m.antes === m.despues) continue;
       // El dato mismo identifica (la misma placa, el mismo conductor); si no, el viaje comparte los datos de los que depende
       const requeridos = REQUIERE[m.variable];
       const parecido = requeridos ? requeridos.every((k) => c.contexto[k] && coinciden.includes(k))
         : CONTEXTO.includes(m.variable) || coinciden.length >= 3;
       if (!parecido) continue;
       const k = `${c.codigo}|${c.documento}|${m.variable}|${m.antes}|${m.despues}`;
-      const p = out.get(k) || { codigo: c.codigo, documento: c.documento, ...m, veces: 0, viajes: [], coinciden };
+      const p = out.get(k) || { codigo: c.codigo, documento: c.documento, variable: m.variable, antes: m.antes, despues: m.despues, veces: 0, viajes: [], coinciden };
       p.veces++; if (p.viajes.length < 5) p.viajes.push(c.numero ?? c.viaje);
       out.set(k, p);
     }
@@ -122,6 +146,13 @@ export async function casosAprendidos(empresaId) {
   const ids = [...new Set(fallidas.map((f) => String(f.viaje)))];
   const aceptadas = ids.length ? await TransaccionRndc.find({ ...base, ok: true, viaje: { $in: ids } }).select('viaje proceso solicitud createdAt').sort({ createdAt: 1 }).lean() : [];
   const casos = casosDesdeTransacciones(fallidas, aceptadas);
+  // Lo aceptado después de cada caso (de cualquier viaje) para descartar los avisos que el RNDC ya contradijo
+  if (casos.length) {
+    const desde = new Date(Math.min(...casos.map((c) => new Date(c.fecha).getTime())));
+    const posteriores = await TransaccionRndc.find({ empresa: empresaId, tipo: 1, proceso: { $in: [3, 4] }, ok: true, createdAt: { $gt: desde } })
+      .select('proceso solicitud createdAt').sort({ createdAt: -1 }).limit(6000).lean();
+    marcarContradichos(casos, posteriores);
+  }
   const numeros = new Map((await Viaje.find({ empresa: empresaId, _id: { $in: [...new Set(casos.map((c) => c.viaje))] } }).select('numero').lean())
     .map((v) => [String(v._id), v.numero]));
   for (const c of casos) c.numero = numeros.get(c.viaje) ?? null;

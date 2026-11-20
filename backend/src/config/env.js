@@ -50,7 +50,7 @@ export const env = {
     url: (process.env.GEMINI_URL || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, ''),
     maxDia: entero(process.env.GEMINI_MAX_DIA, 150),
     pausaMs: entero(process.env.GEMINI_PAUSA_MS, 6000),
-    timeoutMs: entero(process.env.GEMINI_TIMEOUT_MS, 60000),
+    timeoutMs: entero(process.env.GEMINI_TIMEOUT_MS, 90000),
   },
 };
 

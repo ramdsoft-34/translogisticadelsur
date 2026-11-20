@@ -6,7 +6,7 @@
 // Nunca envía nada ni cambia datos: las correcciones se aplican solo si el usuario lo pide.
 import crypto from 'node:crypto';
 import { vistaPrevia } from './operaciones.js';
-import { CONOCIDOS, conocido, codigosDe, esAplicable } from './conocimiento.js';
+import { CONOCIDOS, conocido, codigosDe, esAplicable, mensajeClaro } from './conocimiento.js';
 import { casosAprendidos, resueltoAntes, patronesQueAplican, esPersonal } from './aprendizaje.js';
 import { diagnostico } from './ia.js';
 
@@ -42,11 +42,15 @@ export function hallazgosDeReglas(p) {
   for (const m of p.maestros || []) {
     if (m.estado === 'no_existe') add('error', `${m.rol}: no está registrado`, `${m.referencia} no está en la plataforma. Regístrelo o tráigalo del RNDC antes de enviar.`);
     // Ya registrado en el RNDC: lo que falte en la plataforma no impide el envío (solo un nuevo registro)
-    else if (m.faltantes?.length && m.estado === 'enviado') add('alerta', `${m.rol}: datos incompletos en la plataforma`, `${m.referencia}: falta ${m.faltantes.map((f) => f.etiqueta || f).join(', ')}. Ya está registrado en el RNDC, así que no impide enviar; complételo para cuando haya que actualizarlo.`);
+    else if (m.faltantes?.length && m.estado === 'enviado') add('info', `${m.rol}: datos incompletos en la plataforma`, `${m.referencia}: falta ${m.faltantes.map((f) => f.etiqueta || f).join(', ')}. Ya está registrado en el RNDC, así que no impide enviar; complételo para cuando haya que actualizarlo.`);
     else if (m.faltantes?.length) add('error', `${m.rol}: faltan datos`, `${m.referencia}: ${m.faltantes.map((f) => f.etiqueta || f).join(', ')}.`);
     else if (m.estado === 'error') add('alerta', `${m.rol}: el RNDC lo rechazó al registrarlo`, `${m.referencia}: ${m.mensaje || 'revise sus datos'}`);
   }
-  for (const a of p.avisos || []) add(/vencid/i.test(a) ? 'error' : 'alerta', 'Revise', a);
+  for (const a of p.avisos || []) {
+    if (/SOAT.*vencid/i.test(a)) add('error', 'SOAT vencido', 'Según la plataforma el SOAT del vehículo está vencido y el RNDC no lo acepta así. Si ya lo renovaron, actualice el vehículo desde el RNDC (Vehículo y personas → «Actualizar desde el RNDC») o registre el SOAT nuevo en Vehículos.');
+    else if (/licencia.*vencid/i.test(a)) add('error', 'Licencia vencida', 'La licencia del conductor está vencida según la plataforma. Si ya la renovó, actualice al conductor desde el RNDC o cambie el conductor del viaje.');
+    else add(/vencid/i.test(a) ? 'error' : 'alerta', 'Revise', a);
+  }
   // Tipo de manifiesto contra la ruta (MAN092 / MAN153), antes de que el RNDC lo rechace
   if (p.manifiesto?.variables && p.documentos?.manifiesto?.estado !== 'aceptado') {
     const m = p.manifiesto.variables; const tipo = valor(m, 'CODOPERACIONTRANSPORTE');
@@ -99,7 +103,7 @@ export async function revisarViaje(empresaId, viajeId, { previa = null, conIa = 
     hallazgos.unshift({
       nivel: 'error', fuente: c ? 'regla' : antes ? 'historial' : 'rndc', codigo: codigos[0] || c?.id || '',
       titulo: `El RNDC rechazó ${doc === 'remesa' ? 'la remesa' : 'el manifiesto'}${c ? `: ${c.titulo.toLowerCase()}` : ''}`,
-      detalle: c?.que || (antes ? 'No está entre los rechazos conocidos, pero ya le pasó antes a la empresa: abajo, cómo se resolvió.' : 'Este rechazo no está entre los conocidos.'), mensajeRndc: e.mensaje,
+      detalle: c?.que || (antes ? 'No está entre los rechazos conocidos, pero ya le pasó antes a la empresa: abajo, cómo se resolvió.' : 'Este rechazo no está entre los conocidos.'), mensajeRndc: mensajeClaro(e.mensaje),
       historial: antes ? { codigo: antes.codigo, cambios: antes.cambios.map((m) => ({ ...m, texto: `${nombre(m.variable)}: ${legible(m.variable, m.antes)} → ${legible(m.variable, m.despues)}` })), sinCambios: antes.sinCambios, viajesSin: antes.viajesSin } : null,
       correcciones,
     });

@@ -24,7 +24,7 @@ function crear(r: RevisionRndc, modo: 'lista' | 'rechazo' = 'lista') {
 describe('Revisión RNDC', () => {
   it('en la lista resume el estado y aplica la corrección con un clic', () => {
     const { el, texto, aplicadas } = crear(MAN092);
-    expect(texto()).toContain('No pasaría: 1 problema');
+    expect(texto()).toContain('1 por corregir');
     expect(texto()).toContain('y 1 más');
     expect((el.querySelector('details') as HTMLDetailsElement).open).toBe(true);
     const b = [...el.querySelectorAll('button')].find((x) => /Aplicar corrección/.test(x.textContent!))!;
@@ -32,9 +32,12 @@ describe('Revisión RNDC', () => {
     expect(aplicadas).toEqual([MAN092.hallazgos[0].correccion!]);
   });
 
-  it('sin hallazgos no muestra nada', () => {
-    const { el } = crear({ viaje: 'v', nivel: 'ok', hallazgos: [], ia: null });
+  it('sin nada por hacer muestra «Listo para enviar» (lo informativo no se muestra)', () => {
+    const { el, texto } = crear({ viaje: 'v', nivel: 'ok', ia: null,
+      hallazgos: [{ nivel: 'info', fuente: 'regla', titulo: 'Vehículo: datos incompletos en la plataforma', detalle: 'falta N° póliza SOAT' }] });
     expect(el.querySelector('details')).toBeNull();
+    expect(texto()).toContain('Listo para enviar');
+    expect(texto()).not.toContain('datos incompletos');
   });
 
   it('en Expedir muestra solo cómo corregir el rechazo: historial e IA', () => {
