@@ -557,7 +557,8 @@ export function cambioMasivo(v, accion, x, tarifa) {
       // Solo impide el cambio lo que sigue vigente en el RNDC: una remesa anulada o un manifiesto rechazado o anulado
       // (p. ej. se envió por error) permiten pasarlo a soporte interno
       if (v.estado !== 'registrado' || v.remesa?.estado === 'aceptado' || v.manifiesto?.estado === 'aceptado') return { omitir: 'Tiene documentos vigentes en el RNDC: anúlelos primero en Manifiestos' };
-      if (v.soporteInterno?.mc && x.requiere) return { omitir: 'Ya tiene soporte interno numerado (anúlelo primero)' };
+      // Un soporte interno anulado no impide pasarlo al RNDC (queda su registro como anulado)
+      if (v.soporteInterno?.mc && v.soporteInterno.estado !== 'anulado' && x.requiere) return { omitir: 'Ya tiene soporte interno vigente (anúlelo primero)' };
       if ((v.requiereManifiesto !== false) === !!x.requiere) return { omitir: x.requiere ? 'Ya lleva manifiesto' : 'Ya va con soporte interno' };
       return { set: { requiereManifiesto: !!x.requiere }, texto: x.requiere ? 'Lleva manifiesto del RNDC' : 'Sin manifiesto: soporte interno' };
     }
