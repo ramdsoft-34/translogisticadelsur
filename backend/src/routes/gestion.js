@@ -27,6 +27,7 @@ import { avisarLiquidacion } from '../services/rastreo/surtrack.js';
 import { avisarDocumentosApp } from '../services/rastreo/documentosApp.js';
 import { prepararEnvio as prepararWhatsapp, descartarEnvios as descartarWhatsapp } from '../services/whatsappBusiness.js';
 import { nombreCompleto } from '../utils/nombres.js';
+import { programarEnvios as programarEnviosCorreo } from '../services/correo.js';
 
 const r = Router();
 r.use(autenticar, soloEmpresa);
@@ -671,6 +672,7 @@ r.post('/soportes/viajes/:id', permitir(P.VIAJES_REGISTRAR), async (req, res) =>
   await auditar(req, reemplazar ? 'soporte_interno_reemplazo' : 'soporte_interno', { entidad: 'Viaje', entidadId: req.params.id, detalle: { mc: d.soporte.mc, rc: d.soporte.rc, codigo: d.soporte.codigo } });
   avisarDocumentosApp(req.empresaId, req.params.id);
   await prepararWhatsapp(req.empresaId, req.params.id, { usuario: req.usuario._id }).catch(() => {});
+  await programarEnviosCorreo(req.empresaId, req.params.id, { origen: 'automatico', usuario: req.usuario._id }).catch(() => {});
   res.json(d.soporte);
 });
 // Cumplido y anulación del soporte interno (no van al RNDC)

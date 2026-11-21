@@ -65,6 +65,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         @if (pestana() === 'soporte' && seleccion().size) {
           <button type="button" (click)="abrirCorreoManual(true)" [disabled]="trabajando()" title="Correo con los soportes internos elegidos y archivos adjuntos">
             <app-icono nombre="correo" />Correo con {{ seleccion().size }} soporte(s)</button>
+          <button type="button" confirmar="Clic otra vez para descartar" (confirmado)="descartarCorreos([...seleccion()])" [disabled]="trabajando()">Descartar correos</button>
+          <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([...seleccion()])" [disabled]="trabajando()">
+            <app-icono nombre="correo" />Aprobar correos ({{ seleccion().size }})</button>
           @if (whatsappActivo()) {
             <button type="button" confirmar="Clic otra vez para descartar" (confirmado)="descartarWhatsapp([...seleccion()])" [disabled]="trabajando()">Descartar WhatsApp</button>
             <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="aprobarWhatsapp([...seleccion()])" [disabled]="trabajando()">
@@ -134,7 +137,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
         <button type="button" class="pequeno texto" (click)="resultadoLote.set(null)" aria-label="Cerrar resultado">Cerrar</button>
       </div>
     }
-    @if (pestana() === 'manifestados' && porAprobar().length) {
+    @if ((pestana() === 'manifestados' || pestana() === 'soporte') && porAprobar().length) {
       <div class="mensaje alerta pendientes-correo">
         <span><strong>{{ porAprobar().length }} viaje(s) con correos por aprobar.</strong>
           Los correos al cliente no salen solos: revíselos y apruébelos (un correo por cliente con sus manifiestos y la carta de salida de cada vehículo).</span>
@@ -222,10 +225,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                 <td data-etiqueta="Remesa">@if ($any(v).soporteInterno?.rc) { {{ $any(v).soporteInterno.rc }}<br /><span class="chip ok sin-punto">interna</span> } @else { <span class="chip alerta sin-punto">sin soporte</span> }</td>
                 <td data-etiqueta="Manifiesto">@if ($any(v).soporteInterno?.mc) { {{ $any(v).soporteInterno.mc }}<br /><span class="chip" [class]="chipSoporte($any(v))">{{ textoSoporte($any(v)) }}</span>
                   @if ($any(v).soporteInterno.estado === 'anulado' && $any(v).soporteInterno.anulado?.motivo) { <br /><span class="sutil" [title]="$any(v).soporteInterno.anulado.motivo">{{ $any(v).soporteInterno.anulado.motivo }}</span> }
-                  @else { <br /><span class="sutil">Cód. {{ $any(v).soporteInterno.codigo }}</span> } }
-                  @if (whatsappDe(v._id); as w) {
-                    @if (w.estado === 'error') { <button type="button" class="chip-boton" style="display:block;margin-top:4px" (click)="verErrorWhatsapp([w._id])" [title]="'Ver qué pasó y corregirlo: ' + (w.error || '')"><span class="chip error">WhatsApp: error · ver</span></button> }
-                    @else { <span class="chip" style="display:block;width:fit-content;margin-top:4px" [class]="claseWhatsapp(w.estado)" [title]="w.error || ('WhatsApp al conductor ' + (w.telefono || ''))">WhatsApp: {{ textoWhatsapp(w.estado) }}</span> } }</td>
+                  @else { <br /><span class="sutil">Cód. {{ $any(v).soporteInterno.codigo }}</span> } }</td>
                 } @else {
                 <td data-etiqueta="Remesa">@if (v.remesa.numero) { {{ v.remesa.numero }}<br /><span class="chip" [class]="chip(v.remesa.estado)">{{ v.remesa.estado || 'sin enviar' }}</span> }</td>
                 <td data-etiqueta="Manifiesto">@if (v.manifiesto.numero) { {{ v.manifiesto.numero }}<br /><span class="chip" [class]="chip(v.manifiesto.estado)">{{ v.manifiesto.estado || 'sin enviar' }}</span> }
@@ -288,6 +288,10 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                           <button class="pequeno primario" confirmar="Clic otra vez: se numera un MC/RC nuevo" (confirmado)="reemplazarSoporte(v)" [disabled]="trabajando()">Generar nuevo</button>
                         } @else {
                           <div class="pila-acciones">
+                            @if (tienePorAprobar(v._id)) {
+                              <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarCorreos([v._id])" [disabled]="trabajando()"
+                                title="Envía al cliente el soporte y la carta de salida de este viaje"><app-icono nombre="correo" [tam]="15" />Aprobar correo</button>
+                            }
                             <div class="fila-acciones">
                               <button class="pequeno" (click)="verSoporte(v)" title="Ver el soporte en pantalla"><app-icono nombre="ojo" [tam]="15" />Ver</button>
                               <button class="pequeno" (click)="correoSoporte(v)" title="Enviar el soporte por correo"><app-icono nombre="correo" [tam]="15" />Correo</button>
@@ -642,7 +646,8 @@ export class Manifiestos {
   readonly filtroCorreo = signal('');
   readonly correosViaje = signal<Viaje | null>(null);
   readonly enviosViaje = computed(() => this.enviosPorViaje().get(this.correosViaje()?._id || '') || []);
-  readonly conCorreo = computed(() => ['manifestados', 'cumplidos'].includes(this.pestana()));
+  // Los soportes llevan los mismos correos que los manifiestos (documento y carta de salida)
+  readonly conCorreo = computed(() => ['manifestados', 'cumplidos', 'soporte'].includes(this.pestana()));
   readonly pendientesCorreo = signal(0);
   // Manifiesto directo (sin registrar antes el viaje)
   private auth = inject(Auth);

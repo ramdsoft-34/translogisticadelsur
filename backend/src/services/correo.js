@@ -54,7 +54,8 @@ export function datosCorreo(empresa, v) {
     fecha_larga: fechaLarga(v.fecha), empresa: txt(empresa.nombre), empresa_mayus: txt(empresa.nombre).toUpperCase(),
     placa: txt(v.placa), remolque: txt(v.remolque), conductor: titulo(nombre(c) || v.conductorNombre),
     conductor_corto: titulo([txt(c.nombres).split(/\s+/)[0], c.apellido1].filter(Boolean).join(' ') || v.conductorNombre),
-    cedula: txt(c.numId), destino: txt(v.destino), manifiesto: txt(v.manifiesto?.numero), remesa: txt(v.remesa?.numero),
+    cedula: txt(c.numId), destino: txt(v.destino), manifiesto: txt(v.manifiesto?.estado === 'aceptado' ? v.manifiesto.numero : v.soporteInterno?.mc || v.manifiesto?.numero),
+    remesa: txt(v.manifiesto?.estado === 'aceptado' ? v.remesa?.numero : v.soporteInterno?.rc || v.remesa?.numero),
     radicado: txt(v.manifiesto?.radicado),
   };
 }
@@ -96,8 +97,22 @@ export async function enviarPrueba(empresaId, para) {
   return { ok: true, idMensaje: r.messageId || '' };
 }
 
+// Documento que va en el correo: el manifiesto aceptado por el RNDC o, en los viajes sin RNDC, el soporte vigente (MC/RC).
+// El correo y la carta de salida son los mismos; solo cambia la palabra «manifiesto» por «soporte».
+async function documentoCorreo(empresa, viajeId) {
+  const v = await Viaje.findOne({ empresa: empresa._id, _id: viajeId }).select('manifiesto soporteInterno requiereManifiesto').lean();
+  if (v?.manifiesto?.estado === 'aceptado') {
+    const d = await datosManifiesto(empresa, viajeId);
+    return { soporte: false, numero: txt(d.numero), filename: nombreArchivo(d), buffer: async () => (await manifiestoExpedido(empresa, viajeId)).buffer };
+  }
+  const s = v?.soporteInterno;
+  if (s?.mc && s.estado !== 'anulado') {
+    return { soporte: true, numero: txt(s.mc), filename: `Soporte_${s.mc}.pdf`, buffer: async () => (await soporteExpedido(empresa, viajeId)).buffer };
+  }
+  const e = new Error('El viaje ya no tiene un manifiesto ni un soporte vigente'); e.noVigente = true; throw e;
+}
+
 async function mensaje(empresa, smtp, envio) {
-  const d = await datosManifiesto(empresa, envio.viaje);
   const v = await Viaje.findOne({ empresa: empresa._id, _id: envio.viaje })
     .populate([pob(empresa._id, 'cliente'), pob(empresa._id, 'conductor', 'nombres apellido1 apellido2 numId')]).lean();
   const datos = datosCorreo(empresa, v);
@@ -108,13 +123,15 @@ async function mensaje(empresa, smtp, envio) {
     return { ...base, subject: c.asunto, text: c.texto,
       html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(c.texto)}</div>` };
   }
-  // Solo el número del manifiesto (sin la remesa) y el agradecimiento
+  // Solo el número del documento (sin la remesa) y el agradecimiento
+  const doc = await documentoCorreo(empresa, envio.viaje);
+  const palabra = doc.soporte ? 'soporte' : 'manifiesto';
   const texto = [`${datos.saludo},`, '',
-    `Adjuntamos el manifiesto de carga N.° ${datos.manifiesto}.`, '',
+    `Adjuntamos el ${palabra} de carga N.° ${doc.numero}.`, '',
     'Muchas gracias.', '', 'Cordialmente,', datos.empresa_mayus].join('\n');
-  return { ...base, subject: `Manifiesto ${datos.manifiesto} - ${datos.cliente}`, text: texto,
+  return { ...base, subject: `${doc.soporte ? 'Soporte' : 'Manifiesto'} ${doc.numero} - ${datos.cliente}`, text: texto,
     html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(texto)}</div>`,
-    attachments: [{ filename: nombreArchivo(d), content: (await manifiestoExpedido(empresa, envio.viaje)).buffer, contentType: 'application/pdf' }] };
+    attachments: [{ filename: doc.filename, content: await doc.buffer(), contentType: 'application/pdf' }] };
 }
 
 const esConexion = (e) => ['ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'ECONNREFUSED', 'EDNS'].includes(e?.code);
@@ -144,10 +161,14 @@ export async function procesarEnvio(empresaId, envioId, { automatico = false } =
 // Crea los envíos de un viaje según la configuración del cliente y los procesa.
 // Solo cuando el RNDC aceptó remesa y manifiesto.
 export async function programarEnvios(empresaId, viajeId, { origen = 'automatico', usuario = null, tipos } = {}) {
-  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('cliente remesa manifiesto estado').lean();
-  if (!v || v.remesa?.estado !== 'aceptado' || v.manifiesto?.estado !== 'aceptado') {
-    const e = new Error('Solo se envía cuando el RNDC aceptó la remesa y el manifiesto'); e.status = 409; throw e;
+  const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('cliente remesa manifiesto estado soporteInterno requiereManifiesto').lean();
+  const conManifiesto = v?.remesa?.estado === 'aceptado' && v?.manifiesto?.estado === 'aceptado';
+  // Viaje sin RNDC: se envía igual con su soporte vigente (MC/RC)
+  const conSoporte = !conManifiesto && !!v?.soporteInterno?.mc && v.soporteInterno.estado !== 'anulado';
+  if (!v || (!conManifiesto && !conSoporte)) {
+    const e = new Error('Solo se envía cuando el RNDC aceptó la remesa y el manifiesto, o con el soporte vigente'); e.status = 409; throw e;
   }
+  const numeroDoc = conManifiesto ? v.manifiesto.numero : v.soporteInterno.mc;
   const cliente = await Cliente.findOne({ empresa: empresaId, _id: v.cliente }).lean();
   const cfg = cliente?.envios;
   if (!cfg?.activo || !cfg.destinatarios?.length) return [];
@@ -162,7 +183,7 @@ export async function programarEnvios(empresaId, viajeId, { origen = 'automatico
     if (origen === 'automatico'
       && await EnvioCorreo.exists({ empresa: empresaId, viaje: viajeId, tipo, estado: { $in: ['por_aprobar', 'pendiente', 'enviando', 'enviado'] } })) continue;
     // Los automáticos quedan por aprobar: no sale ningún correo sin la confirmación de una persona
-    const envio = await EnvioCorreo.create({ empresa: empresaId, viaje: viajeId, cliente: cliente._id, tipo, documento: v.manifiesto.numero,
+    const envio = await EnvioCorreo.create({ empresa: empresaId, viaje: viajeId, cliente: cliente._id, tipo, documento: numeroDoc,
       destinatarios: cfg.destinatarios, cc: cfg.cc || [], origen, usuario, estado: origen === 'automatico' ? 'por_aprobar' : 'pendiente' });
     if (origen === 'automatico') creados.push(envio.toObject());
     else creados.push(await procesarEnvio(empresaId, envio._id));
@@ -198,26 +219,33 @@ export async function descartarEnvios(empresaId, viajes, usuario) {
 
 // ── Manifiestos agrupados: un correo por cliente con todos sus PDF pendientes ──
 async function mensajeGrupo(empresa, smtp, envios) {
-  const lineas = []; const adjuntos = [];
+  const lineas = []; const adjuntos = []; let soportes = 0;
   for (const e of envios) {
-    const d = await datosManifiesto(empresa, e.viaje);
-    lineas.push(`  - Manifiesto ${d.numero}`);
-    adjuntos.push({ filename: nombreArchivo(d), content: (await manifiestoExpedido(empresa, e.viaje)).buffer, contentType: 'application/pdf' });
+    const doc = await documentoCorreo(empresa, e.viaje);
+    if (doc.soporte) soportes++;
+    lineas.push(`  - ${doc.soporte ? 'Soporte' : 'Manifiesto'} ${doc.numero}`);
+    adjuntos.push({ filename: doc.filename, content: await doc.buffer(), contentType: 'application/pdf' });
   }
+  // Solo soportes: el mismo correo con la palabra «soporte»; mezclados: manifiestos y soportes
+  const todos = soportes === envios.length; const mezcla = soportes > 0 && !todos;
+  const TITULO = todos ? 'SOPORTES' : mezcla ? 'MANIFIESTOS Y SOPORTES' : 'MANIFIESTOS';
   const cliente = await Cliente.findOne({ empresa: empresa._id, _id: envios[0].cliente }).select('nombre').lean();
   const nombre = txt(cliente?.nombre).toUpperCase();
   // Opción de la empresa: todos los manifiestos del correo en un solo PDF
   if (smtp.unirPdf && adjuntos.length > 1) {
     const unido = await unirPdf(adjuntos.map(a => a.content));
-    adjuntos.splice(0, adjuntos.length, { filename: `Manifiestos_${nombre.replace(/[^\w]+/g, '_')}_${fmtFecha(new Date()).replace(/\//g, '-')}.pdf`, content: unido, contentType: 'application/pdf' });
+    adjuntos.splice(0, adjuntos.length, { filename: `${todos ? 'Soportes' : 'Manifiestos'}_${nombre.replace(/[^\w]+/g, '_')}_${fmtFecha(new Date()).replace(/\//g, '-')}.pdf`, content: unido, contentType: 'application/pdf' });
   }
-  const texto = [`${saludo()},`, '', `MANIFIESTOS ${nombre}`, '', ...lineas, '',
-    `Adjuntamos ${envios.length === 1 ? 'el manifiesto de carga' : `los ${envios.length} manifiestos de carga`} expedidos en el RNDC.`, '',
+  const cuales = todos ? (envios.length === 1 ? 'el soporte de carga' : `los ${envios.length} soportes de carga`)
+    : mezcla ? `los ${envios.length} documentos de carga (manifiestos expedidos en el RNDC y soportes)`
+      : `${envios.length === 1 ? 'el manifiesto de carga' : `los ${envios.length} manifiestos de carga`} expedidos en el RNDC`;
+  const texto = [`${saludo()},`, '', `${TITULO} ${nombre}`, '', ...lineas, '',
+    `Adjuntamos ${cuales}.`, '',
     'Muchas gracias.', '',
     'Cordialmente,', txt(empresa.nombre).toUpperCase()].join('\n');
   return { from: { name: smtp.remitenteNombre || empresa.nombre, address: smtp.remitenteCorreo },
     to: envios[0].destinatarios, cc: envios[0].cc?.length ? envios[0].cc : undefined, replyTo: smtp.responderA || undefined,
-    subject: `MANIFIESTOS ${nombre} - ${fmtFecha(new Date())}${envios.length > 1 ? ` (${envios.length})` : ''}`,
+    subject: `${TITULO} ${nombre} - ${fmtFecha(new Date())}${envios.length > 1 ? ` (${envios.length})` : ''}`,
     text: texto, html: `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-line">${escaparHtml(texto)}</div>`, attachments: adjuntos };
 }
 

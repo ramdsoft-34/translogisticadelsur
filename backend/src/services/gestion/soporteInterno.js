@@ -94,6 +94,8 @@ export async function asegurarSoporte(empresaId, viajeId) {
   import('../rastreo/documentosApp.js').then((m) => m.avisarDocumentosApp(empresaId, viajeId)).catch(() => {});
   // Igual que el manifiesto: queda por aprobar para enviarlo por WhatsApp al conductor
   await import('../whatsappBusiness.js').then((m) => m.prepararEnvio(empresaId, viajeId)).catch(() => {});
+  // Y los correos al cliente (soporte y carta de salida), igual que con el manifiesto aceptado
+  await import('../correo.js').then((m) => m.programarEnvios(empresaId, viajeId, { origen: 'automatico' })).catch(() => {});
   return s;
 }
 
