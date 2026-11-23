@@ -1109,8 +1109,121 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     assert.match(textosS[6], /^RC/, 'el RC va como remesa');
     assert.match(mS.template.components[0].parameters[0].document.filename, /^Soporte_MC/);
 
+    // ── Manifiestos al WhatsApp del cliente: agrupados como el correo (un mensaje por número con un PDF que los reúne) ──
+    const clientesCfg = (await s.adminA.get('/api/correo/clientes')).body.clientes;
+    const cfgCliente = clientesCfg.find(x => String(x._id) === String(s.cliente));
+    const enviosCli = { activo: false, destinatarios: [], cc: [], documentos: { manifiesto: true, salida: false }, ...(cfgCliente.envios || {}) };
+    const conNumeros = (numeros) => s.adminA.put(`/api/correo/clientes/${s.cliente}`, { ...enviosCli, whatsappManifiestos: numeros });
+    assert.equal((await conNumeros([{ nombre: 'Malo', numero: '12345' }])).status, 400, 'número inválido');
+    assert.equal((await conNumeros([{ nombre: 'A', numero: '3009998877' }, { nombre: 'B', numero: '573009998877' }])).status, 400, 'número repetido');
+    const numeros = [{ nombre: 'Despachos', numero: '300 999 8877' }, { nombre: 'Respaldo', numero: '3105556677' }, { nombre: 'Apagado', numero: '3201112233', activo: false }];
+    const rNum = await conNumeros(numeros);
+    assert.equal(rNum.status, 200, JSON.stringify(rNum.body));
+    assert.deepEqual(rNum.body.whatsappManifiestos.map(n => n.numero), ['3009998877', '3105556677', '3201112233']);
+    const clienteDe = async (viaje) => (await s.manif.get(`/api/whatsapp/envios?viajes=${viaje}`)).body.filter(x => x.para === 'cliente');
+    const despacharViaje = async (fecha) => {
+      const vv = await s.reportero.post('/api/viajes', { fecha, cliente: s.cliente, tarifaRef: s.tarifa, destino: 'Tumaco', placa: 'ABC123', conductor: s.conductor });
+      assert.equal(vv.status, 201, JSON.stringify(vv.body));
+      const d = await s.manif.post(`/api/rndc/viajes/${vv.body._id}/despachar`, { clave: CLAVE_RNDC });
+      assert.equal(d.body.manifiesto.estado, 'aceptado', JSON.stringify(d.body));
+      await new Promise(r => setTimeout(r, 200));
+      return { id: vv.body._id, manifiesto: d.body.manifiesto.numero };
+    };
+    // Sin la plantilla del cliente configurada (Meta aún no la aprueba) no se prepara nada para el cliente
+    const sinPlantilla = await despacharViaje('2026-06-22');
+    assert.equal((await clienteDe(sinPlantilla.id)).length, 0, 'sin plantilla no se crean envíos al cliente');
+    assert.equal((await s.manif.post(`/api/whatsapp/viajes/${sinPlantilla.id}/enviar-cliente`, {})).status, 400);
+    await s.manif.post('/api/whatsapp/descartar', { viajes: [sinPlantilla.id] });
+    assert.equal((await s.adminA.put('/api/whatsapp/config', { ...base, plantillaCliente: 'Manifiesto Cliente' })).status, 400, 'nombre de plantilla inválido');
+    assert.equal((await s.adminA.put('/api/whatsapp/config', { ...base, plantillaCliente: 'manifiesto_cliente' })).status, 200);
+    assert.equal((await s.adminA.get('/api/whatsapp/config')).body.plantillaCliente, 'manifiesto_cliente');
+    assert.equal((await s.adminA.put('/api/whatsapp/config', base)).status, 200);
+    assert.equal((await s.adminA.get('/api/whatsapp/config')).body.plantillaCliente, 'manifiesto_cliente', 'guardar sin el campo no lo borra');
+
+    // Tres manifiestos aceptados: por aprobar al conductor y a cada número ACTIVO del cliente (no al apagado)
+    const tres = [await despacharViaje('2026-06-23'), await despacharViaje('2026-06-24'), await despacharViaje('2026-06-25')];
+    for (const x of tres) {
+      const cl = await clienteDe(x.id);
+      assert.deepEqual(cl.map(e => e.telefono).sort(), ['573009998877', '573105556677'], JSON.stringify(cl));
+      assert.ok(cl.every(e => e.estado === 'por_aprobar' && e.documento === x.manifiesto && e.tipo === 'manifiesto'));
+    }
+    const antesTres = llamadas.filter(x => x.ruta.endsWith('/messages')).length;
+    const apTres = (await s.manif.post('/api/whatsapp/aprobar', { viajes: tres.map(x => x.id) })).body;
+    assert.equal(apTres.aprobados, 9, JSON.stringify(apTres));
+    const mensajesTres = llamadas.filter(x => x.ruta.endsWith('/messages')).slice(antesTres).map(x => JSON.parse(x.cuerpo.toString()));
+    const alCliente = mensajesTres.filter(x => x.template.name === 'manifiesto_cliente');
+    assert.equal(mensajesTres.filter(x => x.template.name === 'manifiesto_conductor').length, 3, 'cada conductor recibe el suyo');
+    assert.equal(alCliente.length, 2, 'un solo mensaje por número del cliente con los tres manifiestos');
+    assert.deepEqual(alCliente.map(x => x.to).sort(), ['573009998877', '573105556677']);
+    const [pEmpresa, pCuantos, pLista] = alCliente[0].template.components[1].parameters.map(x => x.text);
+    assert.ok(pEmpresa.length > 2);
+    assert.equal(pCuantos, '3 manifiestos de carga');
+    for (const x of tres) assert.ok(pLista.includes(`${x.manifiesto} (ABC123)`), pLista);
+    assert.match(alCliente[0].template.components[0].parameters[0].document.filename, /^Manifiestos_.*\.pdf$/);
+    const ultimaMedia = llamadas.filter(x => x.ruta.endsWith('/media')).at(-1);
+    assert.ok(ultimaMedia.cuerpo.includes('%PDF'), 'adjunta un PDF');
+    const enviosTres = (await Promise.all(tres.map(x => clienteDe(x.id)))).flat();
+    assert.ok(enviosTres.every(e => e.estado === 'enviado'), JSON.stringify(enviosTres.map(e => e.estado)));
+    const porNumero = (tel) => enviosTres.filter(e => e.telefono === tel);
+    assert.equal(new Set(porNumero('573009998877').map(e => e.idMensaje)).size, 1, 'los tres salieron en el mismo mensaje');
+    assert.equal(new Set(porNumero('573009998877').map(e => String(e.grupo))).size, 1);
+
+    // Meta avisa leído para ese mensaje: aplica a los tres manifiestos
+    const idDespachos = porNumero('573009998877')[0].idMensaje;
+    const leidoCli = JSON.stringify({ entry: [{ changes: [{ value: { statuses: [{ id: idDespachos, status: 'read', timestamp: '1793900200' }] } }] }] });
+    await avisar(leidoCli, firmar(leidoCli));
+    assert.ok((await Promise.all(tres.map(x => clienteDe(x.id)))).flat().filter(e => e.telefono === '573009998877').every(e => e.estado === 'leido'));
+
+    // No se pudo entregar al otro número: los tres quedan con error; la ventana habla del número del cliente, no del conductor
+    const idRespaldo = porNumero('573105556677')[0].idMensaje;
+    const falloCli = JSON.stringify({ entry: [{ changes: [{ value: { statuses: [{ id: idRespaldo, status: 'failed', timestamp: '1793900210', errors: [{ code: 131026, title: 'Message undeliverable' }] }] } }] }] });
+    await avisar(falloCli, firmar(falloCli));
+    const conError = (await Promise.all(tres.map(x => clienteDe(x.id)))).flat().filter(e => e.telefono === '573105556677');
+    assert.ok(conError.every(e => e.estado === 'error' && e.causa === 'no_entregado'));
+    const dgCli = (await s.manif.get(`/api/whatsapp/envios/${conError[0]._id}/diagnostico`)).body;
+    assert.equal(dgCli.conductor, null, 'no muestra ni corrige al conductor');
+    assert.equal(dgCli.envio.para, 'cliente');
+    assert.equal(dgCli.cliente.destinatario, 'Respaldo');
+    assert.equal(dgCli.cliente.documentos.length, 3);
+    assert.ok(dgCli.explicacion.acciones.includes('cliente') && !dgCli.explicacion.acciones.includes('celular'), JSON.stringify(dgCli.explicacion));
+    assert.match(dgCli.explicacion.pasos.join(' '), /Clientes/);
+    assert.equal((await s.manif.post(`/api/whatsapp/envios/${conError[0]._id}/corregir`, { celular: '3001234567' })).status, 400);
+    // Reintentar uno vuelve a enviar el grupo completo en un solo mensaje
+    const antesRe = llamadas.filter(x => x.ruta.endsWith('/messages')).length;
+    const reCli = (await s.manif.post(`/api/whatsapp/envios/${conError[0]._id}/corregir`, {})).body;
+    assert.equal(reCli.envio.estado, 'enviado', JSON.stringify(reCli.envio));
+    const reMsj = llamadas.filter(x => x.ruta.endsWith('/messages')).slice(antesRe).map(x => JSON.parse(x.cuerpo.toString()));
+    assert.equal(reMsj.length, 1);
+    assert.equal(reMsj[0].template.components[1].parameters[1].text, '3 manifiestos de carga');
+    assert.ok((await Promise.all(tres.map(x => clienteDe(x.id)))).flat().filter(e => e.telefono === '573105556677').every(e => e.estado === 'enviado'));
+
+    // Un solo manifiesto pendiente: un mensaje con ese manifiesto
+    const uno = await despacharViaje('2026-06-26');
+    const antesUno = llamadas.filter(x => x.ruta.endsWith('/messages')).length;
+    await s.manif.post('/api/whatsapp/aprobar', { viajes: [uno.id] });
+    const msjUno = llamadas.filter(x => x.ruta.endsWith('/messages')).slice(antesUno).map(x => JSON.parse(x.cuerpo.toString())).filter(x => x.template.name === 'manifiesto_cliente');
+    assert.equal(msjUno.length, 2);
+    assert.equal(msjUno[0].template.components[1].parameters[1].text, '1 manifiesto de carga');
+    assert.equal(msjUno[0].template.components[0].parameters[0].document.filename, `Manifiesto_${uno.manifiesto}.pdf`);
+    // Reenvío manual al cliente
+    const manual = (await s.manif.post(`/api/whatsapp/viajes/${uno.id}/enviar-cliente`, {})).body;
+    assert.equal(manual.length, 2);
+    assert.ok(manual.every(e => e.estado === 'enviado'), JSON.stringify(manual));
+
+    // Número apagado mientras esperaba: no se envía y queda explicado
+    const apagado = await despacharViaje('2026-06-27');
+    await conNumeros([{ nombre: 'Despachos', numero: '3009998877', activo: false }, { nombre: 'Respaldo', numero: '3105556677' }]);
+    await s.manif.post('/api/whatsapp/aprobar', { viajes: [apagado.id] });
+    const trasApagar = await clienteDe(apagado.id);
+    assert.deepEqual(trasApagar.find(e => e.telefono === '573009998877').causa, 'numero_inactivo');
+    assert.equal(trasApagar.find(e => e.telefono === '573009998877').estado, 'descartado');
+    assert.equal(trasApagar.find(e => e.telefono === '573105556677').estado, 'enviado');
+    // Se deja como estaba para las demás pruebas
+    await conNumeros([]);
+    await s.adminA.put('/api/whatsapp/config', { ...base, plantillaCliente: '' });
+
     // Mensajes de WhatsApp: lista del periodo con totales; otra empresa no los ve
-    const msj = (await s.manif.get('/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31')).body;
+    const msj =(await s.manif.get('/api/whatsapp/mensajes?desde=2020-01-01&hasta=2099-12-31')).body;
     assert.ok(msj.totales.enviados >= 2 && msj.totales.entregados + msj.totales.leidos >= 1, JSON.stringify(msj.totales));   // el primero se reenvió tras el fallo 131026
     const mSoporte = msj.mensajes.find(x => x.documento === porAprobarS.documento);
     assert.equal(mSoporte.tipo, 'soporte');

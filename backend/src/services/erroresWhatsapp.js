@@ -96,6 +96,28 @@ export const CAUSAS = {
     'Meta respondió con un error que no es de los datos del conductor.',
     ['Presione «Reintentar». Si se repite, avise al administrador con el detalle de abajo.'], ['reintentar']),
 };
+// Envíos del manifiesto a un número del cliente: la corrección no es del conductor sino del número en Clientes
+//   cliente: corregir o apagar el número en Clientes → WhatsApp de manifiestos
+CAUSAS.numero_inactivo = C('Ese número ya no está activo en el cliente',
+  'El número se apagó o se quitó en Clientes mientras el envío esperaba, así que no se envió.',
+  ['Si debe recibirlo, actívelo en Clientes → WhatsApp de manifiestos y envíe de nuevo desde el viaje.'], ['cliente']);
+const CAUSAS_CLIENTE = {
+  no_entregado: C('WhatsApp no pudo entregar el mensaje a ese número del cliente',
+    'Meta no lo entregó: ese número no tiene WhatsApp activo, no ha aceptado los términos nuevos de WhatsApp o bloqueó el número de la empresa.',
+    ['Confirme el número con el cliente.', 'Si cambió, corríjalo en Clientes → WhatsApp de manifiestos; si es el mismo, presione «Reintentar» cuando el cliente lo confirme.'], ['cliente', 'reintentar']),
+  rechazo_conductor: C('El cliente pidió no recibir estos mensajes',
+    'Ese número bloqueó o pidió no recibir mensajes de este tipo de la empresa. No se le debe insistir.',
+    ['Hable con el cliente. Si vuelve a aceptar, presione «Reintentar»; si no, apague el número en Clientes.'], ['cliente', 'reintentar']),
+  celular_invalido: C('El número del cliente no es válido',
+    'Para WhatsApp se necesita un celular colombiano de 10 dígitos que empiece por 3.',
+    ['Corrija el número en Clientes → WhatsApp de manifiestos y envíe de nuevo desde el viaje.'], ['cliente']),
+  plantilla: C('Problema con la plantilla de WhatsApp para clientes',
+    'La plantilla del manifiesto al cliente no existe, no está aprobada o no coincide con los datos que se envían.',
+    ['El administrador debe revisar la plantilla para clientes en Configuración → WhatsApp y en Meta.', 'Después, presione «Reintentar».'], ['config', 'reintentar']),
+};
+/** Explicación de una causa según a quién iba el envío (conductor o cliente). */
+export const explicacionDe = (causa, para = 'conductor') => (para === 'cliente' && CAUSAS_CLIENTE[causa]) || CAUSAS[causa] || CAUSAS.meta;
+
 const POR_CODIGO = {
   131026: 'no_entregado', 131050: 'rechazo_conductor', 131049: 'limite', 131056: 'limite', 130429: 'limite', 131048: 'cuenta', 80007: 'limite',
   131052: 'archivo', 131053: 'archivo', 131009: 'celular_invalido',

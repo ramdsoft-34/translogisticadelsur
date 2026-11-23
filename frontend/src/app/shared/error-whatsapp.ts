@@ -7,7 +7,9 @@ import { Avisos } from '../core/avisos.service';
 import { Modal } from './modal';
 
 interface Diagnostico {
-  envio: { _id: string; estado: string; error: string; causa: string; tipo: string; documento: string; telefono: string; intentos: number; solucion: { accion: string } | null };
+  envio: { _id: string; estado: string; error: string; causa: string; tipo: string; documento: string; telefono: string; intentos: number; solucion: { accion: string } | null; para?: 'conductor' | 'cliente' };
+  // Envío a un número del cliente: con los demás manifiestos que iban en el mismo mensaje
+  cliente?: { _id: string; nombre: string; destinatario: string; telefono: string; documentos: string[] } | null;
   viaje: { _id: string; numero: number; placa: string } | null;
   explicacion: { id: string; titulo: string; explicacion: string; pasos: string[]; acciones: string[] } | null;
   conductor: { _id: string; nombre: string; documento: string; celular: string; celularValido: boolean; whatsappAutorizado: boolean; whatsappFallo: { telefono: string; en: string } | null } | null;
@@ -28,7 +30,7 @@ const ENVIADO = ['enviado', 'entregado', 'leido'];
       @if (d(); as x) {
         @if (x.explicacion; as c) {
           <div class="mensaje" [class.ok]="enviado()" [class.error]="!enviado()" role="status">
-            @if (enviado()) { <strong>Listo: {{ x.envio.tipo === 'soporte' ? 'el soporte interno' : 'el manifiesto' }} {{ x.envio.documento }} se envió.</strong> }
+            @if (enviado()) { <strong>Listo: {{ x.envio.tipo === 'soporte' ? 'el soporte interno' : 'el manifiesto' }} {{ x.envio.documento }} se envió{{ x.cliente ? ' al cliente' : '' }}.</strong> }
             @else { <strong>{{ c.titulo }}</strong> }
           </div>
           @if (!enviado()) {
@@ -41,6 +43,10 @@ const ENVIADO = ['enviado', 'entregado', 'leido'];
 
         <dl class="datos">
           @if (x.viaje) { <dt>Viaje</dt><dd>N° {{ x.viaje.numero }} · {{ x.viaje.placa }} · {{ x.envio.tipo === 'soporte' ? 'Soporte' : 'Manifiesto' }} {{ x.envio.documento }}</dd> }
+          @if (x.cliente; as k) {
+            <dt>Para</dt><dd>{{ k.nombre }} · {{ k.destinatario || 'número del cliente' }} ({{ k.telefono }})</dd>
+            @if (k.documentos.length > 1) { <dt>En el mismo mensaje</dt><dd>{{ k.documentos.length }} manifiestos: {{ k.documentos.join(', ') }}</dd> }
+          }
           @if (x.conductor; as t) {
             <dt>Conductor</dt><dd>{{ t.nombre }} ({{ t.documento }})</dd>
             <dt>Celular</dt><dd>{{ t.celular || 'sin celular' }} @if (!t.celularValido) { <span class="chip error sin-punto">no válido</span> }</dd>
@@ -65,12 +71,16 @@ const ENVIADO = ['enviado', 'entregado', 'leido'];
                 El conductor me confirmó que acepta recibir sus documentos por WhatsApp</label>
             }
             @if (tiene('viaje')) { <p class="sutil">Elija el conductor del viaje en «Expedir» o en Viajes, y vuelva a enviar.</p> }
+            @if (tiene('cliente')) {
+              @if (x.puedeConfigurar) { <p><a routerLink="/configuracion" (click)="cerrar.emit()">Abrir Configuración</a> → pestaña Correo → «Envío por cliente» → {{ x.cliente?.nombre || 'el cliente' }} → WhatsApp de manifiestos.</p> }
+              @else { <p class="sutil">El número del cliente lo corrige el administrador de la empresa (Configuración → Correo → Envío por cliente).</p> }
+            }
             @if (tiene('config')) {
               @if (x.puedeConfigurar) { <p><a routerLink="/configuracion" (click)="cerrar.emit()">Abrir Configuración</a> (pestaña WhatsApp)</p> }
               @else { <p class="sutil">Esto lo corrige el administrador de la empresa: avísele con el detalle de abajo.</p> }
             }
             @if (puedeEnviar()) {
-              <button type="button" class="primario" [disabled]="trabajando() || !listoParaEnviar()" (click)="corregir()">{{ textoBoton() }}</button>
+              <button type="button" class="primario" [disabled]="trabajando() || !listoParaEnviar()" (click)="corregir()">{{ x.cliente && (x.cliente.documentos.length || 0) > 1 ? 'Reintentar los ' + x.cliente.documentos.length + ' manifiestos' : textoBoton() }}</button>
             }
           </div>
         }

@@ -58,7 +58,7 @@ r.post('/config/probar', gestionar, async (req, res) => {
 
 // ── Envío por cliente ───────────────────────────────────────────────────────
 r.get('/clientes', gestionar, async (req, res) => {
-  const lista = await Cliente.find(deEmpresa(req)).select('nombre activo envios enviosRelaciones correos contactosWhatsapp').sort({ nombre: 1 }).lean();
+  const lista = await Cliente.find(deEmpresa(req)).select('nombre activo envios enviosRelaciones correos contactosWhatsapp whatsappManifiestos').sort({ nombre: 1 }).lean();
   res.json({ clientes: lista, salidaBase: SALIDA_BASE, marcadores: MARCADORES_SALIDA });
 });
 
@@ -68,15 +68,24 @@ const enviosSchema = z.object({
   cc: z.array(correo).max(30).optional().default([]),
   documentos: z.object({ manifiesto: z.boolean(), salida: z.boolean() }),
   salida: z.object({ asunto: z.string().trim().max(200).optional().default(''), cuerpo: z.string().max(3000).optional().default('') }).optional().default({}),
+  // Números de WhatsApp que reciben los manifiestos (solo los activos; celular colombiano de 10 dígitos)
+  whatsappManifiestos: z.array(z.object({
+    nombre: z.string().trim().max(60).optional().default(''),
+    numero: z.string().trim().transform((x) => x.replace(/\D/g, '').replace(/^57(?=3\d{9}$)/, '')).pipe(z.string().regex(/^3\d{9}$/, 'cada número de WhatsApp debe ser un celular de 10 dígitos que empiece por 3')),
+    activo: z.boolean().optional().default(true),
+  })).max(5, 'máximo 5 números de WhatsApp por cliente').optional(),
 });
 r.put('/clientes/:id', gestionar, async (req, res) => {
-  const d = enviosSchema.parse(req.body);
+  const { whatsappManifiestos, ...d } = enviosSchema.parse(req.body);
   if (d.activo && !d.destinatarios.length) throw new ErrorHttp(400, 'Agregue al menos un destinatario');
   if (d.activo && !d.documentos.manifiesto && !d.documentos.salida) throw new ErrorHttp(400, 'Elija al menos un documento para enviar');
-  const c = await Cliente.findOneAndUpdate(deEmpresa(req, { _id: id(req.params.id) }), { $set: { envios: d } }, { new: true }).lean();
+  if (whatsappManifiestos && new Set(whatsappManifiestos.map((n) => n.numero)).size !== whatsappManifiestos.length) throw new ErrorHttp(400, 'Hay un número de WhatsApp repetido');
+  const set = { envios: d };
+  if (whatsappManifiestos) set.whatsappManifiestos = whatsappManifiestos;
+  const c = await Cliente.findOneAndUpdate(deEmpresa(req, { _id: id(req.params.id) }), { $set: set }, { new: true }).lean();
   if (!c) throw new ErrorHttp(404, 'Cliente no encontrado');
   await auditar(req, 'editar_envios_cliente', { entidad: 'Cliente', entidadId: c._id,
-    detalle: { cliente: c.nombre, activo: d.activo, destinatarios: d.destinatarios, cc: d.cc, documentos: d.documentos } });
+    detalle: { cliente: c.nombre, activo: d.activo, destinatarios: d.destinatarios, cc: d.cc, documentos: d.documentos, whatsappManifiestos } });
   res.json(c);
 });
 

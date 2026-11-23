@@ -87,7 +87,7 @@ const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/)
               <td><strong>{{ cl.nombre }}</strong></td>
               <td><span class="chip" [class.ok]="cl.envios?.activo">{{ cl.envios?.activo ? 'Activo' : 'Sin envío' }}</span></td>
               <td class="sutil">{{ (cl.envios?.destinatarios || []).join(', ') || '—' }}</td>
-              <td>{{ documentos(cl) }}</td>
+              <td>{{ documentos(cl) }}@if (whatsappActivos(cl); as n) { <br /><span class="chip ok sin-punto">WhatsApp: {{ n }} número(s)</span> }</td>
               <td><button class="pequeno" type="button" (click)="editar(cl)">Configurar</button></td>
             </tr>
           } @empty { <tr><td colspan="5" class="vacio">Sin clientes</td></tr> }</tbody>
@@ -154,6 +154,20 @@ const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/)
               <small>Separe los correos con coma o en líneas distintas.</small></div>
             <div class="campo"><label for="ec-cc">Con copia (CC)</label><textarea id="ec-cc" name="cc" rows="2" [(ngModel)]="f.ccTexto"></textarea></div>
           </div>
+          <!-- Números de WhatsApp que reciben los manifiestos: como el correo, por aprobar y agrupados en un solo mensaje -->
+          <fieldset style="margin-top:14px"><legend>WhatsApp de manifiestos</legend>
+            <p class="sutil" style="margin-top:0">Cada número <strong>activo</strong> recibe los manifiestos aceptados por el RNDC. Igual que el correo, quedan por aprobar en «Manifestados»
+              y al aprobar salen <strong>todos juntos en un solo mensaje</strong> (un PDF con todos). Apague un número para dejar de enviarle sin borrarlo.</p>
+            @for (n of f.whatsapp; track $index) {
+              <div class="contacto-rel">
+                <input [name]="'wn' + $index" [(ngModel)]="n.nombre" placeholder="Nombre (ej. Despachos)" maxlength="60" />
+                <input [name]="'wt' + $index" [(ngModel)]="n.numero" placeholder="Celular de 10 dígitos" maxlength="16" inputmode="tel" [attr.aria-label]="'Celular de WhatsApp ' + ($index + 1)" />
+                <label class="casilla" style="margin:0"><input type="checkbox" [name]="'wa' + $index" [(ngModel)]="n.activo" />Activo</label>
+                <button type="button" class="texto peligro" (click)="f.whatsapp.splice($index, 1)">Quitar</button>
+              </div>
+            }
+            @if (f.whatsapp.length < 5) { <button type="button" class="texto" (click)="f.whatsapp.push({ nombre: '', numero: '', activo: true })">+ Agregar número de WhatsApp</button> }
+          </fieldset>
           <fieldset style="margin-top:14px"><legend>Relaciones de viajes</legend>
             <p class="sutil" style="margin-top:0">A quién se envía la relación de cobro (Relaciones → Relaciones generadas → Correo). Puede ser distinto de los manifiestos.</p>
             <div class="rejilla">
@@ -357,6 +371,8 @@ export class ConfigCorreo {
     catch (e) { this.avisos.error(e); } finally { this.trabajando.set(false); }
   }
 
+  whatsappActivos(cl: any) { return (cl.whatsappManifiestos || []).filter((n: any) => n.activo !== false).length; }
+
   editar(cl: any) {
     const e = cl.envios || {};
     this.form.set({ _id: cl._id, nombre: cl.nombre, activo: !!e.activo,
@@ -365,7 +381,8 @@ export class ConfigCorreo {
       salida: { asunto: e.salida?.asunto || this.salidaBase.asunto, cuerpo: e.salida?.cuerpo || this.salidaBase.cuerpo },
       relParaTexto: (cl.enviosRelaciones?.destinatarios || []).join(', '), relCcTexto: (cl.enviosRelaciones?.cc || []).join(', '),
       relAsunto: cl.enviosRelaciones?.plantilla?.asunto || this.relBase.asunto, relCuerpo: cl.enviosRelaciones?.plantilla?.cuerpo || this.relBase.cuerpo,
-      contactos: (cl.contactosWhatsapp || []).map((k: any) => ({ ...k })) });
+      contactos: (cl.contactosWhatsapp || []).map((k: any) => ({ ...k })),
+      whatsapp: (cl.whatsappManifiestos || []).map((n: any) => ({ nombre: n.nombre || '', numero: n.numero || '', activo: n.activo !== false })) });
     this.vista.set(null); this.previa();
   }
 
@@ -420,7 +437,8 @@ export class ConfigCorreo {
     this.trabajando.set(true);
     try {
       await this.api.put(`/correo/clientes/${f._id}`, { activo: f.activo, destinatarios: listaCorreos(f.destinatariosTexto), cc: listaCorreos(f.ccTexto),
-        documentos: f.documentos, salida: f.salida });
+        documentos: f.documentos, salida: f.salida,
+        whatsappManifiestos: (f.whatsapp || []).filter((n: any) => (n.numero || '').trim()).map((n: any) => ({ nombre: (n.nombre || '').trim(), numero: n.numero, activo: !!n.activo })) });
       const general = f.relAsunto.trim() === this.relBase.asunto && f.relCuerpo.trim() === this.relBase.cuerpo;
       await this.api.put(`/correo/clientes/${f._id}/relaciones`, { destinatarios: listaCorreos(f.relParaTexto), cc: listaCorreos(f.relCcTexto),
         plantilla: general ? { asunto: '', cuerpo: '' } : { asunto: f.relAsunto, cuerpo: f.relCuerpo },

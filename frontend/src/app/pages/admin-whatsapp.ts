@@ -5,7 +5,7 @@ import { Modal } from '../shared/modal';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api.service';
 import { Avisos } from '../core/avisos.service';
-import { CUERPO_PLANTILLA } from '../shared/config-whatsapp';
+import { CUERPO_PLANTILLA, CUERPO_PLANTILLA_CLIENTE } from '../shared/config-whatsapp';
 
 // SuperAdmin: número de WhatsApp de Translogística, usado por las empresas sin número propio, y mensajes por empresa.
 @Component({
@@ -43,11 +43,14 @@ import { CUERPO_PLANTILLA } from '../shared/config-whatsapp';
               <div class="campo"><label for="we-sec">Secreto de la app (App secret)</label><input id="we-sec" name="esec" type="password" autocomplete="new-password" [(ngModel)]="secretoEmpresa" [placeholder]="c.tieneSecreto ? 'Guardado. Escriba solo para cambiarlo' : ''" /></div>
               <div class="campo"><label for="we-pla">Nombre de la plantilla aprobada</label><input id="we-pla" name="epla" [(ngModel)]="c.plantilla" /></div>
               <div class="campo"><label for="we-idi">Idioma de la plantilla</label><input id="we-idi" name="eidi" maxlength="5" [(ngModel)]="c.idioma" /></div>
+              <div class="campo"><label for="we-plc">Plantilla para clientes</label><input id="we-plc" name="eplc" [(ngModel)]="c.plantillaCliente" placeholder="manifiesto_cliente" /><small>Vacía hasta que Meta la apruebe.</small></div>
               <div class="campo ancho"><label for="we-url">Webhook: dirección de devolución de llamada</label><input id="we-url" readonly [value]="c.webhookUrl" /></div>
               <div class="campo ancho"><label for="we-ver">Webhook: token de verificación</label><input id="we-ver" readonly [value]="c.webhookToken || 'Se genera al guardar'" /></div>
             </div>
             <p class="sutil" style="margin-top:12px">Plantilla: categoría <strong>Utilidad</strong>, encabezado <strong>Documento</strong> y este cuerpo.</p>
             <pre class="plantilla">{{ cuerpo }}</pre>
+            <p class="sutil" style="margin-top:12px">Plantilla para clientes (manifiestos agrupados en un PDF): misma categoría y encabezado, con este cuerpo.</p>
+            <pre class="plantilla">{{ cuerpoCliente }}</pre>
           } @else if (!c.plataformaLista) {
             <div class="mensaje alerta">La cuenta de WhatsApp de Translogística todavía no está disponible.</div>
           }
@@ -77,6 +80,7 @@ import { CUERPO_PLANTILLA } from '../shared/config-whatsapp';
             <input id="wp-sec" name="sec" type="password" autocomplete="new-password" [(ngModel)]="secreto" [placeholder]="c.tieneSecreto ? 'Guardado. Escriba solo para cambiarlo' : ''" /></div>
           <div class="campo"><label for="wp-pla">Nombre de la plantilla aprobada</label><input id="wp-pla" name="pla" [(ngModel)]="c.plantilla" /></div>
           <div class="campo"><label for="wp-idi">Idioma de la plantilla</label><input id="wp-idi" name="idi" maxlength="5" [(ngModel)]="c.idioma" /><small>El mismo con el que se aprobó, por ejemplo es o es_CO.</small></div>
+          <div class="campo"><label for="wp-plc">Plantilla para clientes</label><input id="wp-plc" name="plc" [(ngModel)]="c.plantillaCliente" placeholder="manifiesto_cliente" /><small>Vacía hasta que Meta la apruebe: mientras tanto no se envía nada a los clientes.</small></div>
         </div>
         <div class="acciones" style="margin-top:14px">
           <button class="primario" type="submit" [disabled]="trabajando()">Guardar</button>
@@ -95,6 +99,8 @@ import { CUERPO_PLANTILLA } from '../shared/config-whatsapp';
         </div>
         <p class="sutil" style="margin-top:12px">Plantilla: categoría <strong>Utilidad</strong>, encabezado <strong>Documento</strong> y este cuerpo.</p>
         <pre class="plantilla">{{ cuerpo }}</pre>
+        <p class="sutil" style="margin-top:12px">Plantilla para clientes (manifiestos agrupados en un PDF): misma categoría y encabezado, con este cuerpo.</p>
+        <pre class="plantilla">{{ cuerpoCliente }}</pre>
       </div>
     }
 
@@ -116,6 +122,7 @@ export class AdminWhatsapp {
   private api = inject(Api);
   private avisos = inject(Avisos);
   readonly cuerpo = CUERPO_PLANTILLA;
+  readonly cuerpoCliente = CUERPO_PLANTILLA_CLIENTE;
   readonly cfg = signal<any>(null);
   readonly consumo = signal<any[]>([]);
   readonly mes = signal('');
@@ -150,6 +157,7 @@ export class AdminWhatsapp {
     this.trabajando.set(true); this.pruebaEmpresa.set(null);
     try {
       await this.api.put(`/admin/whatsapp/empresas/${e._id}`, { activo: !!c.activo, modo: c.modo || 'propia', phoneNumberId: c.phoneNumberId || '', wabaId: c.wabaId || '', plantilla: c.plantilla, idioma: c.idioma,
+        ...(c.modo === 'propia' ? { plantillaCliente: (c.plantillaCliente || '').trim() } : {}),
         ...(this.tokenEmpresa ? { token: this.tokenEmpresa } : {}), ...(this.secretoEmpresa ? { appSecret: this.secretoEmpresa } : {}) });
       this.avisos.ok(`WhatsApp de ${e.nombre} guardado`);
       await this.abrirEmpresa(e); await this.cargarEmpresas();
@@ -176,7 +184,7 @@ export class AdminWhatsapp {
     const c = this.cfg();
     this.trabajando.set(true); this.prueba.set(null);
     try {
-      await this.api.put('/admin/whatsapp', { activo: !!c.activo, phoneNumberId: c.phoneNumberId || '', wabaId: c.wabaId || '', plantilla: c.plantilla, idioma: c.idioma,
+      await this.api.put('/admin/whatsapp', { activo: !!c.activo, phoneNumberId: c.phoneNumberId || '', wabaId: c.wabaId || '', plantilla: c.plantilla, idioma: c.idioma, plantillaCliente: (c.plantillaCliente || '').trim(),
         ...(this.token ? { token: this.token } : {}), ...(this.secreto ? { appSecret: this.secreto } : {}) });
       this.token = ''; this.secreto = '';
       this.avisos.ok('Cuenta de WhatsApp guardada');

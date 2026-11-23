@@ -21,7 +21,7 @@ const ESTADOS: Record<string, [string, string]> = {
   imports: [FormsModule, Icono, Paginador, ErrorWhatsapp, ...FORMATOS],
   template: `
     <div class="pagina-cab"><div><h1>Mensajes de WhatsApp</h1>
-      <p class="sutil">Manifiestos y soportes internos que se mandaron a enviar al WhatsApp de los conductores, y las solicitudes de cargues a los jefes de bodega: cuándo salieron, si llegaron al celular y si los leyeron. Los que aún no se han enviado no aparecen aquí.</p></div></div>
+      <p class="sutil">Manifiestos y soportes internos que se mandaron a enviar al WhatsApp de los conductores y de los clientes, y las solicitudes de cargues a los jefes de bodega: cuándo salieron, si llegaron al celular y si los leyeron. Los que aún no se han enviado no aparecen aquí.</p></div></div>
 
     <div class="pestanas" role="tablist" style="margin-bottom:14px">
       <button type="button" role="tab" [class.activa]="vista() === 'enviados'" [attr.aria-selected]="vista() === 'enviados'" (click)="ver('enviados')">Enviados</button>
@@ -69,7 +69,7 @@ const ESTADOS: Record<string, [string, string]> = {
         @for (m of mensajes(); track m._id) {
           <tr>
             <td data-etiqueta="Fecha">{{ m.fecha | fechaHora }}</td>
-            <td data-etiqueta="Para">{{ m.tipo === 'bodega' ? (m.destinatario || 'Jefe de bodega') : (m.conductor?.nombre || 'Sin conductor') }}<br /><span class="sutil">{{ m.tipo === 'bodega' ? 'Jefe de bodega · ' : '' }}{{ celular(m.telefono) }}</span></td>
+            <td data-etiqueta="Para">{{ m.tipo === 'bodega' ? (m.destinatario || 'Jefe de bodega') : m.para === 'cliente' ? (m.cliente?.nombre || 'Cliente') : (m.conductor?.nombre || 'Sin conductor') }}<br /><span class="sutil">{{ m.tipo === 'bodega' ? 'Jefe de bodega · ' : m.para === 'cliente' ? (m.destinatario || 'Cliente') + ' · ' : '' }}{{ celular(m.telefono) }}</span></td>
             <td data-etiqueta="Documento">{{ m.documento }}<br /><span class="sutil">{{ m.tipo === 'bodega' ? 'Solicitud a bodega' : m.tipo === 'soporte' ? 'Soporte interno' : 'Manifiesto' }}</span></td>
             <td data-etiqueta="Viaje o cliente">@if (m.viaje) { N° {{ m.viaje.numero }} · <strong>{{ m.viaje.placa }}</strong><br /><span class="sutil">{{ m.viaje.destino }}</span> }
               @else if (m.cliente) { <strong>{{ m.cliente.nombre }}</strong><br /><span class="sutil">Cargues del día</span> }</td>

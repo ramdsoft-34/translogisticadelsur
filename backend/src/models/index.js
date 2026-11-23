@@ -102,6 +102,8 @@ const empresaSchema = new Schema({
     modo: { type: String, enum: ['plataforma', 'propia'], default: 'plataforma' },
     phoneNumberId: str(), wabaId: str(),
     plantilla: str({ default: 'manifiesto_conductor' }), idioma: str({ default: 'es' }),
+    // Plantilla del manifiesto al cliente (vacía = no se envía a los clientes: se activa cuando Meta la aprueba)
+    plantillaCliente: str(),
     tokenCifrado: { type: String, default: '', select: false },
     appSecretCifrado: { type: String, default: '', select: false },
     webhookToken: { type: String, default: '', select: false },
@@ -171,6 +173,11 @@ const clienteSchema = new Schema({
   sedeRemitente: str(),
   correos: { type: [String], default: [] },
   whatsapp: str(),                       // número para el reporte de vehículos (opcional)
+  // Números de WhatsApp que reciben los manifiestos aceptados (además del conductor). Solo los activos reciben.
+  whatsappManifiestos: {
+    type: [new Schema({ nombre: str({ maxlength: 60 }), numero: str({ maxlength: 12 }), activo: { type: Boolean, default: true } }, { _id: false })],
+    default: [],
+  },
   siglas: str({ uppercase: true, maxlength: 6 }),   // numeración de las liquidaciones de conductores (COR-0001)
   // RN-15: cómo se factura el auxiliar a este cliente
   //   registrado: lo registrado en el viaje · sin: nunca se cobra · incluido: va dentro de la tarifa
@@ -475,6 +482,7 @@ const plataformaWhatsappSchema = new Schema({
   activo: { type: Boolean, default: false },
   phoneNumberId: str(), wabaId: str(),
   plantilla: str({ default: 'manifiesto_conductor' }), idioma: str({ default: 'es' }),
+  plantillaCliente: str(),                 // manifiesto al cliente (vacía = desactivado)
   tokenCifrado: { type: String, default: '', select: false },
   appSecretCifrado: { type: String, default: '', select: false },
   webhookToken: { type: String, default: '', select: false },
@@ -488,6 +496,9 @@ const envioWhatsappSchema = new Schema({
   // soporte: interno MC/RC en viajes sin RNDC · bodega: enlace del día al jefe de bodega del cliente
   tipo: { type: String, enum: ['manifiesto', 'soporte', 'bodega'], default: 'manifiesto' },
   cliente: { type: Schema.Types.ObjectId, ref: 'Cliente', default: null },
+  // A quién va el manifiesto: al conductor del viaje o a un número de WhatsApp del cliente («destinatario» y «telefono»)
+  para: { type: String, enum: ['conductor', 'cliente'], default: 'conductor' },
+  grupo: { type: Schema.Types.ObjectId, default: null },   // envíos al cliente que salieron juntos en un mensaje
   reporteBodega: { type: Schema.Types.ObjectId, ref: 'ReporteBodega', default: null },
   destinatario: str(),                      // a quién (el jefe de bodega; el conductor va en «conductor»)
   documento: str(),                         // n.° del manifiesto (o MC del soporte interno)
@@ -510,6 +521,8 @@ envioWhatsappSchema.index({ empresa: 1, viaje: 1, createdAt: -1 });
 envioWhatsappSchema.index({ empresa: 1, idMensaje: 1 });
 envioWhatsappSchema.index({ empresa: 1, updatedAt: -1, _id: -1 });
 envioWhatsappSchema.index({ empresa: 1, enviadoEn: -1 });
+envioWhatsappSchema.index({ empresa: 1, para: 1, cliente: 1, telefono: 1, estado: 1 });
+envioWhatsappSchema.index({ empresa: 1, grupo: 1 }, { partialFilterExpression: { grupo: { $type: 'objectId' } } });
 
 // ── Mensajes que la gente le escribe al número de WhatsApp (solo lectura en la plataforma) ──
 const mensajeWhatsappSchema = new Schema({

@@ -165,7 +165,7 @@ r.get('/auditoria.xlsx', async (req, res) => {
 // ── Cuenta de WhatsApp de Translogística (la usan las empresas sin número propio) ──
 r.get('/whatsapp', async (_req, res) => {
   const { tokenCifrado, appSecretCifrado, webhookToken, ...p } = (await cuentaPlataforma()) || {};
-  res.json({ activo: false, phoneNumberId: '', wabaId: '', plantilla: 'manifiesto_conductor', idioma: 'es', ...p,
+  res.json({ activo: false, phoneNumberId: '', wabaId: '', plantilla: 'manifiesto_conductor', idioma: 'es', plantillaCliente: '', ...p,
     tieneToken: !!tokenCifrado, tieneSecreto: !!appSecretCifrado, webhookToken: webhookToken || '', webhookUrl: `${env.urlPublica}/api/whatsapp/webhook` });
 });
 
@@ -176,11 +176,12 @@ r.put('/whatsapp', async (req, res) => {
     throw new ErrorHttp(400, 'Para activar la cuenta indique el identificador del número, el token y el secreto de la app');
   }
   const set = { activo: d.activo, phoneNumberId: d.phoneNumberId, wabaId: d.wabaId, plantilla: d.plantilla, idioma: d.idioma };
+  if (d.plantillaCliente !== undefined) set.plantillaCliente = d.plantillaCliente;
   if (d.token) set.tokenCifrado = cifrar(d.token);            // vacío = conservar el actual
   if (d.appSecret) set.appSecretCifrado = cifrar(d.appSecret);
   if (!antes?.webhookToken) set.webhookToken = crypto.randomBytes(24).toString('hex');
   await PlataformaWhatsapp.updateOne({ clave: 'whatsapp' }, { $set: set }, { upsert: true });
-  await auditar(req, 'editar_whatsapp_plataforma', { detalle: { activo: d.activo, phoneNumberId: d.phoneNumberId, plantilla: d.plantilla, tokenCambiado: !!d.token, secretoCambiado: !!d.appSecret } });
+  await auditar(req, 'editar_whatsapp_plataforma', { detalle: { activo: d.activo, phoneNumberId: d.phoneNumberId, plantilla: d.plantilla, plantillaCliente: d.plantillaCliente, tokenCambiado: !!d.token, secretoCambiado: !!d.appSecret } });
   res.json({ ok: true });
 });
 

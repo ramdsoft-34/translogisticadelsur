@@ -14,6 +14,12 @@ Remesa: {{7}}
 Este número solo envía documentos. Para cualquier novedad, comuníquese con {{8}}. Gracias.`;
 // Meta no acepta una variable al final del texto: por eso cierra con «Gracias.»
 
+// Plantilla del manifiesto al cliente (encabezado Documento: un PDF con todos los manifiestos del envío).
+// {{1}} empresa · {{2}} cuántos («3 manifiestos de carga») · {{3}} números y placas
+export const CUERPO_PLANTILLA_CLIENTE = `Hola, {{1}} le envía {{2}}: {{3}}.
+
+Los documentos están en el PDF adjunto, expedidos en el RNDC. Este número solo envía documentos; para cualquier novedad, comuníquese con la transportadora. Gracias.`;
+
 // WhatsApp de la empresa: sale del número de Translogística o de una cuenta propia en Meta.
 @Component({
   selector: 'app-config-whatsapp',
@@ -48,6 +54,8 @@ Este número solo envía documentos. Para cualquier novedad, comuníquese con {{
               <input id="wa-sec" name="sec" type="password" autocomplete="new-password" [(ngModel)]="secreto" [placeholder]="c.tieneSecreto ? 'Guardado. Escriba solo para cambiarlo' : ''" /></div>
             <div class="campo"><label for="wa-pla">Nombre de la plantilla aprobada</label><input id="wa-pla" name="pla" [(ngModel)]="c.plantilla" /></div>
             <div class="campo"><label for="wa-idi">Idioma de la plantilla</label><input id="wa-idi" name="idi" maxlength="5" [(ngModel)]="c.idioma" /><small>El mismo con el que se aprobó, por ejemplo es o es_CO.</small></div>
+            <div class="campo"><label for="wa-plc">Plantilla para clientes</label><input id="wa-plc" name="plc" [(ngModel)]="c.plantillaCliente" placeholder="manifiesto_cliente" />
+              <small>Déjela vacía hasta que Meta la apruebe: mientras esté vacía no se envía nada a los clientes.</small></div>
           </div>
         }
         <div class="acciones" style="margin-top:14px">
@@ -74,6 +82,10 @@ Este número solo envía documentos. Para cualquier novedad, comuníquese con {{
           <h3>Plantilla</h3>
           <p class="sutil">Categoría <strong>Utilidad</strong>, encabezado <strong>Documento</strong> y este cuerpo. Meta debe aprobarla antes del primer envío.</p>
           <pre class="plantilla">{{ cuerpo }}</pre>
+          <h3>Plantilla para clientes (manifiestos agrupados)</h3>
+          <p class="sutil">Nombre sugerido <strong>manifiesto_cliente</strong>, categoría <strong>Utilidad</strong>, encabezado <strong>Documento</strong> y este cuerpo.
+            Todos los manifiestos por aprobar de un cliente salen en un solo mensaje con un PDF que los reúne.</p>
+          <pre class="plantilla">{{ cuerpoCliente }}</pre>
         </div>
       }
       <p class="sutil" style="margin-top:12px">Antes de enviar: cada conductor debe tener su celular y la casilla de autorización marcada en Conductores y terceros.</p>
@@ -85,6 +97,7 @@ export class ConfigWhatsapp {
   private api = inject(Api);
   private avisos = inject(Avisos);
   readonly cuerpo = CUERPO_PLANTILLA;
+  readonly cuerpoCliente = CUERPO_PLANTILLA_CLIENTE;
   readonly cfg = signal<any>(null);
   readonly trabajando = signal(false);
   readonly prueba = signal<any>(null);
@@ -102,6 +115,7 @@ export class ConfigWhatsapp {
     this.trabajando.set(true); this.prueba.set(null);
     try {
       await this.api.put('/whatsapp/config', { activo: !!c.activo, modo: c.modo || 'plataforma', phoneNumberId: c.phoneNumberId || '', wabaId: c.wabaId || '', plantilla: c.plantilla, idioma: c.idioma,
+        ...(c.modo === 'propia' ? { plantillaCliente: (c.plantillaCliente || '').trim() } : {}),
         ...(this.token ? { token: this.token } : {}), ...(this.secreto ? { appSecret: this.secreto } : {}) });
       this.token = ''; this.secreto = '';
       this.avisos.ok('Configuración de WhatsApp guardada');

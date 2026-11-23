@@ -11,8 +11,8 @@ import { P } from '../config/permisos.js';
 import { env } from '../config/env.js';
 import { auditar } from '../services/auditoria.js';
 import { cifrar, descifrar } from '../utils/cifrado.js';
-import { aprobarEnvios, celularWhatsapp, cuentaPlataforma, descartarEnvios, firmaValida, plataformaLista, prepararEnvio, probarCuenta, procesarEnvio, registrarEstados, registrarEstadosPlataforma } from '../services/whatsappBusiness.js';
-import { aclararError, CAUSAS, causaDeTexto } from '../services/erroresWhatsapp.js';
+import { aprobarEnvios, celularWhatsapp, cuentaPlataforma, descartarEnvios, firmaValida, plataformaLista, prepararEnvio, prepararEnviosCliente, probarCuenta, procesarEnvio, registrarEstados, registrarEstadosPlataforma } from '../services/whatsappBusiness.js';
+import { aclararError, explicacionDe, causaDeTexto } from '../services/erroresWhatsapp.js';
 import { tienePermiso } from '../config/permisos.js';
 import { nombreCompleto } from '../utils/nombres.js';
 
@@ -67,6 +67,8 @@ export const datosCuenta = {
   wabaId: z.string().trim().regex(/^\d*$/, 'el identificador de la cuenta solo lleva dígitos').max(30).optional().default(''),
   plantilla: z.string().trim().regex(/^[a-z0-9_]+$/, 'la plantilla solo lleva minúsculas, números y guion bajo').max(100),
   idioma: z.string().trim().regex(/^[a-z]{2}(_[A-Z]{2})?$/, 'idioma inválido').max(5),
+  // Vacía = no se envía el manifiesto a los clientes (se escribe cuando Meta aprueba la plantilla)
+  plantillaCliente: z.string().trim().regex(/^[a-z0-9_]*$/, 'la plantilla solo lleva minúsculas, números y guion bajo').max(100).optional(),
   token: z.string().trim().max(1000).optional(), appSecret: z.string().trim().max(200).optional(),
 };
 
@@ -75,7 +77,7 @@ export async function datosCuentaEmpresa(empresaId) {
   const e = await Empresa.findById(empresaId).select('+whatsapp.tokenCifrado +whatsapp.appSecretCifrado +whatsapp.webhookToken').lean();
   if (!e) throw new ErrorHttp(404, 'Empresa no encontrada');
   const { tokenCifrado, appSecretCifrado, webhookToken, ...w } = e.whatsapp || {};
-  return { modo: 'plataforma', plantilla: 'manifiesto_conductor', idioma: 'es', ...w, plataformaLista: plataformaLista(await cuentaPlataforma()), tieneToken: !!tokenCifrado, tieneSecreto: !!appSecretCifrado,
+  return { modo: 'plataforma', plantilla: 'manifiesto_conductor', idioma: 'es', plantillaCliente: '', ...w, plataformaLista: plataformaLista(await cuentaPlataforma()), tieneToken: !!tokenCifrado, tieneSecreto: !!appSecretCifrado,
     webhookToken: webhookToken || '', webhookUrl: `${env.urlPublica}/api/whatsapp/webhook/${empresaId}` };
 }
 
@@ -91,11 +93,12 @@ export async function guardarCuentaEmpresa(empresaId, d) {
     throw new ErrorHttp(400, 'Para activar WhatsApp indique el identificador del número, el token y el secreto de la app');
   }
   const set = { 'whatsapp.activo': d.activo, 'whatsapp.modo': d.modo, 'whatsapp.phoneNumberId': d.phoneNumberId, 'whatsapp.wabaId': d.wabaId, 'whatsapp.plantilla': d.plantilla, 'whatsapp.idioma': d.idioma };
+  if (d.plantillaCliente !== undefined) set['whatsapp.plantillaCliente'] = d.plantillaCliente;
   if (d.token) set['whatsapp.tokenCifrado'] = cifrar(d.token);           // vacío = conservar el actual
   if (d.appSecret) set['whatsapp.appSecretCifrado'] = cifrar(d.appSecret);
   if (!antes.whatsapp?.webhookToken) set['whatsapp.webhookToken'] = crypto.randomBytes(24).toString('hex');
   await Empresa.updateOne({ _id: empresaId }, { $set: set });
-  return { activo: d.activo, modo: d.modo, phoneNumberId: d.phoneNumberId, plantilla: d.plantilla, tokenCambiado: !!d.token, secretoCambiado: !!d.appSecret };
+  return { activo: d.activo, modo: d.modo, phoneNumberId: d.phoneNumberId, plantilla: d.plantilla, plantillaCliente: d.plantillaCliente, tokenCambiado: !!d.token, secretoCambiado: !!d.appSecret };
 }
 
 // ── Cuenta de la empresa ─────────────────────────────────────────────────────
@@ -169,7 +172,7 @@ r.get('/mensajes', operar, async (req, res) => {
   else lista = await EnvioWhatsapp.find(f).sort({ updatedAt: -1, _id: -1 }).limit(3000).populate(poblar).lean();
   const nombreDe = (t) => nombreCompleto(t);
   const mensajes = lista
-    .map(x => ({ _id: x._id, fecha: x.enviadoEn || x.updatedAt, tipo: x.tipo || 'manifiesto', documento: x.documento, estado: x.estado, error: aclararError(x.error), telefono: x.telefono,
+    .map(x => ({ _id: x._id, fecha: x.enviadoEn || x.updatedAt, tipo: x.tipo || 'manifiesto', para: x.para || 'conductor', documento: x.documento, estado: x.estado, error: aclararError(x.error), telefono: x.telefono,
       origen: x.origen, cuenta: x.cuenta, intentos: x.intentos, enviadoEn: x.enviadoEn, entregadoEn: x.entregadoEn, leidoEn: x.leidoEn,
       viaje: x.viaje ? { _id: x.viaje._id, numero: x.viaje.numero, placa: x.viaje.placa, destino: x.viaje.destino } : null,
       conductor: x.conductor ? { nombre: nombreDe(x.conductor), numId: x.conductor.numId } : null,
@@ -238,6 +241,15 @@ r.post('/viajes/:id/enviar', operar, async (req, res) => {
   } catch (e) { throw e.status ? new ErrorHttp(e.status, e.message) : e; }
 });
 
+// Envío o reenvío manual del manifiesto vigente a los números activos del cliente del viaje
+r.post('/viajes/:id/enviar-cliente', operar, async (req, res) => {
+  try {
+    const x = await prepararEnviosCliente(req.empresaId, id(req.params.id), { origen: 'manual', usuario: req.usuario._id });
+    await auditar(req, 'enviar_whatsapp_cliente', { entidad: 'Viaje', entidadId: req.params.id, detalle: { numeros: x.length, estados: x.map((e) => e.estado) } });
+    res.json(x.map((e) => ({ ...e, error: aclararError(e.error) })));
+  } catch (e) { throw e.status ? new ErrorHttp(e.status, e.message) : e; }
+});
+
 r.post('/envios/:id/reintentar', operar, async (req, res) => {
   const e = await EnvioWhatsapp.findOne(deEmpresa(req, { _id: id(req.params.id) })).select('tipo').lean();
   if (e?.tipo === 'bodega') throw new ErrorHttp(409, 'La solicitud al jefe de bodega se vuelve a enviar desde Viajes → Cargues de bodega');
@@ -252,7 +264,9 @@ r.post('/envios/:id/reintentar', operar, async (req, res) => {
 async function diagnostico(req, envio) {
   const causa = envio.estado === 'error' || envio.estado === 'descartado' ? (envio.causa || causaDeTexto(envio.error)) : '';
   const v = envio.viaje ? await Viaje.findOne(deEmpresa(req, { _id: envio.viaje })).select('numero placa conductor conductorNombre manifiesto.numero soporteInterno.mc').lean() : null;
-  const idConductor = envio.conductor || v?.conductor;
+  const alCliente = envio.para === 'cliente';
+  // Al cliente: la corrección es del número en Clientes, nunca del conductor del viaje
+  const idConductor = alCliente ? null : envio.conductor || v?.conductor;
   const t = idConductor ? await Tercero.findOne(deEmpresa(req, { _id: idConductor })).select('tipoId numId nombres apellido1 apellido2 celular whatsappAutorizado whatsappFallo').lean() : null;
   // Cómo se resolvió antes este mismo problema en la empresa
   const resueltos = causa ? await EnvioWhatsapp.aggregate([
@@ -260,11 +274,16 @@ async function diagnostico(req, envio) {
     { $group: { _id: '$solucion.accion', veces: { $sum: 1 }, ultima: { $max: '$solucion.en' } } }, { $sort: { veces: -1 } }, { $limit: 3 },
   ]) : [];
   // Otros envíos con error del mismo conductor (para corregirlos todos de una vez)
-  const otros = t ? await EnvioWhatsapp.countDocuments(deEmpresa(req, { conductor: t._id, estado: 'error', _id: { $ne: envio._id } })) : 0;
+  const otros = t ? await EnvioWhatsapp.countDocuments(deEmpresa(req, { conductor: t._id, para: { $ne: 'cliente' }, estado: 'error', _id: { $ne: envio._id } })) : 0;
+  // Al cliente: los demás manifiestos que iban en el mismo mensaje
+  const grupo = alCliente && envio.grupo ? await EnvioWhatsapp.find(deEmpresa(req, { grupo: envio.grupo })).select('documento').sort({ documento: 1 }).lean() : [];
+  const c = alCliente && envio.cliente ? await Cliente.findOne(deEmpresa(req, { _id: envio.cliente })).select('nombre').lean() : null;
   return {
-    envio: { _id: envio._id, estado: envio.estado, error: aclararError(envio.error), causa, tipo: envio.tipo, documento: envio.documento, telefono: envio.telefono, intentos: envio.intentos, solucion: envio.solucion || null },
+    envio: { _id: envio._id, estado: envio.estado, error: aclararError(envio.error), causa, tipo: envio.tipo, documento: envio.documento, telefono: envio.telefono, intentos: envio.intentos,
+      solucion: envio.solucion || null, para: envio.para || 'conductor' },
     viaje: v ? { _id: v._id, numero: v.numero, placa: v.placa } : null,
-    explicacion: causa ? { id: causa, ...(CAUSAS[causa] || CAUSAS.meta) } : null,
+    explicacion: causa ? { id: causa, ...explicacionDe(causa, envio.para) } : null,
+    cliente: alCliente ? { _id: envio.cliente, nombre: c?.nombre || '', destinatario: envio.destinatario || '', telefono: envio.telefono || '', documentos: grupo.map((x) => x.documento) } : null,
     conductor: t ? { _id: t._id, nombre: nombreCompleto(t), documento: `${t.tipoId} ${t.numId}`, celular: t.celular || '', celularValido: !!celularWhatsapp(t.celular),
       whatsappAutorizado: !!t.whatsappAutorizado, whatsappFallo: t.whatsappFallo?.telefono ? t.whatsappFallo : null } : null,
     resueltosAntes: resueltos.map((x) => ({ accion: x._id, veces: x.veces, ultima: x.ultima })),
@@ -291,8 +310,10 @@ r.post('/envios/:id/corregir', operar, async (req, res) => {
   if (!e) throw new ErrorHttp(404, 'Envío no encontrado');
   if (e.tipo === 'bodega') throw new ErrorHttp(409, 'La solicitud al jefe de bodega se corrige desde Viajes → Cargues de bodega');
   if (!['error', 'descartado'].includes(e.estado) && d.reintentar) throw new ErrorHttp(409, 'Este envío no tiene un error que corregir');
-  const v = e.viaje ? await Viaje.findOne(deEmpresa(req, { _id: e.viaje })).select('conductor').lean() : null;
-  const t = await Tercero.findOne(deEmpresa(req, { _id: e.conductor || v?.conductor }));
+  // Al cliente no se corrigen datos del conductor: el número se corrige en Clientes y aquí solo se reintenta
+  if (e.para === 'cliente' && (d.celular !== undefined || d.autorizado)) throw new ErrorHttp(400, 'El número del cliente se corrige en Clientes → WhatsApp de manifiestos');
+  const v = e.viaje && e.para !== 'cliente' ? await Viaje.findOne(deEmpresa(req, { _id: e.viaje })).select('conductor').lean() : null;
+  const t = e.para === 'cliente' ? null : await Tercero.findOne(deEmpresa(req, { _id: e.conductor || v?.conductor }));
   const acciones = [];
   if ((d.celular !== undefined || d.autorizado) && !t) throw new ErrorHttp(409, 'El viaje no tiene conductor: elíjalo primero');
   if (t) {

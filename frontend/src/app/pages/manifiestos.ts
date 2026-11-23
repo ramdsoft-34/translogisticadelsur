@@ -236,7 +236,11 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                     @if (whatsappDe(v._id); as w) {
                     @if (w.estado === 'error') { <button type="button" class="chip-boton" style="display:block;margin-top:4px" (click)="verErrorWhatsapp([w._id])" [title]="'Ver qué pasó y corregirlo: ' + (w.error || '')"><span class="chip error">WhatsApp: error · ver</span></button> }
                     @else { <span class="chip" style="display:block;width:fit-content;margin-top:4px" [class]="claseWhatsapp(w.estado)" [title]="w.error || ('WhatsApp al conductor ' + (w.telefono || ''))">WhatsApp: {{ textoWhatsapp(w.estado) }}</span> } }
-                    @else { <button type="button" class="pequeno texto" (click)="verCorreos(v)">Sin envío</button> }</td>
+                    @else if (!whatsappClienteDe(v._id)) { <button type="button" class="pequeno texto" (click)="verCorreos(v)">Sin envío</button> }
+                    @if (whatsappClienteDe(v._id); as wc) {
+                      @if (wc.estado === 'error') { <button type="button" class="chip-boton" style="display:block;margin-top:4px" (click)="verErrorWhatsapp(wc.error)" [title]="'Ver qué pasó y corregirlo · ' + wc.titulo"><span class="chip error">WhatsApp cliente: error · ver</span></button> }
+                      @else { <span class="chip" style="display:block;width:fit-content;margin-top:4px" [class]="claseWhatsapp(wc.estado)" [title]="wc.titulo">WhatsApp cliente: {{ textoWhatsapp(wc.estado) }}</span> }
+                    }</td>
                 }
                 <td class="celda-acciones">
                   <div class="acciones" style="justify-content:flex-end">
@@ -264,12 +268,17 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                           }
                           @if (whatsappActivo()) {
                             @let w = whatsappDe(v._id);
-                            @if (w?.estado === 'por_aprobar') {
+                            @let wc = whatsappClienteDe(v._id);
+                            @if (porAprobarWhatsapp(v._id)) {
                               <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarWhatsapp([v._id])" [disabled]="trabajando()"
-                                title="Envía el PDF del manifiesto al WhatsApp del conductor"><app-icono nombre="enviar" [tam]="15" />Aprobar WhatsApp</button>
+                                [title]="wc?.estado === 'por_aprobar' ? 'Envía el manifiesto al conductor y a los números del cliente (con los demás pendientes del cliente en un solo mensaje)' : 'Envía el PDF del manifiesto al WhatsApp del conductor'"><app-icono nombre="enviar" [tam]="15" />Aprobar WhatsApp</button>
                             } @else {
                               <button class="pequeno" confirmar="Clic otra vez para enviar" (confirmado)="enviarWhatsapp(v)" [disabled]="trabajando()"
                                 title="Envía el PDF del manifiesto al WhatsApp del conductor"><app-icono nombre="enviar" [tam]="15" />{{ w ? 'Reenviar WhatsApp' : 'Enviar WhatsApp' }}</button>
+                              @if (wc && wc.estado !== 'error') {
+                                <button class="pequeno" confirmar="Clic otra vez para enviar" (confirmado)="enviarWhatsappCliente(v)" [disabled]="trabajando()"
+                                  [title]="'Vuelve a enviar este manifiesto a los números activos del cliente · ' + wc.titulo"><app-icono nombre="enviar" [tam]="15" />Reenviar al cliente</button>
+                              }
                             }
                           }
                           <button class="pequeno" (click)="verPdf(v)" title="Ver el manifiesto y la remesa"><app-icono nombre="ojo" [tam]="15" />Ver PDF</button>
@@ -781,9 +790,16 @@ export class Manifiestos {
     }
     try {
       const envios = await this.api.get<any[]>('/whatsapp/envios', { viajes: lista.map(v => v._id).join(','), limite: 1000 });
-      const m = new Map<string, any>();
-      for (const e of envios) if (!m.has(e.viaje)) m.set(e.viaje, e);      // vienen del más reciente al más antiguo
-      this.whatsappPorViaje.set(m);
+      // Vienen del más reciente al más antiguo: el último al conductor y el último a cada número del cliente
+      const m = new Map<string, any>(); const mc = new Map<string, any[]>();
+      for (const e of envios) {
+        if (e.para === 'cliente') {
+          const l = mc.get(e.viaje) || [];
+          if (!l.some(x => x.telefono === e.telefono)) l.push(e);
+          mc.set(e.viaje, l);
+        } else if (!m.has(e.viaje)) m.set(e.viaje, e);
+      }
+      this.whatsappPorViaje.set(m); this.whatsappClientePorViaje.set(mc);
     } catch { /* sin permiso */ }
   }
 
@@ -791,6 +807,25 @@ export class Manifiestos {
   readonly whatsappActivo = signal(false);
   private whatsappPorViaje = signal<Map<string, any>>(new Map());
   whatsappDe(viajeId: string) { const w = this.whatsappPorViaje().get(viajeId); return w && w.estado !== 'descartado' ? w : null; }
+  // Manifiesto a los números de WhatsApp del cliente: un resumen por viaje (el peor estado manda)
+  private whatsappClientePorViaje = signal<Map<string, any[]>>(new Map());
+  whatsappClienteDe(viajeId: string) {
+    const l = (this.whatsappClientePorViaje().get(viajeId) || []).filter(e => e.estado !== 'descartado');
+    if (!l.length) return null;
+    const orden = ['error', 'por_aprobar', 'pendiente', 'enviando', 'enviado', 'entregado', 'leido'];
+    const peor = [...l].sort((a, b) => orden.indexOf(a.estado) - orden.indexOf(b.estado))[0];
+    return { estado: peor.estado, envios: l, error: l.filter(e => e.estado === 'error').map(e => e._id),
+      titulo: l.map(e => `${e.destinatario || 'Cliente'} ${e.telefono}: ${this.textoWhatsapp(e.estado)}`).join(' · ') };
+  }
+  porAprobarWhatsapp(viajeId: string) { return this.whatsappDe(viajeId)?.estado === 'por_aprobar' || this.whatsappClienteDe(viajeId)?.estado === 'por_aprobar'; }
+  enviarWhatsappCliente(v: Viaje) {
+    return this.tareaWhatsapp(async () => {
+      const r = await this.api.post<any[]>(`/whatsapp/viajes/${v._id}/enviar-cliente`, {});
+      const fallos = r.filter(x => x.estado === 'error');
+      if (fallos.length) this.verErrorWhatsapp([fallos[0]._id]);
+      else this.avisos.ok(`Manifiesto enviado a ${r.length} número(s) del cliente`);
+    });
+  }
   textoWhatsapp(e: string) { return ({ por_aprobar: 'por aprobar', pendiente: 'enviando', enviando: 'enviando', enviado: 'enviado', entregado: 'entregado', leido: 'leído', error: 'error' } as Record<string, string>)[e] || e; }
   claseWhatsapp(e: string) { return ({ por_aprobar: 'alerta', error: 'error', enviado: 'ok', entregado: 'ok', leido: 'ok' } as Record<string, string>)[e] || ''; }
   private async tareaWhatsapp(fn: () => Promise<void>) {
@@ -805,11 +840,15 @@ export class Manifiestos {
     return this.tareaWhatsapp(async () => {
       const r = await this.api.post<any>('/whatsapp/aprobar', { viajes });
       const fallos = r.resultados.filter((x: any) => x.estado === 'error');
+      const aConductor = r.resultados.filter((x: any) => x.para !== 'cliente').length;
+      const aCliente = r.resultados.filter((x: any) => x.para === 'cliente');
+      const partes = [aConductor ? `${aConductor} a conductores` : '',
+        aCliente.length ? `${aCliente.length} mensaje(s) al cliente con ${aCliente.reduce((s: number, x: any) => s + (x.cantidad || 0), 0)} manifiesto(s)` : ''].filter(Boolean).join(' y ');
       if (!r.aprobados) this.avisos.mostrar('Los viajes elegidos no tienen WhatsApp por aprobar', 'info');
       else if (fallos.length) {
-        this.avisos.mostrar(`${r.aprobados - fallos.length} de ${r.aprobados} enviados; ${fallos.length} con error`, 'error');
+        this.avisos.mostrar(`${fallos.length} envío(s) con error de ${r.resultados.length}`, 'error');
         this.verErrorWhatsapp(fallos.map((x: any) => x.id));
-      } else this.avisos.ok(`${r.aprobados} documento(s) enviados por WhatsApp`);
+      } else this.avisos.ok(`WhatsApp enviado: ${partes}`);
     });
   }
   descartarWhatsapp(viajes: string[]) {
