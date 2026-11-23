@@ -534,6 +534,26 @@ test('Revisión «Por enviar»: detecta MAN092 antes de enviar, aplica la correc
   assert.equal((await s.manif.post(`/api/rndc/viajes/${id}/aplicar-correccion`, { documento: 'manifiesto', variable: 'CODOPERACIONTRANSPORTE', valor: 'U' })).status, 409);
 });
 
+test('IA: el diagnóstico de un rechazo desconocido se guarda y se puede leer', async () => {
+  const { env } = await import('../src/config/env.js');
+  const ia = await import('../src/services/rndc/ia.js');
+  const respuesta = { causa: 'Causa de prueba', queHacer: 'Reenviar', correcciones: [], confianza: 'media' };
+  const gemini = http.createServer((req, res) => { req.resume(); req.on('end', () => { res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ steps: [{ type: 'thought' }, { type: 'model_output', content: [{ type: 'text', text: JSON.stringify(respuesta) }] }] })); }); });
+  await new Promise(r => gemini.listen(0, '127.0.0.1', r));
+  const antes = { ...env.gemini };
+  Object.assign(env.gemini, { clave: 'clave-prueba', url: `http://127.0.0.1:${gemini.address().port}`, pausaMs: 0 });
+  try {
+    const datos = { documentos: { remesa: [], manifiesto: [['CODOPERACIONTRANSPORTE', 'G']] }, proceso: 4, mensaje: 'Error XYZ999 desconocido' };
+    assert.equal((await ia.diagnostico(s.empresaA, s.viaje3, 'huella-prueba', datos)).estado, 'pendiente');
+    let d;
+    for (let i = 0; i < 60; i++) { d = await M.RevisionIaRndc.findOne({ empresa: s.empresaA, viaje: s.viaje3, huella: 'huella-prueba' }).lean(); if (d && d.estado !== 'pendiente') break; await new Promise(r => setTimeout(r, 100)); }
+    assert.equal(d?.estado, 'listo', JSON.stringify(d));
+    assert.equal(d.resultado.causa, 'Causa de prueba');
+    assert.equal((await ia.diagnostico(s.empresaA, s.viaje3, 'huella-prueba', datos)).estado, 'listo', 'la segunda vez sale de lo guardado');
+  } finally { Object.assign(env.gemini, antes); gemini.close(); }
+});
+
 test('Duplicados: detecta la misma persona con la cédula mal digitada, une sin perder relaciones y corrige nombres', async () => {
   const crear = (numId, extra = {}) => s.adminA.post('/api/maestros/terceros', { tipoId: 'C', numId, nombres: 'LUISA FERNANDA', apellido1: 'ORTIZ', apellido2: 'BRAVO', roles: ['conductor'], direccion: 'Calle 5', codMunicipio: '52001000', ...extra });
   const bueno = (await crear('1085278424', { celular: '3001112233' })).body;

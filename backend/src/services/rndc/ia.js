@@ -124,21 +124,21 @@ async function trabajar() {
   ocupado = true;
   try {
     while (cola.length) {
-      if (!disponibilidad().activa) { for (const t of cola.splice(0)) { enCola.delete(t.clave); await RevisionIaRndc.deleteOne({ _id: t.id }).catch(() => {}); } break; }
+      if (!disponibilidad().activa) { for (const t of cola.splice(0)) { enCola.delete(t.clave); await RevisionIaRndc.deleteOne({ empresa: t.empresa, _id: t.id }).catch(() => {}); } break; }
       const t = cola.shift();
       if (estado.dia !== hoy()) { estado.dia = hoy(); estado.usadas = 0; }
       estado.usadas++;
       try {
         const resultado = validarRespuesta(await consultar(t.datos), t.documentos);
-        if (resultado) await RevisionIaRndc.updateOne({ _id: t.id }, { estado: 'listo', resultado, modelo: env.gemini.modelo });
-        else await RevisionIaRndc.updateOne({ _id: t.id }, { estado: 'error', error: 'La IA no dio una respuesta válida' });
+        if (resultado) await RevisionIaRndc.updateOne({ empresa: t.empresa, _id: t.id }, { estado: 'listo', resultado, modelo: env.gemini.modelo });
+        else await RevisionIaRndc.updateOne({ empresa: t.empresa, _id: t.id }, { estado: 'error', error: 'La IA no dio una respuesta válida' });
       } catch (e) {
         // Cupo agotado o servicio no disponible: se pausa y se vuelve a intentar más tarde (sin guardar el fallo)
         if (e.status === 429) { estado.pausaHasta = Date.now() + 10 * 60000; estado.motivo = 'limite'; }
         else if (e.status === 401 || e.status === 403) { estado.pausaHasta = Date.now() + 60 * 60000; estado.motivo = /free tier|billing/i.test(e.message) ? 'sin_plan' : 'clave'; }
         else if (!e.status || e.status >= 500) { estado.pausaHasta = Date.now() + 2 * 60000; estado.motivo = 'no_responde'; }
-        if (estado.pausaHasta > Date.now()) await RevisionIaRndc.deleteOne({ _id: t.id }).catch(() => {});
-        else await RevisionIaRndc.updateOne({ _id: t.id }, { estado: 'error', error: 'La IA no pudo revisar este rechazo' }).catch(() => {});
+        if (estado.pausaHasta > Date.now()) await RevisionIaRndc.deleteOne({ empresa: t.empresa, _id: t.id }).catch(() => {});
+        else await RevisionIaRndc.updateOne({ empresa: t.empresa, _id: t.id }, { estado: 'error', error: 'La IA no pudo revisar este rechazo' }).catch(() => {});
         if (env.nodeEnv !== 'test') console.warn('[ia-rndc]', e.status || '', String(e.message).slice(0, 200));
       } finally { enCola.delete(t.clave); }
       if (cola.length) await new Promise((r) => setTimeout(r, env.gemini.pausaMs));
@@ -163,12 +163,12 @@ export async function diagnostico(empresaId, viajeId, huella, { documentos, proc
   let id;
   try {
     id = guardado?._id || (await RevisionIaRndc.create({ empresa: empresaId, viaje: viajeId, huella, estado: 'pendiente' }))._id;
-    if (guardado) await RevisionIaRndc.updateOne({ _id: id }, { $set: { estado: 'pendiente' } });
+    if (guardado) await RevisionIaRndc.updateOne({ empresa: empresaId, _id: id }, { $set: { estado: 'pendiente' } });
   } catch (e) {
     if (e?.code === 11000) return { estado: 'pendiente' };   // otra petición lo acaba de pedir
     throw e;
   }
-  if (!enCola.has(clave)) { enCola.add(clave); cola.push({ id, clave, datos, documentos: anon.documentos }); }
+  if (!enCola.has(clave)) { enCola.add(clave); cola.push({ id, empresa: empresaId, clave, datos, documentos: anon.documentos }); }
   trabajar().catch(() => {});
   return { estado: 'pendiente' };
 }
