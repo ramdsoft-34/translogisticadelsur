@@ -271,7 +271,7 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                             @let wc = whatsappClienteDe(v._id);
                             @if (porAprobarWhatsapp(v._id)) {
                               <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarWhatsapp([v._id])" [disabled]="trabajando()"
-                                [title]="wc?.estado === 'por_aprobar' ? 'Envía el manifiesto al conductor y a los números del cliente (con los demás pendientes del cliente en un solo mensaje)' : 'Envía el PDF del manifiesto al WhatsApp del conductor'"><app-icono nombre="enviar" [tam]="15" />Aprobar WhatsApp</button>
+                                [title]="wc?.estado === 'por_aprobar' ? 'Envía el manifiesto al conductor y a los números del cliente (cada manifiesto en su PDF)' : 'Envía el PDF del manifiesto al WhatsApp del conductor'"><app-icono nombre="enviar" [tam]="15" />Aprobar WhatsApp</button>
                             } @else {
                               <button class="pequeno" confirmar="Clic otra vez para enviar" (confirmado)="enviarWhatsapp(v)" [disabled]="trabajando()"
                                 title="Envía el PDF del manifiesto al WhatsApp del conductor"><app-icono nombre="enviar" [tam]="15" />{{ w ? 'Reenviar WhatsApp' : 'Enviar WhatsApp' }}</button>
@@ -843,7 +843,7 @@ export class Manifiestos {
       const aConductor = r.resultados.filter((x: any) => x.para !== 'cliente').length;
       const aCliente = r.resultados.filter((x: any) => x.para === 'cliente');
       const partes = [aConductor ? `${aConductor} a conductores` : '',
-        aCliente.length ? `${aCliente.length} mensaje(s) al cliente con ${aCliente.reduce((s: number, x: any) => s + (x.cantidad || 0), 0)} manifiesto(s)` : ''].filter(Boolean).join(' y ');
+        aCliente.length ? `${aCliente.reduce((s: number, x: any) => s + (x.enviados || 0), 0)} manifiesto(s) a ${aCliente.length} número(s) del cliente` : ''].filter(Boolean).join(' y ');
       if (!r.aprobados) this.avisos.mostrar('Los viajes elegidos no tienen WhatsApp por aprobar', 'info');
       else if (fallos.length) {
         this.avisos.mostrar(`${fallos.length} envío(s) con error de ${r.resultados.length}`, 'error');

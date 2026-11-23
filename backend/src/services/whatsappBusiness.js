@@ -3,7 +3,6 @@
 // Igual que los correos: al aceptarse el manifiesto queda «por aprobar» y solo sale con la confirmación de una persona.
 import crypto from 'node:crypto';
 import mongoose from 'mongoose';
-import { unirPdf } from './reportes/unirPdf.js';
 import { Cliente, Empresa, EnvioWhatsapp, MensajeWhatsapp, PlataformaWhatsapp, Tercero, Viaje } from '../models/index.js';
 import { publicar } from './eventos.js';
 import { descifrar } from '../utils/cifrado.js';
@@ -172,34 +171,27 @@ export function numerosActivos(cliente) {
     .filter((n) => n.telefono && !vistos.has(n.telefono) && vistos.add(n.telefono));
 }
 
-// Texto de la lista de manifiestos para la plantilla: «M10063403 (TDM027), M10063404 (SET146)»; si es muy larga, «y N más»
-export function listaManifiestos(items, max = 700) {
-  const partes = items.map((x) => `${x.numero}${x.placa ? ` (${x.placa})` : ''}`);
-  let texto = '';
-  for (let i = 0; i < partes.length; i++) {
-    const resto = partes.length - i - 1;
-    const prueba = texto ? `${texto}, ${partes[i]}` : partes[i];
-    if (prueba.length + (resto ? ` y ${resto} más`.length : 0) > max) return `${texto} y ${partes.length - i} más`;
-    texto = prueba;
-  }
-  return texto;
-}
-export const cantidadManifiestos = (n) => (n === 1 ? '1 manifiesto de carga' : `${n} manifiestos de carga`);
+// «el manifiesto de carga» o, en una tanda de varios, «el manifiesto de carga 2 de 5» ({{2}} de la plantilla)
+export const cualManifiesto = (i, n) => (n > 1 ? `el manifiesto de carga ${i} de ${n}` : 'el manifiesto de carga');
+export const manifiestoConPlaca = (d) => `${txt(d.numero)}${d.placa ? ` (${txt(d.placa)})` : ''}`;
 
-function mensajePlantillaCliente(plantilla, idioma, para, mediaId, nombre, empresa, items) {
+function mensajePlantillaCliente(plantilla, idioma, para, mediaId, nombre, empresa, d, i, n) {
   const parametro = (t, max) => ({ type: 'text', text: txt(t).replace(/\s+/g, ' ').trim().slice(0, max) || '-' });
   return { messaging_product: 'whatsapp', to: para, type: 'template', template: {
     name: plantilla, language: { code: idioma },
     components: [
       { type: 'header', parameters: [{ type: 'document', document: { id: mediaId, filename: nombre } }] },
-      // {{1}} empresa · {{2}} cuántos («3 manifiestos de carga») · {{3}} números y placas (plantilla «manifiesto_cliente»)
-      { type: 'body', parameters: [parametro(empresa.nombre, 100), parametro(cantidadManifiestos(items.length), 40), parametro(listaManifiestos(items), 720)] },
+      // {{1}} empresa · {{2}} cuál («el manifiesto de carga 2 de 5») · {{3}} número y placa (plantilla «manifiesto_cliente»)
+      { type: 'body', parameters: [parametro(empresa.nombre, 100), parametro(cualManifiesto(i, n), 60), parametro(manifiestoConPlaca(d), 120)] },
     ] } };
 }
 
+// Errores que no dependen de un manifiesto en particular: si pasan, no tiene sentido seguir con los demás de la tanda
+const ERROR_DE_CUENTA = ['plantilla', 'cuenta', 'no_entregado', 'rechazo_conductor', 'celular_invalido'];
+
 /**
- * Como el correo: todos los manifiestos pendientes de un cliente para un mismo número salen en UN mensaje,
- * con un solo PDF que los reúne (WhatsApp admite un documento por mensaje de plantilla). 1 pendiente → 1 manifiesto.
+ * Los manifiestos pendientes de un cliente para un número salen juntos, uno tras otro: cada manifiesto en su propio
+ * mensaje con su propio PDF (WhatsApp admite un documento por mensaje de plantilla). 5 pendientes → 5 PDF seguidos.
  */
 export async function enviarGrupoWhatsappCliente(empresaId, clienteId, telefono) {
   const grupo = new mongoose.Types.ObjectId();
@@ -218,6 +210,8 @@ export async function enviarGrupoWhatsappCliente(empresaId, clienteId, telefono)
   if (vencidos.length) await marcar(vencidos.map((e) => e._id), { estado: 'descartado', causa: 'no_vigente', error: 'El manifiesto ya no está vigente: no se envió' });
   if (!vigentes.length) return { grupo, cantidad: 0, estado: 'descartado' };
   const ids = vigentes.map((e) => e._id);
+  const fallo = (e) => ({ causa: e.causa || (e.codigoMeta ? causaDeCodigo(e.codigoMeta) : 'meta'), error: String(e.message).slice(0, 500) });
+  let cuentaW; let plantilla;
   try {
     // El número pudo apagarse o quitarse en Clientes mientras esperaba
     const c = await Cliente.findOne({ empresa: empresaId, _id: clienteId }).select('nombre whatsappManifiestos').lean();
@@ -225,32 +219,42 @@ export async function enviarGrupoWhatsappCliente(empresaId, clienteId, telefono)
       await marcar(ids, { estado: 'descartado', causa: 'numero_inactivo', error: `El número ${telefono} ya no está activo en el cliente${c ? ` ${c.nombre}` : ''}: no se envió` });
       return { grupo, cantidad: ids.length, estado: 'descartado' };
     }
-    const plantilla = await plantillaClienteDe(empresaId);
+    plantilla = await plantillaClienteDe(empresaId);
     if (!plantilla) throw new ErrorEnvio('Falta la plantilla de WhatsApp para clientes (Configuración → WhatsApp)', 'plantilla');
-    const { empresa, cuenta, token, tipo } = await cuentaWhatsapp(empresaId);
-    const items = []; const pdfs = [];
-    for (const e of vigentes) {
-      const d = await datosManifiesto(empresa, e.viaje);
-      items.push({ numero: d.numero, placa: d.placa });
-      pdfs.push(await manifiestoPdf(d));
-    }
-    const fecha = new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
-    const nombre = vigentes.length === 1 ? `Manifiesto_${items[0].numero}.pdf` : `Manifiestos_${txt(c.nombre).replace(/[^\wÁÉÍÓÚÑáéíóúñ]+/g, '_').slice(0, 40)}_${fecha}.pdf`;
-    const pdf = pdfs.length === 1 ? pdfs[0] : await unirPdf(pdfs);
-    const mediaId = await subirPdf(cuenta, token, pdf, nombre);
-    const res = await llamarMeta(`${cuenta.phoneNumberId}/messages`, token, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(mensajePlantillaCliente(plantilla, cuenta.idioma || 'es', telefono, mediaId, nombre, empresa, items)) });
-    await marcar(ids, { estado: 'enviado', cuenta: tipo, idMensaje: res.messages?.[0]?.id || '', enviadoEn: new Date(), error: '', causa: '' });
-    return { grupo, cantidad: ids.length, estado: 'enviado' };
+    cuentaW = await cuentaWhatsapp(empresaId);
   } catch (e) {
-    const causa = e.causa || (e.codigoMeta ? causaDeCodigo(e.codigoMeta) : 'meta');
-    const error = String(e.message).slice(0, 500);
-    await marcar(ids, { estado: 'error', error, causa });
-    return { grupo, cantidad: ids.length, estado: 'error', error, causa, ids };
+    const f = fallo(e);
+    await marcar(ids, { estado: 'error', ...f });
+    return { grupo, cantidad: ids.length, enviados: 0, estado: 'error', ...f };
   }
+  const { empresa, cuenta, token, tipo } = cuentaW;
+  let enviados = 0; let ultimoError = null;
+  for (let i = 0; i < vigentes.length; i++) {
+    const e = vigentes[i];
+    try {
+      const d = await datosManifiesto(empresa, e.viaje);
+      const nombre = nombreArchivo(d);
+      const mediaId = await subirPdf(cuenta, token, await manifiestoPdf(d), nombre);
+      const res = await llamarMeta(`${cuenta.phoneNumberId}/messages`, token, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(mensajePlantillaCliente(plantilla, cuenta.idioma || 'es', telefono, mediaId, nombre, empresa, d, i + 1, vigentes.length)) });
+      await marcar([e._id], { estado: 'enviado', cuenta: tipo, idMensaje: res.messages?.[0]?.id || '', enviadoEn: new Date(), error: '', causa: '' });
+      enviados++;
+    } catch (x) {
+      ultimoError = fallo(x);
+      await marcar([e._id], { estado: 'error', ...ultimoError });
+      // Un problema del número o de la cuenta afectaría igual a los siguientes: quedan con el mismo error, sin insistir
+      if (ERROR_DE_CUENTA.includes(ultimoError.causa)) {
+        const resto = vigentes.slice(i + 1).map((y) => y._id);
+        if (resto.length) await marcar(resto, { estado: 'error', ...ultimoError });
+        break;
+      }
+    }
+  }
+  const estado = enviados === vigentes.length ? 'enviado' : enviados ? 'parcial' : 'error';
+  return { grupo, cantidad: vigentes.length, enviados, estado, ...(ultimoError || {}) };
 }
 
-// Reintento de un envío al cliente (ventana de errores o «Reintentar»): vuelve a salir junto con los demás de su grupo que fallaron
+// Reintento de un envío al cliente (ventana de errores o «Reintentar»): salen de nuevo los de su tanda que fallaron (los ya enviados no se repiten)
 async function reintentarGrupoCliente(empresaId, envioId) {
   const e = await EnvioWhatsapp.findOne({ empresa: empresaId, _id: envioId, para: 'cliente' }).lean();
   if (!e || !['pendiente', 'error'].includes(e.estado)) return null;
@@ -306,7 +310,7 @@ export async function prepararEnvio(empresaId, viajeId, { origen = 'automatico',
   return origen === 'automatico' ? envio.toObject() : procesarEnvio(empresaId, envio._id);
 }
 
-// Aprobación: cada conductor recibe su documento; cada número del cliente recibe UN mensaje con todos sus manifiestos
+// Aprobación: cada conductor recibe su documento; cada número del cliente recibe sus manifiestos pendientes, cada uno con su PDF
 export async function aprobarEnvios(empresaId, viajes, usuario) {
   const lista = await EnvioWhatsapp.find({ empresa: empresaId, viaje: { $in: viajes }, estado: 'por_aprobar' }).select('_id para cliente telefono').lean();
   const ids = lista.map(x => x._id);
@@ -321,9 +325,10 @@ export async function aprobarEnvios(empresaId, viajes, usuario) {
   for (const x of grupos.values()) {
     const g = await enviarGrupoWhatsappCliente(empresaId, x.cliente, x.telefono);
     if (!g) continue;
-    // El error del grupo se muestra una sola vez (un envío representa al grupo)
-    const uno = await EnvioWhatsapp.findOne({ empresa: empresaId, grupo: g.grupo, ...(g.estado === 'error' ? { estado: 'error' } : {}) }).select('_id viaje estado error causa').lean();
-    resultados.push({ id: uno?._id, viaje: uno?.viaje, para: 'cliente', cantidad: g.cantidad, estado: g.estado, error: g.error || '', causa: g.causa || '' });
+    // Si algo falló, el primer envío con error representa a la tanda en la ventana de errores
+    const conError = g.estado !== 'enviado' && g.estado !== 'descartado';
+    const uno = await EnvioWhatsapp.findOne({ empresa: empresaId, grupo: g.grupo, ...(conError ? { estado: 'error' } : {}) }).select('_id viaje estado error causa').lean();
+    resultados.push({ id: uno?._id, viaje: uno?.viaje, para: 'cliente', cantidad: g.cantidad, enviados: g.enviados || 0, estado: conError ? 'error' : g.estado, error: g.error || '', causa: g.causa || '' });
   }
   return { aprobados: ids.length, resultados };
 }
@@ -348,7 +353,7 @@ const estadosDe = (datos) => (datos?.entry || []).flatMap(x => x.changes || []).
 async function aplicarEstado(empresaId, s) {
   const envio = await EnvioWhatsapp.findOne({ empresa: empresaId, idMensaje: String(s.id || '') }).select('estado conductor telefono').lean();
   if (!envio) return;
-  // Un mensaje al cliente lleva varios manifiestos: el estado aplica a todos los envíos de ese mensaje
+  // El estado aplica a los envíos de ese mensaje (normalmente uno)
   const delMensaje = { empresa: empresaId, idMensaje: String(s.id) };
   if (s.status === 'failed') {
     const e = s.errors?.[0] || {};

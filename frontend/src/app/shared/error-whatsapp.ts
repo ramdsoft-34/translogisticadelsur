@@ -8,7 +8,7 @@ import { Modal } from './modal';
 
 interface Diagnostico {
   envio: { _id: string; estado: string; error: string; causa: string; tipo: string; documento: string; telefono: string; intentos: number; solucion: { accion: string } | null; para?: 'conductor' | 'cliente' };
-  // Envío a un número del cliente: con los demás manifiestos que iban en el mismo mensaje
+  // Envío a un número del cliente: con los manifiestos de la misma tanda que también fallaron
   cliente?: { _id: string; nombre: string; destinatario: string; telefono: string; documentos: string[] } | null;
   viaje: { _id: string; numero: number; placa: string } | null;
   explicacion: { id: string; titulo: string; explicacion: string; pasos: string[]; acciones: string[] } | null;
@@ -45,7 +45,7 @@ const ENVIADO = ['enviado', 'entregado', 'leido'];
           @if (x.viaje) { <dt>Viaje</dt><dd>N° {{ x.viaje.numero }} · {{ x.viaje.placa }} · {{ x.envio.tipo === 'soporte' ? 'Soporte' : 'Manifiesto' }} {{ x.envio.documento }}</dd> }
           @if (x.cliente; as k) {
             <dt>Para</dt><dd>{{ k.nombre }} · {{ k.destinatario || 'número del cliente' }} ({{ k.telefono }})</dd>
-            @if (k.documentos.length > 1) { <dt>En el mismo mensaje</dt><dd>{{ k.documentos.length }} manifiestos: {{ k.documentos.join(', ') }}</dd> }
+            @if (k.documentos.length > 1) { <dt>También fallaron</dt><dd>{{ k.documentos.length }} manifiestos de la misma tanda: {{ k.documentos.join(', ') }}</dd> }
           }
           @if (x.conductor; as t) {
             <dt>Conductor</dt><dd>{{ t.nombre }} ({{ t.documento }})</dd>

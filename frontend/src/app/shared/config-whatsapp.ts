@@ -84,7 +84,7 @@ Los documentos están en el PDF adjunto, expedidos en el RNDC. Este número solo
           <pre class="plantilla">{{ cuerpo }}</pre>
           <h3>Plantilla para clientes (manifiestos agrupados)</h3>
           <p class="sutil">Nombre sugerido <strong>manifiesto_cliente</strong>, categoría <strong>Utilidad</strong>, encabezado <strong>Documento</strong> y este cuerpo.
-            Todos los manifiestos por aprobar de un cliente salen en un solo mensaje con un PDF que los reúne.</p>
+            Cada manifiesto sale en su propio mensaje con su PDF («le envía el manifiesto de carga 2 de 5: …»).</p>
           <pre class="plantilla">{{ cuerpoCliente }}</pre>
         </div>
       }

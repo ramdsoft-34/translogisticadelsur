@@ -1,18 +1,14 @@
 // Manifiestos al WhatsApp del cliente: textos de la plantilla y números activos (sin base de datos ni red)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { listaManifiestos, cantidadManifiestos, numerosActivos } from '../src/services/whatsappBusiness.js';
+import { cualManifiesto, manifiestoConPlaca, numerosActivos } from '../src/services/whatsappBusiness.js';
 import { explicacionDe } from '../src/services/erroresWhatsapp.js';
 
-test('lista de manifiestos: números con placa y, si no cabe, «y N más»', () => {
-  assert.equal(listaManifiestos([{ numero: 'M1', placa: 'ABC123' }, { numero: 'M2', placa: '' }]), 'M1 (ABC123), M2');
-  const muchos = Array.from({ length: 80 }, (_, i) => ({ numero: `M100634${String(i).padStart(2, '0')}`, placa: 'TDM027' }));
-  const t = listaManifiestos(muchos);
-  assert.ok(t.length <= 700, `largo ${t.length}`);
-  const visibles = t.split(', ').length;
-  assert.match(t, new RegExp(` y ${80 - visibles} más$`));
-  assert.equal(cantidadManifiestos(1), '1 manifiesto de carga');
-  assert.equal(cantidadManifiestos(5), '5 manifiestos de carga');
+test('texto de cada mensaje: cuál manifiesto de la tanda y su placa', () => {
+  assert.equal(cualManifiesto(1, 1), 'el manifiesto de carga');
+  assert.equal(cualManifiesto(2, 5), 'el manifiesto de carga 2 de 5');
+  assert.equal(manifiestoConPlaca({ numero: 'M10063404', placa: 'SET146' }), 'M10063404 (SET146)');
+  assert.equal(manifiestoConPlaca({ numero: 'M1', placa: '' }), 'M1');
 });
 
 test('números del cliente: solo los activos, válidos y sin repetir', () => {

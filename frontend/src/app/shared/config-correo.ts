@@ -154,10 +154,10 @@ const listaCorreos = (t: string) => [...new Set(String(t || '').split(/[\s,;]+/)
               <small>Separe los correos con coma o en líneas distintas.</small></div>
             <div class="campo"><label for="ec-cc">Con copia (CC)</label><textarea id="ec-cc" name="cc" rows="2" [(ngModel)]="f.ccTexto"></textarea></div>
           </div>
-          <!-- Números de WhatsApp que reciben los manifiestos: como el correo, por aprobar y agrupados en un solo mensaje -->
+          <!-- Números de WhatsApp que reciben los manifiestos: como el correo, por aprobar; cada manifiesto en su PDF -->
           <fieldset style="margin-top:14px"><legend>WhatsApp de manifiestos</legend>
             <p class="sutil" style="margin-top:0">Cada número <strong>activo</strong> recibe los manifiestos aceptados por el RNDC. Igual que el correo, quedan por aprobar en «Manifestados»
-              y al aprobar salen <strong>todos juntos en un solo mensaje</strong> (un PDF con todos). Apague un número para dejar de enviarle sin borrarlo.</p>
+              y al aprobar salen todos los pendientes, <strong>cada manifiesto en su propio PDF</strong> (5 pendientes = 5 PDF seguidos en el chat). Apague un número para dejar de enviarle sin borrarlo.</p>
             @for (n of f.whatsapp; track $index) {
               <div class="contacto-rel">
                 <input [name]="'wn' + $index" [(ngModel)]="n.nombre" placeholder="Nombre (ej. Despachos)" maxlength="60" />

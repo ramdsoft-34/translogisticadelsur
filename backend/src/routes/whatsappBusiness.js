@@ -275,8 +275,8 @@ async function diagnostico(req, envio) {
   ]) : [];
   // Otros envíos con error del mismo conductor (para corregirlos todos de una vez)
   const otros = t ? await EnvioWhatsapp.countDocuments(deEmpresa(req, { conductor: t._id, para: { $ne: 'cliente' }, estado: 'error', _id: { $ne: envio._id } })) : 0;
-  // Al cliente: los demás manifiestos que iban en el mismo mensaje
-  const grupo = alCliente && envio.grupo ? await EnvioWhatsapp.find(deEmpresa(req, { grupo: envio.grupo })).select('documento').sort({ documento: 1 }).lean() : [];
+  // Al cliente: los manifiestos de la misma tanda que también fallaron (se reintentan juntos)
+  const grupo = alCliente && envio.grupo ? await EnvioWhatsapp.find(deEmpresa(req, { grupo: envio.grupo, estado: { $in: ['error', 'pendiente'] } })).select('documento').sort({ documento: 1 }).lean() : [];
   const c = alCliente && envio.cliente ? await Cliente.findOne(deEmpresa(req, { _id: envio.cliente })).select('nombre').lean() : null;
   return {
     envio: { _id: envio._id, estado: envio.estado, error: aclararError(envio.error), causa, tipo: envio.tipo, documento: envio.documento, telefono: envio.telefono, intentos: envio.intentos,

@@ -498,7 +498,7 @@ const envioWhatsappSchema = new Schema({
   cliente: { type: Schema.Types.ObjectId, ref: 'Cliente', default: null },
   // A quién va el manifiesto: al conductor del viaje o a un número de WhatsApp del cliente («destinatario» y «telefono»)
   para: { type: String, enum: ['conductor', 'cliente'], default: 'conductor' },
-  grupo: { type: Schema.Types.ObjectId, default: null },   // envíos al cliente que salieron juntos en un mensaje
+  grupo: { type: Schema.Types.ObjectId, default: null },   // envíos al cliente aprobados en la misma tanda (cada uno es su mensaje con su PDF)
   reporteBodega: { type: Schema.Types.ObjectId, ref: 'ReporteBodega', default: null },
   destinatario: str(),                      // a quién (el jefe de bodega; el conductor va en «conductor»)
   documento: str(),                         // n.° del manifiesto (o MC del soporte interno)
