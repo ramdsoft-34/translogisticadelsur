@@ -11,7 +11,7 @@ import { P } from '../config/permisos.js';
 import { env } from '../config/env.js';
 import { auditar } from '../services/auditoria.js';
 import { cifrar, descifrar } from '../utils/cifrado.js';
-import { aprobarEnvios, celularWhatsapp, cuentaPlataforma, descartarEnvios, firmaValida, plataformaLista, prepararEnvio, prepararEnviosCliente, probarCuenta, procesarEnvio, registrarEstados, registrarEstadosPlataforma } from '../services/whatsappBusiness.js';
+import { aprobarEnvios, celularWhatsapp, cuentaPlataforma, descartarEnvios, enviarVariosACliente, firmaValida, plataformaLista, prepararEnvio, prepararEnviosCliente, probarCuenta, procesarEnvio, registrarEstados, registrarEstadosPlataforma } from '../services/whatsappBusiness.js';
 import { aclararError, explicacionDe, causaDeTexto } from '../services/erroresWhatsapp.js';
 import { tienePermiso } from '../config/permisos.js';
 import { nombreCompleto } from '../utils/nombres.js';
@@ -248,6 +248,14 @@ r.post('/viajes/:id/enviar-cliente', operar, async (req, res) => {
     await auditar(req, 'enviar_whatsapp_cliente', { entidad: 'Viaje', entidadId: req.params.id, detalle: { numeros: x.length, estados: x.map((e) => e.estado) } });
     res.json(x.map((e) => ({ ...e, error: aclararError(e.error) })));
   } catch (e) { throw e.status ? new ErrorHttp(e.status, e.message) : e; }
+});
+
+// Envío manual al cliente de varios viajes en una tanda (cada manifiesto con su PDF, numerados 1 de N…)
+r.post('/enviar-cliente', operar, async (req, res) => {
+  const { viajes } = listaViajes.parse(req.body);
+  const x = await enviarVariosACliente(req.empresaId, [...new Set(viajes)], { usuario: req.usuario._id });
+  await auditar(req, 'enviar_whatsapp_cliente', { detalle: { viajes: viajes.length, envios: x.envios.length, estados: x.envios.map((e) => e.estado), omitidos: x.omitidos.length } });
+  res.json({ envios: x.envios.map((e) => ({ ...e, error: aclararError(e.error) })), omitidos: x.omitidos });
 });
 
 r.post('/envios/:id/reintentar', operar, async (req, res) => {

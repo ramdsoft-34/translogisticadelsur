@@ -63,6 +63,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
             <button type="button" confirmar="Clic otra vez para descartar" (confirmado)="descartarWhatsapp([...seleccion()])" [disabled]="trabajando()">Descartar WhatsApp</button>
             <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="aprobarWhatsapp([...seleccion()])" [disabled]="trabajando()">
               <app-icono nombre="enviar" />Aprobar WhatsApp ({{ seleccion().size }})</button>
+            <button type="button" confirmar="Clic otra vez para enviar" (confirmado)="enviarVariosCliente([...seleccion()])" [disabled]="trabajando()"
+              title="Envía al WhatsApp del cliente los manifiestos elegidos, cada uno con su PDF (1 de N, 2 de N…)">
+              <app-icono nombre="enviar" />Enviar al cliente ({{ seleccion().size }})</button>
           }
         }
         @if (pestana() === 'soporte' && seleccion().size) {
@@ -853,6 +856,15 @@ export class Manifiestos {
       titulo: l.map(e => `${e.destinatario || 'Cliente'} ${e.telefono}: ${this.textoWhatsapp(e.estado)}`).join(' · ') };
   }
   porAprobarWhatsapp(viajeId: string) { return this.whatsappDe(viajeId)?.estado === 'por_aprobar' || this.whatsappClienteDe(viajeId)?.estado === 'por_aprobar'; }
+  enviarVariosCliente(viajes: string[]) {
+    return this.tareaWhatsapp(async () => {
+      const r = await this.api.post<any>('/whatsapp/enviar-cliente', { viajes });
+      const fallos = r.envios.filter((x: any) => x.estado === 'error');
+      if (!r.envios.length) this.avisos.mostrar(r.omitidos[0]?.motivo || 'Los viajes elegidos no tienen números de WhatsApp activos del cliente', 'info');
+      else if (fallos.length) { this.avisos.mostrar(`${fallos.length} de ${r.envios.length} con error`, 'error'); this.verErrorWhatsapp([fallos[0]._id]); }
+      else this.avisos.ok(`${r.envios.length} manifiesto(s) enviados al WhatsApp del cliente${r.omitidos.length ? ` · ${r.omitidos.length} viaje(s) sin números activos` : ''}`);
+    });
+  }
   enviarWhatsappCliente(v: Viaje) {
     return this.tareaWhatsapp(async () => {
       const r = await this.api.post<any[]>(`/whatsapp/viajes/${v._id}/enviar-cliente`, {});

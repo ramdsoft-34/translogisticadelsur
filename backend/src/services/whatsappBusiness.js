@@ -265,7 +265,23 @@ async function reintentarGrupoCliente(empresaId, envioId) {
 }
 
 /** Crea los envíos del manifiesto a los números activos del cliente del viaje. Automático: una vez por número y documento. */
-export async function prepararEnviosCliente(empresaId, viajeId, { origen = 'automatico', usuario = null } = {}) {
+/**
+ * Envío manual al cliente de varios viajes a la vez: todos salen en una sola tanda por número
+ * («el manifiesto de carga 1 de N», «2 de N»…), cada manifiesto con su PDF.
+ */
+export async function enviarVariosACliente(empresaId, viajes, { usuario = null } = {}) {
+  const creados = []; const omitidos = [];
+  for (const v of viajes) {
+    try { creados.push(...await prepararEnviosCliente(empresaId, v, { origen: 'manual', usuario, enviar: false })); }
+    catch (e) { omitidos.push({ viaje: String(v), motivo: e.message }); }
+  }
+  const grupos = new Map(creados.map((x) => [`${x.cliente}|${x.telefono}`, x]));
+  for (const x of grupos.values()) await enviarGrupoWhatsappCliente(empresaId, x.cliente, x.telefono);
+  const envios = await EnvioWhatsapp.find({ empresa: empresaId, _id: { $in: creados.map((x) => x._id) } }).lean();
+  return { envios, omitidos };
+}
+
+export async function prepararEnviosCliente(empresaId, viajeId, { origen = 'automatico', usuario = null, enviar = true } = {}) {
   const plantilla = await plantillaClienteDe(empresaId);
   const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('cliente manifiesto soporteInterno').lean();
   const doc = documentoVigente(v);
@@ -283,7 +299,7 @@ export async function prepararEnviosCliente(empresaId, viajeId, { origen = 'auto
     creados.push(await EnvioWhatsapp.create({ empresa: empresaId, viaje: viajeId, para: 'cliente', cliente: v.cliente, destinatario: n.nombre, telefono: n.telefono,
       tipo: 'manifiesto', documento: doc.documento, origen, usuario, cuenta: e?.whatsapp?.modo || 'plataforma', estado: origen === 'automatico' ? 'por_aprobar' : 'pendiente' }));
   }
-  if (origen === 'automatico') return creados.map((x) => x.toObject());
+  if (origen === 'automatico' || !enviar) return creados.map((x) => x.toObject());
   for (const n of numeros) await enviarGrupoWhatsappCliente(empresaId, v.cliente, n.telefono);
   return EnvioWhatsapp.find({ empresa: empresaId, _id: { $in: creados.map((x) => x._id) } }).lean();
 }
