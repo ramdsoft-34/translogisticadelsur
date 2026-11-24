@@ -12,7 +12,7 @@ import { Paginador } from '../shared/paginador';
 import { ListaServidor, conPausa } from '../shared/lista-servidor';
 import { Modal } from '../shared/modal';
 import { Icono } from '../shared/icono';
-import { FORMATOS, hoyIso, isoDia } from '../shared/formato';
+import { FORMATOS, hoyIso, isoDia, inicioMesIso } from '../shared/formato';
 import { ExpedirRndc } from '../shared/expedir-rndc';
 import { Confirmar } from '../shared/confirmar';
 import { SelectorMunicipio } from '../shared/municipio';
@@ -25,6 +25,9 @@ import { ErrorWhatsapp } from '../shared/error-whatsapp';
 
 type Pestana = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'soporte' | 'correos' | 'historial';
 type PestanaViajes = 'pendientes' | 'anulados' | 'manifestados' | 'cumplidos' | 'soporte';
+type PeriodoM = 'todos' | 'hoy' | 'ayer' | 'semana' | 'mes' | 'rango';
+// Fecha (AAAA-MM-DD) de hace n días en Colombia
+const diasAtras = (n: number) => { const d = new Date(`${hoyIso()}T12:00:00`); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
 // Filtro de cada pestaña. Con remesa o manifiesto anulados el viaje sale de «Por enviar» y queda en «Anulados».
 const FILTROS: Record<PestanaViajes, Record<string, string | number>> = {
   pendientes: { estado: 'registrado,remesa', anulados: 0, reportados: 1 }, anulados: { estado: 'registrado,remesa', anulados: 1 },
@@ -110,14 +113,26 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     }
     <section class="barra" aria-label="Filtros">
       @if (pestana() !== 'correos' && pestana() !== 'historial') {
-        <div class="campo"><label for="m-desde">Desde</label><input id="m-desde" type="date" [(ngModel)]="filtro.desde" (change)="cargar()" /></div>
-        <div class="campo"><label for="m-hasta">Hasta</label><input id="m-hasta" type="date" [(ngModel)]="filtro.hasta" (change)="cargar()" /></div>
+        <!-- Mismo diseño que Viajes: periodo, cliente, estado y búsqueda -->
+        <div class="campo"><span class="etiqueta">Periodo</span>
+          <div class="segmentos" role="group" aria-label="Periodo">
+            @for (p of periodos; track p[0]) {
+              <button type="button" [class.activo]="periodo() === p[0]" [attr.aria-pressed]="periodo() === p[0]" (click)="elegirPeriodo(p[0])">{{ p[1] }}</button>
+            }
+          </div></div>
+        @if (periodo() === 'rango') {
+          <div class="campo"><label for="m-desde">Desde</label><input id="m-desde" type="date" [(ngModel)]="filtro.desde" (change)="cargar()" /></div>
+          <div class="campo"><label for="m-hasta">Hasta</label><input id="m-hasta" type="date" [(ngModel)]="filtro.hasta" (change)="cargar()" /></div>
+        }
         <div class="campo"><label for="m-cli">Cliente</label>
           <select id="m-cli" [(ngModel)]="filtro.cliente" (change)="cargar()"><option value="">Todos</option>
             @for (c of clientesFiltro(); track c._id) { <option [value]="c._id">{{ c.nombre }}</option> }</select></div>
+        <div class="campo"><label for="m-est">Estado</label>
+          <select id="m-est" [ngModel]="estadoFiltro()" (ngModelChange)="estadoFiltro.set($event); cargar()" [disabled]="estadosPestana().length <= 1">
+            @for (e of estadosPestana(); track e[0]) { <option [value]="e[0]">{{ e[1] }}</option> }</select></div>
         <div class="campo crece"><label for="m-q">Buscar</label>
-          <input id="m-q" type="search" placeholder="Placa, destino, remesa o manifiesto (Enter)" [(ngModel)]="filtro.q" (keyup.enter)="cargar()" (search)="cargar()" /></div>
-        @if (filtro.desde || filtro.hasta || filtro.cliente || filtro.q) { <button type="button" class="pequeno texto" (click)="limpiarFiltros()">Quitar filtros</button> }
+          <input id="m-q" type="search" placeholder="Placa, destino, remesa o manifiesto" [(ngModel)]="filtro.q" (keyup.enter)="cargar()" (search)="cargar()" /></div>
+        @if (periodo() !== 'todos' || filtro.cliente || filtro.q || estadoFiltro()) { <button type="button" class="pequeno texto" (click)="limpiarFiltros()">Quitar filtros</button> }
       } @else {
         @if (pestana() === 'historial') {
           <div class="campo"><label for="m-res">Resultado</label>
@@ -148,11 +163,6 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     @if (pestana() === 'soporte') {
       <div class="filtros soporte-filtros">
         <p class="sutil">Viajes que no van al RNDC. Cada uno lleva su soporte interno (MC/RC) con un código QR que cualquiera puede escanear para comprobar que es válido. Se cumplen, se anulan y se envían por correo igual que los manifiestos.</p>
-        <div class="segmentos">
-          @for (e of estadosSoporte; track e[0]) {
-            <button type="button" [class.activo]="soporteEstado() === e[0]" (click)="soporteEstado.set(e[0]); cargar()">{{ e[1] }}</button>
-          }
-        </div>
       </div>
     }
     @if (pestana() === 'anulados') {
@@ -648,9 +658,34 @@ export class Manifiestos {
   // Al escribir se espera a que se deje de teclear antes de buscar
   readonly buscarTexto = conPausa(() => this.cargar());
   private filtrosViajes() {
-    return Object.fromEntries(Object.entries(this.filtro).filter(([, v]) => v));
+    const f: Record<string, string> = Object.fromEntries(Object.entries(this.filtro).filter(([, v]) => v));
+    // El estado elegido afina el de la pestaña (p. ej. «Por enviar» → solo los que ya tienen remesa)
+    const e = this.estadoFiltro();
+    if (e && ['pendientes', 'anulados'].includes(this.pestana())) f['estado'] = e;
+    return f;
   }
-  limpiarFiltros() { this.filtro = { desde: '', hasta: '', cliente: '', q: '' }; this.cargar(); }
+  limpiarFiltros() { this.filtro = { desde: '', hasta: '', cliente: '', q: '' }; this.periodo.set('todos'); this.estadoFiltro.set(''); this.soporteEstado.set(''); this.cargar(); }
+
+  // ── Periodo (como en Viajes). «Todos» es el inicial: lo pendiente de días anteriores no se esconde ──
+  readonly periodos: [PeriodoM, string][] = [['todos', 'Todos'], ['hoy', 'Hoy'], ['ayer', 'Ayer'], ['semana', '7 días'], ['mes', 'Este mes'], ['rango', 'Rango']];
+  readonly periodo = signal<PeriodoM>('todos');
+  elegirPeriodo(p: PeriodoM) {
+    this.periodo.set(p);
+    const hoy = hoyIso();
+    if (p === 'todos') this.filtro = { ...this.filtro, desde: '', hasta: '' };
+    if (p === 'hoy') this.filtro = { ...this.filtro, desde: hoy, hasta: hoy };
+    if (p === 'ayer') { const a = diasAtras(1); this.filtro = { ...this.filtro, desde: a, hasta: a }; }
+    if (p === 'semana') this.filtro = { ...this.filtro, desde: diasAtras(6), hasta: hoy };
+    if (p === 'mes') this.filtro = { ...this.filtro, desde: inicioMesIso(), hasta: hoy };
+    if (p !== 'rango') this.cargar();
+  }
+  // ── Estado: opciones según la pestaña (el soporte interno usa su propio estado) ──
+  readonly estadoFiltro = signal('');
+  readonly estadosPestana = computed<[string, string][]>(() => ({
+    pendientes: [['', 'Todos'], ['registrado', 'Sin remesa'], ['remesa', 'Remesa aceptada, falta manifiesto']],
+    anulados: [['', 'Todos'], ['registrado', 'Sin remesa vigente'], ['remesa', 'Con remesa vigente']],
+    soporte: this.estadosSoporte,
+  } as Record<string, [string, string][]>)[this.pestana()] || [['', 'Todos']]);
   readonly enviosPorViaje = signal<Map<string, any[]>>(new Map());
   readonly filtroCorreo = signal('');
   readonly correosViaje = signal<Viaje | null>(null);
@@ -702,7 +737,7 @@ export class Manifiestos {
   }
 
   ir(p: Pestana) {
-    this.pestana.set(p); this.seleccion.set(new Set()); this.texto.set(''); this.buscarTexto.cancelar();
+    this.pestana.set(p); this.seleccion.set(new Set()); this.texto.set(''); this.buscarTexto.cancelar(); this.estadoFiltro.set(''); this.soporteEstado.set('');
     this.listaViajes.limpiar(); this.listaHist.limpiar(); this.listaCorreos.limpiar();
     this.cargar();
   }
@@ -1053,7 +1088,8 @@ export class Manifiestos {
   readonly soporteEstado = signal('');
   private filtroSoporte() {
     if (this.pestana() !== 'soporte') return { rndc: 1 };
-    return this.soporteEstado() ? { soporteEstado: this.soporteEstado() } : {};
+    const e = this.estadoFiltro() || this.soporteEstado();
+    return e ? { soporteEstado: e } : {};
   }
   chipSoporte(v: any) { return ({ cumplido: 'ok', anulado: 'error' } as Record<string, string>)[v.soporteInterno?.estado] || 'alerta'; }
   textoSoporte(v: any) { return ({ cumplido: 'cumplido', anulado: 'anulado' } as Record<string, string>)[v.soporteInterno?.estado] || 'por cumplir'; }
