@@ -777,6 +777,20 @@ export function registroVigente(documentos) {
 }
 const numero = (v) => (txt(v) === '' ? null : Number(txt(v).replace(',', '.')));
 
+// Datos de contacto al traer un tercero del RNDC (consulta, verificación antes de expedir, actualización masiva):
+//  - Un valor vacío del RNDC nunca borra el de la plataforma (teléfono, celular, dirección, municipio, nombre de sede).
+//  - El celular registrado en la plataforma manda: es el que usa WhatsApp y el que la empresa mantiene al día.
+//    El del RNDC solo completa uno vacío o que no es un celular válido.
+// Antes se reemplazaba todo con lo del RNDC: un conductor sin celular en el RNDC quedaba con el celular vacío
+// la siguiente vez que se expedía un manifiesto suyo (la verificación vuelve a consultar cada 7 días).
+const celularValido = (v) => /^(57)?3\d{9}$/.test(String(v ?? '').replace(/\D/g, ''));
+export function conservarContacto(datos, previo) {
+  for (const k of ['telefono', 'direccion', 'codMunicipio']) if (!txt(datos[k]) && txt(previo[k])) datos[k] = previo[k];
+  if (datos.sede && !txt(datos.sede.nombre) && txt(previo.sede?.nombre)) datos.sede.nombre = previo.sede.nombre;
+  if (celularValido(previo.celular) || (!txt(datos.celular) && txt(previo.celular))) datos.celular = previo.celular;
+  return datos;
+}
+
 export async function traerTercero(empresaId, clave, usuarioId, { tipoId, numId, roles = [] }) {
   const r = await consultar(empresaId, clave, usuarioId, { que: 'tercero', filtros: { CODTIPOIDTERCERO: tipoId, NUMIDTERCERO: numId } });
   if (!r.ok) return { ok: false, mensaje: r.mensaje };
@@ -797,6 +811,7 @@ export async function traerTercero(empresaId, clave, usuarioId, { tipoId, numId,
     const existente = await Tercero.findOne(tipoId === 'N' ? { empresa: empresaId, tipoId, numId, 'sede.codigo': datos.sede.codigo } : { empresa: empresaId, tipoId: { $ne: 'N' }, numId });
     const doc = existente || new Tercero({ empresa: empresaId, tipoId, numId, roles: [] });
     const previo = existente ? existente.toObject() : null;
+    if (previo) conservarContacto(datos, previo);
     // El RNDC devuelve «0» cuando no hay licencia; una empresa (NIT) nunca es conductor
     if (/^0*$/.test(datos.licencia.numero)) datos.licencia.numero = '';
     doc.set(datos);

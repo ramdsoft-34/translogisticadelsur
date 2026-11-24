@@ -715,6 +715,15 @@ test('Actualizar terceros desde el RNDC: confirma los importados del Excel', asy
   assert.doesNotMatch(conf.rndc.mensaje, /^Importado/, 'queda confirmado con el RNDC');
   assert.equal((await s.manif.post('/api/rndc/terceros/actualizar', { clave: CLAVE_RNDC, tipoId: 'C', numId: '99999999' })).body.estado, 'no_registrado');
   assert.equal((await s.reportero.post('/api/rndc/terceros/actualizar', { clave: CLAVE_RNDC, tipoId: c.tipoId, numId: c.numId })).status, 403);
+  // El celular registrado en la plataforma no se pierde al volver a traer el conductor del RNDC (ni al verificar antes de expedir)
+  const celAntes = (await M.Tercero.findOne({ empresa: s.empresaA, _id: s.conductor }).lean()).celular;
+  await M.Tercero.updateOne({ empresa: s.empresaA, _id: s.conductor }, { $set: { celular: '3009990011', telefono: '7234567' } });
+  assert.equal((await s.manif.post('/api/rndc/terceros/actualizar', { clave: CLAVE_RNDC, tipoId: c.tipoId, numId: c.numId })).status, 200);
+  await s.manif.post('/api/rndc/verificar/tercero', { tipoId: c.tipoId, numId: c.numId, clave: CLAVE_RNDC, roles: ['conductor'] });
+  const conCel = await M.Tercero.findOne({ empresa: s.empresaA, _id: s.conductor }).lean();
+  assert.equal(conCel.celular, '3009990011', 'el celular sigue igual después de traerlo del RNDC');
+  assert.equal(conCel.telefono, '7234567', 'el teléfono no se borra con un vacío del RNDC');
+  await M.Tercero.updateOne({ empresa: s.empresaA, _id: s.conductor }, { $set: { celular: celAntes || '' } });
 
   // Masivo solo de los sin confirmar
   await M.Tercero.updateOne({ empresa: s.empresaA, _id: s.conductor }, { $set: { 'rndc.mensaje': 'Importado de la plantilla' } });
