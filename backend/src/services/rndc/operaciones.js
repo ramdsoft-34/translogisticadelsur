@@ -785,6 +785,8 @@ const numero = (v) => (txt(v) === '' ? null : Number(txt(v).replace(',', '.')));
 // la siguiente vez que se expedía un manifiesto suyo (la verificación vuelve a consultar cada 7 días).
 const celularValido = (v) => /^(57)?3\d{9}$/.test(String(v ?? '').replace(/\D/g, ''));
 export function conservarContacto(datos, previo) {
+  // El RNDC responde «0» cuando no tiene el dato: es un vacío, no un número
+  for (const k of ['telefono', 'celular']) if (/^0*$/.test(String(datos[k] ?? '').replace(/\D/g, '')) && !/[1-9]/.test(String(datos[k] ?? ''))) datos[k] = '';
   for (const k of ['telefono', 'direccion', 'codMunicipio']) if (!txt(datos[k]) && txt(previo[k])) datos[k] = previo[k];
   if (datos.sede && !txt(datos.sede.nombre) && txt(previo.sede?.nombre)) datos.sede.nombre = previo.sede.nombre;
   if (celularValido(previo.celular) || (!txt(datos.celular) && txt(previo.celular))) datos.celular = previo.celular;
@@ -811,7 +813,7 @@ export async function traerTercero(empresaId, clave, usuarioId, { tipoId, numId,
     const existente = await Tercero.findOne(tipoId === 'N' ? { empresa: empresaId, tipoId, numId, 'sede.codigo': datos.sede.codigo } : { empresa: empresaId, tipoId: { $ne: 'N' }, numId });
     const doc = existente || new Tercero({ empresa: empresaId, tipoId, numId, roles: [] });
     const previo = existente ? existente.toObject() : null;
-    if (previo) conservarContacto(datos, previo);
+    conservarContacto(datos, previo || {});
     // El RNDC devuelve «0» cuando no hay licencia; una empresa (NIT) nunca es conductor
     if (/^0*$/.test(datos.licencia.numero)) datos.licencia.numero = '';
     doc.set(datos);

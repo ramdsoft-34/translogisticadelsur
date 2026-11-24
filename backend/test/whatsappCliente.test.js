@@ -41,4 +41,9 @@ test('al traer un tercero del RNDC no se pierden el celular ni los datos de cont
   assert.equal(conservarContacto({ celular: '3001112233' }, { celular: '' }).celular, '3001112233');
   assert.equal(conservarContacto({ celular: '3001112233' }, { celular: '12345' }).celular, '3001112233');
   assert.equal(conservarContacto({ celular: '' }, { celular: '12345' }).celular, '12345', 'tampoco borra uno inválido con un vacío');
+  // El RNDC responde «0» cuando no tiene celular: nunca reemplaza un número (caso real de producción)
+  assert.equal(conservarContacto({ celular: '0', telefono: '0' }, { celular: '3182512147', telefono: '7234567' }).celular, '3182512147');
+  assert.equal(conservarContacto({ celular: '0', telefono: '0' }, { celular: '3182512147', telefono: '7234567' }).telefono, '7234567');
+  assert.equal(conservarContacto({ celular: '0' }, {}).celular, '', 'un tercero nuevo queda sin celular, no con «0»');
+  assert.equal(conservarContacto({ celular: '0' }, { celular: '0' }).celular, '0', 'lo que ya había no se toca');
 });
