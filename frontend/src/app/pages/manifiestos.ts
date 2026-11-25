@@ -201,9 +201,9 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
             </td>
             <td><span class="chip" [class]="claseCorreo(e.estado)">{{ textoCorreo(e.estado) }}</span>
               @if (e.enviadoEn) { <br /><span class="sutil">{{ e.enviadoEn | fechaHora }}</span> }
-              @if (e.error) { <div class="error-correo">{{ e.error }}</div> }</td>
+              @if (e.error) { <div class="error-correo" [class.reintento]="e.estado === 'pendiente'">{{ e.error }}</div> }</td>
             <td class="num">{{ e.intentos }}</td>
-            <td>@if (e.estado === 'error') { <button class="pequeno" (click)="reintentar(e)" [disabled]="trabajando()">Reintentar</button> }</td></tr>
+            <td>@if (e.estado === 'error' || (e.estado === 'pendiente' && e.reintentarEn)) { <button class="pequeno" (click)="reintentar(e)" [disabled]="trabajando()">{{ e.estado === 'error' ? 'Reintentar' : 'Reintentar ya' }}</button> }</td></tr>
         } @empty { <tr><td colspan="7" class="vacio">{{ listaCorreos.cargando() ? 'Cargando…' : 'Sin correos registrados' }}</td></tr> }</tbody>
       </table>
       <app-paginador [total]="listaCorreos.total()" [pagina]="listaCorreos.pagina()" [porPagina]="listaCorreos.porPagina()" [cargando]="listaCorreos.cambiando()" unidad="correos" (cambio)="listaCorreos.ir($event)" /></div>
@@ -282,13 +282,19 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                           @if (whatsappActivo()) {
                             @let w = whatsappDe(v._id);
                             @let wc = whatsappClienteDe(v._id);
-                            @if (porAprobarWhatsapp(v._id)) {
+                            @if (!conductorListo(v)) {
+                              <!-- Sin celular válido o sin autorización no se envía: se completa primero -->
+                              <button class="pequeno alerta-boton" (click)="abrirDatosWa(v, porAprobarWhatsapp(v._id) ? 'aprobar' : 'enviar')" [disabled]="trabajando()"
+                                [title]="'No se puede enviar por WhatsApp: ' + faltaWhatsapp(v)"><app-icono nombre="enviar" [tam]="15" />Completar WhatsApp</button>
+                            } @else if (porAprobarWhatsapp(v._id)) {
                               <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarWhatsapp([v._id])" [disabled]="trabajando()"
                                 [title]="wc?.estado === 'por_aprobar' ? 'Envía el manifiesto al conductor y a los números del cliente (cada manifiesto en su PDF)' : 'Envía el PDF del manifiesto al WhatsApp del conductor'"><app-icono nombre="enviar" [tam]="15" />Aprobar WhatsApp</button>
                             } @else {
                               <button class="pequeno" confirmar="Clic otra vez para enviar" (confirmado)="enviarWhatsapp(v)" [disabled]="trabajando()"
                                 title="Envía el PDF del manifiesto al WhatsApp del conductor"><app-icono nombre="enviar" [tam]="15" />{{ w ? 'Reenviar WhatsApp' : 'Enviar WhatsApp' }}</button>
-                              @if (wc && wc.estado !== 'error') {
+                            }
+                            @if (!porAprobarWhatsapp(v._id) || !conductorListo(v)) {
+                              @if (wc && wc.estado !== 'error' && wc.estado !== 'por_aprobar') {
                                 <button class="pequeno" confirmar="Clic otra vez para enviar" (confirmado)="enviarWhatsappCliente(v)" [disabled]="trabajando()"
                                   [title]="'Vuelve a enviar este manifiesto a los números activos del cliente · ' + wc.titulo"><app-icono nombre="enviar" [tam]="15" />Reenviar al cliente</button>
                               }
@@ -320,7 +326,10 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                             </div>
                             @if (whatsappActivo()) {
                               @let w = whatsappDe(v._id);
-                              @if (w?.estado === 'por_aprobar') {
+                              @if (!conductorListo(v)) {
+                                <button class="pequeno alerta-boton" (click)="abrirDatosWa(v, w?.estado === 'por_aprobar' ? 'aprobar' : 'enviar')" [disabled]="trabajando()"
+                                  [title]="'No se puede enviar por WhatsApp: ' + faltaWhatsapp(v)"><app-icono nombre="enviar" [tam]="15" />Completar WhatsApp</button>
+                              } @else if (w?.estado === 'por_aprobar') {
                                 <button class="pequeno primario" confirmar="Clic otra vez para enviar" (confirmado)="aprobarWhatsapp([v._id])" [disabled]="trabajando()"
                                   title="Envía el PDF del soporte interno al WhatsApp del conductor"><app-icono nombre="enviar" [tam]="15" />Aprobar WhatsApp</button>
                               } @else {
@@ -433,8 +442,8 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
                 <ul>@for (d of e.destinatarios; track d) { <li>{{ d }}</li> }@for (d of e.cc || []; track d) { <li>CC: {{ d }}</li> }</ul></details>
             </td>
             <td><span class="chip" [class]="claseCorreo(e.estado)">{{ textoCorreo(e.estado) }}</span> <span class="sutil">· {{ e.intentos }} intento(s)</span>
-              @if (e.error) { <div class="error-correo">{{ e.error }}</div> }</td>
-            <td>@if (e.estado === 'error') { <button class="pequeno" (click)="reintentar(e)" [disabled]="trabajando()">Reintentar</button> }</td></tr>
+              @if (e.error) { <div class="error-correo" [class.reintento]="e.estado === 'pendiente'">{{ e.error }}</div> }</td>
+            <td>@if (e.estado === 'error' || (e.estado === 'pendiente' && e.reintentarEn)) { <button class="pequeno" (click)="reintentar(e)" [disabled]="trabajando()">{{ e.estado === 'error' ? 'Reintentar' : 'Reintentar ya' }}</button> }</td></tr>
         } @empty { <tr><td colspan="5" class="vacio">Este viaje no tiene correos enviados. Revise que el cliente tenga destinatarios en Configuración → Correo.</td></tr> }</tbody>
       </table></div>
       <ng-container pie>
@@ -487,6 +496,31 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     <app-expedir-rndc [viajeId]="expedir()" [soloVer]="soloVer()" (cerrar)="expedir.set(null)" (actualizado)="cargar()" />
     <!-- Errores de WhatsApp: qué pasó, cómo corregirlo y corrección ahí mismo -->
     <app-error-whatsapp [envios]="erroresWhatsapp()" (cerrar)="erroresWhatsapp.set([])" (corregido)="cargarCorreos(viajes())" />
+    <!-- Datos del conductor que faltan para enviar por WhatsApp: celular válido y autorización -->
+    <app-modal titulo="Completar datos para WhatsApp" [abierto]="!!datosWa()" (cerrar)="datosWa.set(null)">
+      @if (datosWa(); as d) {
+        <p>Para enviar {{ d.soporte ? 'el soporte' : 'el manifiesto' }} del viaje N° {{ d.numero }} por WhatsApp, el conductor debe tener un celular válido y haber autorizado recibir sus documentos por WhatsApp.</p>
+        @if (!d.conductorId) {
+          <div class="mensaje error">El viaje no tiene conductor. Elíjalo en «Expedir» o en Viajes y vuelva a intentarlo.</div>
+        } @else {
+          <dl class="datos-wa"><dt>Conductor</dt><dd>{{ d.nombre }}</dd></dl>
+          <div class="campo"><label for="dw-cel">Celular del conductor (10 dígitos)</label>
+            <input id="dw-cel" name="dwcel" inputmode="numeric" maxlength="13" [ngModel]="d.celular" (ngModelChange)="actualizarDatosWa({ celular: $event })" placeholder="3001234567" />
+            @if (d.celular && !celularValidoWa(d.celular)) { <small class="error-correo">Debe ser un celular colombiano de 10 dígitos que empiece por 3.</small> }</div>
+          @if (!d.autorizadoAntes) {
+            <label class="casilla" style="margin-top:10px"><input type="checkbox" name="dwaut" [ngModel]="d.autorizo" (ngModelChange)="actualizarDatosWa({ autorizo: $event })" />
+              El conductor me confirmó que acepta recibir sus documentos por WhatsApp</label>
+          } @else { <p class="sutil">El conductor ya autorizó WhatsApp.</p> }
+        }
+      }
+      <ng-container pie>
+        <button type="button" (click)="datosWa.set(null)">Cancelar</button>
+        @if (datosWa()?.conductorId) {
+          <button type="button" [disabled]="trabajando() || !datosWaListos()" (click)="guardarDatosWa(false)">Guardar</button>
+          <button type="button" class="primario" [disabled]="trabajando() || !datosWaListos()" (click)="guardarDatosWa(true)">Guardar y enviar</button>
+        }
+      </ng-container>
+    </app-modal>
 
     <!-- Ver PDF del manifiesto o de la remesa -->
     <app-modal [titulo]="pdfVisto()?.titulo || ''" [abierto]="!!pdfVisto()" (cerrar)="cerrarPdf()" [ancho]="true">
@@ -603,6 +637,10 @@ const ESTADO_CORREO: Record<string, [string, string]> = {
     .destinos summary { color: var(--gris-7); }
     .destinos ul { margin: 6px 0 0; padding-left: 16px; font-size: 12.5px; color: var(--gris-5); word-break: break-all; }
     .error-correo { margin-top: 4px; font-size: 12.5px; color: var(--rojo-texto); max-width: 360px; }
+    .error-correo.reintento { color: var(--gris-7); }
+    .alerta-boton { border-color: var(--amarillo, #d4a017); background: #fff8e1; }
+    .datos-wa { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0 12px; }
+    .datos-wa dt { color: var(--gris-5); } .datos-wa dd { margin: 0; font-weight: 600; }
     .chip-boton { border: 0; background: none; padding: 0; min-height: 0; cursor: pointer; }
     .rejilla { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
     .rejilla .campo > label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -856,6 +894,36 @@ export class Manifiestos {
       titulo: l.map(e => `${e.destinatario || 'Cliente'} ${e.telefono}: ${this.textoWhatsapp(e.estado)}`).join(' · ') };
   }
   porAprobarWhatsapp(viajeId: string) { return this.whatsappDe(viajeId)?.estado === 'por_aprobar' || this.whatsappClienteDe(viajeId)?.estado === 'por_aprobar'; }
+  // ── Datos del conductor para WhatsApp: sin celular válido o sin autorización no se habilita el envío ──
+  celularValidoWa(c: string) { return /^(57)?3\d{9}$/.test(String(c || '').replace(/\D/g, '')); }
+  conductorListo(v: Viaje) { const c: any = v.conductor; return !!c && this.celularValidoWa(c.celular) && !!c.whatsappAutorizado; }
+  faltaWhatsapp(v: Viaje) {
+    const c: any = v.conductor;
+    if (!c) return 'el viaje no tiene conductor';
+    return [!this.celularValidoWa(c.celular) ? 'celular válido' : '', !c.whatsappAutorizado ? 'autorización del conductor' : ''].filter(Boolean).join(' y ') + ' (faltan)';
+  }
+  readonly datosWa = signal<{ viaje: Viaje; numero: number; soporte: boolean; conductorId: string; nombre: string; celular: string; autorizadoAntes: boolean; autorizo: boolean; accion: 'aprobar' | 'enviar' } | null>(null);
+  abrirDatosWa(v: Viaje, accion: 'aprobar' | 'enviar') {
+    const c: any = v.conductor;
+    this.datosWa.set({ viaje: v, numero: v.numero, soporte: this.pestana() === 'soporte', conductorId: c?._id || '', nombre: v.conductorNombre || '',
+      celular: String(c?.celular || '').replace(/\D/g, '').slice(-10), autorizadoAntes: !!c?.whatsappAutorizado, autorizo: false, accion });
+  }
+  actualizarDatosWa(x: Partial<{ celular: string; autorizo: boolean }>) { this.datosWa.update((d) => (d ? { ...d, ...x } : d)); }
+  datosWaListos() { const d = this.datosWa(); return !!d && this.celularValidoWa(d.celular) && (d.autorizadoAntes || d.autorizo); }
+  async guardarDatosWa(enviar: boolean) {
+    const d = this.datosWa();
+    if (!d || !this.datosWaListos()) return;
+    this.trabajando.set(true);
+    try {
+      const r = await this.api.post<any>(`/whatsapp/viajes/${d.viaje._id}/conductor`, { celular: d.celular, ...(d.autorizo ? { autorizado: true } : {}) });
+      // El viaje en pantalla queda con los datos nuevos (también los otros viajes del mismo conductor)
+      for (const v of this.viajes()) if ((v.conductor as any)?._id === r.conductor._id) Object.assign(v.conductor as any, { celular: r.conductor.celular, whatsappAutorizado: r.conductor.whatsappAutorizado });
+      this.datosWa.set(null);
+      this.avisos.ok('Datos del conductor guardados');
+    } catch (e) { this.avisos.error(e); this.trabajando.set(false); return; }
+    this.trabajando.set(false);
+    if (enviar) await (d.accion === 'aprobar' ? this.aprobarWhatsapp([d.viaje._id]) : this.enviarWhatsapp(d.viaje));
+  }
   enviarVariosCliente(viajes: string[]) {
     return this.tareaWhatsapp(async () => {
       const r = await this.api.post<any>('/whatsapp/enviar-cliente', { viajes });
@@ -884,6 +952,14 @@ export class Manifiestos {
   readonly erroresWhatsapp = signal<string[]>([]);
   verErrorWhatsapp(ids: string[]) { this.erroresWhatsapp.set(ids.filter(Boolean)); }
   aprobarWhatsapp(viajes: string[]) {
+    // Todo completo antes de enviar: si a algún conductor le falta el celular o la autorización, se completa primero
+    const incompletos = this.viajes().filter((v) => viajes.includes(v._id) && this.whatsappDe(v._id)?.estado === 'por_aprobar' && !this.conductorListo(v));
+    if (incompletos.length) {
+      this.avisos.mostrar(incompletos.length === 1 ? `Viaje N° ${incompletos[0].numero}: complete los datos de WhatsApp del conductor antes de enviar`
+        : `${incompletos.length} viajes con datos de WhatsApp incompletos (N° ${incompletos.map((v) => v.numero).join(', ')}): complételos antes de enviar`, 'error');
+      this.abrirDatosWa(incompletos[0], 'aprobar');
+      return Promise.resolve();
+    }
     return this.tareaWhatsapp(async () => {
       const r = await this.api.post<any>('/whatsapp/aprobar', { viajes });
       const fallos = r.resultados.filter((x: any) => x.estado === 'error');

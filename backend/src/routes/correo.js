@@ -10,6 +10,7 @@ import { auditar } from '../services/auditoria.js';
 import { cifrar } from '../utils/cifrado.js';
 import express from 'express';
 import { enviarRelacion, enviarManual } from '../services/correo.js';
+import { errorCorreoClaro } from '../services/erroresCorreo.js';
 import { parseFecha, escaparRegex } from '../utils/texto.js';
 import { enviarPrueba, programarEnvios, procesarEnvio, enviarPendientes, aprobarEnvios, descartarEnvios, enviarGrupoCliente, cartaSalida, datosCorreo, SALIDA_BASE, MARCADORES_SALIDA } from '../services/correo.js';
 
@@ -148,6 +149,8 @@ r.post('/clientes/:id/vista-previa', gestionar, async (req, res) => {
 });
 
 // ── Trazabilidad y reintentos ───────────────────────────────────────────────
+// Los errores guardados con el texto técnico del servidor de correo se muestran explicados
+const aclarar = (x) => (x.error ? { ...x, error: errorCorreoClaro(x.error) } : x);
 r.get('/envios', operar, async (req, res) => {
   const f = deEmpresa(req);
   if (req.query.viaje) f.viaje = id(req.query.viaje);
@@ -160,11 +163,11 @@ r.get('/envios', operar, async (req, res) => {
     const texto = String(req.query.q || '').trim().slice(0, 60);
     if (texto) { const re = new RegExp(escaparRegex(texto), 'i'); f.$or = [{ documento: re }, { destinatarios: re }, { cc: re }, { error: re }]; }
     const { items, total } = await listarPagina(EnvioCorreo, f, p, { orden: { createdAt: -1 }, populate: { path: 'usuario', select: 'nombre' } });
-    return res.json(pagina(items, total, p));
+    return res.json(pagina(items.map(aclarar), total, p));
   }
   const lista = await EnvioCorreo.find(f).sort({ createdAt: -1, _id: -1 }).limit(Math.min(Number(req.query.limite) || 200, 1000))
     .populate({ path: 'usuario', select: 'nombre' }).lean();
-  res.json(lista);
+  res.json(lista.map(aclarar));
 });
 
 r.post('/envios/:id/reintentar', operar, async (req, res) => {
@@ -175,7 +178,8 @@ r.post('/envios/:id/reintentar', operar, async (req, res) => {
   let x;
   if (e.tipo === 'manifiesto' && e.origen === 'automatico') {
     // Se vuelve a enviar el grupo completo (y cualquier otro pendiente del cliente) en un solo correo
-    await EnvioCorreo.updateMany(deEmpresa(req, e.grupo ? { grupo: e.grupo, estado: 'error' } : { _id: e._id }), { $set: { estado: 'pendiente' } });
+    // También los que esperaban un reintento automático: salen ya
+    await EnvioCorreo.updateMany(deEmpresa(req, e.grupo ? { grupo: e.grupo, estado: { $in: ['error', 'pendiente'] } } : { _id: e._id }), { $set: { estado: 'pendiente', reintentarEn: null } });
     const g = await enviarGrupoCliente(req.empresaId, e.cliente);
     x = { ...e, estado: g?.estado || 'error', error: g?.error || '', intentos: e.intentos + 1 };
   } else x = await procesarEnvio(req.empresaId, e._id);

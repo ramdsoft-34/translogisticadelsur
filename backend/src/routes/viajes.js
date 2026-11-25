@@ -90,7 +90,7 @@ function numeroManifiestoA(d) {
 
 const POBLAR = (req) => [
   pob(req.empresaId, 'cliente', 'nombre nit dv tipoId seguros'),
-  pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId tipoId celular'),
+  pob(req.empresaId, 'conductor', 'nombres apellido1 apellido2 numId tipoId celular whatsappAutorizado'),
   pob(req.empresaId, 'titular', 'nombres apellido1 apellido2 numId tipoId'),
 ];
 

@@ -968,6 +968,39 @@ test('Correo: cuenta SMTP cifrada, envío por cliente al aceptar el RNDC, trazab
   assert.equal(buzonPruebas.length, antes + 1);
   assert.ok(!buzonPruebas.at(-1).attachments, 'la carta de salida va sin el PDF del manifiesto');
   assert.equal((await s.reportero.get(`/api/correo/envios?viaje=${v.body._id}`)).status, 403);
+
+  // Gmail ocupado (421, caso real): queda pendiente con la hora del reintento y un mensaje claro; no se marca error
+  const { fallasPruebas, reintentarVencidos } = await import('../src/services/correo.js');
+  const ocupado = { message: 'Invalid greeting. response=421 4.4.5 Server busy, try again later.', code: 'EPROTOCOL', responseCode: 421 };
+  fallasPruebas.push(ocupado);
+  const [temporal] = (await s.manif.post(`/api/correo/viajes/${v.body._id}/enviar`, { tipos: ['salida'] })).body;
+  assert.equal(temporal.estado, 'pendiente', JSON.stringify(temporal));
+  assert.ok(temporal.reintentarEn, 'queda la hora del reintento');
+  assert.match(temporal.error, /Gmail\) estaba ocupado.*Se reintenta a las/);
+  const enLista = (await s.manif.get(`/api/correo/envios?viaje=${v.body._id}`)).body.find(x => x._id === temporal._id);
+  assert.equal(enLista.estado, 'pendiente');
+  // Antes de su hora no se reintenta; al llegar la hora el agrupador lo envía solo
+  assert.equal(await reintentarVencidos(s.empresaA), 0);
+  await M.EnvioCorreo.updateOne({ empresa: s.empresaA, _id: temporal._id }, { $set: { reintentarEn: new Date(Date.now() - 1000) } });
+  assert.equal(await reintentarVencidos(s.empresaA), 1);
+  assert.equal((await M.EnvioCorreo.findOne({ empresa: s.empresaA, _id: temporal._id }).lean()).estado, 'enviado');
+  // Después de 3 intentos fallidos ya no se reintenta solo: queda como error para revisarlo
+  fallasPruebas.push(ocupado, ocupado, ocupado, ocupado);
+  const [t2] = (await s.manif.post(`/api/correo/viajes/${v.body._id}/enviar`, { tipos: ['salida'] })).body;
+  for (let i = 0; i < 3; i++) {
+    await M.EnvioCorreo.updateOne({ empresa: s.empresaA, _id: t2._id }, { $set: { reintentarEn: new Date(Date.now() - 1000) } });
+    await reintentarVencidos(s.empresaA);
+  }
+  const agotado = await M.EnvioCorreo.findOne({ empresa: s.empresaA, _id: t2._id }).lean();
+  assert.deepEqual([agotado.estado, agotado.intentos, agotado.reintentarEn], ['error', 4, null]);
+  assert.match(agotado.error, /estaba ocupado/);
+  fallasPruebas.length = 0;
+  // Error permanente (contraseña): queda como error de una vez, sin reintento
+  fallasPruebas.push({ message: 'Invalid login: 535-5.7.8 Username and Password not accepted', code: 'EAUTH', responseCode: 535 });
+  const [perm] = (await s.manif.post(`/api/correo/viajes/${v.body._id}/enviar`, { tipos: ['salida'] })).body;
+  assert.equal(perm.estado, 'error');
+  assert.match(perm.error, /contraseña de la cuenta de correo/);
+  assert.equal((await s.manif.post(`/api/correo/envios/${perm._id}/reintentar`, {})).body.estado, 'enviado');
   delete process.env.CORREO_TRANSPORTE;
 });
 
@@ -1036,6 +1069,13 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     assert.equal(cr.envio.telefono, '573001234567');
     assert.equal(cr.envio.solucion.accion, 'autorizar', 'queda guardada la solución');
     assert.equal(cr.conductor.whatsappAutorizado, true);
+    // Completar datos del conductor desde Manifiestos (antes de enviar): celular válido y autorización
+    assert.equal((await s.reportero.post(`/api/whatsapp/viajes/${v.body._id}/conductor`, { celular: '3001234567' })).status, 403);
+    assert.equal((await s.manif.post(`/api/whatsapp/viajes/${v.body._id}/conductor`, { celular: '12345' })).status, 400, 'celular inválido');
+    const dc = (await s.manif.post(`/api/whatsapp/viajes/${v.body._id}/conductor`, { celular: '300 123 4567', autorizado: true })).body;
+    assert.deepEqual([dc.conductor.celular, dc.conductor.whatsappAutorizado, dc.conductor.listo], ['3001234567', true, true]);
+    const conDatos = (await s.manif.get(`/api/viajes/${v.body._id}`)).body;
+    assert.equal(conDatos.conductor.whatsappAutorizado, true, 'la lista de viajes trae la autorización para habilitar el botón');
     const media = llamadas.find(x => x.ruta.endsWith('/media'));
     assert.equal(media.auth, 'Bearer token-secreto');
     assert.ok(media.cuerpo.includes('%PDF'), 'adjunta el PDF real del manifiesto');

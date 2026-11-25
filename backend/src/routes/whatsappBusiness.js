@@ -250,6 +250,33 @@ r.post('/viajes/:id/enviar-cliente', operar, async (req, res) => {
   } catch (e) { throw e.status ? new ErrorHttp(e.status, e.message) : e; }
 });
 
+// Datos del conductor para WhatsApp (celular y autorización), completados desde Manifiestos antes de enviar.
+// Solo cambia lo que se manda; la autorización la confirma quien opera y queda en la auditoría con su usuario.
+const datosConductorWa = z.object({ celular: z.string().trim().max(20).optional(), autorizado: z.boolean().optional() });
+r.post('/viajes/:id/conductor', operar, async (req, res) => {
+  const d = datosConductorWa.parse(req.body);
+  const v = await Viaje.findOne(deEmpresa(req, { _id: id(req.params.id) })).select('conductor numero').lean();
+  if (!v) throw new ErrorHttp(404, 'Viaje no encontrado');
+  if (!v.conductor) throw new ErrorHttp(409, 'El viaje no tiene conductor: elíjalo primero en «Expedir» o en Viajes');
+  const t = await Tercero.findOne(deEmpresa(req, { _id: v.conductor }));
+  if (!t) throw new ErrorHttp(404, 'No se encontró el conductor del viaje');
+  const antes = { celular: t.celular, whatsappAutorizado: !!t.whatsappAutorizado };
+  if (d.celular !== undefined) {
+    const diez = String(d.celular).replace(/\D/g, '').slice(-10);
+    if (!celularWhatsapp(diez)) throw new ErrorHttp(400, 'Escriba un celular colombiano de 10 dígitos que empiece por 3');
+    if (diez !== String(t.celular || '').replace(/\D/g, '').slice(-10)) t.celular = diez;
+    if (t.whatsappFallo?.telefono && t.whatsappFallo.telefono !== celularWhatsapp(diez)) t.whatsappFallo = undefined;
+  }
+  // La autorización solo se marca (nunca se quita desde aquí)
+  if (d.autorizado === true) t.whatsappAutorizado = true;
+  if (t.isModified()) {
+    await t.save();
+    await auditar(req, 'corregir_conductor_whatsapp', { entidad: 'Tercero', entidadId: t._id, detalle: { viaje: v.numero, antes, despues: { celular: t.celular, whatsappAutorizado: t.whatsappAutorizado } } });
+  }
+  res.json({ conductor: { _id: t._id, nombre: nombreCompleto(t), celular: t.celular || '', whatsappAutorizado: !!t.whatsappAutorizado,
+    listo: !!celularWhatsapp(t.celular) && !!t.whatsappAutorizado } });
+});
+
 // Envío manual al cliente de varios viajes en una tanda (cada manifiesto con su PDF, numerados 1 de N…)
 r.post('/enviar-cliente', operar, async (req, res) => {
   const { viajes } = listaViajes.parse(req.body);

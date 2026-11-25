@@ -467,6 +467,8 @@ const envioCorreoSchema = new Schema({
   aprobadoPor: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null }, aprobadoEn: fecha,
   error: str(), idMensaje: str(), respuesta: str(),
   enviadoEn: fecha,
+  // Error temporal del servidor de correo: queda «pendiente» y se reintenta solo a esta hora (ver services/erroresCorreo.js)
+  reintentarEn: fecha,
   origen: { type: String, enum: ['automatico', 'manual'], default: 'automatico' },
   grupo: { type: Schema.Types.ObjectId, default: null },   // manifiestos que salieron en el mismo correo
   usuario: { type: Schema.Types.ObjectId, ref: 'Usuario', default: null },

@@ -47,3 +47,20 @@ test('al traer un tercero del RNDC no se pierden el celular ni los datos de cont
   assert.equal(conservarContacto({ celular: '0' }, {}).celular, '', 'un tercero nuevo queda sin celular, no con «0»');
   assert.equal(conservarContacto({ celular: '0' }, { celular: '0' }).celular, '0', 'lo que ya había no se toca');
 });
+
+test('errores de correo: temporales se reintentan y se explican en español', async () => {
+  const { esTemporal, errorCorreoClaro, proximoReintento } = await import('../src/services/erroresCorreo.js');
+  const ocupado = { code: 'EPROTOCOL', message: 'Invalid greeting. response=421 4.4.5 Server busy, try again later.', responseCode: 421 };
+  assert.equal(esTemporal(ocupado), true);
+  assert.equal(esTemporal({ code: 'ETIMEDOUT', message: 'Connection timeout' }), true);
+  assert.equal(esTemporal({ code: 'EAUTH', responseCode: 535, message: 'Invalid login' }), false);
+  assert.equal(esTemporal({ responseCode: 550, message: '550 5.1.1 The email account that you tried to reach does not exist' }), false);
+  assert.equal(esTemporal({ responseCode: 550, message: '550 5.4.5 Daily user sending limit exceeded' }), false, 'el límite diario no se arregla en minutos');
+  assert.match(errorCorreoClaro('EPROTOCOL: Invalid greeting. response=421 4.4.5 Server busy, try again later.'), /^El servidor de correo \(Gmail\) estaba ocupado.*detalle: EPROTOCOL/);
+  assert.match(errorCorreoClaro('EAUTH: Invalid login: 535-5.7.8 Username and Password not accepted'), /contraseña de la cuenta de correo/);
+  assert.match(errorCorreoClaro('550 5.1.1 The email account that you tried to reach does not exist'), /dirección de destino no existe/);
+  assert.equal(errorCorreoClaro('La cuenta de correo de la empresa no está configurada'), 'La cuenta de correo de la empresa no está configurada', 'lo ya claro no cambia');
+  const t0 = Date.UTC(2026, 10, 25, 21, 0);
+  assert.deepEqual([1, 2, 3].map((n) => (proximoReintento(n, t0) - t0) / 60000), [2, 5, 15]);
+  assert.equal(proximoReintento(4, t0), null);
+});

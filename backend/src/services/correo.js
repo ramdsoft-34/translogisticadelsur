@@ -17,8 +17,8 @@ import { unirPdf } from './reportes/unirPdf.js';
 import { relacionCliente } from './reportes/relacion.js';
 import { txt } from '../utils/texto.js';
 import { nombreCompleto } from '../utils/nombres.js';
+import { errorCorreoClaro, esTemporal, proximoReintento, horaColombia } from './erroresCorreo.js';
 
-const REINTENTO_AUTOMATICO_MS = 60 * 1000;
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
 // Formato de la carta de salida (modelo enviado por Cooespatrans a Corbeta). Editable por cliente.
@@ -41,6 +41,8 @@ export const MARCADORES_SALIDA = {
 
 // Buzón en memoria para pruebas (CORREO_TRANSPORTE=memoria): no sale nada a internet.
 export const buzonPruebas = [];
+// Fallas simuladas del servidor en pruebas: cada envío toma la primera (un objeto de error) y la lanza
+export const fallasPruebas = [];
 
 const titulo = (s) => txt(s).toLowerCase().replace(/(^|\s)\p{L}/gu, m => m.toUpperCase());
 const fechaLarga = (d) => { const f = new Date(d); return `${f.getUTCDate()} de ${MESES[f.getUTCMonth()]} de ${f.getUTCFullYear()}`; };
@@ -67,7 +69,7 @@ export function cartaSalida(plantilla, datos) {
 
 function transporte(smtp) {
   if (process.env.CORREO_TRANSPORTE === 'memoria') {
-    return { sendMail: async (m) => { buzonPruebas.push(m); return { messageId: `<prueba-${buzonPruebas.length}@local>`, response: '250 OK (memoria)' }; } };
+    return { sendMail: async (m) => { if (fallasPruebas.length) throw Object.assign(new Error(fallasPruebas[0].message), fallasPruebas.shift()); buzonPruebas.push(m); return { messageId: `<prueba-${buzonPruebas.length}@local>`, response: '250 OK (memoria)' }; } };
   }
   return nodemailer.createTransport({
     host: smtp.host, port: smtp.puerto, secure: smtp.seguridad === 'tls', requireTLS: smtp.seguridad === 'starttls',
@@ -134,12 +136,21 @@ async function mensaje(empresa, smtp, envio) {
     attachments: [{ filename: doc.filename, content: await doc.buffer(), contentType: 'application/pdf' }] };
 }
 
-const esConexion = (e) => ['ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'ECONNREFUSED', 'EDNS'].includes(e?.code);
+// Resultado de un envío fallido: un error temporal del servidor (ocupado, sin conexión) queda «pendiente» y se
+// reintenta solo (2, 5 y 15 minutos); uno permanente o el que ya agotó los reintentos queda como «error».
+function falloCorreo(e, intentos) {
+  const texto = e.sinCuenta ? e.message : `${e.code ? `${e.code}: ` : ''}${e.message}`;
+  const claro = e.sinCuenta ? e.message : errorCorreoClaro({ ...e, message: texto, code: e.code, responseCode: e.responseCode, response: e.response });
+  const reintentarEn = !e.sinCuenta && !e.noVigente && esTemporal(e) ? proximoReintento(intentos) : null;
+  return reintentarEn
+    ? { estado: 'pendiente', reintentarEn, error: `${claro} Se reintenta a las ${horaColombia(reintentarEn)}.`.slice(0, 500) }
+    : { estado: 'error', reintentarEn: null, error: claro.slice(0, 500) };
+}
 
 // Envía un registro de EnvioCorreo (bloqueándolo para que no se mande dos veces a la vez).
-export async function procesarEnvio(empresaId, envioId, { automatico = false } = {}) {
+export async function procesarEnvio(empresaId, envioId) {
   const envio = await EnvioCorreo.findOneAndUpdate({ empresa: empresaId, _id: envioId, estado: { $in: ['pendiente', 'error'] } },
-    { $set: { estado: 'enviando' }, $inc: { intentos: 1 } }, { new: true }).lean();
+    { $set: { estado: 'enviando', reintentarEn: null }, $inc: { intentos: 1 } }, { new: true }).lean();
   if (!envio) return null;
   try {
     const { empresa, smtp } = await cuentaCorreo(empresaId);
@@ -149,12 +160,9 @@ export async function procesarEnvio(empresaId, envioId, { automatico = false } =
     await EnvioCorreo.updateOne({ empresa: empresaId, _id: envioId }, { $set: set });
     return { ...envio, ...set };
   } catch (e) {
-    const error = e.sinCuenta ? e.message : `${e.code ? `${e.code}: ` : ''}${e.message}`.slice(0, 500);
-    await EnvioCorreo.updateOne({ empresa: empresaId, _id: envioId }, { $set: { estado: 'error', error } });
-    if (automatico && esConexion(e) && envio.intentos < 2) {
-      setTimeout(() => procesarEnvio(empresaId, envioId).catch(() => {}), REINTENTO_AUTOMATICO_MS).unref?.();
-    }
-    return { ...envio, estado: 'error', error };
+    const set = falloCorreo(e, envio.intentos);
+    await EnvioCorreo.updateOne({ empresa: empresaId, _id: envioId }, { $set: set });
+    return { ...envio, ...set };
   }
 }
 
@@ -250,10 +258,13 @@ async function mensajeGrupo(empresa, smtp, envios) {
 }
 
 // Envía en un solo correo todos los manifiestos pendientes de un cliente.
+// Los que esperan un reintento automático salen solo cuando llega su hora (o con «Reintentar», que borra la espera)
+const listoParaSalir = () => ({ $or: [{ reintentarEn: null }, { reintentarEn: { $exists: false } }, { reintentarEn: { $lte: new Date() } }] });
+
 export async function enviarGrupoCliente(empresaId, clienteId) {
   const grupo = new mongoose.Types.ObjectId();
-  const r = await EnvioCorreo.updateMany({ empresa: empresaId, cliente: clienteId, tipo: 'manifiesto', estado: 'pendiente' },
-    { $set: { estado: 'enviando', grupo }, $inc: { intentos: 1 } });
+  const r = await EnvioCorreo.updateMany({ empresa: empresaId, cliente: clienteId, tipo: 'manifiesto', estado: 'pendiente', ...listoParaSalir() },
+    { $set: { estado: 'enviando', grupo, reintentarEn: null }, $inc: { intentos: 1 } });
   if (!r.modifiedCount) return null;
   const envios = await EnvioCorreo.find({ empresa: empresaId, grupo }).sort({ documento: 1 }).lean();
   try {
@@ -264,9 +275,10 @@ export async function enviarGrupoCliente(empresaId, clienteId) {
     await EnvioCorreo.updateMany({ empresa: empresaId, grupo }, { $set: set });
     return { grupo, cantidad: envios.length, estado: 'enviado', asunto: m.subject };
   } catch (e) {
-    const error = e.sinCuenta ? e.message : `${e.code ? `${e.code}: ` : ''}${e.message}`.slice(0, 500);
-    await EnvioCorreo.updateMany({ empresa: empresaId, grupo }, { $set: { estado: 'error', error } });
-    return { grupo, cantidad: envios.length, estado: 'error', error };
+    // Los reintentos se cuentan por el envío con más intentos del grupo
+    const set = falloCorreo(e, Math.max(...envios.map((x) => x.intentos || 1)));
+    await EnvioCorreo.updateMany({ empresa: empresaId, grupo }, { $set: set });
+    return { grupo, cantidad: envios.length, ...set };
   }
 }
 
@@ -294,13 +306,25 @@ export async function enviarPendientes(empresaId, { cliente, soloVencidos = fals
   return resultados;
 }
 
+/** Reintenta los correos sueltos (carta de salida, manifiesto reenviado a mano) cuya hora de reintento llegó. */
+export async function reintentarVencidos(empresaId) {
+  // Los manifiestos automáticos salen agrupados por cliente (enviarPendientes); aquí van los que se envían solos
+  const lista = await EnvioCorreo.find({ empresa: empresaId, estado: 'pendiente', reintentarEn: { $ne: null, $lte: new Date() },
+    $or: [{ tipo: 'salida' }, { tipo: 'manifiesto', origen: 'manual' }] }).select('_id').limit(50).lean();
+  for (const x of lista) await procesarEnvio(empresaId, x._id);
+  return lista.length;
+}
+
 // Revisa cada minuto los manifiestos pendientes de todas las empresas.
 let temporizadorAgrupador = null;
 export function iniciarAgrupador() {
   if (temporizadorAgrupador) return;
   temporizadorAgrupador = setInterval(async () => {
     try {
-      for (const e of await Empresa.find({ 'smtp.activo': true }).select('_id').lean()) await enviarPendientes(e._id, { soloVencidos: true });
+      for (const e of await Empresa.find({ 'smtp.activo': true }).select('_id').lean()) {
+        await enviarPendientes(e._id, { soloVencidos: true });
+        await reintentarVencidos(e._id);
+      }
     } catch (err) { console.error('Agrupador de correos:', err.message); }
   }, 60 * 1000);
   temporizadorAgrupador.unref?.();
@@ -324,7 +348,7 @@ async function enviarYRegistrar(empresaId, { tipo, cliente = null, viajes = [], 
     await EnvioCorreo.updateMany({ empresa: empresaId, _id: { $in: ids } }, { $set: set });
     return { estado: 'enviado', asunto: m.subject, adjuntos: base.adjuntos };
   } catch (e) {
-    const error = `${e.code ? `${e.code}: ` : ''}${e.message}`.slice(0, 500);
+    const error = errorCorreoClaro({ ...e, message: `${e.code ? `${e.code}: ` : ''}${e.message}`, code: e.code, responseCode: e.responseCode, response: e.response }).slice(0, 500);
     await EnvioCorreo.updateMany({ empresa: empresaId, _id: { $in: ids } }, { $set: { estado: 'error', error } });
     return { estado: 'error', error, asunto: m.subject };
   }
