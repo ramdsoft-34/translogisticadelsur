@@ -928,9 +928,11 @@ export class Manifiestos {
     return this.tareaWhatsapp(async () => {
       const r = await this.api.post<any>('/whatsapp/enviar-cliente', { viajes });
       const fallos = r.envios.filter((x: any) => x.estado === 'error');
-      if (!r.envios.length) this.avisos.mostrar(r.omitidos[0]?.motivo || 'Los viajes elegidos no tienen números de WhatsApp activos del cliente', 'info');
+      const ya = r.omitidos.filter((x: any) => x.yaEnviado).length; const sinNumeros = r.omitidos.length - ya;
+      const notas = [ya ? `${ya} ya se habían enviado (no se repiten)` : '', sinNumeros ? `${sinNumeros} sin números activos del cliente` : ''].filter(Boolean).join(' · ');
+      if (!r.envios.length) this.avisos.mostrar(notas || 'Los viajes elegidos no tienen números de WhatsApp activos del cliente', 'info', 7000);
       else if (fallos.length) { this.avisos.mostrar(`${fallos.length} de ${r.envios.length} con error`, 'error'); this.verErrorWhatsapp([fallos[0]._id]); }
-      else this.avisos.ok(`${r.envios.length} manifiesto(s) enviados al WhatsApp del cliente${r.omitidos.length ? ` · ${r.omitidos.length} viaje(s) sin números activos` : ''}`);
+      else this.avisos.mostrar(`${r.envios.length} manifiesto(s) enviados al WhatsApp del cliente${notas ? ` · ${notas}` : ''}`, notas ? 'info' : 'ok', notas ? 7000 : 4500);
     });
   }
   enviarWhatsappCliente(v: Viaje) {

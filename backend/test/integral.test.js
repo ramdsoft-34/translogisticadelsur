@@ -1268,14 +1268,26 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     const manual = (await s.manif.post(`/api/whatsapp/viajes/${uno.id}/enviar-cliente`, {})).body;
     assert.equal(manual.length, 2);
     assert.ok(manual.every(e => e.estado === 'enviado'), JSON.stringify(manual));
-    // Envío manual de varios en una tanda: cada manifiesto con su PDF, numerados 1 de N…
+    // Envío manual de varios en una tanda (viajes que el cliente aún no ha recibido): cada manifiesto con su PDF, 1 de N…
+    const dosNuevos = [await despacharViaje('2026-06-29'), await despacharViaje('2026-06-30')];
+    await s.manif.post('/api/whatsapp/descartar', { viajes: dosNuevos.map(x => x.id) });   // no se aprobaron: no le han llegado
     const antesVarios = llamadas.filter(x => x.ruta.endsWith('/messages')).length;
     assert.equal((await s.reportero.post('/api/whatsapp/enviar-cliente', { viajes: [uno.id] })).status, 403);
-    const varios = (await s.manif.post('/api/whatsapp/enviar-cliente', { viajes: [tres[0].id, tres[1].id] })).body;
+    const varios = (await s.manif.post('/api/whatsapp/enviar-cliente', { viajes: dosNuevos.map(x => x.id) })).body;
     assert.equal(varios.envios.length, 4, JSON.stringify(varios));
     assert.ok(varios.envios.every(e => e.estado === 'enviado'));
     const msjVarios = llamadas.filter(x => x.ruta.endsWith('/messages')).slice(antesVarios).map(x => JSON.parse(x.cuerpo.toString())).filter(x => x.to === '573009998877');
     assert.deepEqual(msjVarios.map(x => x.template.components[1].parameters[1].text), ['el manifiesto de carga 1 de 2', 'el manifiesto de carga 2 de 2']);
+    // Volver a seleccionarlos y enviar: lo que ya le llegó al cliente no se repite (ni los de antes aprobados)
+    const antesRepite = llamadas.filter(x => x.ruta.endsWith('/messages')).length;
+    const repite = (await s.manif.post('/api/whatsapp/enviar-cliente', { viajes: dosNuevos.map(x => x.id) })).body;
+    assert.equal(repite.envios.length, 0, JSON.stringify(repite));
+    assert.deepEqual(repite.omitidos.map(x => x.yaEnviado), [true, true]);
+    assert.equal(llamadas.filter(x => x.ruta.endsWith('/messages')).length, antesRepite, 'no sale ningún mensaje repetido');
+    // Aprobar de nuevo lo ya enviado tampoco reenvía (solo sale lo que está por aprobar)
+    const reAprobar = (await s.manif.post('/api/whatsapp/aprobar', { viajes: tres.map(x => x.id) })).body;
+    assert.equal(reAprobar.aprobados, 0);
+    assert.equal(llamadas.filter(x => x.ruta.endsWith('/messages')).length, antesRepite);
 
     // Número apagado mientras esperaba: no se envía y queda explicado
     const apagado = await despacharViaje('2026-06-27');

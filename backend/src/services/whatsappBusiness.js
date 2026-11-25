@@ -272,8 +272,11 @@ async function reintentarGrupoCliente(empresaId, envioId) {
 export async function enviarVariosACliente(empresaId, viajes, { usuario = null } = {}) {
   const creados = []; const omitidos = [];
   for (const v of viajes) {
-    try { creados.push(...await prepararEnviosCliente(empresaId, v, { origen: 'manual', usuario, enviar: false })); }
-    catch (e) { omitidos.push({ viaje: String(v), motivo: e.message }); }
+    try {
+      // Lo que ya le llegó al cliente (ese manifiesto a ese número) no se vuelve a enviar
+      const x = await prepararEnviosCliente(empresaId, v, { origen: 'manual', usuario, enviar: false, saltarEnviados: true });
+      if (x.length) creados.push(...x); else omitidos.push({ viaje: String(v), motivo: 'ya enviado', yaEnviado: true });
+    } catch (e) { omitidos.push({ viaje: String(v), motivo: e.message }); }
   }
   const grupos = new Map(creados.map((x) => [`${x.cliente}|${x.telefono}`, x]));
   for (const x of grupos.values()) await enviarGrupoWhatsappCliente(empresaId, x.cliente, x.telefono);
@@ -281,7 +284,7 @@ export async function enviarVariosACliente(empresaId, viajes, { usuario = null }
   return { envios, omitidos };
 }
 
-export async function prepararEnviosCliente(empresaId, viajeId, { origen = 'automatico', usuario = null, enviar = true } = {}) {
+export async function prepararEnviosCliente(empresaId, viajeId, { origen = 'automatico', usuario = null, enviar = true, saltarEnviados = false } = {}) {
   const plantilla = await plantillaClienteDe(empresaId);
   const v = await Viaje.findOne({ empresa: empresaId, _id: viajeId }).select('cliente manifiesto soporteInterno').lean();
   const doc = documentoVigente(v);
@@ -296,6 +299,9 @@ export async function prepararEnviosCliente(empresaId, viajeId, { origen = 'auto
   const creados = [];
   for (const n of numeros) {
     if (origen === 'automatico' && await EnvioWhatsapp.exists({ empresa: empresaId, viaje: viajeId, documento: doc.documento, para: 'cliente', telefono: n.telefono })) continue;
+    // Envío de varios: si ese manifiesto ya le llegó (o está saliendo) a ese número, no se repite
+    if (saltarEnviados && await EnvioWhatsapp.exists({ empresa: empresaId, viaje: viajeId, documento: doc.documento, para: 'cliente', telefono: n.telefono,
+      estado: { $in: ['pendiente', 'enviando', 'enviado', 'entregado', 'leido'] } })) continue;
     creados.push(await EnvioWhatsapp.create({ empresa: empresaId, viaje: viajeId, para: 'cliente', cliente: v.cliente, destinatario: n.nombre, telefono: n.telefono,
       tipo: 'manifiesto', documento: doc.documento, origen, usuario, cuenta: e?.whatsapp?.modo || 'plataforma', estado: origen === 'automatico' ? 'por_aprobar' : 'pendiente' }));
   }
