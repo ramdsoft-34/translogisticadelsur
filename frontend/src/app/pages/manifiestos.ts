@@ -952,26 +952,28 @@ export class Manifiestos {
   readonly erroresWhatsapp = signal<string[]>([]);
   verErrorWhatsapp(ids: string[]) { this.erroresWhatsapp.set(ids.filter(Boolean)); }
   aprobarWhatsapp(viajes: string[]) {
-    // Todo completo antes de enviar: si a algún conductor le falta el celular o la autorización, se completa primero
+    // Solo salen los viajes con el conductor completo (celular válido y autorización); los incompletos se saltan
+    // sin enviarse y sin error, y quedan por aprobar para completarlos con «Completar WhatsApp»
     const incompletos = this.viajes().filter((v) => viajes.includes(v._id) && this.whatsappDe(v._id)?.estado === 'por_aprobar' && !this.conductorListo(v));
-    if (incompletos.length) {
-      this.avisos.mostrar(incompletos.length === 1 ? `Viaje N° ${incompletos[0].numero}: complete los datos de WhatsApp del conductor antes de enviar`
-        : `${incompletos.length} viajes con datos de WhatsApp incompletos (N° ${incompletos.map((v) => v.numero).join(', ')}): complételos antes de enviar`, 'error');
-      this.abrirDatosWa(incompletos[0], 'aprobar');
-      return Promise.resolve();
-    }
+    const saltados = new Set(incompletos.map((v) => v._id));
+    const listos = viajes.filter((id) => !saltados.has(id));
+    const textoSaltados = incompletos.length ? `${incompletos.length} sin enviar porque al conductor le faltan datos (N° ${incompletos.map((v) => v.numero).join(', ')}): use «Completar WhatsApp»` : '';
+    if (!listos.length) { this.avisos.mostrar(textoSaltados || 'Los viajes elegidos no tienen WhatsApp por aprobar', 'info'); return Promise.resolve(); }
     return this.tareaWhatsapp(async () => {
-      const r = await this.api.post<any>('/whatsapp/aprobar', { viajes });
+      const r = await this.api.post<any>('/whatsapp/aprobar', { viajes: listos });
+      const saltadosSrv = (r.omitidos || []).filter((x: any) => !saltados.has(x.viaje));
+      const avisoSaltados = [textoSaltados, saltadosSrv.length ? `${saltadosSrv.length} más sin enviar por datos incompletos del conductor (N° ${saltadosSrv.map((x: any) => x.numero).join(', ')})` : ''].filter(Boolean).join(' · ');
       const fallos = r.resultados.filter((x: any) => x.estado === 'error');
       const aConductor = r.resultados.filter((x: any) => x.para !== 'cliente').length;
       const aCliente = r.resultados.filter((x: any) => x.para === 'cliente');
       const partes = [aConductor ? `${aConductor} a conductores` : '',
         aCliente.length ? `${aCliente.reduce((s: number, x: any) => s + (x.enviados || 0), 0)} manifiesto(s) a ${aCliente.length} número(s) del cliente` : ''].filter(Boolean).join(' y ');
-      if (!r.aprobados) this.avisos.mostrar('Los viajes elegidos no tienen WhatsApp por aprobar', 'info');
+      const cola = avisoSaltados ? ` · ${avisoSaltados}` : '';
+      if (!r.aprobados) this.avisos.mostrar(avisoSaltados || 'Los viajes elegidos no tienen WhatsApp por aprobar', 'info', 9000);
       else if (fallos.length) {
-        this.avisos.mostrar(`${fallos.length} envío(s) con error de ${r.resultados.length}`, 'error');
+        this.avisos.mostrar(`${fallos.length} envío(s) con error de ${r.resultados.length}${cola}`, 'error', 9000);
         this.verErrorWhatsapp(fallos.map((x: any) => x.id));
-      } else this.avisos.ok(`WhatsApp enviado: ${partes}`);
+      } else this.avisos.mostrar(`WhatsApp enviado: ${partes}${cola}`, avisoSaltados ? 'info' : 'ok', avisoSaltados ? 9000 : 4500);
     });
   }
   descartarWhatsapp(viajes: string[]) {

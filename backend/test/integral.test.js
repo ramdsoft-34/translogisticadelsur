@@ -1046,10 +1046,14 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
 
     // Sin autorización del conductor no sale, y queda el motivo
     await s.adminA.put(`/api/maestros/terceros/${s.conductor}`, { celular: '3001234567', whatsappAutorizado: false });
+    // Al aprobar, un viaje con el conductor incompleto se salta: no se envía, no queda error y sigue por aprobar
     const ap = (await s.manif.post('/api/whatsapp/aprobar', { viajes: [v.body._id] })).body;
-    assert.equal(ap.aprobados, 1);
-    assert.equal(ap.resultados[0].estado, 'error');
-    assert.match(ap.resultados[0].error, /no ha autorizado/);
+    assert.deepEqual([ap.aprobados, ap.omitidos.length], [0, 1], JSON.stringify(ap));
+    assert.equal((await lista())[0].estado, 'por_aprobar');
+    // Un envío manual sí se intenta y deja el motivo para la ventana de errores
+    const manualSinAut = (await s.manif.post(`/api/whatsapp/viajes/${v.body._id}/enviar`, {})).body;
+    assert.equal(manualSinAut.estado, 'error');
+    assert.match(manualSinAut.error, /no ha autorizado/);
     assert.equal(llamadas.length, antes);
 
     // Ventana de errores: explica solo la causa que corresponde, corrige desde ahí y reenvía
@@ -1281,6 +1285,17 @@ test('WhatsApp Business: manifiesto al conductor con aprobación, firma de Meta 
     assert.deepEqual(trasApagar.find(e => e.telefono === '573009998877').causa, 'numero_inactivo');
     assert.equal(trasApagar.find(e => e.telefono === '573009998877').estado, 'descartado');
     assert.equal(trasApagar.find(e => e.telefono === '573105556677').estado, 'enviado');
+    // Conductor incompleto (sin autorización): al aprobar varios, ese viaje se salta sin enviarse y sin error, y sigue por aprobar
+    const incompleto = await despacharViaje('2026-06-28');
+    await M.Tercero.updateOne({ empresa: s.empresaA, _id: s.conductor }, { $set: { whatsappAutorizado: false } });
+    const antesInc = llamadas.filter(x => x.ruta.endsWith('/messages')).length;
+    const apInc = (await s.manif.post('/api/whatsapp/aprobar', { viajes: [incompleto.id] })).body;
+    assert.deepEqual([apInc.aprobados, apInc.omitidos.map(x => x.viaje)], [0, [incompleto.id]], JSON.stringify(apInc));
+    assert.equal(llamadas.filter(x => x.ruta.endsWith('/messages')).length, antesInc, 'no sale ningún mensaje de ese viaje');
+    const trasInc = (await s.manif.get(`/api/whatsapp/envios?viajes=${incompleto.id}`)).body;
+    assert.ok(trasInc.length && trasInc.every(e => e.estado === 'por_aprobar' && !e.error), JSON.stringify(trasInc.map(e => [e.para, e.estado, e.error])));
+    await M.Tercero.updateOne({ empresa: s.empresaA, _id: s.conductor }, { $set: { whatsappAutorizado: true } });
+    await s.manif.post('/api/whatsapp/descartar', { viajes: [incompleto.id] });
     // Se deja como estaba para las demás pruebas
     await conNumeros([]);
     await s.adminA.put('/api/whatsapp/config', { ...base, plantillaCliente: '' });

@@ -327,8 +327,20 @@ export async function prepararEnvio(empresaId, viajeId, { origen = 'automatico',
 }
 
 // Aprobación: cada conductor recibe su documento; cada número del cliente recibe sus manifiestos pendientes, cada uno con su PDF
+// Conductor listo para WhatsApp: con celular válido y autorización
+export const conductorListo = (t) => !!t && !!celularWhatsapp(t.celular) && !!t.whatsappAutorizado;
+
 export async function aprobarEnvios(empresaId, viajes, usuario) {
-  const lista = await EnvioWhatsapp.find({ empresa: empresaId, viaje: { $in: viajes }, estado: 'por_aprobar' }).select('_id para cliente telefono').lean();
+  // Viajes cuyo conductor no está completo (sin celular válido o sin autorización): no se envía nada de ese viaje
+  // y queda todo por aprobar, sin error, para completarlo y enviarlo después
+  const vs = await Viaje.find({ empresa: empresaId, _id: { $in: viajes } }).select('numero conductor').lean();
+  const conductores = new Map((await Tercero.find({ empresa: empresaId, _id: { $in: vs.map((v) => v.conductor).filter(Boolean) } })
+    .select('celular whatsappAutorizado').lean()).map((t) => [String(t._id), t]));
+  const conDocConductor = new Set((await EnvioWhatsapp.find({ empresa: empresaId, viaje: { $in: viajes }, estado: 'por_aprobar', para: { $ne: 'cliente' } }).select('viaje').lean()).map((x) => String(x.viaje)));
+  const omitidos = vs.filter((v) => conDocConductor.has(String(v._id)) && !conductorListo(conductores.get(String(v.conductor))));
+  const saltar = new Set(omitidos.map((v) => String(v._id)));
+  const lista = (await EnvioWhatsapp.find({ empresa: empresaId, viaje: { $in: viajes }, estado: 'por_aprobar' }).select('_id viaje para cliente telefono').lean())
+    .filter((x) => !saltar.has(String(x.viaje)));
   const ids = lista.map(x => x._id);
   await EnvioWhatsapp.updateMany({ empresa: empresaId, _id: { $in: ids } }, { $set: { estado: 'pendiente', aprobadoPor: usuario, aprobadoEn: new Date() } });
   const resultados = [];
@@ -346,7 +358,7 @@ export async function aprobarEnvios(empresaId, viajes, usuario) {
     const uno = await EnvioWhatsapp.findOne({ empresa: empresaId, grupo: g.grupo, ...(conError ? { estado: 'error' } : {}) }).select('_id viaje estado error causa').lean();
     resultados.push({ id: uno?._id, viaje: uno?.viaje, para: 'cliente', cantidad: g.cantidad, enviados: g.enviados || 0, estado: conError ? 'error' : g.estado, error: g.error || '', causa: g.causa || '' });
   }
-  return { aprobados: ids.length, resultados };
+  return { aprobados: ids.length, resultados, omitidos: omitidos.map((v) => ({ viaje: String(v._id), numero: v.numero })) };
 }
 
 export async function descartarEnvios(empresaId, viajes, usuario) {
